@@ -10,6 +10,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QSettings>
+#include <QScrollBar>
 #include <QSplitter>
 #include <QVBoxLayout>
 
@@ -59,7 +60,7 @@ TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fs
                 m_audio->open(m_video->path());
         }
         m_video->subsChanged();
-        m_video->seekFrame(0);
+        m_video->seekFrame(m_video->frame()); // 0, or the position the script was saved at
         applyLayout();
         emit statusChanged();
         emit titleChanged();
@@ -108,6 +109,8 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
     m_edit->load(-1); // a new file: forget the revert text of the old one
     changed();
     setActive(std::clamp(fs::q(s().project_value("Active Line")).toInt(), 0, std::max(0, int(s().row_count()) - 1)));
+    if (const int top = fs::q(s().project_value("Scroll Position")).toInt(); top > 0) // after setActive, as Aegisub
+        m_grid->verticalScrollBar()->setValue(top);
     // reopen the media remembered in the script, as Kainote does
     const QDir dir = QFileInfo(path).dir();
     auto resolve = [&](const QString &key) {
@@ -117,7 +120,8 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
         return QFileInfo::exists(abs) ? abs : QString();
     };
     if (QSettings().value("video/openWithSubs", true).toBool()) {
-        if (const QString v = resolve("Video File"); !v.isEmpty()) openVideo(v);
+        if (const QString v = resolve("Video File"); !v.isEmpty())
+            openVideo(v, fs::q(s().project_value("Video Position")).toLongLong());
         if (const QString a = resolve("Audio File"); !a.isEmpty() && a != resolve("Video File")) openAudio(a);
         if (const QString k = resolve("Keyframes File"); !k.isEmpty()) openKeyframes(k);
         if (const QString t = resolve("Timecodes File"); !t.isEmpty()) openTimecodes(t);
@@ -145,7 +149,11 @@ bool TabPanel::save(const QString &target) {
     const QString p = target.isEmpty() ? path() : target;
     if (p.isEmpty()) return false;
     try {
-        if (m_active >= 0) s().set_project_value("Active Line", fs::Utf8(QString::number(m_active)));
+        // written only when non-zero, as Aegisub does; a video that did not open keeps its old position
+        auto setNum = [this](rust::Str key, qint64 v) { s().set_project_value(key, fs::Utf8(v ? QString::number(v) : QString())); };
+        setNum("Active Line", std::max(0, m_active));
+        setNum("Scroll Position", m_grid->verticalScrollBar()->value());
+        if (m_video->hasVideo()) setNum("Video Position", m_video->frame());
         s().save(fs::Utf8(p));
     } catch (const rust::Error &e) {
         m_main->error(QString::fromUtf8(e.what()));
@@ -242,8 +250,8 @@ void TabPanel::redo() {
     if (s().redo()) changed();
 }
 
-void TabPanel::openVideo(const QString &path) {
-    m_video->open(path);
+void TabPanel::openVideo(const QString &path, qint64 frame) {
+    m_video->open(path, frame);
     m_main->addRecent("video", path);
 }
 

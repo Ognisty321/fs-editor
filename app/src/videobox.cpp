@@ -448,7 +448,7 @@ void VideoBox::setTimecodes(std::vector<std::int64_t> tc) {
     updateTimeField();
 }
 
-void VideoBox::open(const QString &path) {
+void VideoBox::open(const QString &path, qint64 frame) {
     const QString name = QFileInfo(path).fileName();
     m_tab->main()->status(tr("Indexing %1…").arg(name));
     *m_openCancel = true; // a file still indexing is replaced
@@ -456,7 +456,7 @@ void VideoBox::open(const QString &path) {
     auto media = m_media;
     auto cancel = m_openCancel;
     const QString cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex";
-    QMetaObject::invokeMethod(m_worker, [this, media, path, name, cache, cancel] {
+    QMetaObject::invokeMethod(m_worker, [this, media, path, name, cache, cancel, frame] {
         QString err;
         {
             std::lock_guard g(media->m);
@@ -479,7 +479,7 @@ void VideoBox::open(const QString &path) {
                 err = QString::fromUtf8(e.what());
             }
         }
-        QMetaObject::invokeMethod(this, [this, path, err, cancel] {
+        QMetaObject::invokeMethod(this, [this, path, err, cancel, frame] {
             if (*cancel) { // closed, or replaced by a newer open (which has its own status)
                 if (cancel == m_openCancel) m_tab->main()->status(QString());
                 return;
@@ -499,7 +499,7 @@ void VideoBox::open(const QString &path) {
             m_frames = m_info.frames;
             m_dummyFps = 0;
             m_path = path;
-            m_frame = 0;
+            m_frame = std::clamp<qint64>(frame, 0, std::max<qint64>(0, m_frames - 1));
             m_scriptAt = -2;
             m_seek->setRange(0, int(std::max<qint64>(0, m_frames - 1)));
             m_tab->main()->status(QString());

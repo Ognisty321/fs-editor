@@ -100,7 +100,7 @@ public:
     ~VideoBox() override;
 
     TabPanel *tab() const { return m_tab; }
-    void open(const QString &path);
+    void open(const QString &path, qint64 frame = 0); // frame: where to start (a script's "Video Position")
     void openDummy(int w, int h, double fps, qint64 ms);
     void close();
     bool hasVideo() const { return m_frames > 0; }
