@@ -215,6 +215,11 @@ void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
             break;
         }
     }
+    // Aegisub's split commands
+    m->addSeparator();
+    m->addAction(tr("Split at cursor (estimate times)"), this, [this] { emit splitRequested(-1); });
+    m->addAction(tr("Split at cursor (preserve times)"), this, [this] { emit splitRequested(-2); });
+    m->addAction(tr("Split at cursor (at video frame)"), this, [this] { emit splitRequested(0); });
     m->exec(e->globalPos());
 }
 
@@ -461,6 +466,9 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     connect(m_text, &QPlainTextEdit::selectionChanged, this, &EditBox::updateTextInfo);
     connect(m_text, &QPlainTextEdit::textChanged, this, &EditBox::updateTextInfo);
     for (auto *e : {m_text, m_original}) connect(e, &SubsTextEdit::keyCommand, this, &EditBox::onKey);
+    connect(m_text, &SubsTextEdit::splitRequested, this, [this](qint64 at) {
+        splitAtCursor(at == 0 ? m_tab->videoTime() : at);
+    });
 
     // fields row (wraps into two rows when narrow)
     m_fields1 = new QWidget(this);
@@ -761,6 +769,13 @@ void EditBox::nextLine() {
     m_text->setFocus();
 }
 
+void EditBox::splitAtCursor(qint64 atMs) {
+    const QString t = m_text->text();
+    const auto r = m_tab->s().split_row(size_t(m_row), bytePos(t, m_text->textCursor().position()), atMs);
+    m_tab->changed();
+    if (r >= 0) m_tab->setActive(int(r));
+}
+
 void EditBox::onKey(int key, Qt::KeyboardModifiers mods) {
     auto &s = m_tab->s();
     const bool tl = s.file_info().tl_mode;
@@ -768,10 +783,7 @@ void EditBox::onKey(int key, Qt::KeyboardModifiers mods) {
     case Qt::Key_Return:
     case Qt::Key_Enter:
         if (mods & Qt::ShiftModifier) {
-            const QString t = m_text->text();
-            const auto r = s.split_row(size_t(m_row), bytePos(t, m_text->textCursor().position()), -1);
-            m_tab->changed();
-            if (r >= 0) m_tab->setActive(int(r));
+            splitAtCursor(-1);
         } else if (!(mods & Qt::ControlModifier)) {
             nextLine();
         }

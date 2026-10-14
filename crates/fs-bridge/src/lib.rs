@@ -365,6 +365,7 @@ pub mod ffi {
         fn recombine_rows(self: &mut Session, rows: &[usize]) -> Vec<usize>;
         fn change_fps(self: &mut Session, from: &str, to: &str, video: &[i64]) -> Result<()>;
         fn split_by_karaoke(self: &mut Session, rows: &[usize]) -> Vec<usize>;
+        /// `at_ms`: -1 estimates the split time from the text lengths, -2 keeps both parts' times.
         fn split_row(self: &mut Session, row: usize, byte_pos: usize, at_ms: i64) -> i64;
         fn swap_rows(self: &mut Session, a: usize, b: usize);
         /// Replace a row by one copy per part (split into words, wraps, frames…).

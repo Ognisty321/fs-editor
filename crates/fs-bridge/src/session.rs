@@ -787,7 +787,16 @@ impl Session {
         }
         let Some(r) = self.tl_row(row) else { return -1 };
         let at = (at_ms >= 0).then_some(Time(at_ms));
-        let n = self.edit("Split line", |d| ops::split_at(d, r.main(), byte_pos, at));
+        let n = self.edit("Split line", |d| {
+            let (start, end) = d.event(r.main()).map(|e| (e.start, e.end))?;
+            let n = ops::split_at(d, r.main(), byte_pos, at)?;
+            if at_ms == -2 {
+                // Aegisub's "preserve times": both parts keep the line's times
+                d.event_mut(r.main())?.end = end;
+                d.event_mut(n)?.start = start;
+            }
+            Some(n)
+        });
         n.and_then(|e| self.row_of_event(e))
             .map_or(-1, |r| r as i64)
     }
@@ -1748,6 +1757,17 @@ mod tests {
     }
 
     const ASS: &str = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,one\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,two\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,three\n";
+
+    #[test]
+    fn split_row_estimates_or_keeps_times() {
+        let mut s = session(ASS);
+        assert_eq!(s.split_row(2, 2, -2), 3);
+        let (a, b) = (s.row(2), s.row(3));
+        assert_eq!((a.text.as_str(), a.start, a.end), ("th", 5000, 6000));
+        assert_eq!((b.text.as_str(), b.start, b.end), ("ree", 5000, 6000));
+        assert_eq!(s.split_row(0, 1, -1), 1);
+        assert_eq!((s.row(0).end, s.row(1).start), (1333, 1333));
+    }
 
     #[test]
     fn export_copy_filters_without_touching_the_file() {

@@ -55,6 +55,7 @@ public:
     void toggleTag(const QString &name);
 signals:
     void keyCommand(int key, Qt::KeyboardModifiers mods);
+    void splitRequested(qint64 atMs); // -1 estimate, -2 keep both times, else at that time
 protected:
     void keyPressEvent(QKeyEvent *) override;
     void contextMenuEvent(QContextMenuEvent *) override;
@@ -81,6 +82,7 @@ private:
     void rebuildTagButtons();
     void onKey(int key, Qt::KeyboardModifiers mods);
     void nextLine();
+    void splitAtCursor(qint64 atMs);
     void setColorTag(int which);
     void configureTagButton(int index);
     void wrapFields();
