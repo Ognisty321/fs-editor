@@ -126,12 +126,12 @@ int main(int argc, char **argv) {
             QDropEvent drop(QPointF(5, 5), Qt::CopyAction, &md, Qt::LeftButton, Qt::NoModifier);
             QApplication::sendEvent(target, &drop);
         });
-    // FSED_SMOKE_CLICK="Check" presses that button in the open dialog.
+    // FSED_SMOKE_CLICK="Check" presses that button in the open dialog, else in the main window.
     if (const QString text = qEnvironmentVariable("FSED_SMOKE_CLICK"); !text.isEmpty())
         QTimer::singleShot(std::max(800, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 5 / 6), &w, [&w, text] {
-            if (auto *top = smokeDialog(w))
-                for (auto *b : top->findChildren<QAbstractButton *>())
-                    if (b->text() == text) return b->click();
+            QWidget *top = smokeDialog(w);
+            for (auto *b : (top ? top : &w)->findChildren<QAbstractButton *>())
+                if (b->text() == text && b->isVisible()) return b->click();
         });
     if (const QString out = qEnvironmentVariable("FSED_SMOKE"); !out.isEmpty())
         QTimer::singleShot(std::max(1000, qEnvironmentVariableIntValue("FSED_SMOKE_MS")), &w, [&w, out] {

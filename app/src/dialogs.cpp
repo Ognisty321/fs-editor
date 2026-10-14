@@ -40,6 +40,7 @@
 #include <QStandardPaths>
 #include <QTabWidget>
 #include <QToolButton>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QHeaderView>
 #include <QVBoxLayout>
@@ -354,18 +355,21 @@ QVariantMap toMap(const fsb::StyleData &s) {
 }
 } // namespace
 
+// Laid out like Kainote's style panel (two columns, colours with alpha under them, big preview);
+// the Apply / rename / name-clash logic follows Aegisub's DialogStyleEditor.
 StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog(parent), m_style(style) {
     setWindowTitle(tr("Style editor"));
     auto *v = new QVBoxLayout(this);
-    auto *f = new QFormLayout;
-    m_name = new QLineEdit(fs::q(style.name), this);
-    f->addRow(tr("Name"), m_name);
-    auto *fontRow = new QHBoxLayout;
-    m_font = new QComboBox(this);
-    m_font->setEditable(true);
-    m_font->addItems(QFontDatabase::families());
-    m_font->setCurrentText(fs::q(style.font));
-    if (!QFontDatabase::families().contains(m_font->currentText())) m_font->setToolTip(tr("Font is not installed"));
+    auto *cols = new QHBoxLayout;
+    auto *left = new QVBoxLayout, *right = new QVBoxLayout;
+    cols->addLayout(left, 3);
+    cols->addLayout(right, 2);
+    v->addLayout(cols);
+    auto group = [this](QBoxLayout *col, const QString &title, QLayout *content) {
+        auto *g = new QGroupBox(title, this);
+        g->setLayout(content);
+        col->addWidget(g);
+    };
     auto dspin = [this](double v, double lo, double hi) {
         auto *s = new QDoubleSpinBox(this);
         s->setRange(lo, hi);
@@ -373,11 +377,34 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
         s->setValue(v);
         return s;
     };
+    auto ispin = [this](int v, int hi) {
+        auto *s = new QSpinBox(this);
+        s->setRange(0, hi);
+        s->setValue(v);
+        return s;
+    };
+    // a caption above each field, Kainote style
+    auto labelled = [this](QGridLayout *g, int row, int col, const QString &text, QWidget *w) {
+        g->addWidget(new QLabel(text, this), row * 2, col);
+        g->addWidget(w, row * 2 + 1, col);
+    };
+
+    auto *nameL = new QHBoxLayout;
+    m_name = new QLineEdit(fs::q(style.name), this);
+    nameL->addWidget(m_name);
+    group(left, tr("Style name"), nameL);
+
+    auto *fontL = new QGridLayout;
+    m_font = new QComboBox(this);
+    m_font->setEditable(true);
+    m_font->addItems(QFontDatabase::families());
+    m_font->completer()->setCompletionMode(QCompleter::PopupCompletion);
+    m_font->completer()->setFilterMode(Qt::MatchContains);
+    m_font->setCurrentText(fs::q(style.font));
+    if (!QFontDatabase::families().contains(m_font->currentText())) m_font->setToolTip(tr("Font is not installed"));
     m_size = dspin(style.size, 1, 1000);
-    fontRow->addWidget(m_font, 1);
-    fontRow->addWidget(m_size);
-    f->addRow(tr("Font"), fontRow);
-    auto *flags = new QHBoxLayout;
+    fontL->addWidget(m_font, 0, 0, 1, 3);
+    fontL->addWidget(m_size, 0, 3);
     m_bold = new QCheckBox(tr("Bold"), this);
     m_italic = new QCheckBox(tr("Italic"), this);
     m_underline = new QCheckBox(tr("Underline"), this);
@@ -386,27 +413,27 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
     m_italic->setChecked(style.italic);
     m_underline->setChecked(style.underline);
     m_strike->setChecked(style.strikeout);
-    for (auto *c : {m_bold, m_italic, m_underline, m_strike}) flags->addWidget(c);
-    f->addRow(flags);
-    auto *colors = new QHBoxLayout;
+    int fc = 0;
+    for (auto *c : {m_bold, m_italic, m_underline, m_strike}) fontL->addWidget(c, 1, fc++);
+    group(left, tr("Font and size"), fontL);
+
+    auto *colorL = new QGridLayout;
     const char *names[] = {"Primary", "Secondary", "Outline", "Shadow"};
     const rust::String *src[] = {&style.primary, &style.secondary, &style.outline_color, &style.back};
     for (int k = 0; k < 4; ++k) {
         m_colors[k] = fs::q(*src[k]);
         auto *b = m_colorButtons[k] = new QToolButton(this);
         b->setText(tr(names[k]));
-        b->setToolTip(tr("Alpha is set next to the button"));
+        b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         m_alpha[k] = new QSpinBox(this);
         m_alpha[k]->setRange(0, 255);
         m_alpha[k]->setValue(255 - assColor(m_colors[k]).alpha());
         m_alpha[k]->setToolTip(tr("Transparency (0 = opaque)"));
         auto paint = [this, k] {
-            QPixmap px(14, 14);
             QColor c = assColor(m_colors[k]);
             c.setAlpha(255);
-            px.fill(c);
-            m_colorButtons[k]->setIcon(px);
-            m_colorButtons[k]->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+            m_colorButtons[k]->setStyleSheet(QString("QToolButton{background:%1;color:%2;border:1px solid palette(mid);padding:3px}")
+                                                 .arg(c.name(), c.lightness() > 140 ? "black" : "white"));
         };
         paint();
         connect(b, &QToolButton::clicked, this, [this, k, paint] {
@@ -417,64 +444,101 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
             paint();
             preview();
         });
-        colors->addWidget(b);
-        colors->addWidget(m_alpha[k]);
+        colorL->addWidget(b, 0, k);
+        colorL->addWidget(m_alpha[k], 1, k);
     }
-    f->addRow(tr("Colors"), colors);
-    auto *geo = new QGridLayout;
+    group(left, tr("Colors and transparency"), colorL);
+
+    auto *prevL = new QVBoxLayout;
+    m_previewText = new QLineEdit(QSettings().value("styles/previewText", tr("Sample text 0123 ĄĘŻŹ")).toString(), this);
+    m_preview = new QLabel(this);
+    m_preview->setMinimumSize(420, 110);
+    m_preview->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored); // the pixmap must not dictate the size
+    prevL->addWidget(m_previewText);
+    prevL->addWidget(m_preview, 1);
+    group(left, tr("Preview"), prevL);
+    connect(m_previewText, &QLineEdit::textChanged, this, &StyleEditor::preview);
+
+    auto *borderL = new QGridLayout;
     m_outline = dspin(style.outline, 0, 100);
     m_shadow = dspin(style.shadow, 0, 100);
+    m_box = new QCheckBox(tr("Opaque box"), this);
+    m_box->setChecked(style.border_style == 3);
+    labelled(borderL, 0, 0, tr("Outline:"), m_outline);
+    labelled(borderL, 0, 1, tr("Shadow:"), m_shadow);
+    borderL->addWidget(m_box, 2, 0, 1, 2);
+    group(right, tr("Outline"), borderL);
+
+    auto *geoL = new QGridLayout;
     m_scaleX = dspin(style.scale_x, 0, 1000);
     m_scaleY = dspin(style.scale_y, 0, 1000);
     m_angle = dspin(style.angle, -360, 360);
     m_spacing = dspin(style.spacing, -100, 100);
-    const std::pair<const char *, QDoubleSpinBox *> g[] = {{"Border", m_outline}, {"Shadow", m_shadow},
-                                                           {"Scale X", m_scaleX}, {"Scale Y", m_scaleY},
-                                                           {"Angle", m_angle}, {"Spacing", m_spacing}};
-    for (int k = 0; k < 6; ++k) {
-        geo->addWidget(new QLabel(tr(g[k].first), this), k / 3, (k % 3) * 2);
-        geo->addWidget(g[k].second, k / 3, (k % 3) * 2 + 1);
-    }
-    f->addRow(geo);
-    m_box = new QCheckBox(tr("Opaque box"), this);
-    m_box->setChecked(style.border_style == 3);
-    f->addRow(m_box);
-    auto ispin = [this](int v, int hi) {
-        auto *s = new QSpinBox(this);
-        s->setRange(0, hi);
-        s->setValue(v);
-        return s;
-    };
-    auto *margins = new QHBoxLayout;
+    labelled(geoL, 0, 0, tr("Scale X:"), m_scaleX);
+    labelled(geoL, 0, 1, tr("Scale Y:"), m_scaleY);
+    labelled(geoL, 1, 0, tr("Angle:"), m_angle);
+    labelled(geoL, 1, 1, tr("Spacing:"), m_spacing);
+    group(right, tr("Miscellaneous"), geoL);
+
+    auto *marginL = new QGridLayout;
     m_ml = ispin(style.margin_l, 9999);
     m_mr = ispin(style.margin_r, 9999);
     m_mv = ispin(style.margin_v, 9999);
-    for (auto *s : {m_ml, m_mr, m_mv}) margins->addWidget(s);
-    f->addRow(tr("Margins (left, right, vertical)"), margins);
-    auto *align = new QGridLayout;
+    labelled(marginL, 0, 0, tr("Left:"), m_ml);
+    labelled(marginL, 0, 1, tr("Right:"), m_mr);
+    labelled(marginL, 0, 2, tr("Vertical:"), m_mv);
+    group(right, tr("Margins"), marginL);
+
+    auto *alignL = new QGridLayout;
     auto *ag = new QButtonGroup(this);
     for (int k = 0; k < 9; ++k) {
         m_align[k] = new QRadioButton(QString::number(k + 1), this);
         ag->addButton(m_align[k]);
-        align->addWidget(m_align[k], 2 - k / 3, k % 3);
+        alignL->addWidget(m_align[k], 2 - k / 3, k % 3);
     }
     m_align[std::clamp(style.alignment, 1, 9) - 1]->setChecked(true);
-    f->addRow(tr("Alignment"), align);
-    m_encoding = ispin(style.encoding, 255);
-    f->addRow(tr("Encoding"), m_encoding);
-    v->addLayout(f);
-    m_preview = new QLabel(this);
-    m_preview->setFixedSize(480, 120);
-    v->addWidget(m_preview);
-    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    connect(ag, &QButtonGroup::buttonToggled, this, &StyleEditor::preview);
+    group(right, tr("Alignment"), alignL);
+
+    // Aegisub's encoding list; the number before " - " is what gets stored
+    auto *encL = new QHBoxLayout;
+    m_encodingBox = new QComboBox(this);
+    m_encodingBox->setEditable(true);
+    m_encodingBox->addItems({"0 - ANSI", "1 - Default", "2 - Symbol", "77 - Mac", "128 - Shift_JIS", "129 - Hangeul",
+                             "130 - Johab", "134 - GB2312", "136 - Chinese BIG5", "161 - Greek", "162 - Turkish",
+                             "163 - Vietnamese", "177 - Hebrew", "178 - Arabic", "186 - Baltic", "204 - Russian",
+                             "222 - Thai", "238 - East European", "255 - OEM"});
+    const int enc = m_encodingBox->findText(QString::number(style.encoding) + " - ", Qt::MatchStartsWith);
+    if (enc >= 0) m_encodingBox->setCurrentIndex(enc);
+    else m_encodingBox->setCurrentText(QString::number(style.encoding));
+    encL->addWidget(m_encodingBox);
+    group(right, tr("Encoding"), encL);
+    right->addStretch();
+
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Apply | QDialogButtonBox::Cancel, this);
     connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(bb->button(QDialogButtonBox::Apply), &QPushButton::clicked, this, [this] {
+        if (onApply) onApply(this->style());
+    });
     v->addWidget(bb);
     for (auto *w : findChildren<QDoubleSpinBox *>()) connect(w, &QDoubleSpinBox::valueChanged, this, &StyleEditor::preview);
     for (auto *w : findChildren<QSpinBox *>()) connect(w, &QSpinBox::valueChanged, this, &StyleEditor::preview);
     for (auto *w : findChildren<QCheckBox *>()) connect(w, &QCheckBox::toggled, this, &StyleEditor::preview);
     connect(m_font, &QComboBox::currentTextChanged, this, &StyleEditor::preview);
+    resize(900, sizeHint().height());
     preview();
+}
+
+void StyleEditor::accept() {
+    if (onApply && !onApply(style())) return;
+    QSettings().setValue("styles/previewText", m_previewText->text());
+    QDialog::accept();
+}
+
+void StyleEditor::resizeEvent(QResizeEvent *e) {
+    QDialog::resizeEvent(e);
+    QTimer::singleShot(0, this, &StyleEditor::preview); // once the layout gave the preview its new size
 }
 
 fsb::StyleData StyleEditor::style() const {
@@ -504,13 +568,14 @@ fsb::StyleData StyleEditor::style() const {
     s.margin_l = m_ml->value();
     s.margin_r = m_mr->value();
     s.margin_v = m_mv->value();
-    s.encoding = m_encoding->value();
+    s.encoding = m_encodingBox->currentText().section(' ', 0, 0).toInt();
     return s;
 }
 
-// Render a sample line with libass on a checkerboard.
+// Render the preview text with libass on a checkerboard.
 void StyleEditor::preview() {
-    const int w = 480, h = 120;
+    if (!m_preview) return;
+    const int w = std::max(420, m_preview->width()), h = std::max(110, m_preview->height());
     QImage img(w, h, QImage::Format_RGBA8888);
     {
         QPainter p(&img);
@@ -525,8 +590,8 @@ void StyleEditor::preview() {
                 "Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, "
                 "StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, "
                 "MarginR, MarginV, Encoding\n%3\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, "
-                "MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:01:00.00,Preview,,0,0,0,,{\\an5}%4\n")
-            .arg(w).arg(h).arg(styleLine(st), tr("Sample text 0123 ĄĘŻŹ"));
+                "MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:01:00.00,Preview,,0,0,0,,{\\an5\\q2}%4\n")
+            .arg(w).arg(h).arg(styleLine(st), m_previewText->text());
     try {
         static std::optional<rust::Box<fsb::Renderer>> r;
         if (!r) r.emplace(fsb::new_renderer());
@@ -611,11 +676,10 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         return d;
     };
     connect(fNew, &QPushButton::clicked, this, [=, this] {
+        int idx = -1;
         StyleEditor e(defaultStyle(), this);
-        if (e.exec() == QDialog::Accepted) {
-            session().set_style(-1, e.style());
-            edited();
-        }
+        e.onApply = [&](const fsb::StyleData &s) { return applyToFile(idx, s); };
+        e.exec();
     });
     connect(fCopy, &QPushButton::clicked, this, [=, this] {
         const int i = m_file->currentRow();
@@ -628,11 +692,10 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     auto editFile = [=, this] {
         const int i = m_file->currentRow();
         if (i < 0) return;
+        int idx = i;
         StyleEditor e(session().styles()[size_t(i)], this);
-        if (e.exec() == QDialog::Accepted) {
-            session().set_style(i, e.style());
-            edited();
-        }
+        e.onApply = [&](const fsb::StyleData &s) { return applyToFile(idx, s); };
+        e.exec();
     };
     connect(fEdit, &QPushButton::clicked, this, editFile);
     connect(m_file, &QListWidget::itemDoubleClicked, this, editFile);
@@ -692,20 +755,18 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         reload();
     });
     connect(sNew, &QPushButton::clicked, this, [=, this] {
+        int idx = -1;
         StyleEditor e(defaultStyle(), this);
-        if (e.exec() != QDialog::Accepted) return;
-        m_stored.push_back(e.style());
-        saveCatalog();
-        reload();
+        e.onApply = [&](const fsb::StyleData &s) { return applyToStorage(idx, s); };
+        e.exec();
     });
     auto editStored = [this] {
         const int i = m_storage->currentRow();
         if (i < 0) return;
+        int idx = i;
         StyleEditor e(m_stored[size_t(i)], this);
-        if (e.exec() != QDialog::Accepted) return;
-        m_stored[size_t(i)] = e.style();
-        saveCatalog();
-        reload();
+        e.onApply = [&](const fsb::StyleData &s) { return applyToStorage(idx, s); };
+        e.exec();
     };
     connect(sEdit, &QPushButton::clicked, this, editStored);
     connect(m_storage, &QListWidget::itemDoubleClicked, this, editStored);
@@ -791,13 +852,45 @@ void StyleManager::editStyle(const QString &name) {
     const auto items = m_file->findItems(name, Qt::MatchExactly);
     if (items.isEmpty()) return;
     m_file->setCurrentItem(items.first());
-    const int i = m_file->currentRow();
-    StyleEditor e(m_main->current()->s().styles()[size_t(i)], this);
-    if (e.exec() == QDialog::Accepted) {
-        m_main->current()->s().set_style(i, e.style());
-        m_main->current()->changed();
-        reload();
+    int idx = m_file->currentRow();
+    StyleEditor e(m_main->current()->s().styles()[size_t(idx)], this);
+    e.onApply = [&](const fsb::StyleData &s) { return applyToFile(idx, s); };
+    e.exec();
+}
+
+bool StyleManager::applyToFile(int &index, const fsb::StyleData &s) {
+    auto &session = m_main->current()->s();
+    const auto styles = session.styles();
+    for (size_t k = 0; k < styles.size(); ++k)
+        if (int(k) != index && fs::q(styles[k].name) == fs::q(s.name)) {
+            QMessageBox::warning(this, tr("Style name conflict"),
+                                 tr("There is already a style with this name. Please choose another name."));
+            return false;
+        }
+    // a rename also moves the lines and \r tags that used the old name (Aegisub asks; this always does)
+    session.set_style(index, s);
+    if (index < 0) index = int(styles.size());
+    m_main->current()->changed();
+    reload();
+    return true;
+}
+
+bool StyleManager::applyToStorage(int &index, const fsb::StyleData &s) {
+    for (size_t k = 0; k < m_stored.size(); ++k)
+        if (int(k) != index && fs::q(m_stored[k].name) == fs::q(s.name)) {
+            QMessageBox::warning(this, tr("Style name conflict"),
+                                 tr("There is already a style with this name. Please choose another name."));
+            return false;
+        }
+    if (index < 0) {
+        index = int(m_stored.size());
+        m_stored.push_back(s);
+    } else {
+        m_stored[size_t(index)] = s;
     }
+    saveCatalog();
+    reload();
+    return true;
 }
 
 // ---- properties ---------------------------------------------------------------

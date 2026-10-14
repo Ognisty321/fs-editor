@@ -5,6 +5,7 @@
 #include "bridge.h"
 
 #include <QDialog>
+#include <functional>
 #include <QPointer>
 #include <QSet>
 
@@ -68,8 +69,15 @@ class StyleEditor : public QDialog {
 public:
     StyleEditor(const fsb::StyleData &style, QWidget *parent);
     fsb::StyleData style() const;
+    // Apply / OK hand the style here; false (e.g. a name clash) keeps the editor open
+    std::function<bool(const fsb::StyleData &)> onApply;
+    void accept() override;
+protected:
+    void resizeEvent(QResizeEvent *e) override;
 private:
     void preview();
+    QLineEdit *m_previewText;
+    QComboBox *m_encodingBox;
     fsb::StyleData m_style;
     QLineEdit *m_name;
     QComboBox *m_font;
@@ -77,9 +85,9 @@ private:
     QCheckBox *m_bold, *m_italic, *m_underline, *m_strike, *m_box;
     QString m_colors[4];
     class QToolButton *m_colorButtons[4];
-    QSpinBox *m_alpha[4], *m_ml, *m_mr, *m_mv, *m_encoding;
+    QSpinBox *m_alpha[4], *m_ml, *m_mr, *m_mv;
     QRadioButton *m_align[9];
-    QLabel *m_preview;
+    QLabel *m_preview = nullptr;
 };
 
 class StyleManager : public QDialog {
@@ -88,6 +96,9 @@ public:
     explicit StyleManager(MainWindow *main);
     void editStyle(const QString &name);
 private:
+    // checks the name like Aegisub, then stores the style; index -1 = new, set to where it landed
+    bool applyToFile(int &index, const fsb::StyleData &s);
+    bool applyToStorage(int &index, const fsb::StyleData &s);
     void reload();
     void loadCatalog();
     void saveCatalog();

@@ -118,6 +118,35 @@ fn style_data(s: &Style) -> StyleData {
     }
 }
 
+/// `\r<old>` inside override blocks becomes `\r<new>` (Aegisub's StyleRenamer); None when nothing changed.
+fn rename_reset_tags(text: &str, old: &str, new: &str) -> Option<String> {
+    let needle = format!("\\r{old}");
+    let (mut out, mut depth, mut changed, mut i) = (String::with_capacity(text.len()), 0, false, 0);
+    while i < text.len() {
+        let rest = &text[i..];
+        if depth > 0 && rest.starts_with(&needle) {
+            // the name runs to the next tag or the end of the block
+            let after = &rest[needle.len()..];
+            if after.starts_with('\\') || after.starts_with('}') || after.is_empty() {
+                out.push_str("\\r");
+                out.push_str(new);
+                i += needle.len();
+                changed = true;
+                continue;
+            }
+        }
+        let c = rest.chars().next().unwrap();
+        match c {
+            '{' => depth += 1,
+            '}' => depth = 0,
+            _ => {}
+        }
+        out.push(c);
+        i += c.len_utf8();
+    }
+    changed.then_some(out)
+}
+
 fn apply_style_data(s: &mut Style, d: &StyleData) {
     let color = |v: &str, old: Color| Color::parse_style(v).unwrap_or(old);
     s.name = d.name.clone();
@@ -1349,8 +1378,16 @@ impl Session {
             apply_style_data(s, &style);
             if old != style.name {
                 for i in 0..d.event_count() {
-                    if d.event(i).unwrap().style == old {
-                        d.event_mut(i).unwrap().style = style.name.clone();
+                    let e = d.event(i).unwrap();
+                    let text = rename_reset_tags(&e.text, &old, &style.name);
+                    if e.style == old || text.is_some() {
+                        let e = d.event_mut(i).unwrap();
+                        if e.style == old {
+                            e.style = style.name.clone();
+                        }
+                        if let Some(t) = text {
+                            e.text = t;
+                        }
                     }
                 }
             }
@@ -1816,6 +1853,15 @@ mod tests {
         assert_eq!(s.info_value("Video File"), "");
         s.set_info_value("Title", "x");
         assert!(s.file_info().modified && s.can_undo());
+    }
+
+    #[test]
+    fn rename_style_moves_reset_tags() {
+        assert_eq!(
+            rename_reset_tags(r"{\rSign\b1}a \rSign {\rSigns}{\rSign}", "Sign", "Title").as_deref(),
+            Some(r"{\rTitle\b1}a \rSign {\rSigns}{\rTitle}")
+        );
+        assert_eq!(rename_reset_tags(r"{\r}x", "Sign", "Title"), None);
     }
 
     #[test]
