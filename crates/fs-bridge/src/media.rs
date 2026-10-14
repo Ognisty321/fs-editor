@@ -116,11 +116,15 @@ pub struct Audio {
 
 impl Audio {
     fn from_pcm(pcm: PcmBuffer) -> Self {
-        Audio {
-            peaks: PeakCache::new(pcm.clone()),
-            spectrum: Spectrogram::new(pcm.clone(), SpectrumConfig::default()),
-            player: Player::new(pcm, None).ok(),
-        }
+        // opening the output device takes ~200 ms (WASAPI): meanwhile build the peaks
+        std::thread::scope(|sc| {
+            let player = sc.spawn(|| Player::new(pcm.clone(), None).ok());
+            Audio {
+                peaks: PeakCache::new(pcm.clone()),
+                spectrum: Spectrogram::new(pcm.clone(), SpectrumConfig::default()),
+                player: player.join().ok().flatten(),
+            }
+        })
     }
 
     pub fn open(path: &str, cache_dir: &str) -> Result<Self, String> {
