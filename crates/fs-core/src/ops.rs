@@ -516,27 +516,18 @@ pub fn duplicate(doc: &mut Document, rows: &[usize]) -> Vec<usize> {
     let mut rows = rows.to_vec();
     rows.sort_unstable();
     rows.dedup();
-    let mut out = Vec::new();
-    for (k, &r) in rows.iter().enumerate() {
-        let r = r + k;
-        let ev = doc.event(r).unwrap().clone();
-        doc.insert_event(r + 1, ev);
-        out.push(r + 1);
-    }
-    out
+    let items = rows
+        .iter()
+        .filter_map(|&r| Some((r + 1, doc.event(r)?.clone())))
+        .collect();
+    doc.insert_events(items)
 }
 
 pub fn delete_rows(doc: &mut Document, rows: &[usize]) -> usize {
     let mut rows = rows.to_vec();
     rows.sort_unstable();
     rows.dedup();
-    let mut n = 0;
-    for &r in rows.iter().rev() {
-        if doc.remove_event(r).is_some() {
-            n += 1;
-        }
-    }
-    n
+    doc.remove_events(&rows)
 }
 
 /// Remove styles no line uses (Kainote "Delete unused ASS styles"). Styles

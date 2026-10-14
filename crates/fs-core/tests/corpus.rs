@@ -173,3 +173,44 @@ fn later_format_line_applies_to_the_following_events() {
     assert_eq!(ev, [("Default".into(), "first".into()), ("Top".into(), "second, with comma".into())]);
     assert_eq!(doc.to_ass_string(), src);
 }
+
+/// The one-pass insert_events/remove_events give the same document as
+/// insert_event/remove_event one at a time.
+#[test]
+fn batch_insert_and_remove_match_single_steps() {
+    let crafted = "[Events]\r\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\r\n\
+                   Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,a\r\n; note b\r\n\
+                   Dialogue: 0,0:00:02.00,0:00:03.00,Default,,0,0,0,,b\r\n\r\n; note c\r\n\
+                   Dialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,c\r\n; note d\r\n\
+                   Dialogue: 0,0:00:04.00,0:00:05.00,Default,,0,0,0,,d";
+    let mut docs: Vec<Document> = corpus_files().iter().map(|p| load(p).1).collect();
+    docs.push(Document::parse(crafted));
+    for doc in docs {
+        let n = doc.event_count();
+        // a few deterministic subsets: every k-th line from an offset, plus the last line
+        for (k, off) in [(1, 0), (2, 0), (2, 1), (3, 2), (5, 4)] {
+            let mut rows: Vec<usize> = (off..n).step_by(k).collect();
+            if n > 0 && rows.last() != Some(&(n - 1)) {
+                rows.push(n - 1);
+            }
+            let (mut a, mut b) = (doc.clone(), doc.clone());
+            for &r in rows.iter().rev() {
+                a.remove_event(r);
+            }
+            assert_eq!(b.remove_events(&rows), rows.len());
+            assert_eq!(a.to_ass_string(), b.to_ass_string());
+
+            let items: Vec<(usize, fs_core::Event)> =
+                rows.iter().map(|&r| (r + 1, doc.event(r).unwrap().clone())).collect();
+            let (mut a, mut b) = (doc.clone(), doc.clone());
+            for (j, (r, e)) in items.iter().enumerate() {
+                a.insert_event(r + j, e.clone());
+            }
+            let at = b.insert_events(items.clone());
+            assert_eq!(at, items.iter().enumerate().map(|(j, (r, _))| r + j).collect::<Vec<_>>());
+            assert_eq!(a.to_ass_string(), b.to_ass_string());
+            let ids = |d: &Document| d.events().iter().map(|e| e.id).collect::<Vec<_>>();
+            assert_eq!(ids(&a), ids(&b));
+        }
+    }
+}

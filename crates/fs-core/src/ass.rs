@@ -709,17 +709,94 @@ impl Document {
         Some(e.event)
     }
 
-    /// Remove all events for which `keep` returns false.
-    pub fn retain_events(&mut self, mut keep: impl FnMut(&Event) -> bool) -> usize {
-        let n = self.event_count();
-        let mut removed = 0;
-        for i in (0..n).rev() {
-            if !keep(self.event(i).unwrap()) {
-                self.remove_event(i);
-                removed += 1;
+    /// [`insert_event`](Self::insert_event) for many events in one pass:
+    /// `items` are `(index in the current list, event)` in ascending order.
+    /// Returns the new indices.
+    pub fn insert_events(&mut self, items: Vec<(usize, Event)>) -> Vec<usize> {
+        debug_assert!(items.is_sorted_by_key(|i| i.0));
+        let first_id = self.next_id;
+        self.next_id += items.len() as EventId;
+        let le = self.default_ending;
+        let sec = self.ensure_events();
+        let n = sec.entries.len();
+        if items.last().is_some_and(|i| i.0 >= n)
+            && let Some(last) = sec.entries.last_mut()
+            && last.ending == LineEnding::None
+        {
+            Arc::make_mut(last).ending = le;
+        }
+        let old = std::mem::replace(&mut sec.entries, Vec::with_capacity(n + items.len()));
+        let mut items = (first_id..).zip(items).peekable();
+        let mut out = Vec::new();
+        let mut old = old.into_iter().enumerate();
+        loop {
+            let next = old.next();
+            let at = next.as_ref().map_or(usize::MAX, |(i, _)| *i);
+            while let Some((id, (_, event))) = items.next_if(|(_, (i, _))| *i <= at) {
+                out.push(sec.entries.len());
+                sec.entries.push(Arc::new(EventEntry {
+                    id,
+                    leading: Vec::new(),
+                    event,
+                    orig: None,
+                    ending: le,
+                }));
+            }
+            match next {
+                Some((_, e)) => sec.entries.push(e),
+                None => break,
             }
         }
+        out
+    }
+
+    /// [`remove_event`](Self::remove_event) for many events in one pass
+    /// (`rows` ascending, no duplicates). Returns how many were removed.
+    pub fn remove_events(&mut self, rows: &[usize]) -> usize {
+        debug_assert!(rows.is_sorted() && rows.windows(2).all(|w| w[0] != w[1]));
+        let sec = self.ensure_events();
+        let n = sec.entries.len();
+        let last_unterminated =
+            n > 0 && rows.last() == Some(&(n - 1)) && sec.entries[n - 1].ending == LineEnding::None;
+        let mut gone = rows.iter().copied().filter(|&r| r < n).peekable();
+        let mut removed = 0;
+        // comments of removed lines move to the next kept line, as remove_event does
+        let mut carry: Vec<RawLine> = Vec::new();
+        let old = std::mem::take(&mut sec.entries);
+        for (i, e) in old.into_iter().enumerate() {
+            if gone.next_if_eq(&i).is_some() {
+                removed += 1;
+                let e = Arc::unwrap_or_clone(e);
+                carry.extend(e.leading.into_iter().filter(|l| !l.text.trim().is_empty()));
+                continue;
+            }
+            let mut e = e;
+            if !carry.is_empty() {
+                let lead = &mut Arc::make_mut(&mut e).leading;
+                carry.append(lead);
+                *lead = std::mem::take(&mut carry);
+            }
+            sec.entries.push(e);
+        }
+        if !carry.is_empty() {
+            carry.append(&mut sec.trailing);
+            sec.trailing = carry;
+        } else if last_unterminated
+            && sec.trailing.is_empty()
+            && let Some(last) = sec.entries.last_mut()
+        {
+            Arc::make_mut(last).ending = LineEnding::None;
+        }
         removed
+    }
+
+    /// Remove all events for which `keep` returns false.
+    pub fn retain_events(&mut self, mut keep: impl FnMut(&Event) -> bool) -> usize {
+        let gone: Vec<usize> = (self.events().iter().enumerate())
+            .filter(|(_, e)| !keep(&e.event))
+            .map(|(i, _)| i)
+            .collect();
+        self.remove_events(&gone)
     }
 
     /// Mutable access to the raw entry vector (for bulk operations such as

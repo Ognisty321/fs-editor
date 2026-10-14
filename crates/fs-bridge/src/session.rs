@@ -248,7 +248,20 @@ impl Session {
     }
 
     pub(crate) fn rows_of_events(&self, evs: &[usize]) -> Vec<usize> {
-        let mut v: Vec<usize> = evs.iter().filter_map(|&e| self.row_of_event(e)).collect();
+        if evs.len() <= 1 {
+            return evs.iter().filter_map(|&e| self.row_of_event(e)).collect();
+        }
+        // event -> row built once; a search per event is O(rows × events)
+        let mut row_of = vec![usize::MAX; self.ed.doc.event_count()];
+        for (i, r) in self.rows.iter().enumerate() {
+            for e in std::iter::once(r.original).chain(r.translation) {
+                row_of[e] = i;
+            }
+        }
+        let mut v: Vec<usize> = evs
+            .iter()
+            .filter_map(|&e| row_of.get(e).copied().filter(|&r| r != usize::MAX))
+            .collect();
         v.dedup();
         v
     }
@@ -884,9 +897,7 @@ impl Session {
         let first = (sel[0] as i64 + delta) as usize;
         let mut out = rest;
         let new: Vec<usize> = (first..first + moving.len()).collect();
-        for (k, g) in moving.into_iter().enumerate() {
-            out.insert(first + k, g);
-        }
+        out.splice(first..first, moving);
         self.set_groups("Move lines", out);
         new
     }
@@ -2032,6 +2043,21 @@ mod tests {
         let t0 = Instant::now();
         s.undo();
         eprintln!("undo: {:?}", t0.elapsed());
+        let all: Vec<usize> = (0..s.row_count()).collect();
+        let mut time = |what: &str, f: &mut dyn FnMut(&mut Session)| {
+            let t0 = Instant::now();
+            f(&mut s);
+            eprintln!("{what}: {:?}", t0.elapsed());
+        };
+        time("script_for_render", &mut |s| drop(std::hint::black_box(s.script_for_render(false))));
+        time("copy all", &mut |s| drop(std::hint::black_box(s.copy_rows(&all))));
+        time("set style all", &mut |s| s.set_rows_field(&all, "style", "Other"));
+        time("sort by end", &mut |s| s.sort_rows(1, false, &[]));
+        time("rows_at", &mut |s| drop(std::hint::black_box(s.rows_at(100_000_000))));
+        let half: Vec<usize> = (0..50_000).map(|i| i * 2).collect();
+        time("duplicate 50k", &mut |s| drop(s.duplicate_rows(&half)));
+        time("delete 50k", &mut |s| s.delete_rows(&half));
+        time("move 50k", &mut |s| drop(s.move_rows(&half, 1)));
         let out = std::env::temp_dir().join(format!("fsb-bench-{}.ass", std::process::id()));
         let t0 = Instant::now();
         s.save(out.to_str().unwrap()).unwrap();
