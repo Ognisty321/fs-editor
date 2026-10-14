@@ -275,27 +275,12 @@ void MainWindow::compareTabs(bool on) {
     if (auto *a = action("compareTabs")) a->setChecked(m_compareOn);
     for (auto *t : tabs()) t->grid()->setCompare({});
     if (!m_compareOn) return;
-    auto rows = [](TabPanel *t) {
-        std::vector<fsb::Row> v;
-        for (size_t i = 0; i < t->s().row_count(); ++i) v.push_back(t->s().row(i));
-        return v;
+    auto diff = [](TabPanel *x, TabPanel *y) {
+        const auto rows = x->s().compare_rows(y->s());
+        return std::set<size_t>(rows.begin(), rows.end());
     };
-    auto diff = [](const std::vector<fsb::Row> &x, const std::vector<fsb::Row> &y) {
-        std::multimap<std::pair<qint64, qint64>, QString> other;
-        for (const auto &r : y)
-            if (!r.comment) other.emplace(std::pair{qint64(r.start), qint64(r.end)}, fs::q(r.text));
-        std::set<size_t> out;
-        for (size_t i = 0; i < x.size(); ++i) {
-            if (x[i].comment) continue;
-            const auto [lo, hi] = other.equal_range({qint64(x[i].start), qint64(x[i].end)});
-            if (lo != hi && std::none_of(lo, hi, [&](const auto &kv) { return kv.second == fs::q(x[i].text); }))
-                out.insert(i);
-        }
-        return out;
-    };
-    const auto a = rows(current()), b = rows(m_second);
-    current()->grid()->setCompare(diff(a, b));
-    m_second->grid()->setCompare(diff(b, a));
+    current()->grid()->setCompare(diff(current(), m_second));
+    m_second->grid()->setCompare(diff(m_second, current()));
 }
 
 QList<TabPanel *> MainWindow::tabs() const {

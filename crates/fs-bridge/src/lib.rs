@@ -368,6 +368,8 @@ pub mod ffi {
 
         fn row_count(self: &Session) -> usize;
         fn column_info(self: &Session) -> ColumnInfo;
+        /// Kainote "compare by times": rows timed like a line of `other` whose text differs.
+        fn compare_rows(self: &Session, other: &Session) -> Vec<usize>;
         fn row(self: &Session, i: usize) -> Row;
         fn set_row(self: &mut Session, i: usize, row: &Row, amend: &str);
         fn set_rows_field(self: &mut Session, rows: &[usize], field: &str, value: &str);

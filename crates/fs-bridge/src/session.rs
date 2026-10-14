@@ -456,6 +456,32 @@ impl Session {
         self.rows.len()
     }
 
+    /// Rows whose start and end match non-comment lines of `other` none of
+    /// which has the same text (comments are not compared).
+    pub fn compare_rows(&self, other: &Session) -> Vec<usize> {
+        let mut by_time: HashMap<(Time, Time), Vec<&str>> = HashMap::new();
+        for i in 0..other.rows.len() {
+            if let Some((start, end, text)) = other.timed_text(i) {
+                by_time.entry((start, end)).or_default().push(text);
+            }
+        }
+        (0..self.rows.len())
+            .filter(|&i| {
+                self.timed_text(i).is_some_and(|(start, end, text)| {
+                    by_time.get(&(start, end)).is_some_and(|v| !v.contains(&text))
+                })
+            })
+            .collect()
+    }
+
+    /// Times and shown text of a non-comment row.
+    fn timed_text(&self, i: usize) -> Option<(Time, Time, &str)> {
+        let r = self.rows[i];
+        let ev = &self.ed.doc.events()[r.main()].event;
+        let text = if self.tl { tlmode::translation_text(&self.ed.doc, r) } else { &ev.text };
+        (!ev.is_comment()).then_some((ev.start, ev.end, text))
+    }
+
     pub fn column_info(&self) -> ColumnInfo {
         let mut ci = ColumnInfo::default();
         let (mut styles, mut actors, mut effects) = (HashSet::new(), HashSet::new(), HashSet::new());
@@ -1868,6 +1894,16 @@ mod tests {
             assert_eq!(s.filter(spec), oracle(&s, spec), "{spec:?}");
         }
         assert!(specs.iter().any(|sp| s.filter(sp).len() < s.row_count()));
+    }
+
+    #[test]
+    fn compare_marks_time_matches_with_other_text() {
+        let a = session(ASS);
+        let mut b = session(ASS);
+        b.set_texts(&[1], &["changed".to_string()], "edit");
+        b.set_rows_field(&[2], "start", "5100");
+        assert_eq!(a.compare_rows(&b), [1]);
+        assert_eq!(b.compare_rows(&a), [1]);
     }
 
     #[test]
