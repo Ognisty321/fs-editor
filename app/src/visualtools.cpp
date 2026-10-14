@@ -123,7 +123,8 @@ bool near(QPointF a, QPointF b, double r = 7) { return QLineF(a, b).length() <= 
 } // namespace
 
 VisualTools::VisualTools(VideoBox *box)
-    : QObject(box), m_box(box), m_shiftWhat(QSettings().value("visual/shiftWhat", 47).toInt()) {}
+    : QObject(box), m_box(box), m_shiftWhat(QSettings().value("visual/shiftWhat", 47).toInt()),
+      m_scaleWhat(QSettings().value("visual/scaleWhat", 5).toInt()) {}
 
 QPointF VisualTools::w(QPointF p) const { return m_box->view()->toWidget(p); }
 QPointF VisualTools::s(QPointF p) const { return m_box->view()->toScript(p); }
@@ -251,6 +252,28 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
         applyAllTags(m_tagValue->value());
     });
     m_sub->addWidget(tags);
+    // scale tool (Kainote): which axes a left drag scales
+    auto *scale = new QWidget(m_sub);
+    auto *ch = new QHBoxLayout(scale);
+    ch->setContentsMargins(6, 0, 0, 0);
+    ch->setSpacing(1);
+    const char *si[] = {"arrow-autofit-width", "link", "arrow-autofit-height"};
+    const char *st[] = {"Scale width", "Keep proportions", "Scale height"};
+    for (int k = 0; k < 3; ++k) {
+        auto *b = new QToolButton(scale);
+        b->setIcon(icon(si[k], QColor(0x4aa3ff)));
+        b->setToolTip(tr(st[k]));
+        b->setCheckable(true);
+        b->setAutoRaise(true);
+        b->setChecked(m_scaleWhat & (1 << k));
+        connect(b, &QToolButton::toggled, this, [this, k](bool on) {
+            m_scaleWhat = on ? m_scaleWhat | (1 << k) : m_scaleWhat & ~(1 << k);
+            QSettings().setValue("visual/scaleWhat", m_scaleWhat);
+        });
+        ch->addWidget(b);
+    }
+    ch->addStretch();
+    m_sub->addWidget(scale);
     h->addWidget(m_sub);
     h->addStretch();
     m_invert = invert;
@@ -261,7 +284,7 @@ void VisualTools::setTool(int t) {
     m_tool = t;
     if (t < int(m_buttons.size())) m_buttons[t]->setChecked(true);
     if (m_sub) {
-        m_sub->setCurrentIndex(t == VClip || t == Draw || t == RClip ? 1 : t == Pos || t == Move ? 2 : t == Shifter ? 3 : t == AllTags ? 4 : 0);
+        m_sub->setCurrentIndex(t == VClip || t == Draw || t == RClip ? 1 : t == Pos || t == Move ? 2 : t == Shifter ? 3 : t == AllTags ? 4 : t == Scale ? 5 : 0);
         m_invert->setVisible(t == VClip || t == RClip);
         for (auto *b : m_sub->widget(1)->findChildren<QToolButton *>())
             if (b != m_invert) b->setVisible(t != RClip);
@@ -627,8 +650,17 @@ bool VisualTools::move(QMouseEvent *e) {
     }
     case Scale: {
         double sx = m_start.fscx, sy = m_start.fscy;
-        if (m_button == Qt::LeftButton) sx = std::max(0.0, sx + dw.x());
-        else if (m_button == Qt::RightButton) sy = std::max(0.0, sy - dw.y());
+        if (m_button == Qt::LeftButton) {
+            if (m_scaleWhat & 2) { // keep proportions: one factor from the larger move
+                const double d = std::abs(dw.x()) >= std::abs(dw.y()) ? dw.x() : -dw.y();
+                const double f = std::max(0.0, 1 + d / std::max(1.0, (m_scaleWhat & 1) ? sx : sy));
+                sx *= f;
+                sy *= f;
+            } else {
+                if (m_scaleWhat & 1) sx = std::max(0.0, sx + dw.x());
+                if (m_scaleWhat & 4) sy = std::max(0.0, sy - dw.y());
+            }
+        } else if (m_button == Qt::RightButton) sy = std::max(0.0, sy - dw.y());
         else {
             const double f = std::max(0.0, 1 + dw.x() / 100);
             sx *= f;

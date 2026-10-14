@@ -83,6 +83,7 @@ private:
     QString m_amend;
     QStackedWidget *m_sub = nullptr;
     int m_shiftWhat = 47; // all but drawing points
+    int m_scaleWhat = 5;  // scale tool: 1 width, 2 keep proportions, 4 height
     QWidget *m_invert = nullptr;
     QComboBox *m_tagName = nullptr, *m_tagMode = nullptr;
     QDoubleSpinBox *m_tagValue = nullptr;
