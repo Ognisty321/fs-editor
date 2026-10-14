@@ -544,6 +544,22 @@ impl Session {
         });
     }
 
+    pub fn set_texts(&mut self, rows: &[usize], texts: &[String], description: &str) {
+        let evs: Vec<(usize, String)> = rows
+            .iter()
+            .zip(texts)
+            .filter_map(|(&r, t)| Some((*self.main_events(&[r]).first()?, t.clone())))
+            .collect();
+        if evs.is_empty() {
+            return;
+        }
+        self.edit(description, move |d| {
+            for (e, t) in evs {
+                d.event_mut(e).unwrap().text = t;
+            }
+        });
+    }
+
     pub fn set_rows_field(&mut self, rows: &[usize], field: &str, value: &str) {
         let evs = if field == "style" || field == "effect" {
             self.main_events(rows)

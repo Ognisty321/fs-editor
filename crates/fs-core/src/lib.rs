@@ -6,6 +6,8 @@ pub mod attachments;
 pub mod color;
 pub mod fonts;
 pub mod history;
+pub mod kana_table;
+pub mod kanji_timer;
 pub mod karaoke;
 pub mod keyframes;
 pub mod model;

@@ -3,17 +3,22 @@
 //! plus plain DTO structs. All editing logic stays in the Rust core.
 
 mod automation;
+mod kanji;
 mod media;
 mod session;
 mod spell;
 mod visual;
 
 pub use automation::Automation;
+pub use kanji::KanjiTimer;
+use kanji::new_kanji_timer;
 pub use media::{Audio, Renderer, Video};
 pub use session::Session;
 pub use spell::Speller;
 use spell::new_speller;
 
+// the export functions mirror Aegisub's Export dialog options one to one
+#[allow(clippy::too_many_arguments)]
 #[cxx::bridge(namespace = "fsb")]
 pub mod ffi {
     /// One grid row (in translation mode: an original/translation pair).
@@ -195,6 +200,18 @@ pub mod ffi {
         text: String,
     }
 
+    /// The kanji timer's line pair: matched groups, the current selection and the rest.
+    struct KanjiState {
+        group_src: Vec<String>,
+        group_dst: Vec<String>,
+        sel_src: Vec<String>,
+        rest_src: Vec<String>,
+        sel_dst: String,
+        rest_dst: String,
+        remaining_src: usize,
+        remaining_dst: usize,
+    }
+
     /// A font or graphic embedded in the script.
     struct AttachmentRow {
         font: bool,
@@ -338,6 +355,8 @@ pub mod ffi {
         fn row(self: &Session, i: usize) -> Row;
         fn set_row(self: &mut Session, i: usize, row: &Row, amend: &str);
         fn set_rows_field(self: &mut Session, rows: &[usize], field: &str, value: &str);
+        /// New texts for rows, as one undo step.
+        fn set_texts(self: &mut Session, rows: &[usize], texts: &[String], description: &str);
         fn insert_row(self: &mut Session, at: usize, start: i64, end: i64) -> usize;
         fn duplicate_rows(self: &mut Session, rows: &[usize]) -> Vec<usize>;
         fn delete_rows(self: &mut Session, rows: &[usize]);
@@ -519,6 +538,16 @@ pub mod ffi {
         fn playing(self: &Audio) -> bool;
         fn position_ms(self: &Audio) -> i64;
         fn set_volume(self: &Audio, v: f32);
+
+        type KanjiTimer;
+        fn new_kanji_timer() -> Box<KanjiTimer>;
+        fn set_lines(self: &mut KanjiTimer, session: &Session, src_row: usize, dst_row: usize);
+        fn auto_match(self: &mut KanjiTimer);
+        fn accept(self: &mut KanjiTimer) -> bool;
+        fn undo(self: &mut KanjiTimer) -> bool;
+        fn adjust(self: &mut KanjiTimer, what: u8, grow: bool) -> bool;
+        fn output(self: &KanjiTimer) -> String;
+        fn state(self: &KanjiTimer) -> KanjiState;
 
         type Automation;
         fn new_automation(data_dir: &str, user_dir: &str) -> Box<Automation>;

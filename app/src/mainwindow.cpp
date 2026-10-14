@@ -96,7 +96,7 @@ const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"openAudio", {"music", kTeal}}, {"audioFromVideo", {"file-music", kTeal}}, {"blankAudio", {"wave-square", kTeal}},
     {"closeAudio", {"music-off", kRed}}, {"splitView", {"layout-columns", {}}}, {"compareTabs", {"git-compare", {}}},
     {"editor", {"edit", kBlue}}, {"properties", {"file-info", kPurple}}, {"styleManager", {"palette", kPurple}},
-    {"shiftTimes", {"clock-edit", kBlue}}, {"changeFps", {"clock-play", kPurple}}, {"spellChecker", {"text-spellcheck", kGreen}}, {"attachments", {"paperclip", kAmber}}, {"stylingAssistant", {"palette", kPurple}},
+    {"shiftTimes", {"clock-edit", kBlue}}, {"changeFps", {"clock-play", kPurple}}, {"spellChecker", {"text-spellcheck", kGreen}}, {"attachments", {"paperclip", kAmber}}, {"stylingAssistant", {"palette", kPurple}}, {"kanjiTimer", {"language-hiragana", kRed}},
     {"resample", {"aspect-ratio", kPurple}}, {"hideTags", {"code-off", kOrange}}, {"help", {"help", kBlue}},
     {"about", {"info-circle", kBlue}}};
 
@@ -981,6 +981,9 @@ void MainWindow::buildMenus() {
         t->changed();
     });
     add("attachments", tr("Attachments..."), {}, subs, [=, this] { AttachmentsDialog(this, tab()).exec(); });
+    add("kanjiTimer", tr("Kanji timer..."), {}, subs, [=, this] {
+        if (tab()->s().row_count()) (new KanjiTimerDialog(this, tab()))->show();
+    });
     add("stylingAssistant", tr("Styling assistant..."), {}, subs, [=, this] {
         if (tab()->s().row_count()) (new StylingAssistant(this, tab()))->show();
     });
