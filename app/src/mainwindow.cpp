@@ -76,7 +76,8 @@ const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"find", {"search", kOrange}}, {"findNext", {"search", kOrange}}, {"selectLines", {"list-check", kGreen}},
     {"duplicate", {"copy", {}}}, {"deleteText", {"eraser", kRed}}, {"deleteLines", {"row-remove", kRed}},
     {"prevLine", {"arrow-up", {}}}, {"nextLine", {"arrow-down", {}}}, {"joinPrev", {"arrows-join", {}}},
-    {"joinNext", {"arrows-join-2", {}}}, {"selectFromVideo", {"focus-2", kGreen}}, {"newTab", {"browser-plus", {}}},
+    {"joinNext", {"arrows-join-2", {}}}, {"recombine", {"arrows-join", kGreen}},
+    {"splitKaraoke", {"arrows-split", kGreen}}, {"selectFromVideo", {"focus-2", kGreen}}, {"newTab", {"browser-plus", {}}},
     {"closeTab", {"browser-x", kRed}}, {"nextTab", {"chevron-right", {}}}, {"prevTab", {"chevron-left", {}}},
     {"openVideo", {"movie", kBlue}}, {"openKeyframes", {"key", kAmber}}, {"openDummy", {"photo", kBlue}},
     {"startFromVideo", {"brackets-contain-start", kGreen}}, {"endFromVideo", {"brackets-contain-end", kGreen}},
@@ -516,6 +517,22 @@ void MainWindow::buildMenus() {
     };
     add("joinPrev", tr("Join with previous line"), QKeySequence("F4"), lines, [=] { join(-1); });
     add("joinNext", tr("Join with next line"), QKeySequence("F5"), lines, [=] { join(1); });
+    // Aegisub edit/line/recombine and edit/line/split/by_karaoke
+    add("recombine", tr("Recombine lines"), {}, lines, [=] {
+        auto *t = tab();
+        const auto left = t->s().recombine_rows(fs::slice(t->selection()));
+        const std::vector<size_t> rows(left.begin(), left.end());
+        t->changed();
+        if (!rows.empty()) t->setSelection(rows, int(rows.front()));
+    });
+    add("splitKaraoke", tr("Split lines by karaoke"), {}, lines, [=] {
+        auto *t = tab();
+        const auto made = t->s().split_by_karaoke(fs::slice(t->selection()));
+        if (made.empty()) return;
+        const std::vector<size_t> rows(made.begin(), made.end());
+        t->changed();
+        t->setSelection(rows, int(rows.front()));
+    });
     add("selectFromVideo", tr("Select line from video time"), QKeySequence("F2"), lines, [=] {
         const auto rows = tab()->s().rows_at(tab()->videoTime());
         if (!rows.empty()) tab()->setActive(int(rows[0]));

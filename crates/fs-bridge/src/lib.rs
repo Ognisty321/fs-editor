@@ -326,6 +326,8 @@ pub mod ffi {
         fn delete_rows(self: &mut Session, rows: &[usize]);
         fn clear_text(self: &mut Session, rows: &[usize]);
         fn join_rows(self: &mut Session, rows: &[usize], mode: u8) -> i64;
+        fn recombine_rows(self: &mut Session, rows: &[usize]) -> Vec<usize>;
+        fn split_by_karaoke(self: &mut Session, rows: &[usize]) -> Vec<usize>;
         fn split_row(self: &mut Session, row: usize, byte_pos: usize, at_ms: i64) -> i64;
         fn swap_rows(self: &mut Session, a: usize, b: usize);
         /// Replace a row by one copy per part (split into words, wraps, frames…).

@@ -581,6 +581,27 @@ impl Session {
         });
     }
 
+    /// Aegisub "Recombine Lines"; returns the rows left of the selection.
+    pub fn recombine_rows(&mut self, rows: &[usize]) -> Vec<usize> {
+        // shortcut: not in TL mode (pairs would need recombining together); add when asked.
+        if self.tl {
+            return rows.to_vec();
+        }
+        let evs = self.main_events(rows);
+        let left = self.edit("Recombine lines", |d| ops::recombine(d, &evs));
+        self.rows_of_events(&left)
+    }
+
+    /// Aegisub "Split Lines (by karaoke)"; returns the new rows.
+    pub fn split_by_karaoke(&mut self, rows: &[usize]) -> Vec<usize> {
+        if self.tl {
+            return Vec::new();
+        }
+        let evs = self.main_events(rows);
+        let new = self.edit("Split by karaoke", |d| ops::split_by_karaoke(d, &evs));
+        self.rows_of_events(&new)
+    }
+
     /// 0 join, 1 keep first, 2 keep last, 3 as karaoke. Not in TL mode.
     pub fn join_rows(&mut self, rows: &[usize], mode: u8) -> i64 {
         // shortcut: TL pairs are not joined (both halves would need merging); add when asked.

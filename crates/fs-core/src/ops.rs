@@ -473,6 +473,153 @@ pub fn delete_rows(doc: &mut Document, rows: &[usize]) -> usize {
     n
 }
 
+/// Aegisub `trim_text`: drop spaces, tabs and `\N`/`\n`/`\h` at both ends.
+fn trim_breaks(text: &str) -> String {
+    let mut s = text;
+    loop {
+        let t = s.trim_matches([' ', '\t']);
+        let t = ["\\N", "\\n", "\\h"]
+            .iter()
+            .fold(t, |t, b| t.strip_prefix(b).unwrap_or(t));
+        let t = ["\\N", "\\n", "\\h"]
+            .iter()
+            .fold(t, |t, b| t.strip_suffix(b).unwrap_or(t));
+        if t.len() == s.len() {
+            return t.to_string();
+        }
+        s = t;
+    }
+}
+
+/// Aegisub "Recombine Lines": undo a split-and-merge of overlapping lines
+/// (1, 1+2, 2 → 1, 2 with widened times). Returns the rows left over from
+/// `rows`, in document order after the deletions.
+pub fn recombine(doc: &mut Document, rows: &[usize]) -> Vec<usize> {
+    let mut sel: Vec<usize> = rows
+        .iter()
+        .copied()
+        .filter(|&r| doc.event(r).is_some())
+        .collect();
+    sel.sort_unstable();
+    sel.dedup();
+    if sel.len() < 2 {
+        return sel;
+    }
+    sel.sort_by_key(|&r| doc.event(r).unwrap().start);
+    // working copies: (start, end, text)
+    let mut l: Vec<(Time, Time, String)> = sel
+        .iter()
+        .map(|&r| {
+            let e = doc.event(r).unwrap();
+            (e.start, e.end, trim_breaks(&e.text))
+        })
+        .collect();
+    let mut dead = vec![false; l.len()];
+    let expand = |l: &mut Vec<(Time, Time, String)>, src: usize, dst: usize| {
+        l[dst].0 = l[dst].0.min(l[src].0);
+        l[dst].1 = l[dst].1.max(l[src].1);
+    };
+    // d1 starts (or ends) with d2's text: cut it off and widen d2
+    let check = |l: &mut Vec<(Time, Time, String)>, d1: usize, d2: usize, start: bool| {
+        let (a, b) = (l[d1].2.clone(), l[d2].2.clone());
+        let rest = if start {
+            a.strip_prefix(b.as_str())
+        } else {
+            a.strip_suffix(b.as_str())
+        };
+        match rest {
+            Some(rest) => {
+                l[d1].2 = trim_breaks(rest);
+                expand(l, d1, d2);
+                true
+            }
+            None => false,
+        }
+    };
+    let end = l.len() - 1;
+    for cur in 0..end {
+        let mut d2 = cur + 1;
+        if l[cur].2 == l[d2].2 {
+            expand(&mut l, cur, d2);
+            dead[cur] = true;
+            continue;
+        }
+        if l[cur].2.is_empty() {
+            dead[cur] = true;
+            continue;
+        }
+        if d2 == end && l[d2].2.is_empty() {
+            dead[d2] = true;
+            continue;
+        }
+        while d2 <= end && check(&mut l, d2, cur, true) {
+            d2 += 1;
+        }
+        while d2 <= end && check(&mut l, d2, cur, false) {
+            d2 += 1;
+        }
+        while d2 <= end && check(&mut l, cur, d2, false) {
+            d2 += 1;
+        }
+        while d2 <= end && check(&mut l, cur, d2, true) {
+            d2 += 1;
+        }
+    }
+    for (k, &r) in sel.iter().enumerate() {
+        let e = doc.event_mut(r).unwrap();
+        (e.start, e.end, e.text) = l[k].clone();
+    }
+    let gone: Vec<usize> = sel
+        .iter()
+        .zip(&dead)
+        .filter(|(_, d)| **d)
+        .map(|(r, _)| *r)
+        .collect();
+    delete_rows(doc, &gone);
+    let mut left: Vec<usize> = sel
+        .iter()
+        .zip(&dead)
+        .filter(|(_, d)| !**d)
+        .map(|(r, _)| *r)
+        .collect();
+    left.sort_unstable();
+    left.iter()
+        .map(|&r| r - gone.iter().filter(|&&g| g < r).count())
+        .collect()
+}
+
+/// Aegisub "Split Lines (by karaoke)": each `\k` syllable of the rows
+/// becomes its own line with the syllable's times. Rows with fewer than
+/// two syllables stay. Returns the new rows.
+pub fn split_by_karaoke(doc: &mut Document, rows: &[usize]) -> Vec<usize> {
+    let mut rows = rows.to_vec();
+    rows.sort_unstable();
+    rows.dedup();
+    let mut out = Vec::new();
+    let mut offset = 0;
+    for r in rows {
+        let r = r + offset;
+        let Some(ev) = doc.event(r).cloned() else {
+            continue;
+        };
+        let syls = crate::tags::karaoke_syllables(&ev.text);
+        if syls.len() < 2 {
+            continue;
+        }
+        doc.remove_event(r);
+        for (k, s) in syls.iter().enumerate() {
+            let mut e = ev.clone();
+            e.start = ev.start + Time(s.start_ms);
+            e.end = e.start + Time(s.duration_ms);
+            e.text = s.text.clone();
+            doc.insert_event(r + k, e);
+            out.push(r + k);
+        }
+        offset += syls.len() - 1;
+    }
+    out
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JoinMode {
     /// Concatenate texts with a space (or `\N` if `newline`).
@@ -1353,6 +1500,46 @@ mod tests {
         };
         translate_positions(&mut d, &Rows::All, 1.0, 2.0, drawing);
         assert_eq!(d.event(0).unwrap().text, r"{\p2}m 2 4 l 6 8");
+    }
+
+    #[test]
+    fn recombine_split_merge() {
+        // 1, 1+2, 2 (the merged middle line spans both)
+        let mut d = doc(&[
+            ("0:00:01.00", "0:00:02.00", "Default", "one"),
+            ("0:00:02.00", "0:00:03.00", "Default", r"one\Ntwo"),
+            ("0:00:03.00", "0:00:04.00", "Default", "two"),
+        ]);
+        let left = recombine(&mut d, &[0, 1, 2]);
+        let t = |i: usize| {
+            let e = d.event(i).unwrap();
+            (e.start.ms(), e.end.ms(), e.text.clone())
+        };
+        assert_eq!(left, [0, 1]);
+        assert_eq!(d.events().len(), 2);
+        assert_eq!(t(0), (1000, 3000, "one".into()));
+        assert_eq!(t(1), (2000, 4000, "two".into()));
+    }
+
+    #[test]
+    fn split_karaoke_lines() {
+        let mut d = doc(&[
+            (
+                "0:00:01.00",
+                "0:00:02.00",
+                "Default",
+                r"{\k20}ka{\k30\i1}ra",
+            ),
+            ("0:00:05.00", "0:00:06.00", "Default", "plain"),
+        ]);
+        assert_eq!(split_by_karaoke(&mut d, &[0, 1]), [0, 1]);
+        let e = |i: usize| d.event(i).unwrap().clone();
+        assert_eq!(
+            (e(0).start.ms(), e(0).end.ms(), e(0).text),
+            (1000, 1200, "ka".into())
+        );
+        assert_eq!((e(1).start.ms(), e(1).end.ms()), (1200, 1500));
+        assert_eq!(e(2).text, "plain");
     }
 
     #[test]
