@@ -58,6 +58,14 @@ pub fn diff_events(old: &Document, new: &Document) -> EventDiff {
     }
 }
 
+/// Steps kept for a document of `events` lines. Every step holds its own list of event
+/// pointers, so a huge file keeps fewer (100k lines: 250 steps, ~200 MB of lists), but
+/// never fewer than Aegisub's default of 50.
+fn undo_steps(limit: usize, events: usize) -> usize {
+    const POINTERS: usize = 25_000_000;
+    limit.min((POINTERS / events.max(1)).max(50))
+}
+
 /// A document together with its undo history — one per editor tab.
 #[derive(Debug, Clone)]
 pub struct Editor {
@@ -144,9 +152,11 @@ impl Editor {
             amend_key: amend.map(str::to_string),
         });
         self.undo_gen.push(self.generation);
-        if self.undo.len() > self.limit {
-            self.undo.remove(0);
-            self.undo_gen.remove(0);
+        let keep = undo_steps(self.limit, self.doc.event_count());
+        if self.undo.len() > keep {
+            let n = self.undo.len() - keep;
+            self.undo.drain(..n);
+            self.undo_gen.drain(..n);
         }
         self.generation = self.next_generation;
         self.next_generation += 1;
@@ -258,6 +268,13 @@ mod tests {
         let mut e = editor();
         e.edit("nothing", |_| {});
         assert!(!e.can_undo());
+    }
+
+    #[test]
+    fn huge_documents_keep_fewer_undo_steps() {
+        assert_eq!(undo_steps(500, 2_000), 500);
+        assert_eq!(undo_steps(500, 100_000), 250);
+        assert_eq!(undo_steps(500, 10_000_000), 50);
     }
 
     #[test]
