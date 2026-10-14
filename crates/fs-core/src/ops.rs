@@ -668,12 +668,13 @@ pub fn recombine(doc: &mut Document, rows: &[usize]) -> Vec<usize> {
         let e = doc.event_mut(r).unwrap();
         (e.start, e.end, e.text) = l[k].clone();
     }
-    let gone: Vec<usize> = sel
+    let mut gone: Vec<usize> = sel
         .iter()
         .zip(&dead)
         .filter(|(_, d)| **d)
         .map(|(r, _)| *r)
         .collect();
+    gone.sort_unstable();
     delete_rows(doc, &gone);
     let mut left: Vec<usize> = sel
         .iter()
@@ -683,7 +684,7 @@ pub fn recombine(doc: &mut Document, rows: &[usize]) -> Vec<usize> {
         .collect();
     left.sort_unstable();
     left.iter()
-        .map(|&r| r - gone.iter().filter(|&&g| g < r).count())
+        .map(|&r| r - gone.partition_point(|&g| g < r))
         .collect()
 }
 
@@ -694,29 +695,27 @@ pub fn split_by_karaoke(doc: &mut Document, rows: &[usize]) -> Vec<usize> {
     let mut rows = rows.to_vec();
     rows.sort_unstable();
     rows.dedup();
-    let mut out = Vec::new();
-    let mut offset = 0;
+    let mut gone = Vec::new();
+    let mut items = Vec::new();
     for r in rows {
-        let r = r + offset;
-        let Some(ev) = doc.event(r).cloned() else {
-            continue;
-        };
+        let Some(ev) = doc.event(r) else { continue };
         let syls = crate::tags::karaoke_syllables(&ev.text);
         if syls.len() < 2 {
             continue;
         }
-        doc.remove_event(r);
-        for (k, s) in syls.iter().enumerate() {
+        // the parts go where the line was, once the split lines are removed
+        let at = r - gone.len();
+        gone.push(r);
+        for s in syls {
             let mut e = ev.clone();
             e.start = ev.start + Time(s.start_ms);
             e.end = e.start + Time(s.duration_ms);
-            e.text = s.text.clone();
-            doc.insert_event(r + k, e);
-            out.push(r + k);
+            e.text = s.text;
+            items.push((at, e));
         }
-        offset += syls.len() - 1;
     }
-    out
+    doc.remove_events(&gone);
+    doc.insert_events(items)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -771,9 +770,7 @@ pub fn join(doc: &mut Document, rows: &[usize], mode: JoinMode) -> Option<usize>
             s
         }
     };
-    for &r in rows[1..].iter().rev() {
-        doc.remove_event(r);
-    }
+    doc.remove_events(&rows[1..]);
     let ev = doc.event_mut(first).unwrap();
     ev.start = start;
     ev.end = end;
@@ -1668,8 +1665,9 @@ mod tests {
                 r"{\k20}ka{\k30\i1}ra",
             ),
             ("0:00:05.00", "0:00:06.00", "Default", "plain"),
+            ("0:00:07.00", "0:00:08.00", "Default", r"{\k10}a{\k10}b{\k10}c"),
         ]);
-        assert_eq!(split_by_karaoke(&mut d, &[0, 1]), [0, 1]);
+        assert_eq!(split_by_karaoke(&mut d, &[0, 1, 2]), [0, 1, 3, 4, 5]);
         let e = |i: usize| d.event(i).unwrap().clone();
         assert_eq!(
             (e(0).start.ms(), e(0).end.ms(), e(0).text),
@@ -1677,6 +1675,9 @@ mod tests {
         );
         assert_eq!((e(1).start.ms(), e(1).end.ms()), (1200, 1500));
         assert_eq!(e(2).text, "plain");
+        let texts: Vec<String> = (3..6).map(|i| e(i).text).collect();
+        assert_eq!(texts, ["a", "b", "c"]);
+        assert_eq!((e(5).start.ms(), e(5).end.ms(), d.event_count()), (7200, 7300, 6));
     }
 
     #[test]

@@ -102,14 +102,16 @@ pub fn enable(doc: &mut Document) {
 /// exists; original-only lines keep their text. TL keys and style are removed.
 pub fn disable(doc: &mut Document) {
     let Some(style) = tl_style(doc) else { return };
-    let rs = rows(doc);
-    for r in rs.iter().rev() {
+    let mut gone = Vec::new();
+    for r in rows(doc) {
         if let Some(t) = r.translation {
             let ev = doc.event_mut(t).unwrap();
             ev.effect = strip_doubtful(&ev.effect).to_string();
-            doc.remove_event(r.original);
+            gone.push(r.original);
         }
     }
+    gone.sort_unstable();
+    doc.remove_events(&gone);
     doc.remove_info("TLMode");
     doc.remove_info("TLMode Style");
     doc.remove_info("TLMode Showtl");
