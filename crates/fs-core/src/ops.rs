@@ -539,6 +539,32 @@ pub fn delete_rows(doc: &mut Document, rows: &[usize]) -> usize {
     n
 }
 
+/// Remove styles no line uses (Kainote "Delete unused ASS styles"). Styles
+/// named by a `\r` reset or the TL-mode style stay. Returns the removed names.
+pub fn remove_unused_styles(doc: &mut Document) -> Vec<String> {
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for e in doc.events().iter().map(|e| &e.event) {
+        used.insert(e.style.clone());
+        for t in Line::parse(&e.text).tags() {
+            if t.name == "r" && !t.args.is_empty() {
+                used.insert(t.args[0].clone());
+            }
+        }
+    }
+    used.insert(doc.info("TLMode Style").unwrap_or("TLmode").to_string());
+    let gone: Vec<String> = doc
+        .styles()
+        .filter(|s| !used.contains(&s.name))
+        .map(|s| s.name.clone())
+        .collect();
+    for name in &gone {
+        if let Some(i) = doc.style_index(name) {
+            doc.remove_style(i);
+        }
+    }
+    gone
+}
+
 /// Aegisub `trim_text`: drop spaces, tabs and `\N`/`\n`/`\h` at both ends.
 fn trim_breaks(text: &str) -> String {
     let mut s = text;
@@ -1581,6 +1607,18 @@ mod tests {
         let e = d.event(0).unwrap();
         assert_eq!((e.start.ms(), e.end.ms()), (500, 1000));
         assert_eq!(e.text, r"{\move(0,0,1,1,100,200)\fad(100,200)\k25}a{\k25}b");
+    }
+
+    #[test]
+    fn unused_styles_go() {
+        let mut d = doc(&[("0:00:00.00", "0:00:01.00", "Default", r"{\rAlt}x")]);
+        for name in ["Alt", "Unused"] {
+            let mut st = d.style("Default").unwrap().clone();
+            st.name = name.into();
+            d.add_style(st);
+        }
+        assert_eq!(remove_unused_styles(&mut d), ["Unused"]);
+        assert_eq!(d.style_count(), 2);
     }
 
     #[test]

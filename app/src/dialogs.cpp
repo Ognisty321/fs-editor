@@ -28,6 +28,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QLocale>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -573,8 +574,9 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     auto *fb = new QVBoxLayout;
     auto *fNew = new QPushButton(tr("New"), this), *fCopy = new QPushButton(tr("Copy"), this),
          *fEdit = new QPushButton(tr("Edit"), this), *fDel = new QPushButton(tr("Delete"), this),
-         *fClear = new QPushButton(tr("Clear"), this);
-    for (auto *b : {fNew, fCopy, fEdit, fDel, fClear}) fb->addWidget(b);
+         *fClear = new QPushButton(tr("Clear"), this), *fClean = new QPushButton(tr("Clean"), this);
+    fClean->setToolTip(tr("Delete unused styles"));
+    for (auto *b : {fNew, fCopy, fEdit, fDel, fClear, fClean}) fb->addWidget(b);
     fb->addStretch();
     g->addLayout(fb, 5, 1);
     auto *close = new QPushButton(tr("Close"), this);
@@ -635,6 +637,14 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         std::sort(rows.begin(), rows.end(), [](auto &a, auto &b) { return a.row() > b.row(); });
         for (const auto &r : rows) session().delete_style(size_t(r.row()));
         edited();
+    });
+    connect(fClean, &QPushButton::clicked, this, [=, this] {
+        QStringList gone;
+        for (const auto &n : session().clean_styles()) gone << fs::q(n);
+        edited();
+        QMessageBox::information(this, tr("Delete unused styles"),
+                                 gone.isEmpty() ? tr("Every style is in use.")
+                                                : tr("Deleted styles:\n%1").arg(gone.join("\n")));
     });
     connect(fClear, &QPushButton::clicked, this, [=, this] {
         if (!m_main->confirm(tr("Delete all styles from the file?"))) return;

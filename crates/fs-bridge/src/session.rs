@@ -1189,6 +1189,15 @@ impl Session {
         });
     }
 
+    /// Delete styles no line uses; returns their names (no undo step when none).
+    pub fn clean_styles(&mut self) -> Vec<String> {
+        let mut probe = self.ed.doc.clone();
+        if ops::remove_unused_styles(&mut probe).is_empty() {
+            return Vec::new();
+        }
+        self.edit("Delete unused styles", ops::remove_unused_styles)
+    }
+
     pub fn delete_style(&mut self, index: usize) {
         self.edit("Delete style", |d| {
             d.remove_style(index);
