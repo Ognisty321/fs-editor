@@ -69,6 +69,8 @@ public:
     qint64 positionMs() const;
     void setVolume(float v);
     qint64 markTime() const { return m_mark; }
+    void centerOn(qint64 ms);
+    void setMark(qint64 ms);
 
     void lineChanged();   // active row changed
     void docChanged();    // document edited elsewhere

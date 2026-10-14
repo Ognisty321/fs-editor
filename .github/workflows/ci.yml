@@ -19,7 +19,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: ALSA headers (cpal)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
@@ -46,9 +46,9 @@ jobs:
       FS_DEPS_ROOT: ${{ github.workspace }}/../deps
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../vcpkg-bin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # vcpkg binary packages, so FFmpeg is only compiled when vcpkg.json or the overlay ports change
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/../vcpkg-bin
           key: vcpkg-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'tools/vcpkg-ports/**') }}
@@ -64,6 +64,8 @@ jobs:
           version: '6.12.*'
           modules: qtshadertools
           cache: true
+          # shortcut: aqtinstall 3.3.0 (latest release) cannot read the per-compiler Windows repos of Qt >= 6.10; drop when a release can.
+          aqtsource: git+https://github.com/miurahr/aqtinstall.git@076e1659807d0b362a3ed684d54c2e9c775eb9c7
       - uses: Swatinem/rust-cache@v2
       - name: vcpkg
         shell: bash
@@ -90,7 +92,7 @@ jobs:
       - name: Package
         shell: bash
         run: cd app/build-${{ matrix.preset }} && cpack -C Release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: fs-editor-${{ matrix.os }}
           path: app/build-${{ matrix.preset }}/*.zip

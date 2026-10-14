@@ -7,10 +7,12 @@ use std::sync::{Arc, Mutex};
 use cxx::UniquePtr;
 use fs_automation::{
     Context, Dialog, DialogControl, DialogResult, DialogValue, Env, Host, Paths, RunError, Script,
+    VideoFrame,
 };
 
 use crate::Session;
 use crate::ffi::{AutomationHost, DialogControlData, DialogData, MacroItem, MacroResult};
+use crate::media::{Renderer, Video};
 
 struct CppHost(UniquePtr<AutomationHost>);
 // SAFETY: scripts run synchronously on the GUI thread (see `run_macro`), the
@@ -22,6 +24,64 @@ unsafe impl Sync for CppHost {}
 struct GuiHost {
     cpp: Mutex<Option<CppHost>>,
     log: Mutex<String>,
+    frames: Mutex<Frames>,
+}
+
+/// Source for `aegisub.get_frame`: the tab's video, opened on first use
+/// (BestSource reuses the index the video box already built).
+#[derive(Default)]
+struct Frames {
+    cache_dir: String,
+    path: String,
+    script: String,
+    video: Option<Video>,
+    renderer: Option<Renderer>,
+}
+
+impl Frames {
+    fn set(&mut self, path: &str, script: String) {
+        if path != self.path {
+            (self.path, self.video, self.renderer) = (path.to_owned(), None, None);
+        }
+        self.script = script;
+    }
+
+    fn frame(&mut self, n: i64, with_subtitles: bool) -> Option<VideoFrame> {
+        if self.path.is_empty() {
+            return None;
+        }
+        if self.video.is_none() {
+            self.video = Some(Video::open(&self.path, &self.cache_dir).ok()?);
+        }
+        let v = self.video.as_mut()?;
+        let info = v.info();
+        if !(0..info.frames).contains(&n) {
+            return None;
+        }
+        let (w, h) = (info.width as usize, info.height as usize);
+        let mut data = vec![0u8; w * h * 4];
+        v.frame(n, &mut data).ok()?;
+        if with_subtitles {
+            if self.renderer.is_none() {
+                let mut r = Renderer::new().ok()?;
+                r.load_attached_fonts(&self.path);
+                self.renderer = Some(r);
+            }
+            let r = self.renderer.as_mut()?;
+            r.set_script(&self.script).ok()?;
+            r.blend(v.ms_at_frame(n), w, h, w, h, &mut data).ok()?;
+        }
+        for px in data.as_chunks_mut::<4>().0 {
+            px.swap(0, 2); // RGBA -> BGRA, the layout Aegisub's frame object exposes
+        }
+        Some(VideoFrame {
+            width: w as i32,
+            height: h as i32,
+            pitch: (w * 4) as i32,
+            flipped: false,
+            data,
+        })
+    }
 }
 
 impl GuiHost {
@@ -144,7 +204,10 @@ impl Host for GuiHost {
         self.with(|h| h.save_file(title, dir, file, wildcard, no_prompt))
             .filter(|s| !s.is_empty())
     }
-    // shortcut: aegisub.get_frame returns nil in the GUI; wire it to the open Video when a script needs it.
+    fn frame(&self, n: i64, with_subtitles: bool) -> Option<VideoFrame> {
+        let mut f = self.frames.lock().unwrap_or_else(|e| e.into_inner());
+        f.frame(n, with_subtitles)
+    }
 }
 
 pub struct Automation {
@@ -165,6 +228,15 @@ impl Automation {
             scripts: Vec::new(),
             macros: Vec::new(),
         }
+    }
+
+    /// BestSource index cache shared with the video box.
+    pub fn set_cache_dir(&mut self, dir: &str) {
+        self.host
+            .frames
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .cache_dir = dir.to_owned();
     }
 
     pub fn set_host(&mut self, host: UniquePtr<AutomationHost>) {
@@ -277,6 +349,16 @@ impl Automation {
         let &(s, m) = self.macros.get(id).ok_or("no such macro")?;
         let (sel, act) = Self::selection(session, rows, active);
         let ctx = Self::context(session);
+        let video = ctx
+            .video_file
+            .as_deref()
+            .and_then(Path::to_str)
+            .unwrap_or_default();
+        self.host
+            .frames
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .set(video, session.script_for_render(false));
         let out = match self.scripts[s].run_macro(m, &session.ed.doc, &sel, act, &ctx) {
             Ok(o) => o,
             Err(RunError::Cancelled) => return Ok(MacroResult::default()),
@@ -337,5 +419,47 @@ end)"#,
         assert_eq!(s.row(0).text, "ABC");
         assert!(s.undo());
         assert_eq!(s.row(0).text, "abc");
+    }
+
+    #[test]
+    fn get_frame_reads_the_tab_video() {
+        let dir = std::env::temp_dir().join(format!("fsb-frame-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("frame.lua");
+        std::fs::write(
+            &script,
+            r#"script_name="Frame"
+aegisub.register_macro("Frame", "", function(subs, sel)
+  local f, g = aegisub.get_frame(0, false), aegisub.get_frame(0, true)
+  local l = subs[sel[1]]
+  l.text = f:width() .. "x" .. f:height() .. " " .. tostring(aegisub.get_frame(1e9) == nil)
+    .. " " .. f:getPixelFormatted(0, 0) .. " " .. g:getPixelFormatted(0, 0)
+  subs[sel[1]] = l
+end)"#,
+        )
+        .unwrap();
+        let data = concat!(env!("CARGO_MANIFEST_DIR"), "/../fs-automation");
+        let mut a = Automation::new(data, dir.join("user").to_str().unwrap());
+        a.set_cache_dir(dir.join("cache").to_str().unwrap());
+        a.load_script(script.to_str().unwrap()).unwrap();
+        let mut s = Session::default();
+        let video = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/media/cfr.mkv");
+        s.set_project_value("Video File", video);
+        let v = Video::open(video, dir.join("cache").to_str().unwrap()).unwrap();
+        let i = v.info();
+        s.set_video_context(i.width, i.height, &v.timecodes(), &[]);
+        // a full-screen white box from 0 s, so the subtitle frame's corner differs
+        let mut r = s.row(0);
+        r.text =
+            r"{\an7\pos(0,0)\p1\1c&HFFFFFF&\bord0\shad0}m 0 0 l 4000 0 4000 4000 0 4000".into();
+        r.end = 10_000;
+        s.set_row(0, &r, "");
+        a.run_macro(0, &mut s, &[0], 0).unwrap();
+        let t = s.row(0).text;
+        let parts: Vec<&str> = t.split(' ').collect();
+        assert!(parts[0].contains('x') && parts[1] == "true", "{t}");
+        // libass may apply a colour-matrix tweak, so "white" is only checked as bright
+        let red = |p: &str| u8::from_str_radix(&p[6..8], 16).unwrap();
+        assert!(red(parts[2]) < 0x40 && red(parts[3]) > 0xC0, "{t}");
     }
 }

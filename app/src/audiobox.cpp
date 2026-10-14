@@ -628,6 +628,17 @@ void AudioBox::updateScroll() {
     m_scroll->setPageStep(int(m_view->width() * m_msPerPx / 10));
 }
 
+void AudioBox::centerOn(qint64 ms) {
+    setLeft(ms - qint64(m_view->width() * m_msPerPx / 2));
+    m_view->overlayChanged();
+}
+
+void AudioBox::setMark(qint64 ms) {
+    m_mark = ms;
+    ensureVisible(ms, ms);
+    m_view->overlayChanged();
+}
+
 void AudioBox::ensureVisible(qint64 a, qint64 b) {
     const qint64 span = qint64(m_view->width() * m_msPerPx);
     if (a < m_left || b > m_left + span) setLeft(a - (span - std::min(span, b - a)) / 2);

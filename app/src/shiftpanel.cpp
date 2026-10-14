@@ -78,7 +78,9 @@ ShiftPanel::ShiftPanel(TabPanel *tab) : QScrollArea(tab), m_tab(tab) {
     m_byStart->setChecked(true);
     m_markerToVideo = add(vb, new QCheckBox(tr("Move the marker to video time"), vb));
     m_markerToAudio = add(vb, new QCheckBox(tr("Move the marker to audio time"), vb));
-    // shortcut: the two "move the marker" options are shown but not applied yet; wire them when the grid marker gets a setter.
+    // They pick where the marked line moves to; with neither, video wins when loaded.
+    m_markerToVideo->setToolTip(tr("Shift so the marked line lands on the video time"));
+    m_markerToAudio->setToolTip(tr("Shift so the marked line lands on the audio marker"));
 
     auto *lb = group(tr("Which lines"), page, pv);
     const char *lines[] = {"All lines", "Selected lines", "From the selected line", "All times higher and equal",
@@ -193,7 +195,10 @@ void ShiftPanel::shift() {
     if (m_byVideo->isChecked()) {
         const int marker = m_tab->grid()->syncMarker() >= 0 ? m_tab->grid()->syncMarker() : m_tab->active();
         const fsb::Row r = s.row(size_t(marker));
-        const qint64 target = m_tab->video()->hasVideo() ? m_tab->videoTime() : m_tab->audio()->markTime();
+        const bool video = m_markerToVideo->isChecked() ? true
+                           : m_markerToAudio->isChecked() ? false
+                                                          : m_tab->video()->hasVideo();
+        const qint64 target = video ? (m_tab->video()->hasVideo() ? m_tab->videoTime() : -1) : m_tab->audio()->markTime();
         if (target < 0) return;
         amount = target - (m_byEnd->isChecked() ? r.end : r.start);
         spec.frames = false;
@@ -252,6 +257,8 @@ void ShiftPanel::save() const {
     st.setValue("tagTimes", m_tagTimes->isChecked());
     st.setValue("byVideo", m_byVideo->isChecked());
     st.setValue("byEnd", m_byEnd->isChecked());
+    st.setValue("markerToVideo", m_markerToVideo->isChecked());
+    st.setValue("markerToAudio", m_markerToAudio->isChecked());
     st.setValue("lines", whichLines());
     st.setValue("styles", m_styles->text());
     for (int k = 0; k < 3; ++k) {
@@ -274,6 +281,8 @@ void ShiftPanel::load() {
     m_tagTimes->setChecked(st.value("tagTimes").toBool());
     m_byVideo->setChecked(st.value("byVideo").toBool());
     (st.value("byEnd").toBool() ? m_byEnd : m_byStart)->setChecked(true);
+    m_markerToVideo->setChecked(st.value("markerToVideo").toBool());
+    m_markerToAudio->setChecked(st.value("markerToAudio").toBool());
     m_lines[std::clamp(st.value("lines", 1).toInt(), 0, 5)]->setChecked(true);
     m_styles->setText(st.value("styles").toString());
     m_which[std::clamp(st.value("which", 0).toInt(), 0, 2)]->setChecked(true);

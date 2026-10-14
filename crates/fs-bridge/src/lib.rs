@@ -450,6 +450,7 @@ pub mod ffi {
         fn new_automation(data_dir: &str, user_dir: &str) -> Box<Automation>;
         /// Without a host, dialogs are answered with their defaults.
         fn set_host(self: &mut Automation, host: UniquePtr<AutomationHost>);
+        fn set_cache_dir(self: &mut Automation, dir: &str);
         fn scripts(self: &Automation) -> Vec<String>;
         fn reload(self: &mut Automation) -> Vec<String>;
         fn load_autoload(self: &mut Automation) -> Vec<String>;

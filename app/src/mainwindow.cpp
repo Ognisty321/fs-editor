@@ -171,6 +171,7 @@ MainWindow::MainWindow() {
     m_automation.emplace(fsb::new_automation(fs::Utf8(QCoreApplication::applicationDirPath()), fs::Utf8(user)));
     m_host = new GuiAutomationHost(this);
     (*m_automation)->set_host(std::unique_ptr<fsb::AutomationHost>(m_host));
+    (*m_automation)->set_cache_dir(fs::Utf8(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex"));
     for (const auto &e : (*m_automation)->load_autoload()) status(fs::q(e));
     buildAutomationMenu();
 
@@ -531,7 +532,10 @@ void MainWindow::buildMenus() {
     };
     add("prevKeyframe", tr("Go to previous keyframe"), {}, video, [=] { stepKeyframe(-1); });
     add("nextKeyframe", tr("Go to next keyframe"), {}, video, [=] { stepKeyframe(1); });
-    // shortcut: "Set audio position/marker to video time" are missing; add when AudioBox exposes scrolling.
+    add("audioToVideo", tr("Set audio position to video time"), {}, video,
+        [=] { if (tab()->audio()->hasAudio()) tab()->audio()->centerOn(tab()->videoTime()); });
+    add("markToVideo", tr("Set audio marker to video time"), {}, video,
+        [=] { if (tab()->audio()->hasAudio()) tab()->audio()->setMark(tab()->videoTime()); });
     video->addSeparator();
     add("zoomVideo", tr("Zoom video"), {}, video, [=] { tab()->video()->zoomMode(); })->setIcon(glyph("🔍"));
     add("resetZoom", tr("Turn off video zoom"), QKeySequence("Ctrl+Shift+Z"), video, [=] { tab()->video()->resetZoom(); });
@@ -608,7 +612,6 @@ void MainWindow::buildMenus() {
         spell::reload();
     });
     add("resample", tr("Resample subtitles"), {}, subs, [=] { ResampleDialog(tab()).exec(); })->setIcon(glyph("RES"));
-    // shortcut: font collector and spell checker are not built yet; add with their dialogs.
     auto *hide = add("hideTags", tr("Hide tags"), {}, subs, {});
     hide->setIcon(glyph("{}"));
     hide->setCheckable(true);
