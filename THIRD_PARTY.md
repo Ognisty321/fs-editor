@@ -53,6 +53,7 @@ Wersje pochodzą z [docs/research/dependencies.md](docs/research/dependencies.md
 | MoonScript | MIT | dołączony plik `moonscript.lua` z licencją upstream |
 | Include'y i autoloady Automation 4 Aegisub (karaskel, utils, unicode, re, clipboard, lfs, kara-templater …) | BSD-3 / ISC / MIT | `crates/fs-automation/automation/`, z zachowanymi nagłówkami; pliki bez nagłówka objęte `LICENCE-Aegisub` |
 | Corrosion | MIT | narzędzie budowania |
+| Tabler Icons 3.49.0 | MIT | pliki SVG w `app/icons/` (licencja w `app/icons/LICENSE`), wkompilowane jako zasoby Qt |
 
 ## Słowniki pisowni
 

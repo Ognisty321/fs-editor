@@ -2,6 +2,7 @@
 
 #include "editbox.h"
 #include "grid.h"
+#include "icons.h"
 #include "mainwindow.h"
 #include "tabpanel.h"
 #include "videobox.h"
@@ -385,7 +386,8 @@ AudioBox::AudioBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     for (auto *s : {m_hzoom, m_vzoomSlider, m_volume}) srow->addWidget(s);
     sliders->addLayout(srow, 1);
     m_link = new QToolButton(this);
-    m_link->setText("🔗");
+    m_link->setIcon(icon("link"));
+    m_link->setText(tr("Link"));
     m_link->setCheckable(true);
     m_link->setChecked(st.value("link", false).toBool());
     m_link->setToolTip(tr("Link the volume and stretch sliders"));
@@ -453,32 +455,35 @@ QWidget *AudioBox::buttonRow() {
             after();
         });
         h->addWidget(b);
+        return b;
     };
-    btn("◀▶", tr("Play the previous line"), [this] { stepLine(-1); });
-    btn("▶◀", tr("Play the next line"), [this] { stepLine(1); });
+    // icon-only buttons; the text stays as the accessible name
+    const QColor teal(0x36c5d0), green(0x4cc38a);
+    btn("◀▶", tr("Play the previous line"), [this] { stepLine(-1); })->setIcon(icon("player-track-prev-filled", teal));
+    btn("▶◀", tr("Play the next line"), [this] { stepLine(1); })->setIcon(icon("player-track-next-filled", teal));
     btn("▷", tr("Play the current syllable / line"), [this] {
         if (m_karaoke && size_t(m_activeSyl) < m_syl.size()) play(m_syl[m_activeSyl].start, m_syl[m_activeSyl].end);
         else playSelection();
-    });
-    btn("▶", tr("Play the current line"), [this] { playSelection(); });
-    btn("■", tr("Stop playback"), [this] { stop(); });
-    btn("|◀", tr("Play before the mark"), [this] { if (m_mark >= 0) play(std::max<qint64>(0, m_mark - 1000), m_mark); }, true);
-    btn("▶|", tr("Play after the mark"), [this] { if (m_mark >= 0) play(m_mark, m_mark + 1000); });
+    })->setIcon(icon("player-play", green));
+    btn("▶", tr("Play the current line"), [this] { playSelection(); })->setIcon(icon("player-play-filled", green));
+    btn("■", tr("Stop playback"), [this] { stop(); })->setIcon(icon("player-stop-filled", teal));
+    btn("|◀", tr("Play before the mark"), [this] { if (m_mark >= 0) play(std::max<qint64>(0, m_mark - 1000), m_mark); }, true)->setIcon(icon("arrow-bar-left", teal));
+    btn("▶|", tr("Play after the mark"), [this] { if (m_mark >= 0) play(m_mark, m_mark + 1000); })->setIcon(icon("arrow-bar-right", teal));
     btn("◁s", tr("Play 500 ms before the start time"), [this] { play(std::max<qint64>(0, m_selStart - 500), m_selStart); }, true);
     btn("s▷", tr("Play 500 ms after the start time"), [this] { play(m_selStart, std::min(m_selEnd, m_selStart + 500)); });
     btn("◁e", tr("Play 500 ms before the end time"), [this] { play(std::max(m_selStart, m_selEnd - 500), m_selEnd); });
     btn("e▷", tr("Play 500 ms after the end time"), [this] { play(m_selEnd, m_selEnd + 500); });
-    btn("▶▶", tr("Play to the end"), [this] { play(m_selStart, m_duration); });
+    btn("▶▶", tr("Play to the end"), [this] { play(m_selStart, m_duration); })->setIcon(icon("player-skip-forward", teal));
     btn("+in", tr("Add lead-in to the active line"), [this] {
         setSelection(std::max<qint64>(0, m_selStart - QSettings().value("audio/leadIn", 200).toInt()), m_selEnd, false);
         commit();
-    }, true);
+    }, true)->setIcon(icon("arrow-autofit-left", green));
     btn("+out", tr("Add lead-out to the active line"), [this] {
         setSelection(m_selStart, m_selEnd + QSettings().value("audio/leadOut", 300).toInt(), false);
         commit();
-    });
-    btn("✓", tr("Apply changes (commit)"), [this] { commit(); }, true);
-    btn("⌖", tr("Go to selection"), [this] { ensureVisible(m_selStart, m_selEnd); });
+    })->setIcon(icon("arrow-autofit-right", green));
+    btn("✓", tr("Apply changes (commit)"), [this] { commit(); }, true)->setIcon(icon("check", green));
+    btn("⌖", tr("Go to selection"), [this] { ensureVisible(m_selStart, m_selEnd); })->setIcon(icon("focus-centered", teal));
     h->addSpacing(8);
     toggle("K", tr("Enable / disable karaoke creation"), &m_karaoke, "karaoke", [this] { karaokeChanged(); });
     toggle("Ks", tr("Enable / disable automatic splitting of syllables"), &m_autoSplit, "autoSplit", [] {});

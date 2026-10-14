@@ -1,6 +1,7 @@
 #include "videobox.h"
 
 #include "audiobox.h"
+#include "icons.h"
 #include "editbox.h"
 #include "grid.h"
 #include "mainwindow.h"
@@ -298,9 +299,9 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
 // ---- box ----------------------------------------------------------------------
 
 namespace {
-QToolButton *button(QWidget *parent, QStyle::StandardPixmap icon, const QString &tip) {
+QToolButton *button(QWidget *parent, const char *name, const QString &tip) {
     auto *b = new QToolButton(parent);
-    b->setIcon(parent->style()->standardIcon(icon));
+    b->setIcon(icon(name, QColor(0x4cc38a)));
     b->setToolTip(tip);
     b->setAutoRaise(true);
     b->setFixedSize(26, 26);
@@ -336,11 +337,11 @@ VideoBox::VideoBox(TabPanel *tab) : QWidget(tab), m_tab(tab), m_media(std::make_
     auto *row = new QHBoxLayout(m_controls);
     row->setContentsMargins(2, 0, 2, 0);
     row->setSpacing(2);
-    auto *prev = button(m_controls, QStyle::SP_MediaSkipBackward, tr("Previous file"));
-    auto *playBtn = button(m_controls, QStyle::SP_MediaPlay, tr("Play / Pause"));
-    auto *playLine = button(m_controls, QStyle::SP_MediaSeekForward, tr("Play the current line"));
-    auto *stop = button(m_controls, QStyle::SP_MediaStop, tr("Stop"));
-    auto *next = button(m_controls, QStyle::SP_MediaSkipForward, tr("Next file"));
+    auto *prev = button(m_controls, "player-skip-back", tr("Previous file"));
+    auto *playBtn = button(m_controls, "player-play-filled", tr("Play / Pause"));
+    auto *playLine = button(m_controls, "player-track-next", tr("Play the current line"));
+    auto *stop = button(m_controls, "player-stop-filled", tr("Stop"));
+    auto *next = button(m_controls, "player-skip-forward", tr("Next file"));
     for (auto *b : {prev, playBtn, playLine, stop, next}) row->addWidget(b);
     connect(prev, &QToolButton::clicked, this, [this] { openSibling(-1); });
     connect(next, &QToolButton::clicked, this, [this] { openSibling(1); });

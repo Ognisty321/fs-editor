@@ -7,12 +7,13 @@
 class TabPanel;
 class TimeEdit;
 class QCheckBox;
+class QComboBox;
 class QRadioButton;
 class QLineEdit;
 class QSpinBox;
 class QStackedWidget;
 class QPushButton;
-class QDoubleSpinBox;
+class QSettings;
 
 class ShiftPanel : public QScrollArea {
     Q_OBJECT
@@ -21,26 +22,32 @@ public:
     void shift();
     void postProcess();
 
+protected:
+    void enterEvent(QEnterEvent *) override;
+
 private:
     void save() const;
     void load();
-    int whichLines() const;
+    void store(QSettings &st) const; // shift-page values, also used for profiles
+    void restore(QSettings &st);
+    void updateEnabled();            // frames / marker options need video or audio
+    std::vector<size_t> rows(int which, const QString &styles) const;
 
     TabPanel *m_tab;
     QStackedWidget *m_stack;
     QPushButton *m_mode;
     // shift
+    QComboBox *m_profiles;
     TimeEdit *m_time;
     QRadioButton *m_forward, *m_backward;
     QCheckBox *m_frames, *m_tagTimes;
-    QCheckBox *m_byVideo, *m_markerToVideo, *m_markerToAudio;
+    QCheckBox *m_markerToVideo, *m_markerToAudio;
     QRadioButton *m_byStart, *m_byEnd;
-    QRadioButton *m_lines[6];
+    QComboBox *m_lines, *m_which, *m_endFix;
     QLineEdit *m_styles;
-    QRadioButton *m_which[3];
-    QRadioButton *m_endFix[3];
     // post processor
+    QComboBox *m_ppLines;
+    QLineEdit *m_ppStyles;
     QCheckBox *m_leadInOn, *m_leadOutOn, *m_contOn, *m_kfOn;
-    QSpinBox *m_leadIn, *m_leadOut, *m_contStart, *m_kfBs, *m_kfAs, *m_kfBe, *m_kfAe;
-    QDoubleSpinBox *m_bias;
+    QSpinBox *m_leadIn, *m_leadOut, *m_contStart, *m_contEnd, *m_kfBs, *m_kfAs, *m_kfBe, *m_kfAe;
 };

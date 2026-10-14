@@ -4,6 +4,7 @@
 #include "automationhost.h"
 #include "dialogs.h"
 #include "editbox.h"
+#include "icons.h"
 #include "grid.h"
 #include "tabpanel.h"
 #include "videobox.h"
@@ -60,13 +61,43 @@ const QStringList kToolbarDefault = {"openSubs", "recentSubs", "openVideo", "rec
                                      "endFromVideo", "toASS", "toSRT", "zoomVideo", "resample", "hideTags",
                                      "settings"};
 
-// shortcut: letter glyphs instead of an icon set; draw a proper icon theme before release.
+const QColor kAmber(0xf0b429), kBlue(0x4aa3ff), kGreen(0x4cc38a), kRed(0xf2665c), kPurple(0xb48cff),
+    kTeal(0x36c5d0), kOrange(0xff8c42);
+
+// Action id -> Tabler icon and tint; an invalid colour follows the palette text.
+const QHash<QString, std::pair<QString, QColor>> kIcons = {
+    {"openSubs", {"folder-open", kAmber}}, {"save", {"device-floppy", kBlue}}, {"saveAll", {"files", kBlue}},
+    {"saveAs", {"file-export", kBlue}}, {"saveTranslation", {"language", kBlue}}, {"removeSubs", {"file-x", kRed}},
+    {"saveWithVideoName", {"file-symlink", kBlue}}, {"removeTemp", {"trash", kRed}}, {"showLog", {"terminal-2", {}}},
+    {"loadSession", {"restore", {}}}, {"fontCollector", {"typography", kPurple}}, {"settings", {"settings", {}}},
+    {"exit", {"logout", kRed}}, {"undo", {"arrow-back-up", {}}}, {"undoToSave", {"arrow-back-up-double", {}}},
+    {"redo", {"arrow-forward-up", {}}}, {"history", {"history", {}}}, {"findReplace", {"replace", kOrange}},
+    {"find", {"search", kOrange}}, {"findNext", {"search", kOrange}}, {"selectLines", {"list-check", kGreen}},
+    {"duplicate", {"copy", {}}}, {"deleteText", {"eraser", kRed}}, {"deleteLines", {"row-remove", kRed}},
+    {"prevLine", {"arrow-up", {}}}, {"nextLine", {"arrow-down", {}}}, {"joinPrev", {"arrows-join", {}}},
+    {"joinNext", {"arrows-join-2", {}}}, {"selectFromVideo", {"focus-2", kGreen}}, {"newTab", {"browser-plus", {}}},
+    {"closeTab", {"browser-x", kRed}}, {"nextTab", {"chevron-right", {}}}, {"prevTab", {"chevron-left", {}}},
+    {"openVideo", {"movie", kBlue}}, {"openKeyframes", {"key", kAmber}}, {"openDummy", {"photo", kBlue}},
+    {"startFromVideo", {"brackets-contain-start", kGreen}}, {"endFromVideo", {"brackets-contain-end", kGreen}},
+    {"prevFrame", {"chevron-left", kBlue}}, {"nextFrame", {"chevron-right", kBlue}},
+    {"goStart", {"arrow-bar-to-left", kGreen}}, {"goEnd", {"arrow-bar-to-right", kGreen}},
+    {"playPause", {"player-play", kGreen}}, {"prevKeyframe", {"chevrons-left", kAmber}},
+    {"nextKeyframe", {"chevrons-right", kAmber}}, {"audioToVideo", {"wave-sine", kTeal}},
+    {"markToVideo", {"map-pin", kTeal}}, {"zoomVideo", {"zoom-in", kBlue}}, {"resetZoom", {"zoom-reset", kBlue}},
+    {"openAudio", {"music", kTeal}}, {"audioFromVideo", {"file-music", kTeal}}, {"blankAudio", {"wave-square", kTeal}},
+    {"closeAudio", {"music-off", kRed}}, {"splitView", {"layout-columns", {}}}, {"compareTabs", {"git-compare", {}}},
+    {"editor", {"edit", kBlue}}, {"properties", {"file-info", kPurple}}, {"styleManager", {"palette", kPurple}},
+    {"shiftTimes", {"clock-edit", kBlue}}, {"spellCheck", {"text-spellcheck", kGreen}},
+    {"resample", {"aspect-ratio", kPurple}}, {"hideTags", {"code-off", kOrange}}, {"help", {"help", kBlue}},
+    {"about", {"info-circle", kBlue}}};
+
+// Format badge (ASS, SRT, ...) for the conversion actions, as Kainote shows them.
 QIcon glyph(const QString &text) {
     QPixmap px(32, 32);
     px.fill(Qt::transparent);
     QPainter p(&px);
     p.setRenderHint(QPainter::Antialiasing);
-    p.setPen(QApplication::palette().color(QPalette::WindowText));
+    p.setPen(QPen(kBlue, 2));
     QFont f = QApplication::font();
     f.setBold(true);
     f.setPixelSize(text.size() > 2 ? 11 : 14);
@@ -323,6 +354,7 @@ QAction *MainWindow::add(const QString &id, const QString &text, const QKeySeque
                          std::function<void()> fn) {
     auto *a = new QAction(text, this);
     a->setObjectName(id);
+    if (auto it = kIcons.constFind(id); it != kIcons.cend()) a->setIcon(icon(it->first, it->second));
     a->setShortcut(QKeySequence(QSettings().value("hotkeys/" + id, key.toString()).toString()));
     a->setShortcutContext(Qt::ApplicationShortcut);
     a->setToolTip(a->shortcut().isEmpty() ? text : QString("%1 (%2)").arg(text, a->shortcut().toString(QKeySequence::NativeText)));
@@ -363,16 +395,16 @@ void MainWindow::buildMenus() {
                                                                 QSettings().value("main/lastDir").toString(), kSubsFilter);
         for (const auto &f : files) openFile(f);
         if (!files.isEmpty()) QSettings().setValue("main/lastDir", QFileInfo(files.first()).absolutePath());
-    })->setIcon(style()->standardIcon(QStyle::SP_DialogOpenButton));
+    });
     add("save", tr("Save"), QKeySequence("Ctrl+S"), file, [=, this] {
         if (tab()->path().isEmpty() || !tab()->save()) saveAs(tab());
         else addRecent("subs", tab()->path());
-    })->setIcon(style()->standardIcon(QStyle::SP_DialogSaveButton));
+    });
     add("saveAll", tr("Save all"), {}, file, [this] {
         for (auto *t : tabs())
             if (t->modified() && (t->path().isEmpty() || !t->save())) saveAs(t);
-    })->setIcon(glyph("SA"));
-    add("saveAs", tr("Save as..."), QKeySequence("Ctrl+Shift+S"), file, [=, this] { saveAs(tab()); })->setIcon(glyph("S…"));
+    });
+    add("saveAs", tr("Save as..."), QKeySequence("Ctrl+Shift+S"), file, [=, this] { saveAs(tab()); });
     add("saveTranslation", tr("Save translation"), {}, file, [=, this] {
         const QString p = QFileDialog::getSaveFileName(this, tr("Save translation"), tab()->path(), kSubsFilter);
         if (!p.isEmpty()) tab()->saveTranslation(p);
@@ -380,7 +412,7 @@ void MainWindow::buildMenus() {
     file->addMenu(recentMenu("subs"));
     add("removeSubs", tr("Remove subtitles from the editor"), {}, file, [=, this] {
         if (maybeSave(tab())) tab()->clearSubs();
-    })->setIcon(glyph("RS"));
+    });
     auto *videoName = add("saveWithVideoName", tr("Save subtitles using the video name"), {}, file, {});
     videoName->setCheckable(true);
     videoName->setChecked(QSettings().value("main/saveWithVideoName").toBool());
@@ -409,10 +441,9 @@ void MainWindow::buildMenus() {
     ask->setCheckable(true);
     ask->setChecked(QSettings().value("main/askSession", true).toBool());
     connect(ask, &QAction::toggled, this, [](bool on) { QSettings().setValue("main/askSession", on); });
-    // shortcut: .kls session files are not read or written; add with session import from Kainote.
     file->addSeparator();
-    add("fontCollector", tr("Fonts collector"), {}, file, [=, this] { FontCollectorDialog(tab()).exec(); })->setIcon(glyph("FC"));
-    add("settings", tr("Settings"), {}, file, [this] { SettingsDialog(this).exec(); })->setIcon(glyph("⚙"));
+    add("fontCollector", tr("Fonts collector"), {}, file, [=, this] { FontCollectorDialog(tab()).exec(); });
+    add("settings", tr("Settings"), {}, file, [this] { SettingsDialog(this).exec(); });
     add("exit", tr("Exit"), QKeySequence("Alt+F4"), file, [this] { close(); });
 
     // Edit
@@ -429,8 +460,7 @@ void MainWindow::buildMenus() {
         if (!m_find) m_find = new FindDialog(this);
         return m_find;
     };
-    add("findReplace", tr("Find and replace"), QKeySequence("Ctrl+H"), edit, [=] { findDlg()->showTab(1); })
-        ->setIcon(glyph("F/R"));
+    add("findReplace", tr("Find and replace"), QKeySequence("Ctrl+H"), edit, [=] { findDlg()->showTab(1); });
     add("find", tr("Find"), QKeySequence("Ctrl+F"), edit, [=] { findDlg()->showTab(0); });
     add("findNext", tr("Find next"), QKeySequence("F3"), edit, [=, this] {
         if (m_find) m_find->findNext();
@@ -486,7 +516,7 @@ void MainWindow::buildMenus() {
             this, tr("Open video"), QFileInfo(tab()->path()).absolutePath(),
             tr("Video (%1);;All files (*)").arg("*." + kVideoExt.join(" *.")));
         if (!f.isEmpty()) tab()->openVideo(f);
-    })->setIcon(glyph("OV"));
+    });
     video->addMenu(recentMenu("video"));
     add("openKeyframes", tr("Open keyframes"), {}, video, [=, this] {
         const QString f = QFileDialog::getOpenFileName(this, tr("Open keyframes"), QFileInfo(tab()->path()).absolutePath(),
@@ -523,20 +553,20 @@ void MainWindow::buildMenus() {
     video->addSeparator();
     add("startFromVideo", tr("Insert start time from video"), QKeySequence("Ctrl+Left"), video, [this] {
         withRow([](TabPanel *t, fsb::Row &r) { r.start = t->videoTime(); });
-    })->setIcon(glyph("[←"));
+    });
     add("endFromVideo", tr("Insert end time from video"), QKeySequence("Ctrl+Right"), video, [this] {
         withRow([](TabPanel *t, fsb::Row &r) {
             r.end = t->video()->hasVideo() ? t->video()->nextFrameTime() : t->videoTime();
         });
-    })->setIcon(glyph("→]"));
+    });
     add("prevFrame", tr("Previous frame"), QKeySequence("Left"), video, [=] { tab()->video()->stepFrames(-1); });
     add("nextFrame", tr("Next frame"), QKeySequence("Right"), video, [=] { tab()->video()->stepFrames(1); });
     add("goStart", tr("Go to start time of line"), {}, video, [=] {
         if (tab()->active() >= 0) tab()->video()->seekStart(tab()->s().row(size_t(tab()->active())).start);
-    })->setIcon(glyph("|◀"));
+    });
     add("goEnd", tr("Go to end time of line"), {}, video, [=] {
         if (tab()->active() >= 0) tab()->seekVideo(tab()->s().row(size_t(tab()->active())).end - 1);
-    })->setIcon(glyph("▶|"));
+    });
     add("playPause", tr("Play / Pause"), QKeySequence("Alt+Space"), video, [=] { tab()->video()->togglePlay(); });
     auto stepKeyframe = [=](int dir) {
         const auto kf = tab()->keyframes();
@@ -556,7 +586,7 @@ void MainWindow::buildMenus() {
     add("markToVideo", tr("Set audio marker to video time"), {}, video,
         [=] { if (tab()->audio()->hasAudio()) tab()->audio()->setMark(tab()->videoTime()); });
     video->addSeparator();
-    add("zoomVideo", tr("Zoom video"), {}, video, [=] { tab()->video()->zoomMode(); })->setIcon(glyph("🔍"));
+    add("zoomVideo", tr("Zoom video"), {}, video, [=] { tab()->video()->zoomMode(); });
     add("resetZoom", tr("Turn off video zoom"), QKeySequence("Ctrl+Shift+Z"), video, [=] { tab()->video()->resetZoom(); });
 
     // Audio
@@ -601,13 +631,11 @@ void MainWindow::buildMenus() {
     // Subtitles
     auto *subs = menu(tr("&Subtitles"));
     auto *editor = add("editor", tr("Enable / Disable editor"), QKeySequence("Ctrl+E"), subs, {});
-    editor->setIcon(glyph("ED"));
     editor->setCheckable(true);
     editor->setChecked(true);
     connect(editor, &QAction::triggered, this, [=](bool on) { tab()->setPlayerMode(!on); });
-    add("properties", tr("ASS file properties"), {}, subs, [=] { PropertiesDialog(tab()).exec(); })->setIcon(glyph("P"));
-    add("styleManager", tr("Style manager"), QKeySequence("Ctrl+M"), subs, [this] { StyleManager(this).exec(); })
-        ->setIcon(glyph("SM"));
+    add("properties", tr("ASS file properties"), {}, subs, [=] { PropertiesDialog(tab()).exec(); });
+    add("styleManager", tr("Style manager"), QKeySequence("Ctrl+M"), subs, [this] { StyleManager(this).exec(); });
     auto *conv = sub(subs, tr("Conversion"));
     const std::tuple<const char *, const char *, const char *> formats[] = {
         {"toASS", "ASS", "F9"}, {"toSRT", "SRT", "F8"}, {"toMDVD", "MicroDVD", "F10"},
@@ -617,7 +645,6 @@ void MainWindow::buildMenus() {
             [this, fmt] { convert(fmt); })
             ->setIcon(glyph(QString(fmt).left(3)));
     auto *shift = add("shiftTimes", tr("Shift times"), QKeySequence("Ctrl+I"), subs, {});
-    shift->setIcon(glyph("±"));
     shift->setCheckable(true);
     shift->setChecked(QSettings().value("layout/shiftTimes", true).toBool());
     connect(shift, &QAction::triggered, this, [this](bool on) {
@@ -630,9 +657,8 @@ void MainWindow::buildMenus() {
         QSettings().setValue("spell/enabled", on);
         spell::reload();
     });
-    add("resample", tr("Resample subtitles"), {}, subs, [=] { ResampleDialog(tab()).exec(); })->setIcon(glyph("RES"));
+    add("resample", tr("Resample subtitles"), {}, subs, [=] { ResampleDialog(tab()).exec(); });
     auto *hide = add("hideTags", tr("Hide tags"), {}, subs, {});
-    hide->setIcon(glyph("{}"));
     hide->setCheckable(true);
     hide->setChecked(QSettings().value("grid/hideTags").toBool());
     connect(hide, &QAction::toggled, this, [this](bool on) {
@@ -687,7 +713,7 @@ QMenu *MainWindow::recentMenu(const QString &kind) {
     // a toolbar button shows the submenu
     auto *a = new QAction(m->title(), this);
     a->setMenu(m);
-    a->setIcon(glyph(kind == "subs" ? "RS…" : kind == "video" ? "RV…" : "R…"));
+    a->setIcon(kind == "subs" ? icon("file-time", kAmber) : kind == "video" ? icon("clock-play", kBlue) : icon("history", kTeal));
     m_actions.insert("recent" + QString(kind == "subs" ? "Subs" : kind == "video" ? "Video" : kind == "audio" ? "Audio" : "Keyframes"), a);
     return m;
 }
@@ -1044,7 +1070,7 @@ void MainWindow::buildAutomationMenu() {
         edit->appendPlainText(text);
         edit->parentWidget()->show();
     };
-    m->addAction(tr("Load script"), this, [=, this] {
+    m->addAction(icon("script", kAmber), tr("Load script"), this, [=, this] {
         const QString f = QFileDialog::getOpenFileName(this, tr("Load script"), {},
                                                        tr("Automation scripts (*.lua *.moon);;All files (*)"));
         if (f.isEmpty()) return;
@@ -1057,11 +1083,11 @@ void MainWindow::buildAutomationMenu() {
         }
         buildAutomationMenu();
     });
-    m->addAction(tr("Refresh autoload scripts"), this, [=, this] {
+    m->addAction(icon("refresh", kGreen), tr("Refresh autoload scripts"), this, [=, this] {
         for (const auto &e : (*m_automation)->reload()) log(fs::q(e));
         buildAutomationMenu();
     });
-    m->addAction(tr("Run the last loaded script"), this, [this] {
+    m->addAction(icon("player-play-filled", kGreen), tr("Run the last loaded script"), this, [this] {
         if (m_lastMacro >= 0 && size_t(m_lastMacro) < (*m_automation)->macros().size()) runMacro(size_t(m_lastMacro));
     });
     m->addSeparator();

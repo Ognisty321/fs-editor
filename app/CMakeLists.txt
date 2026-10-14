@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui GuiPrivate Widgets Concurrent ShaderTools)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui GuiPrivate Widgets Concurrent ShaderTools Svg)
 qt_standard_project_setup()
 
 # Rust core + cxx bridge, built by cargo through Corrosion.
@@ -44,11 +44,14 @@ qt_add_executable(fsed WIN32 MACOSX_BUNDLE
     src/audiobox.h src/audiobox.cpp
     src/dialogs.h src/dialogs.cpp
     src/automationhost.h src/automationhost.cpp
+    src/icons.h src/icons.cpp
 )
 qt_add_shaders(fsed "shaders"
     PREFIX "/"
     FILES shaders/quad.vert shaders/texture.frag shaders/audio.frag
 )
+file(GLOB FS_ICONS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} icons/*.svg)
+qt_add_resources(fsed "icons" PREFIX "/" FILES ${FS_ICONS})
 target_include_directories(fsed PRIVATE ${FS_BRIDGE_INCLUDE_DIR})
 target_link_directories(fsed PRIVATE ${FS_DEPS_DIR}/lib)
 # Native libraries the Rust staticlib needs (cargo:rustc-link-lib of fs-media, cpal's audio backend).
@@ -60,7 +63,7 @@ elseif(APPLE)
     # shortcut: framework list from cpal's coreaudio backend, not yet linked on a real Mac.
     target_link_libraries(fs_bridge INTERFACE "-framework CoreAudio" "-framework AudioToolbox" "-framework CoreFoundation")
 endif()
-target_link_libraries(fsed PRIVATE fs_bridge Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::Concurrent)
+target_link_libraries(fsed PRIVATE fs_bridge Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::Concurrent Qt6::Svg)
 if(MSVC)
     target_compile_options(fsed PRIVATE /utf-8 /W3 /permissive-)
     # LuaJIT's msvcbuild objects ask for the static CRT; the app uses /MD everywhere else.

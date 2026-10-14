@@ -91,6 +91,8 @@ private:
     QHBoxLayout *m_tagBar, *m_userTags;
     QComboBox *m_an;
     QLabel *m_lineLabel, *m_wrapsLabel, *m_cpsLabel;
+    QLabel *m_textInfo; // Length / Lines / Ln / Col / Sel / Ch under the text
+    void updateTextInfo();
     QCheckBox *m_tlMode;
     QRadioButton *m_timeRadio, *m_frameRadio;
     QWidget *m_tlBox;

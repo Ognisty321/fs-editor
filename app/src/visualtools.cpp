@@ -1,5 +1,6 @@
 #include "visualtools.h"
 
+#include "icons.h"
 #include "mainwindow.h"
 #include "tabpanel.h"
 #include "videobox.h"
@@ -127,14 +128,15 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     auto *h = new QHBoxLayout(row);
     h->setContentsMargins(0, 0, 0, 0);
     h->setSpacing(1);
-    const char *icons[] = {"⌖", "P", "M", "S", "Z", "XY", "▭", "✂", "✎", "⇄"};
+    const char *icons[] = {"pointer", "crosshair", "route", "arrows-diagonal", "rotate-clockwise", "rotate-3d",
+                           "crop", "scissors", "vector-bezier", "arrows-move"};
     const char *tips[] = {"Position pointer", "Text positioning", "Text moving", "Text scaling", "Z rotation",
                           "X/Y rotation", "Rectangle clipping", "Vector clipping", "Vector drawing",
                           "Position shifter"};
     auto *group = new QButtonGroup(row);
     for (int t = 0; t < ToolCount; ++t) {
         auto *b = new QToolButton(row);
-        b->setText(QString::fromUtf8(icons[t]));
+        b->setIcon(icon(icons[t], QColor(t >= 6 && t <= 8 ? 0xb48cff : 0x4aa3ff)));
         b->setToolTip(tr(tips[t]));
         b->setCheckable(true);
         b->setAutoRaise(true);
@@ -161,10 +163,10 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     vh->setSpacing(1);
     auto *modes = new QButtonGroup(vec);
     const char *mt[] = {"Move points", "Add line", "Add Bézier curve", "Add separate point (move)", "Delete point"};
-    const char *mi[] = {"↔", "╱", "∿", "•", "✕"};
+    const char *mi[] = {"arrows-move", "line", "vector-bezier-2", "point", "x"};
     for (int k = 0; k < 5; ++k) {
         auto *b = new QToolButton(vec);
-        b->setText(QString::fromUtf8(mi[k]));
+        b->setIcon(icon(mi[k], QColor(k == 4 ? 0xf2665c : 0xb48cff)));
         b->setToolTip(tr(mt[k]));
         b->setCheckable(true);
         b->setAutoRaise(true);

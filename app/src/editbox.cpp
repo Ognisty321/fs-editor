@@ -18,6 +18,8 @@
 #include <QFontDialog>
 #include <QInputDialog>
 #include <QLabel>
+#include <QLineEdit>
+#include <QPainter>
 #include <QMenu>
 #include <QPushButton>
 #include <QRadioButton>
@@ -344,9 +346,27 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
         connect(b, &QToolButton::clicked, this, [this, n = QString(t[0])] { m_text->toggleTag(n); });
     }
     const char *colors[] = {"Primary color", "Secondary color for karaoke", "Border color", "Shadow color"};
-    for (int k = 0; k < 4; ++k)
-        connect(tool(QString("C%1").arg(k + 1), tr(colors[k])), &QToolButton::clicked, this,
-                [this, k] { setColorTag(k + 1); });
+    const QColor bars[] = {QColor(0xf0, 0xf0, 0xf0), QColor(0xe0, 0x50, 0x50), QColor(0x20, 0x20, 0x20),
+                           QColor(0x80, 0x80, 0x80)};
+    for (int k = 0; k < 4; ++k) {
+        auto *b = tool(QString(), tr(colors[k]) + QString(" (\\%1c)").arg(k + 1));
+        QPixmap px(40, 40);
+        px.fill(Qt::transparent);
+        QPainter p(&px);
+        p.setRenderHint(QPainter::Antialiasing);
+        QFont f = font();
+        f.setBold(true);
+        f.setPixelSize(30);
+        p.setFont(f);
+        p.setPen(QColor(0x5a, 0x8c, 0xe6));
+        p.drawText(QRect(0, -4, 40, 36), Qt::AlignCenter, "A");
+        p.fillRect(QRectF(6, 33, 28, 6), bars[k]);
+        p.setPen(QColor(0x5a, 0x8c, 0xe6));
+        p.drawRect(QRectF(6, 33, 28, 6));
+        p.end();
+        b->setIcon(QIcon(px));
+        connect(b, &QToolButton::clicked, this, [this, k] { setColorTag(k + 1); });
+    }
     m_an = new QComboBox(this);
     m_an->setToolTip(tr("Text position"));
     const char *an[] = {"Bottom-left", "Bottom-center", "Bottom-right", "Middle-left", "Middle-center",
@@ -378,10 +398,11 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     for (QWidget *w : {static_cast<QWidget *>(m_lineLabel), static_cast<QWidget *>(m_wrapsLabel),
                        static_cast<QWidget *>(m_cpsLabel)})
         info->addWidget(w);
-    info->addStretch();
+    info->addSpacing(8);
     info->addWidget(m_tlMode);
     info->addWidget(m_timeRadio);
     info->addWidget(m_frameRadio);
+    info->addStretch();
     v->addLayout(info);
     connect(m_tlMode, &QCheckBox::clicked, this, [this](bool on) {
         if (!on && !m_tab->main()->confirm(tr("Turning translation mode off deletes the original text. Continue?"))) {
@@ -431,6 +452,12 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     m_text = new SubsTextEdit(this);
     v->addWidget(m_text, 2);
     connect(m_text, &QPlainTextEdit::textChanged, this, [this] { commit("text"); });
+    m_textInfo = new QLabel(this);
+    m_textInfo->setTextFormat(Qt::PlainText);
+    v->addWidget(m_textInfo);
+    connect(m_text, &QPlainTextEdit::cursorPositionChanged, this, &EditBox::updateTextInfo);
+    connect(m_text, &QPlainTextEdit::selectionChanged, this, &EditBox::updateTextInfo);
+    connect(m_text, &QPlainTextEdit::textChanged, this, &EditBox::updateTextInfo);
     for (auto *e : {m_text, m_original}) connect(e, &SubsTextEdit::keyCommand, this, &EditBox::onKey);
 
     // fields row (wraps into two rows when narrow)
@@ -467,6 +494,7 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     m_actor->setEditable(true);
     m_actor->setMinimumContentsLength(8);
     m_actor->setToolTip(tr("Actor"));
+    m_actor->lineEdit()->setPlaceholderText(tr("Actor"));
     m_ml = spin(tr("Left margin"), 9999);
     m_mr = spin(tr("Right margin"), 9999);
     m_mv = spin(tr("Vertical margin"), 9999);
@@ -474,9 +502,12 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     m_effect->setEditable(true);
     m_effect->setMinimumContentsLength(8);
     m_effect->setToolTip(tr("Effect"));
-    for (QWidget *w : std::initializer_list<QWidget *>{m_layer, m_start, m_end, m_duration, m_style, m_styleEdit})
-        m_row1->addWidget(w);
-    m_wrapWidgets = {m_comment, m_actor, m_ml, m_mr, m_mv, m_effect};
+    m_effect->lineEdit()->setPlaceholderText(tr("Effect"));
+    // Kainote order: comment, layer, times, style, edit | actor, margins, effect; the combos take the slack
+    for (QWidget *w : std::initializer_list<QWidget *>{m_comment, m_layer, m_start, m_end, m_duration, m_style,
+                                                       m_styleEdit})
+        m_row1->addWidget(w, w == m_style ? 1 : 0);
+    m_wrapWidgets = {m_actor, m_ml, m_mr, m_mv, m_effect};
     v->addWidget(m_fields1);
     v->addWidget(m_fields2);
     wrapFields();
@@ -499,14 +530,7 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
 void EditBox::wrapFields() {
     const bool narrow = width() < 850;
     auto *target = narrow ? m_row2 : m_row1;
-    for (auto *w : m_wrapWidgets) target->addWidget(w);
-    m_row1->addStretch();
-    m_row2->addStretch();
-    // remove duplicate stretches left from earlier passes
-    for (auto *l : {m_row1, m_row2}) {
-        for (int i = l->count() - 2; i >= 0; --i)
-            if (l->itemAt(i)->spacerItem()) delete l->takeAt(i);
-    }
+    for (auto *w : m_wrapWidgets) target->addWidget(w, w == m_actor || w == m_effect ? 1 : 0);
     m_fields2->setVisible(narrow);
 }
 
@@ -522,8 +546,8 @@ void EditBox::rebuildTagButtons() {
         delete it;
     }
     QSettings st;
-    QStringList defs = st.value("edit/tagButtons", QStringList{"fad|\\fad(200,200)|0", "blur|\\blur1|0",
-                                                                "bord|\\bord0|0"}).toStringList();
+    // Kainote starts with no tag buttons; the "+" button adds them
+    QStringList defs = st.value("edit/tagButtons").toStringList();
     for (int k = 0; k < defs.size(); ++k) {
         const auto parts = defs[k].split('|');
         auto *b = new QToolButton(this);
@@ -584,6 +608,23 @@ void EditBox::setColorTag(int which) {
 void EditBox::load(int row) {
     m_row = row;
     reload();
+}
+
+void EditBox::updateTextInfo() {
+    const QString t = m_text->toPlainText();
+    const auto c = m_text->textCursor();
+    const int pos = c.position();
+    const QString before = t.left(pos);
+    // \N counts as a line break, as on screen
+    const qsizetype br = before.lastIndexOf("\\N");
+    const qsizetype lineStart = std::max<qsizetype>(br < 0 ? 0 : br + 2, before.lastIndexOf('\n') + 1);
+    m_textInfo->setText(tr("Length: %1     Lines: %2     Ln: %3     Col: %4     Sel: %5     Ch: %6")
+                            .arg(t.size())
+                            .arg(t.count("\\N") + t.count('\n') + 1)
+                            .arg(before.count("\\N") + before.count('\n') + 1)
+                            .arg(pos - lineStart + 1)
+                            .arg(std::abs(c.anchor() - pos))
+                            .arg(pos + 1));
 }
 
 void EditBox::reload() {

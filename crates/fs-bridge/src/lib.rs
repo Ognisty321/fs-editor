@@ -138,8 +138,11 @@ pub mod ffi {
     struct PostSpec {
         lead_in: i64,
         lead_out: i64,
+        /// Gaps up to `adjacent` close at `bias` (0 previous end .. 1 next start).
         adjacent: i64,
         bias: f64,
+        /// Then gaps up to this close by moving the next start back.
+        adjacent_start: i64,
         kf_before_start: i64,
         kf_after_start: i64,
         kf_before_end: i64,
@@ -337,6 +340,13 @@ pub mod ffi {
         fn sort_rows(self: &mut Session, key: u8, selected_only: bool, rows: &[usize]);
         fn shift(self: &mut Session, spec: &ShiftSpec, fps_timecodes: &[i64]) -> usize;
         fn post_process(self: &mut Session, spec: &PostSpec, keyframes: &[i64], timecodes: &[i64]);
+        fn spec_rows(
+            self: &Session,
+            lines: u8,
+            selected: &[usize],
+            active: usize,
+            styles: &[String],
+        ) -> Vec<usize>;
         fn filter(self: &Session, spec: &FilterSpec) -> Vec<usize>;
         fn find(self: &Session, spec: &FindSpec, from: usize) -> Result<i64>;
         fn replace_all(self: &mut Session, spec: &FindSpec) -> Result<usize>;
