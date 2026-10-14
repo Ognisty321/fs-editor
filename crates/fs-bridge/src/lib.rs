@@ -433,6 +433,8 @@ pub mod ffi {
         fn strip_tags(s: &str) -> String;
         /// Keyframe frame numbers from an XviD/Aegisub/… keyframes file.
         fn load_keyframes(path: &str) -> Result<Vec<i64>>;
+        /// Write keyframes in Aegisub's v1 format.
+        fn save_keyframes(path: &str, keyframes: &[i64]) -> Result<()>;
         /// Frame timestamps from a v1/v2 timecodes file.
         fn load_timecodes(path: &str) -> Result<Vec<i64>>;
 
@@ -549,6 +551,10 @@ fn strip_tags(s: &str) -> String {
 fn load_keyframes(path: &str) -> Result<Vec<i64>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     fs_core::keyframes::parse(&text).map_err(|e| format!("{path}: {e}"))
+}
+
+fn save_keyframes(path: &str, keyframes: &[i64]) -> Result<(), String> {
+    std::fs::write(path, fs_core::keyframes::write(keyframes)).map_err(|e| format!("{path}: {e}"))
 }
 
 fn load_timecodes(path: &str) -> Result<Vec<i64>, String> {

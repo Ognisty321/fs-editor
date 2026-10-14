@@ -80,7 +80,7 @@ const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"joinNext", {"arrows-join-2", {}}}, {"recombine", {"arrows-join", kGreen}},
     {"splitKaraoke", {"arrows-split", kGreen}}, {"selectFromVideo", {"focus-2", kGreen}}, {"newTab", {"browser-plus", {}}},
     {"closeTab", {"browser-x", kRed}}, {"nextTab", {"chevron-right", {}}}, {"prevTab", {"chevron-left", {}}},
-    {"openVideo", {"movie", kBlue}}, {"openKeyframes", {"key", kAmber}}, {"openDummy", {"photo", kBlue}},
+    {"openVideo", {"movie", kBlue}}, {"openKeyframes", {"key", kAmber}}, {"saveKeyframes", {"device-floppy", kAmber}}, {"openDummy", {"photo", kBlue}},
     {"startFromVideo", {"brackets-contain-start", kGreen}}, {"endFromVideo", {"brackets-contain-end", kGreen}},
     {"prevFrame", {"chevron-left", kBlue}}, {"nextFrame", {"chevron-right", kBlue}},
     {"goStart", {"arrow-bar-to-left", kGreen}}, {"goEnd", {"arrow-bar-to-right", kGreen}},
@@ -562,6 +562,23 @@ void MainWindow::buildMenus() {
         if (!f.isEmpty()) tab()->openKeyframes(f);
     });
     video->addMenu(recentMenu("keyframes"));
+    add("saveKeyframes", tr("Save keyframes..."), {}, video, [=, this] {
+        if (tab()->keyframes().empty()) return;
+        const QString f = QFileDialog::getSaveFileName(this, tr("Save keyframes"), QFileInfo(tab()->path()).absolutePath(),
+                                                       tr("Keyframes (*.txt);;All files (*)"));
+        if (f.isEmpty()) return;
+        const auto kf = tab()->keyframes();
+        try {
+            fsb::save_keyframes(fs::Utf8(f), {kf.data(), kf.size()});
+        } catch (const std::exception &e) {
+            QMessageBox::warning(this, tr("Save keyframes"), QString::fromUtf8(e.what()));
+        }
+    });
+    add("closeKeyframes", tr("Close keyframes"), {}, video, [=, this] {
+        // back to the video's own keyframes, like Aegisub
+        tab()->setKeyframes(tab()->video()->keyframes());
+        tab()->s().set_project_value("Keyframes File", "");
+    });
     add("openDummy", tr("Open dummy video"), {}, video, [=, this] {
         QDialog d(this);
         d.setWindowTitle(tr("Dummy video"));
