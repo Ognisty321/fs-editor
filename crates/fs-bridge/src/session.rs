@@ -1095,15 +1095,25 @@ impl Session {
     }
 
     /// Rows that stay visible under the filter.
+    /// Rows the grid shows. Reads the events directly: building a `Row` per
+    /// line (text copies, CPS) made this the slowest step of an edit.
     pub fn filter(&self, spec: &FilterSpec) -> Vec<usize> {
+        let doc = &self.ed.doc;
+        let mut hide_rows = spec.hide_rows.clone();
+        hide_rows.sort_unstable();
         (0..self.rows.len())
             .filter(|&i| {
-                let r = self.row(i);
-                let hidden = spec.hide_styles.contains(&r.style)
-                    || spec.hide_rows.contains(&i)
-                    || (spec.hide_comments && r.comment)
-                    || (spec.only_doubtful && !r.doubtful)
-                    || (spec.only_untranslated && r.translated && !r.text.trim().is_empty());
+                let r = self.rows[i];
+                let ev = &doc.events()[r.main()].event;
+                let untranslated = || {
+                    let text = if self.tl { tlmode::translation_text(doc, r) } else { &ev.text };
+                    r.translation.is_some() && !text.trim().is_empty()
+                };
+                let hidden = spec.hide_styles.contains(&ev.style)
+                    || hide_rows.binary_search(&i).is_ok()
+                    || (spec.hide_comments && ev.is_comment())
+                    || (spec.only_doubtful && !tlmode::is_doubtful(&ev.effect))
+                    || (spec.only_untranslated && untranslated());
                 hidden == spec.invert
             })
             .collect()
@@ -1826,6 +1836,41 @@ mod tests {
     const ASS: &str = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,one\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,two\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,three\n";
 
     #[test]
+    fn filter_matches_the_row_fields() {
+        let mut s = session(ASS);
+        s.set_rows_field(&[0], "comment", "1");
+        s.set_rows_field(&[2], "style", "Other");
+        s.tl_enable(true);
+        s.paste_translation(1, "przekład");
+        s.set_doubtful(&[1], true);
+        // the old definition, row by row
+        let oracle = |s: &Session, spec: &FilterSpec| -> Vec<usize> {
+            (0..s.row_count())
+                .filter(|&i| {
+                    let r = s.row(i);
+                    let hidden = spec.hide_styles.contains(&r.style)
+                        || spec.hide_rows.contains(&i)
+                        || (spec.hide_comments && r.comment)
+                        || (spec.only_doubtful && !r.doubtful)
+                        || (spec.only_untranslated && r.translated && !r.text.trim().is_empty());
+                    hidden == spec.invert
+                })
+                .collect()
+        };
+        let specs = [
+            FilterSpec { hide_comments: true, ..Default::default() },
+            FilterSpec { hide_styles: vec!["Other".into()], ..Default::default() },
+            FilterSpec { hide_rows: vec![2, 0], invert: true, ..Default::default() },
+            FilterSpec { only_doubtful: true, ..Default::default() },
+            FilterSpec { only_untranslated: true, ..Default::default() },
+        ];
+        for spec in &specs {
+            assert_eq!(s.filter(spec), oracle(&s, spec), "{spec:?}");
+        }
+        assert!(specs.iter().any(|sp| s.filter(sp).len() < s.row_count()));
+    }
+
+    #[test]
     fn column_info_lists_distinct_values() {
         let mut s = session(ASS);
         s.set_rows_field(&[1], "actor", "Ann");
@@ -2124,6 +2169,22 @@ mod tests {
         time("sort by end", &mut |s| s.sort_rows(1, false, &[]));
         time("column_info", &mut |s| drop(std::hint::black_box(s.column_info())));
         time("rows_at", &mut |s| drop(std::hint::black_box(s.rows_at(100_000_000))));
+        let find = |pattern: &str, regex: bool| FindSpec {
+            pattern: pattern.into(),
+            replacement: "X".into(),
+            regex,
+            ..Default::default()
+        };
+        time("find last", &mut |s| drop(s.find(&find("number 99999 ", false), 0)));
+        time("find regex last", &mut |s| drop(s.find(&find(r"9999\d ", true), 0)));
+        time("replace all", &mut |s| drop(s.replace_all(&find("with", false))));
+        time("filter comments", &mut |s| {
+            drop(s.filter(&FilterSpec { hide_comments: true, ..Default::default() }))
+        });
+        time("shift all", &mut |s| {
+            s.shift(&ShiftSpec { amount: 1000, ..Default::default() }, &[]);
+        });
+        time("undo replace", &mut |s| assert!(s.undo()));
         let half: Vec<usize> = (0..50_000).map(|i| i * 2).collect();
         time("duplicate 50k", &mut |s| drop(s.duplicate_rows(&half)));
         time("delete 50k", &mut |s| s.delete_rows(&half));
