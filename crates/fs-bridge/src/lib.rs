@@ -315,6 +315,15 @@ pub mod ffi {
         fn open(self: &mut Session, path: &str) -> Result<()>;
         fn open_embedded(self: &mut Session, video: &str, index: i32) -> Result<()>;
         fn save(self: &mut Session, path: &str) -> Result<()>;
+        fn export_copy(
+            self: &Session,
+            path: &str,
+            fix_styles: bool,
+            fps_from: &str,
+            fps_to: &str,
+            video: &[i64],
+            encoding: &str,
+        ) -> Result<()>;
         fn save_translation(self: &Session, path: &str) -> Result<()>;
         fn autosave(self: &Session, path: &str) -> Result<()>;
         fn convert(self: &mut Session, format: &str) -> Result<()>;

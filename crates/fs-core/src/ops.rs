@@ -565,6 +565,22 @@ pub fn remove_unused_styles(doc: &mut Document) -> Vec<String> {
     gone
 }
 
+/// Aegisub's "Fix Styles" export filter: lines whose style is not in the
+/// file (compared without case) get `Default`. Returns how many changed.
+pub fn fix_styles(doc: &mut Document) -> usize {
+    let names: std::collections::HashSet<String> =
+        doc.styles().map(|s| s.name.to_lowercase()).collect();
+    let mut n = 0;
+    for i in 0..doc.event_count() {
+        let e = doc.event_mut(i).unwrap();
+        if !names.contains(&e.style.to_lowercase()) {
+            e.style = "Default".into();
+            n += 1;
+        }
+    }
+    n
+}
+
 /// Aegisub `trim_text`: drop spaces, tabs and `\N`/`\n`/`\h` at both ends.
 fn trim_breaks(text: &str) -> String {
     let mut s = text;
@@ -1607,6 +1623,17 @@ mod tests {
         let e = d.event(0).unwrap();
         assert_eq!((e.start.ms(), e.end.ms()), (500, 1000));
         assert_eq!(e.text, r"{\move(0,0,1,1,100,200)\fad(100,200)\k25}a{\k25}b");
+    }
+
+    #[test]
+    fn fix_styles_defaults_missing() {
+        let mut d = doc(&[
+            ("0:00:00.00", "0:00:01.00", "default", "kept, case differs"),
+            ("0:00:00.00", "0:00:01.00", "Gone", "fixed"),
+        ]);
+        assert_eq!(fix_styles(&mut d), 1);
+        assert_eq!(d.event(0).unwrap().style, "default");
+        assert_eq!(d.event(1).unwrap().style, "Default");
     }
 
     #[test]

@@ -39,6 +39,7 @@
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QCheckBox>
 #include <QSettings>
 #include <QSpinBox>
 #include <QStandardPaths>
@@ -71,7 +72,7 @@ const QColor kAmber(0xf0b429), kBlue(0x4aa3ff), kGreen(0x4cc38a), kRed(0xf2665c)
 // Action id -> Tabler icon and tint; an invalid colour follows the palette text.
 const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"openSubs", {"folder-open", kAmber}}, {"save", {"device-floppy", kBlue}}, {"saveAll", {"files", kBlue}},
-    {"saveAs", {"file-export", kBlue}}, {"saveTranslation", {"language", kBlue}}, {"removeSubs", {"file-x", kRed}},
+    {"saveAs", {"file-export", kBlue}}, {"exportAs", {"file-arrow-right", kBlue}}, {"saveTranslation", {"language", kBlue}}, {"removeSubs", {"file-x", kRed}},
     {"saveWithVideoName", {"file-symlink", kBlue}}, {"removeTemp", {"trash", kRed}}, {"openAutosave", {"restore", kAmber}}, {"showLog", {"terminal-2", {}}},
     {"loadSession", {"restore", {}}}, {"fontCollector", {"typography", kPurple}}, {"settings", {"settings", {}}},
     {"exit", {"logout", kRed}}, {"undo", {"arrow-back-up", {}}}, {"undoToSave", {"arrow-back-up-double", {}}},
@@ -429,6 +430,64 @@ void MainWindow::buildMenus() {
     add("saveTranslation", tr("Save translation"), {}, file, [=, this] {
         const QString p = QFileDialog::getSaveFileName(this, tr("Save translation"), tab()->path(), kSubsFilter);
         if (!p.isEmpty()) tab()->saveTranslation(p);
+    });
+    // Aegisub's Export: a filtered copy in another format/encoding; the open file stays as it is
+    add("exportAs", tr("Export as..."), {}, file, [=, this] {
+        auto *t = tab();
+        const bool video = t->video()->hasVideo();
+        QSettings st;
+        QDialog d(this);
+        d.setWindowTitle(tr("Export"));
+        auto *f = new QFormLayout(&d);
+        auto *fix = new QCheckBox(tr("Fix styles: lines with a style missing from the file get Default"), &d);
+        fix->setChecked(st.value("export/fixStyles", false).toBool());
+        auto *fps = new QCheckBox(tr("Transform framerate"), &d);
+        fps->setChecked(st.value("export/fps", false).toBool());
+        auto rate = [&](const QString &def) {
+            auto *c = new QComboBox(&d);
+            c->setEditable(true);
+            if (video) c->addItem(tr("From video"), "video");
+            c->addItems({"23.976", "24", "25", "29.97", "30", "48", "50", "59.94", "60"});
+            c->setCurrentText(def);
+            return c;
+        };
+        auto *from = rate(video ? tr("From video") : "23.976"), *to = rate(st.value("export/fpsTo", "25").toString());
+        auto *enc = new QComboBox(&d);
+        enc->addItems({"UTF-8", "UTF-16LE", "windows-1250", "windows-1252", "ISO-8859-2", "windows-1251"});
+        enc->setCurrentText(st.value("export/encoding", "UTF-8").toString());
+        f->addRow(fix);
+        f->addRow(fps);
+        f->addRow(tr("Subtitles timed to:"), from);
+        f->addRow(tr("Convert to:"), to);
+        f->addRow(tr("Text encoding:"), enc);
+        auto sync = [=] { from->setEnabled(fps->isChecked()), to->setEnabled(fps->isChecked()); };
+        connect(fps, &QCheckBox::toggled, &d, sync);
+        sync();
+        auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+        bb->button(QDialogButtonBox::Ok)->setText(tr("Export..."));
+        connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+        f->addRow(bb);
+        // shortcut: Automation export filters are not listed here (the CLI `lua` command runs them); add when asked.
+        if (d.exec() != QDialog::Accepted) return;
+        st.setValue("export/fixStyles", fix->isChecked());
+        st.setValue("export/fps", fps->isChecked());
+        st.setValue("export/fpsTo", to->currentText());
+        st.setValue("export/encoding", enc->currentText());
+        const QString p = QFileDialog::getSaveFileName(this, tr("Export subtitles"), QFileInfo(t->path()).absolutePath(), kSubsFilter);
+        if (p.isEmpty()) return;
+        auto value = [](QComboBox *c) {
+            return c->currentText() == c->itemText(0) && c->itemData(0).isValid() ? QString("video") : c->currentText();
+        };
+        const auto tc = t->video()->timecodes();
+        try {
+            t->s().export_copy(fs::Utf8(p), fix->isChecked(), fs::Utf8(value(from)),
+                               fs::Utf8(fps->isChecked() ? value(to) : QString()), {tc.data(), tc.size()},
+                               fs::Utf8(enc->currentText()));
+            status(tr("Exported %1").arg(QFileInfo(p).fileName()));
+        } catch (const std::exception &e) {
+            QMessageBox::warning(this, tr("Export"), QString::fromUtf8(e.what()));
+        }
     });
     file->addMenu(recentMenu("subs"));
     add("removeSubs", tr("Remove subtitles from the editor"), {}, file, [=, this] {

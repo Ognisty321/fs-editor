@@ -614,6 +614,52 @@ impl Session {
         Ok(())
     }
 
+    /// Aegisub's Export: a copy through the Fix Styles / Transform Framerate
+    /// filters (empty `fps_to` skips it), in the path's format and `encoding`.
+    /// The open file, its path and saved state stay as they are.
+    #[allow(clippy::too_many_arguments)]
+    pub fn export_copy(
+        &self,
+        path: &str,
+        fix_styles: bool,
+        fps_from: &str,
+        fps_to: &str,
+        video: &[i64],
+        encoding: &str,
+    ) -> Result<(), String> {
+        let mut doc = self.ed.doc.clone();
+        if fix_styles {
+            ops::fix_styles(&mut doc);
+        }
+        if !fps_to.is_empty() {
+            let rate = |s: &str| {
+                if s == "video" {
+                    Framerate::from_timecodes(video.to_vec())
+                } else {
+                    Framerate::parse(s)
+                }
+                .map_err(|e| format!("{s}: {e}"))
+            };
+            ops::change_fps(&mut doc, &rate(fps_from)?, &rate(fps_to)?);
+        }
+        let p = Path::new(path);
+        let format = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .and_then(Format::from_name)
+            .unwrap_or(Format::Ass);
+        let opts = SaveOptions {
+            encoding: Encoding::for_label(encoding.as_bytes()).unwrap_or(self.encoding),
+            bom: self.bom,
+            fps: self
+                .framerate
+                .clone()
+                .unwrap_or_else(|| Framerate::from_rational(24000, 1001, false).unwrap()),
+            ..Default::default()
+        };
+        fs_formats::save_file(&doc, p, format, &opts).map_err(|e| format!("{path}: {e}"))
+    }
+
     /// Aegisub "Recombine Lines"; returns the rows left of the selection.
     pub fn recombine_rows(&mut self, rows: &[usize]) -> Vec<usize> {
         // shortcut: not in TL mode (pairs would need recombining together); add when asked.
@@ -1627,6 +1673,21 @@ mod tests {
     }
 
     const ASS: &str = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,one\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,two\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,three\n";
+
+    #[test]
+    fn export_copy_filters_without_touching_the_file() {
+        let s = session(ASS);
+        let path = s.file_info().path;
+        let out = std::env::temp_dir().join(format!("fsb-export-{}.srt", std::process::id()));
+        s.export_copy(out.to_str().unwrap(), true, "23.976", "25", &[], "UTF-8")
+            .unwrap();
+        let srt = std::fs::read_to_string(&out).unwrap();
+        // 1 s at 23.976 fps is 0.959 s at 25 fps
+        assert!(srt.contains("00:00:00,95"), "{srt}");
+        assert_eq!(s.file_info().path, path);
+        assert!(!s.file_info().modified);
+        std::fs::remove_file(out).unwrap();
+    }
 
     #[test]
     fn project_values_follow_the_files_section() {
