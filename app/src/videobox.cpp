@@ -126,7 +126,8 @@ void VideoView::render(QRhiCommandBuffer *cb) {
         if (uploadImage(rhi(), m_frameTex, m_frame, u)) m_frameQuad.setTexture(m_frameTex.get());
         m_frameDirty = false;
     }
-    if (m_overlayDirty) {
+    // after a resize the old overlay would be stretched over the new size
+    if (m_overlayDirty || !m_overlayTex || m_overlayTex->pixelSize() != out) {
         QImage ov(out, QImage::Format_RGBA8888_Premultiplied);
         ov.fill(Qt::transparent);
         ov.setDevicePixelRatio(dpr);

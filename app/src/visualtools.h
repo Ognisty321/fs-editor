@@ -33,13 +33,14 @@ struct Drawing {
     QPointF &at(std::pair<int, int> h) { return cmds[h.first].pts[h.second]; }
     QRectF bounds() const;
     void translate(QPointF d);
+    QPointF last() const; // the last point of the figure being drawn
 };
 
 class VisualTools : public QObject {
     Q_OBJECT
 public:
     enum Tool { Pointer, Pos, Move, Scale, RotZ, RotXY, RClip, VClip, Draw, Shifter, AllTags, ToolCount };
-    enum VecMode { VecMove, VecLine, VecBezier, VecNewFigure, VecDelete, VecFreehand, VecInsert, VecConvert };
+    enum VecMode { VecMove, VecLine, VecBezier, VecNewFigure, VecDelete, VecFreehand, VecInsert, VecConvert, VecSpline };
 
     explicit VisualTools(VideoBox *box);
     int tool() const { return m_tool; }

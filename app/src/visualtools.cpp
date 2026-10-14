@@ -81,6 +81,12 @@ std::vector<std::pair<int, int>> Drawing::handles() const {
     return h;
 }
 
+QPointF Drawing::last() const {
+    for (auto c = cmds.rbegin(); c != cmds.rend(); ++c)
+        if (!c->pts.empty()) return c->pts.back();
+    return {};
+}
+
 void Drawing::translate(QPointF d) {
     for (auto &c : cmds)
         for (auto &p : c.pts) p += d;
@@ -177,9 +183,11 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     vh->setSpacing(1);
     auto *modes = new QButtonGroup(vec);
     const char *mt[] = {"Move points", "Add line", "Add Bézier curve", "Add separate point (move)", "Delete point",
-                        "Draw freehand", "Insert a point into a segment", "Convert a segment between line and Bézier"};
-    const char *mi[] = {"arrows-move", "line", "vector-bezier-2", "point", "x", "scribble", "circle-plus", "replace"};
-    for (int k = 0; k < 8; ++k) {
+                        "Draw freehand", "Insert a point into a segment", "Convert a segment between line and Bézier",
+                        "Add B-spline point"};
+    const char *mi[] = {"arrows-move", "line",    "vector-bezier-2", "point",        "x",
+                        "scribble",    "circle-plus", "replace",      "vector-spline"};
+    for (int k = 0; k < 9; ++k) {
         auto *b = new QToolButton(vec);
         b->setIcon(icon(mi[k], QColor(k == 4 ? 0xf2665c : 0xb48cff)));
         b->setToolTip(tr(mt[k]));
@@ -188,7 +196,7 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
         modes->addButton(b, k);
         vh->addWidget(b);
     }
-    m_vecMode = std::clamp(QSettings().value("visual/vecMode", 0).toInt(), 0, 7);
+    m_vecMode = std::clamp(QSettings().value("visual/vecMode", 0).toInt(), 0, 8);
     modes->button(m_vecMode)->setChecked(true);
     connect(modes, &QButtonGroup::idClicked, this, [this](int k) {
         m_vecMode = k;
@@ -436,7 +444,7 @@ int VisualTools::hitSegment(QPointF wp, double &t) const {
     double bestD = 7;
     for (int i = 1; i < int(m_vec.cmds.size()); ++i) {
         const auto &c = m_vec.cmds[i];
-        if (c.type != 'l' && c.type != 'b') continue;
+        if ((c.type != 'l' && c.type != 'b') || m_vec.cmds[i - 1].pts.empty()) continue;
         const QPointF p0 = m_vec.cmds[i - 1].pts.back();
         // sample the segment; plenty for picking
         for (int k = 0; k <= 32; ++k) {
@@ -547,9 +555,37 @@ void VisualTools::paint(QPainter &p) {
         };
         QPainterPath path;
         QPointF last;
-        for (const auto &c : m_vec.cmds) {
+        bool started = false; // libass starts a contour at its first segment, not at the m point
+        for (size_t i = 0; i < m_vec.cmds.size(); ++i) {
+            const auto &c = m_vec.cmds[i];
+            if (c.type == 's' && !c.pts.empty()) {
+                // libass: a uniform cubic B-spline over the previous point, the s points, any p
+                // extensions and, after c, the first three again
+                QPointF prev = c.pts[0];
+                for (size_t k = i; k-- > 0;)
+                    if (!m_vec.cmds[k].pts.empty()) {
+                        prev = m_vec.cmds[k].pts.back();
+                        break;
+                    }
+                std::vector<QPointF> ctl{prev};
+                ctl.insert(ctl.end(), c.pts.begin(), c.pts.end());
+                size_t j = i + 1;
+                for (; j < m_vec.cmds.size() && m_vec.cmds[j].type == 'p'; ++j)
+                    ctl.insert(ctl.end(), m_vec.cmds[j].pts.begin(), m_vec.cmds[j].pts.end());
+                if (j < m_vec.cmds.size() && m_vec.cmds[j].type == 'c' && ctl.size() >= 3)
+                    ctl.insert(ctl.end(), {ctl[0], ctl[1], ctl[2]});
+                for (size_t k = 0; k + 3 < ctl.size(); ++k) {
+                    const QPointF a = ctl[k], b = ctl[k + 1], cc = ctl[k + 2], d4 = ctl[k + 3];
+                    if (started) path.lineTo(map((a + 4 * b + cc) / 6));
+                    else path.moveTo(map((a + 4 * b + cc) / 6)), started = true;
+                    path.cubicTo(map((2 * b + cc) / 3), map((b + 2 * cc) / 3), map((b + 4 * cc + d4) / 6));
+                }
+                i = j - 1;
+                continue;
+            }
             if (c.pts.empty()) continue;
-            if (c.type == 'm' || c.type == 'n') path.moveTo(map(c.pts[0]));
+            started = c.type != 'm' && c.type != 'n';
+            if (!started) path.moveTo(map(c.pts[0]));
             else if (c.type == 'b' && c.pts.size() == 3) path.cubicTo(map(c.pts[0]), map(c.pts[1]), map(c.pts[2]));
             else for (const auto &pt : c.pts) path.lineTo(map(pt));
         }
@@ -571,6 +607,8 @@ void VisualTools::paint(QPainter &p) {
                 handle(p, map(c.pts[0]), true);
                 handle(p, map(c.pts[1]), true);
             }
+            if (c.type == 's' || c.type == 'p')
+                for (const auto &pt : c.pts) handle(p, map(pt), true);
             if (!c.pts.empty()) {
                 last = map(c.pts.back());
                 handle(p, last, false, c.type == 'm' ? kAccent : kHandle);
@@ -697,8 +735,19 @@ bool VisualTools::press(QMouseEvent *e) {
         }
         if (m_vec.cmds.empty() || m_vecMode == VecNewFigure) {
             m_vec.cmds.push_back({'m', {pt}});
+        } else if (m_vecMode == VecSpline) {
+            // Kainote's spline mode: extend the spline being drawn, or start one as a straight
+            // three-point spline so libass always gets a valid s command
+            if (m_vec.cmds.back().type == 's') {
+                m_vec.cmds.back().pts.push_back(pt);
+            } else if (m_vec.cmds.back().type == 'p') {
+                m_vec.cmds.push_back({'p', {pt}});
+            } else {
+                const QPointF last = m_vec.last();
+                m_vec.cmds.push_back({'s', {last + (pt - last) / 3, last + (pt - last) * 2 / 3, pt}});
+            }
         } else if (m_vecMode == VecBezier) {
-            const QPointF last = m_vec.cmds.back().pts.back();
+            const QPointF last = m_vec.last();
             m_vec.cmds.push_back({'b', {last + (pt - last) / 3, last + (pt - last) * 2 / 3, pt}});
         } else {
             m_vec.cmds.push_back({'l', {pt}});
@@ -848,7 +897,7 @@ bool VisualTools::move(QMouseEvent *e) {
         }
         if (m_drag == 6) {
             // freehand: a new line point once the cursor moved a few screen pixels (Aegisub's freehand mode)
-            if (QLineF(vecW(m_vec.cmds.back().pts.back()), e->position()).length() >= 4) {
+            if (QLineF(vecW(m_vec.last()), e->position()).length() >= 4) {
                 m_vec.cmds.push_back({'l', {pt}});
                 writeVector();
             }
