@@ -265,8 +265,16 @@ impl Session {
     // ---- file -------------------------------------------------------------
 
     pub fn open(&mut self, path: &str) -> Result<(), String> {
-        let l = fs_formats::load_file(Path::new(path), &LoadOptions::default())
-            .map_err(|e| format!("{path}: {e}"))?;
+        self.open_as(path, "")
+    }
+
+    /// Open with a forced encoding; an empty or unknown label detects it.
+    pub fn open_as(&mut self, path: &str, encoding: &str) -> Result<(), String> {
+        let opts = LoadOptions {
+            encoding: Encoding::for_label(encoding.as_bytes()),
+            ..LoadOptions::default()
+        };
+        let l = fs_formats::load_file(Path::new(path), &opts).map_err(|e| format!("{path}: {e}"))?;
         self.load(l, Some(PathBuf::from(path)));
         Ok(())
     }
@@ -1757,6 +1765,17 @@ mod tests {
     }
 
     const ASS: &str = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,one\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,two\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,three\n";
+
+    #[test]
+    fn open_as_forces_the_encoding() {
+        let p = std::env::temp_dir().join(format!("fsb-cp1251-{}.srt", std::process::id()));
+        let (bytes, _, _) = encoding_rs::WINDOWS_1251.encode("1\n00:00:01,000 --> 00:00:02,000\nПривет\n");
+        std::fs::write(&p, &bytes).unwrap();
+        let mut s = Session::default();
+        s.open_as(p.to_str().unwrap(), "windows-1251").unwrap();
+        assert_eq!(s.row(0).text, "Привет");
+        std::fs::remove_file(p).ok();
+    }
 
     #[test]
     fn split_row_estimates_or_keeps_times() {

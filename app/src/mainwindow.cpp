@@ -338,7 +338,7 @@ static bool untouched(TabPanel *tab) {
            (tab->s().row_count() == 0 || (tab->s().row_count() == 1 && tab->s().row(0).text.empty()));
 }
 
-void MainWindow::openFile(const QString &path) {
+void MainWindow::openFile(const QString &path, const QString &encoding) {
     const QString ext = QFileInfo(path).suffix().toLower();
     if (kVideoExt.contains(ext)) {
         // like Kainote: an empty tab offers the subtitles stored in the video
@@ -366,7 +366,7 @@ void MainWindow::openFile(const QString &path) {
         // reuse an empty, untouched tab, otherwise open a new one
         TabPanel *tab = current();
         if (!untouched(tab)) tab = newTab();
-        if (tab->openSubs(path)) addRecent("subs", path);
+        if (tab->openSubs(path, encoding)) addRecent("subs", path);
         updateActions();
     }
 }
@@ -418,6 +418,18 @@ void MainWindow::buildMenus() {
                                                                 QSettings().value("main/lastDir").toString(), kSubsFilter);
         for (const auto &f : files) openFile(f);
         if (!files.isEmpty()) QSettings().setValue("main/lastDir", QFileInfo(files.first()).absolutePath());
+    });
+    // Aegisub's "Open Subtitles with Charset": for files whose encoding detection guesses wrong
+    add("openSubsCharset", tr("Open subtitles with encoding..."), {}, file, [this] {
+        const QString f = QFileDialog::getOpenFileName(this, tr("Open subtitles"),
+                                                       QSettings().value("main/lastDir").toString(), kSubsFilter);
+        if (f.isEmpty()) return;
+        bool ok = false;
+        const QString enc = QInputDialog::getItem(this, tr("Choose encoding"), tr("Text encoding:"),
+                                                  {"UTF-8", "UTF-16LE", "UTF-16BE", "windows-1250", "windows-1251",
+                                                   "windows-1252", "ISO-8859-2", "Shift_JIS", "GBK", "Big5", "EUC-KR"},
+                                                  0, true, &ok);
+        if (ok) openFile(f, enc);
     });
     add("save", tr("Save"), QKeySequence("Ctrl+S"), file, [=, this] {
         if (tab()->path().isEmpty() || !tab()->save()) saveAs(tab());

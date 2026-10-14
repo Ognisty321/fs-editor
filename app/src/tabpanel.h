@@ -34,7 +34,7 @@ public:
     AudioBox *audio() const { return m_audio; }
 
     // file
-    bool openSubs(const QString &path);
+    bool openSubs(const QString &path, const QString &encoding = {}); // empty: detect
     // Subtitle stream `index` of a video, as an unsaved script.
     bool openEmbedded(const QString &video, int index);
     bool save(const QString &path = {});

@@ -330,6 +330,8 @@ pub mod ffi {
         type Session;
         fn new_session() -> Box<Session>;
         fn open(self: &mut Session, path: &str) -> Result<()>;
+        /// `encoding`: an encoding label (Aegisub's "Open with charset").
+        fn open_as(self: &mut Session, path: &str, encoding: &str) -> Result<()>;
         fn open_embedded(self: &mut Session, video: &str, index: i32) -> Result<()>;
         fn save(self: &mut Session, path: &str) -> Result<()>;
         fn export_copy(

@@ -96,9 +96,9 @@ QString TabPanel::title() const {
     return (p.isEmpty() ? tr("Untitled") : QFileInfo(p).fileName()) + (modified() ? "*" : "");
 }
 
-bool TabPanel::openSubs(const QString &path) {
+bool TabPanel::openSubs(const QString &path, const QString &encoding) {
     try {
-        s().open(fs::Utf8(path));
+        s().open_as(fs::Utf8(path), fs::Utf8(encoding));
     } catch (const rust::Error &e) {
         m_main->error(QString::fromUtf8(e.what()));
         return false;

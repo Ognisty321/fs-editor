@@ -28,7 +28,7 @@ public:
     QList<TabPanel *> tabs() const;
     TabPanel *newTab();
     // Opens subtitles, video, audio or keyframes by extension.
-    void openFile(const QString &path);
+    void openFile(const QString &path, const QString &encoding = {});
 
     QAction *action(const QString &id) const { return m_actions.value(id); }
     QMenu *recentMenu(const QString &kind);
