@@ -1665,7 +1665,12 @@ mod tests {
                 r"{\k20}ka{\k30\i1}ra",
             ),
             ("0:00:05.00", "0:00:06.00", "Default", "plain"),
-            ("0:00:07.00", "0:00:08.00", "Default", r"{\k10}a{\k10}b{\k10}c"),
+            (
+                "0:00:07.00",
+                "0:00:08.00",
+                "Default",
+                r"{\k10}a{\k10}b{\k10}c",
+            ),
         ]);
         assert_eq!(split_by_karaoke(&mut d, &[0, 1, 2]), [0, 1, 3, 4, 5]);
         let e = |i: usize| d.event(i).unwrap().clone();
@@ -1677,7 +1682,10 @@ mod tests {
         assert_eq!(e(2).text, "plain");
         let texts: Vec<String> = (3..6).map(|i| e(i).text).collect();
         assert_eq!(texts, ["a", "b", "c"]);
-        assert_eq!((e(5).start.ms(), e(5).end.ms(), d.event_count()), (7200, 7300, 6));
+        assert_eq!(
+            (e(5).start.ms(), e(5).end.ms(), d.event_count()),
+            (7200, 7300, 6)
+        );
     }
 
     #[test]

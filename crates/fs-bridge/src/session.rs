@@ -19,7 +19,8 @@ use fs_core::{Color, Document, Event, EventEntry, EventId, Time};
 use fs_formats::{Format, LoadOptions, SaveOptions};
 
 use crate::ffi::{
-    ColumnInfo, FileInfo, FilterSpec, FindSpec, PostSpec, Row, ShiftSpec, StyleData, Syllable, Visual,
+    ColumnInfo, FileInfo, FilterSpec, FindSpec, PostSpec, Row, ShiftSpec, StyleData, Syllable,
+    Visual,
 };
 
 pub struct Session {
@@ -287,7 +288,8 @@ impl Session {
             encoding: Encoding::for_label(encoding.as_bytes()),
             ..LoadOptions::default()
         };
-        let l = fs_formats::load_file(Path::new(path), &opts).map_err(|e| format!("{path}: {e}"))?;
+        let l =
+            fs_formats::load_file(Path::new(path), &opts).map_err(|e| format!("{path}: {e}"))?;
         self.load(l, Some(PathBuf::from(path)));
         Ok(())
     }
@@ -468,7 +470,9 @@ impl Session {
         (0..self.rows.len())
             .filter(|&i| {
                 self.timed_text(i).is_some_and(|(start, end, text)| {
-                    by_time.get(&(start, end)).is_some_and(|v| !v.contains(&text))
+                    by_time
+                        .get(&(start, end))
+                        .is_some_and(|v| !v.contains(&text))
                 })
             })
             .collect()
@@ -478,13 +482,18 @@ impl Session {
     fn timed_text(&self, i: usize) -> Option<(Time, Time, &str)> {
         let r = self.rows[i];
         let ev = &self.ed.doc.events()[r.main()].event;
-        let text = if self.tl { tlmode::translation_text(&self.ed.doc, r) } else { &ev.text };
+        let text = if self.tl {
+            tlmode::translation_text(&self.ed.doc, r)
+        } else {
+            &ev.text
+        };
         (!ev.is_comment()).then_some((ev.start, ev.end, text))
     }
 
     pub fn column_info(&self) -> ColumnInfo {
         let mut ci = ColumnInfo::default();
-        let (mut styles, mut actors, mut effects) = (HashSet::new(), HashSet::new(), HashSet::new());
+        let (mut styles, mut actors, mut effects) =
+            (HashSet::new(), HashSet::new(), HashSet::new());
         let events = self.ed.doc.events();
         let mut last = ("", "", "");
         for r in &self.rows {
@@ -510,7 +519,12 @@ impl Session {
             }
             last = cur;
         }
-        let owned = |set: HashSet<&str>| set.into_iter().filter(|s| !s.is_empty()).map(String::from).collect();
+        let owned = |set: HashSet<&str>| {
+            set.into_iter()
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect()
+        };
         ci.styles = styles.into_iter().map(String::from).collect();
         (ci.actors, ci.effects) = (owned(actors), owned(effects));
         ci
@@ -1132,7 +1146,11 @@ impl Session {
                 let r = self.rows[i];
                 let ev = &doc.events()[r.main()].event;
                 let untranslated = || {
-                    let text = if self.tl { tlmode::translation_text(doc, r) } else { &ev.text };
+                    let text = if self.tl {
+                        tlmode::translation_text(doc, r)
+                    } else {
+                        &ev.text
+                    };
                     r.translation.is_some() && !text.trim().is_empty()
                 };
                 let hidden = spec.hide_styles.contains(&ev.style)
@@ -1884,11 +1902,27 @@ mod tests {
                 .collect()
         };
         let specs = [
-            FilterSpec { hide_comments: true, ..Default::default() },
-            FilterSpec { hide_styles: vec!["Other".into()], ..Default::default() },
-            FilterSpec { hide_rows: vec![2, 0], invert: true, ..Default::default() },
-            FilterSpec { only_doubtful: true, ..Default::default() },
-            FilterSpec { only_untranslated: true, ..Default::default() },
+            FilterSpec {
+                hide_comments: true,
+                ..Default::default()
+            },
+            FilterSpec {
+                hide_styles: vec!["Other".into()],
+                ..Default::default()
+            },
+            FilterSpec {
+                hide_rows: vec![2, 0],
+                invert: true,
+                ..Default::default()
+            },
+            FilterSpec {
+                only_doubtful: true,
+                ..Default::default()
+            },
+            FilterSpec {
+                only_untranslated: true,
+                ..Default::default()
+            },
         ];
         for spec in &specs {
             assert_eq!(s.filter(spec), oracle(&s, spec), "{spec:?}");
@@ -1911,7 +1945,10 @@ mod tests {
         let mut s = session(ASS);
         s.set_rows_field(&[1], "actor", "Ann");
         let ci = s.column_info();
-        assert_eq!((ci.styles, ci.actors, ci.effects), (vec!["Default".to_string()], vec!["Ann".to_string()], vec![]));
+        assert_eq!(
+            (ci.styles, ci.actors, ci.effects),
+            (vec!["Default".to_string()], vec!["Ann".to_string()], vec![])
+        );
         assert!(!ci.any_layer && !ci.any_margin_v);
     }
 
@@ -1929,7 +1966,8 @@ mod tests {
     #[test]
     fn open_as_forces_the_encoding() {
         let p = std::env::temp_dir().join(format!("fsb-cp1251-{}.srt", std::process::id()));
-        let (bytes, _, _) = encoding_rs::WINDOWS_1251.encode("1\n00:00:01,000 --> 00:00:02,000\nПривет\n");
+        let (bytes, _, _) =
+            encoding_rs::WINDOWS_1251.encode("1\n00:00:01,000 --> 00:00:02,000\nПривет\n");
         std::fs::write(&p, &bytes).unwrap();
         let mut s = Session::default();
         s.open_as(p.to_str().unwrap(), "windows-1251").unwrap();
@@ -2168,7 +2206,12 @@ mod tests {
             let t = i * 2;
             text += &format!(
                 "Dialogue: 0,{}:{:02}:{:02}.00,{}:{:02}:{:02}.50,Default,,0,0,0,,{{\\k20}}Line {{\\i1}}number{{\\i0}} {i} with some text\n",
-                t / 3600, t / 60 % 60, t % 60, t / 3600, t / 60 % 60, t % 60
+                t / 3600,
+                t / 60 % 60,
+                t % 60,
+                t / 3600,
+                t / 60 % 60,
+                t % 60
             );
         }
         let t0 = Instant::now();
@@ -2198,27 +2241,54 @@ mod tests {
             f(&mut s);
             eprintln!("{what}: {:?}", t0.elapsed());
         };
-        time("script_for_render", &mut |s| drop(std::hint::black_box(s.script_for_render(false, -1))));
-        time("script_for_render at", &mut |s| drop(std::hint::black_box(s.script_for_render(false, 100_000))));
-        time("copy all", &mut |s| drop(std::hint::black_box(s.copy_rows(&all))));
-        time("set style all", &mut |s| s.set_rows_field(&all, "style", "Other"));
+        time("script_for_render", &mut |s| {
+            drop(std::hint::black_box(s.script_for_render(false, -1)))
+        });
+        time("script_for_render at", &mut |s| {
+            drop(std::hint::black_box(s.script_for_render(false, 100_000)))
+        });
+        time("copy all", &mut |s| {
+            drop(std::hint::black_box(s.copy_rows(&all)))
+        });
+        time("set style all", &mut |s| {
+            s.set_rows_field(&all, "style", "Other")
+        });
         time("sort by end", &mut |s| s.sort_rows(1, false, &[]));
-        time("column_info", &mut |s| drop(std::hint::black_box(s.column_info())));
-        time("rows_at", &mut |s| drop(std::hint::black_box(s.rows_at(100_000_000))));
+        time("column_info", &mut |s| {
+            drop(std::hint::black_box(s.column_info()))
+        });
+        time("rows_at", &mut |s| {
+            drop(std::hint::black_box(s.rows_at(100_000_000)))
+        });
         let find = |pattern: &str, regex: bool| FindSpec {
             pattern: pattern.into(),
             replacement: "X".into(),
             regex,
             ..Default::default()
         };
-        time("find last", &mut |s| drop(s.find(&find("number 99999 ", false), 0)));
-        time("find regex last", &mut |s| drop(s.find(&find(r"9999\d ", true), 0)));
-        time("replace all", &mut |s| drop(s.replace_all(&find("with", false))));
+        time("find last", &mut |s| {
+            drop(s.find(&find("number 99999 ", false), 0))
+        });
+        time("find regex last", &mut |s| {
+            drop(s.find(&find(r"9999\d ", true), 0))
+        });
+        time("replace all", &mut |s| {
+            drop(s.replace_all(&find("with", false)))
+        });
         time("filter comments", &mut |s| {
-            drop(s.filter(&FilterSpec { hide_comments: true, ..Default::default() }))
+            drop(s.filter(&FilterSpec {
+                hide_comments: true,
+                ..Default::default()
+            }))
         });
         time("shift all", &mut |s| {
-            s.shift(&ShiftSpec { amount: 1000, ..Default::default() }, &[]);
+            s.shift(
+                &ShiftSpec {
+                    amount: 1000,
+                    ..Default::default()
+                },
+                &[],
+            );
         });
         time("undo replace", &mut |s| assert!(s.undo()));
         let half: Vec<usize> = (0..50_000).map(|i| i * 2).collect();

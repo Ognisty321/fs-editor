@@ -767,7 +767,12 @@ impl Document {
             if gone.next_if_eq(&i).is_some() {
                 removed += 1;
                 // copy the comments only: the entry may be shared with an undo state
-                carry.extend(e.leading.iter().filter(|l| !l.text.trim().is_empty()).cloned());
+                carry.extend(
+                    e.leading
+                        .iter()
+                        .filter(|l| !l.text.trim().is_empty())
+                        .cloned(),
+                );
                 continue;
             }
             let mut e = e;
@@ -1100,7 +1105,8 @@ impl Parser {
                             (Some(f), _) => f,
                             (None, Some(f)) => &f.fields,
                             (None, None) => {
-                                default = EventField::default_format(version_hint.unwrap_or_default());
+                                default =
+                                    EventField::default_format(version_hint.unwrap_or_default());
                                 &default
                             }
                         };

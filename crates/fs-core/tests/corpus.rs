@@ -169,8 +169,18 @@ fn later_format_line_applies_to_the_following_events() {
                Dialogue: 0,0:00:03.00,0:00:04.00,Top,second, with comma\n\
                [Events]\nFormat: Start, Text\n";
     let doc = Document::parse(src);
-    let ev: Vec<_> = doc.events().iter().map(|e| (e.event.style.clone(), e.event.text.clone())).collect();
-    assert_eq!(ev, [("Default".into(), "first".into()), ("Top".into(), "second, with comma".into())]);
+    let ev: Vec<_> = doc
+        .events()
+        .iter()
+        .map(|e| (e.event.style.clone(), e.event.text.clone()))
+        .collect();
+    assert_eq!(
+        ev,
+        [
+            ("Default".into(), "first".into()),
+            ("Top".into(), "second, with comma".into())
+        ]
+    );
     assert_eq!(doc.to_ass_string(), src);
 }
 
@@ -200,14 +210,23 @@ fn batch_insert_and_remove_match_single_steps() {
             assert_eq!(b.remove_events(&rows), rows.len());
             assert_eq!(a.to_ass_string(), b.to_ass_string());
 
-            let items: Vec<(usize, fs_core::Event)> =
-                rows.iter().map(|&r| (r + 1, doc.event(r).unwrap().clone())).collect();
+            let items: Vec<(usize, fs_core::Event)> = rows
+                .iter()
+                .map(|&r| (r + 1, doc.event(r).unwrap().clone()))
+                .collect();
             let (mut a, mut b) = (doc.clone(), doc.clone());
             for (j, (r, e)) in items.iter().enumerate() {
                 a.insert_event(r + j, e.clone());
             }
             let at = b.insert_events(items.clone());
-            assert_eq!(at, items.iter().enumerate().map(|(j, (r, _))| r + j).collect::<Vec<_>>());
+            assert_eq!(
+                at,
+                items
+                    .iter()
+                    .enumerate()
+                    .map(|(j, (r, _))| r + j)
+                    .collect::<Vec<_>>()
+            );
             assert_eq!(a.to_ass_string(), b.to_ass_string());
             let ids = |d: &Document| d.events().iter().map(|e| e.id).collect::<Vec<_>>();
             assert_eq!(ids(&a), ids(&b));

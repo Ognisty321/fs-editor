@@ -3,7 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use fs_audio::{
-    AudioSource, FreqScale, PcmBuffer, Peak, PeakCache, Player, Spectrogram, SpectrumConfig, SpectrumView,
+    AudioSource, FreqScale, PcmBuffer, Peak, PeakCache, Player, Spectrogram, SpectrumConfig,
+    SpectrumView,
 };
 use fs_core::vfr::{Framerate, TimeType};
 
@@ -133,7 +134,9 @@ impl Audio {
         // A track over a minute decodes in parts, each with its own decoder; BestSource
         // seeks sample-exactly, so this gives the same samples (checked by bench_media).
         let n = if p.num_samples > i64::from(p.sample_rate) * 60 {
-            std::thread::available_parallelism().map_or(1, |n| n.get()).min(4)
+            std::thread::available_parallelism()
+                .map_or(1, |n| n.get())
+                .min(4)
         } else {
             1
         };
@@ -300,11 +303,19 @@ mod tests {
     #[ignore]
     fn bench_media() {
         use std::time::Instant;
-        let Ok(path) = std::env::var("FSED_BENCH_MEDIA") else { return };
+        let Ok(path) = std::env::var("FSED_BENCH_MEDIA") else {
+            return;
+        };
         let cache = std::env::temp_dir().join("fsb-bench-cache");
         let cache = cache.to_str().unwrap();
         let t0 = Instant::now();
-        let src = fs_media::Audio::open(std::path::Path::new(&path), -1, Some(&super::cache(cache)), |_, _| true).unwrap();
+        let src = fs_media::Audio::open(
+            std::path::Path::new(&path),
+            -1,
+            Some(&super::cache(cache)),
+            |_, _| true,
+        )
+        .unwrap();
         eprintln!("audio source open: {:?}", t0.elapsed());
         let t0 = Instant::now();
         let pcm = fs_audio::PcmBuffer::load(&src, |_, _| true).unwrap();
@@ -314,14 +325,22 @@ mod tests {
             let h: Vec<_> = (0..4)
                 .map(|_| {
                     sc.spawn(|| {
-                        fs_media::Audio::open(std::path::Path::new(&path), -1, Some(&super::cache(cache)), |_, _| true)
-                            .unwrap()
+                        fs_media::Audio::open(
+                            std::path::Path::new(&path),
+                            -1,
+                            Some(&super::cache(cache)),
+                            |_, _| true,
+                        )
+                        .unwrap()
                     })
                 })
                 .collect();
             h.into_iter().map(|h| h.join().unwrap()).collect()
         });
-        let refs: Vec<&dyn fs_audio::AudioSource> = srcs.iter().map(|s| s as &dyn fs_audio::AudioSource).collect();
+        let refs: Vec<&dyn fs_audio::AudioSource> = srcs
+            .iter()
+            .map(|s| s as &dyn fs_audio::AudioSource)
+            .collect();
         let par = fs_audio::PcmBuffer::load_parts(&refs, |_, _| true).unwrap();
         eprintln!("audio open+decode x4: {:?}", t0.elapsed());
         let diff: Vec<usize> = (pcm.samples().iter().zip(par.samples()))
@@ -340,18 +359,29 @@ mod tests {
         drop(fs_audio::peaks::PeakCache::new(pcm.clone()));
         eprintln!("peak cache: {:?}", t0.elapsed());
         let t0 = Instant::now();
-        drop(fs_audio::spectrum::Spectrogram::new(pcm.clone(), Default::default()));
+        drop(fs_audio::spectrum::Spectrogram::new(
+            pcm.clone(),
+            Default::default(),
+        ));
         eprintln!("spectrogram: {:?}", t0.elapsed());
         let t0 = Instant::now();
         drop(fs_audio::player::Player::new(pcm, None));
         eprintln!("player: {:?}", t0.elapsed());
         let t0 = Instant::now();
         let a = Audio::open(&path, cache).unwrap();
-        eprintln!("audio open: {:?} ({} ms of audio)", t0.elapsed(), a.duration_ms());
+        eprintln!(
+            "audio open: {:?} ({} ms of audio)",
+            t0.elapsed(),
+            a.duration_ms()
+        );
         let (w, h) = (1600usize, 300usize);
         let mut peaks = vec![0f32; w * 3];
         let t0 = Instant::now();
-        a.peaks(0.0, a.rate() as f64 * a.duration_ms() as f64 / 1000.0 / w as f64, &mut peaks);
+        a.peaks(
+            0.0,
+            a.rate() as f64 * a.duration_ms() as f64 / 1000.0 / w as f64,
+            &mut peaks,
+        );
         eprintln!("peaks whole file: {:?}", t0.elapsed());
         let t0 = Instant::now();
         a.peaks(48000.0 * 60.0, 48000.0 * 10.0 / w as f64, &mut peaks);
@@ -360,13 +390,26 @@ mod tests {
         let spp = a.rate() as f64 * 10.0 / w as f64;
         for k in 0..3 {
             let t0 = Instant::now();
-            a.spectrum(a.rate() as f64 * (60.0 + k as f64 * 2.0), spp, w, h, false, &mut spec);
+            a.spectrum(
+                a.rate() as f64 * (60.0 + k as f64 * 2.0),
+                spp,
+                w,
+                h,
+                false,
+                &mut spec,
+            );
             eprintln!("spectrum 10 s view #{k}: {:?}", t0.elapsed());
         }
         let t0 = Instant::now();
         let mut v = super::Video::open(&path, cache).unwrap();
         let info = v.info();
-        eprintln!("video open: {:?} ({}x{}, {} frames)", t0.elapsed(), info.width, info.height, info.frames);
+        eprintln!(
+            "video open: {:?} ({}x{}, {} frames)",
+            t0.elapsed(),
+            info.width,
+            info.height,
+            info.frames
+        );
         let mut px = vec![0u8; info.width as usize * info.height as usize * 4];
         let t0 = Instant::now();
         for f in 1000..1100 {

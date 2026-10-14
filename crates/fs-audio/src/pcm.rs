@@ -109,7 +109,9 @@ impl PcmBuffer {
             let own = parts.next();
             for (k, (slice, src)) in parts {
                 let (done, cancel) = (&done, &cancel);
-                sc.spawn(move || decode_part(*src, (k * part) as i64, slice, done, cancel, &mut |_| true));
+                sc.spawn(move || {
+                    decode_part(*src, (k * part) as i64, slice, done, cancel, &mut |_| true)
+                });
             }
             if let Some((_, (slice, src))) = own {
                 decode_part(*src, 0, slice, &done, &cancel, &mut |d| progress(d, total));
