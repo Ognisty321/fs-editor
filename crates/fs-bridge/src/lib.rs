@@ -530,6 +530,19 @@ pub mod ffi {
         fn load_autoload(self: &mut Automation) -> Vec<String>;
         fn load_script(self: &mut Automation, path: &str) -> Result<()>;
         fn macros(self: &Automation) -> Vec<MacroItem>;
+        fn filters(self: &Automation) -> Vec<MacroItem>;
+        /// False when the user cancelled a filter's settings.
+        fn export_filtered(
+            self: &Automation,
+            ids: &[usize],
+            session: &Session,
+            path: &str,
+            fix_styles: bool,
+            fps_from: &str,
+            fps_to: &str,
+            video: &[i64],
+            encoding: &str,
+        ) -> Result<bool>;
         fn macro_enabled(
             self: &Automation,
             id: usize,

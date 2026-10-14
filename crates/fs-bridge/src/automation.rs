@@ -216,6 +216,8 @@ pub struct Automation {
     scripts: Vec<Script>,
     /// Flat macro list: (script index, macro index).
     macros: Vec<(usize, usize)>,
+    /// Flat export filter list, highest priority first like Aegisub's.
+    filters: Vec<(usize, usize)>,
 }
 
 impl Automation {
@@ -227,6 +229,7 @@ impl Automation {
             host,
             scripts: Vec::new(),
             macros: Vec::new(),
+            filters: Vec::new(),
         }
     }
 
@@ -250,6 +253,14 @@ impl Automation {
             .enumerate()
             .flat_map(|(s, sc)| (0..sc.macros.len()).map(move |m| (s, m)))
             .collect();
+        self.filters = self
+            .scripts
+            .iter()
+            .enumerate()
+            .flat_map(|(s, sc)| (0..sc.filters.len()).map(move |f| (s, f)))
+            .collect();
+        let prio = |&(s, f): &(usize, usize)| -self.scripts[s].filters[f].priority;
+        self.filters.sort_by_key(prio);
     }
 
     fn add(&mut self, path: &Path) -> Result<(), String> {
@@ -297,6 +308,61 @@ impl Automation {
                 description: self.scripts[s].macros[m].description.clone(),
             })
             .collect()
+    }
+
+    pub fn filters(&self) -> Vec<MacroItem> {
+        self.filters
+            .iter()
+            .enumerate()
+            .map(|(id, &(s, f))| MacroItem {
+                id,
+                script: self.scripts[s].name.clone(),
+                name: self.scripts[s].filters[f].name.clone(),
+                description: self.scripts[s].filters[f].description.clone(),
+            })
+            .collect()
+    }
+
+    /// Aegisub's Export: the chosen filters run on a copy in priority order, then the copy is saved.
+    // shortcut: a filter's settings are asked in its own dialog at export time, not inline in the export dialog; inline them if users want to set them up front.
+    #[allow(clippy::too_many_arguments)]
+    pub fn export_filtered(
+        &self,
+        ids: &[usize],
+        session: &Session,
+        path: &str,
+        fix_styles: bool,
+        fps_from: &str,
+        fps_to: &str,
+        video: &[i64],
+        encoding: &str,
+    ) -> Result<bool, String> {
+        let ctx = Self::context(session);
+        let mut doc = session.ed.doc.clone();
+        for (id, &(s, f)) in self.filters.iter().enumerate() {
+            if !ids.contains(&id) {
+                continue;
+            }
+            let script = &self.scripts[s];
+            let mut settings = Default::default();
+            if let Some(d) = script
+                .filter_config(f, &doc, &ctx)
+                .map_err(|e| e.to_string())?
+            {
+                let r = self.host.dialog(&d);
+                if r.button.is_none() {
+                    return Ok(false);
+                }
+                settings = r.values;
+            }
+            doc = match script.run_filter(f, &doc, &settings, &ctx) {
+                Ok(d) => d,
+                Err(RunError::Cancelled) => return Ok(false),
+                Err(e) => return Err(e.to_string()),
+            };
+        }
+        session.export_doc(doc, path, fix_styles, fps_from, fps_to, video, encoding)?;
+        Ok(true)
     }
 
     fn context(session: &Session) -> Context {
@@ -419,6 +485,36 @@ end)"#,
         assert_eq!(s.row(0).text, "ABC");
         assert!(s.undo());
         assert_eq!(s.row(0).text, "abc");
+    }
+
+    #[test]
+    fn export_filters_run_on_the_copy() {
+        let dir = std::env::temp_dir().join(format!("fsb-filter-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("f.lua");
+        std::fs::write(
+            &script,
+            r#"script_name="F"
+aegisub.register_filter("Late", "", 1, function(subs) local l = subs[#subs]; l.text = l.text .. "!"; subs[#subs] = l end)
+aegisub.register_filter("Early", "", 9, function(subs) local l = subs[#subs]; l.text = l.text .. "?"; subs[#subs] = l end)"#,
+        )
+        .unwrap();
+        let data = concat!(env!("CARGO_MANIFEST_DIR"), "/../fs-automation");
+        let mut a = Automation::new(data, dir.join("user").to_str().unwrap());
+        a.load_script(script.to_str().unwrap()).unwrap();
+        let names: Vec<String> = a.filters().into_iter().map(|f| f.name).collect();
+        assert_eq!(names, ["Early", "Late"]);
+        let mut s = Session::default();
+        let mut r = s.row(0);
+        r.text = "x".into();
+        s.set_row(0, &r, "");
+        let out = dir.join("out.ass");
+        assert!(
+            a.export_filtered(&[0, 1], &s, out.to_str().unwrap(), false, "", "", &[], "")
+                .unwrap()
+        );
+        assert!(std::fs::read_to_string(&out).unwrap().contains(",x?!"));
+        assert_eq!(s.row(0).text, "x");
     }
 
     #[test]

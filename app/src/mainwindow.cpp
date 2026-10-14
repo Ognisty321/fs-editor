@@ -37,6 +37,7 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QCheckBox>
@@ -460,6 +461,17 @@ void MainWindow::buildMenus() {
         f->addRow(tr("Subtitles timed to:"), from);
         f->addRow(tr("Convert to:"), to);
         f->addRow(tr("Text encoding:"), enc);
+        // Automation export filters, run on the copy before the steps above
+        auto *filters = new QListWidget(&d);
+        const QStringList checked = st.value("export/filters").toStringList();
+        for (const auto &fi : (*m_automation)->filters()) {
+            auto *it = new QListWidgetItem(fs::q(fi.name), filters);
+            it->setToolTip(fs::q(fi.description));
+            it->setCheckState(checked.contains(fs::q(fi.name)) ? Qt::Checked : Qt::Unchecked);
+        }
+        filters->setMaximumHeight(110);
+        if (filters->count()) f->addRow(tr("Automation filters:"), filters);
+        else filters->hide();
         auto sync = [=] { from->setEnabled(fps->isChecked()), to->setEnabled(fps->isChecked()); };
         connect(fps, &QCheckBox::toggled, &d, sync);
         sync();
@@ -468,8 +480,12 @@ void MainWindow::buildMenus() {
         connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
         connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
         f->addRow(bb);
-        // shortcut: Automation export filters are not listed here (the CLI `lua` command runs them); add when asked.
         if (d.exec() != QDialog::Accepted) return;
+        std::vector<size_t> ids;
+        QStringList on;
+        for (int k = 0; k < filters->count(); ++k)
+            if (filters->item(k)->checkState() == Qt::Checked) ids.push_back(size_t(k)), on << filters->item(k)->text();
+        st.setValue("export/filters", on);
         st.setValue("export/fixStyles", fix->isChecked());
         st.setValue("export/fps", fps->isChecked());
         st.setValue("export/fpsTo", to->currentText());
@@ -481,10 +497,21 @@ void MainWindow::buildMenus() {
         };
         const auto tc = t->video()->timecodes();
         try {
-            t->s().export_copy(fs::Utf8(p), fix->isChecked(), fs::Utf8(value(from)),
-                               fs::Utf8(fps->isChecked() ? value(to) : QString()), {tc.data(), tc.size()},
-                               fs::Utf8(enc->currentText()));
-            status(tr("Exported %1").arg(QFileInfo(p).fileName()));
+            const QString fpsTo = fps->isChecked() ? value(to) : QString();
+            bool done = true;
+            if (ids.empty())
+                t->s().export_copy(fs::Utf8(p), fix->isChecked(), fs::Utf8(value(from)), fs::Utf8(fpsTo),
+                                   {tc.data(), tc.size()}, fs::Utf8(enc->currentText()));
+            else
+                done = (*m_automation)->export_filtered(fs::slice(ids), t->s(), fs::Utf8(p), fix->isChecked(),
+                                                        fs::Utf8(value(from)), fs::Utf8(fpsTo), {tc.data(), tc.size()},
+                                                        fs::Utf8(enc->currentText()));
+            if (const QString log = fs::q((*m_automation)->take_log()); !log.trimmed().isEmpty()) {
+                auto *edit = findChild<QPlainTextEdit *>("log");
+                edit->appendPlainText(log);
+                edit->parentWidget()->show();
+            }
+            if (done) status(tr("Exported %1").arg(QFileInfo(p).fileName()));
         } catch (const std::exception &e) {
             QMessageBox::warning(this, tr("Export"), QString::fromUtf8(e.what()));
         }

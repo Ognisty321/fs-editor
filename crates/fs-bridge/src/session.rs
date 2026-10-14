@@ -656,7 +656,29 @@ impl Session {
         video: &[i64],
         encoding: &str,
     ) -> Result<(), String> {
-        let mut doc = self.ed.doc.clone();
+        self.export_doc(
+            self.ed.doc.clone(),
+            path,
+            fix_styles,
+            fps_from,
+            fps_to,
+            video,
+            encoding,
+        )
+    }
+
+    /// `export_copy` of an already transformed document (automation export filters).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn export_doc(
+        &self,
+        mut doc: Document,
+        path: &str,
+        fix_styles: bool,
+        fps_from: &str,
+        fps_to: &str,
+        video: &[i64],
+        encoding: &str,
+    ) -> Result<(), String> {
         if fix_styles {
             ops::fix_styles(&mut doc);
         }
