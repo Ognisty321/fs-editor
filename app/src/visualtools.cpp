@@ -274,6 +274,19 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     }
     ch->addStretch();
     m_sub->addWidget(scale);
+    // Z rotation (Kainote): the angle from two points, e.g. along a sign's edge
+    auto *rot = new QWidget(m_sub);
+    auto *rh = new QHBoxLayout(rot);
+    rh->setContentsMargins(6, 0, 0, 0);
+    auto *two = new QToolButton(rot);
+    two->setIcon(icon("line", QColor(0x4aa3ff)));
+    two->setToolTip(tr("Set the angle from 2 points: drag along an edge in the video"));
+    two->setCheckable(true);
+    two->setAutoRaise(true);
+    connect(two, &QToolButton::toggled, this, [this](bool on) { m_twoPoints = on; });
+    rh->addWidget(two);
+    rh->addStretch();
+    m_sub->addWidget(rot);
     h->addWidget(m_sub);
     h->addStretch();
     m_invert = invert;
@@ -284,7 +297,7 @@ void VisualTools::setTool(int t) {
     m_tool = t;
     if (t < int(m_buttons.size())) m_buttons[t]->setChecked(true);
     if (m_sub) {
-        m_sub->setCurrentIndex(t == VClip || t == Draw || t == RClip ? 1 : t == Pos || t == Move ? 2 : t == Shifter ? 3 : t == AllTags ? 4 : t == Scale ? 5 : 0);
+        m_sub->setCurrentIndex(t == VClip || t == Draw || t == RClip ? 1 : t == Pos || t == Move ? 2 : t == Shifter ? 3 : t == AllTags ? 4 : t == Scale ? 5 : t == RotZ ? 6 : 0);
         m_invert->setVisible(t == VClip || t == RClip);
         for (auto *b : m_sub->widget(1)->findChildren<QToolButton *>())
             if (b != m_invert) b->setVisible(t != RClip);
@@ -439,6 +452,11 @@ void VisualTools::paint(QPainter &p) {
         handle(p, tip, true);
         handle(p, org, false, kAccent);
         handle(p, pos, true);
+        if (m_drag == 4) {
+            line(p, m_pressW, m_mouseW, kAccent);
+            handle(p, m_pressW, false, kAccent);
+            handle(p, m_mouseW, false, kAccent);
+        }
         break;
     }
     case RotXY: {
@@ -545,6 +563,7 @@ bool VisualTools::press(QMouseEvent *e) {
         break;
     case RotZ:
         if (near(w({m_v.org_x, m_v.org_y}), m_pressW, 9)) m_drag = 2;
+        else if (m_twoPoints) m_drag = 4;
         break;
     case RClip:
         if (m_v.clip == 1) {
@@ -673,6 +692,14 @@ bool VisualTools::move(QMouseEvent *e) {
         if (m_drag == 2) {
             const QPointF o = QPointF(m_start.org_x, m_start.org_y) + delta;
             apply(QString("\\org(%1,%2)").arg(n2(o.x()), n2(o.y())));
+            break;
+        }
+        if (m_drag == 4) {
+            const QPointF d = now - m_pressS;
+            if (QLineF(m_pressW, e->position()).length() < 4) break;
+            const double frz = std::fmod(qRadiansToDegrees(std::atan2(-d.y(), d.x())) + 360, 360);
+            apply(QString("\\frz%1").arg(n2(frz)), true);
+            m_box->view()->updateOverlay();
             break;
         }
         const QPointF c = w({m_start.org_x, m_start.org_y});
