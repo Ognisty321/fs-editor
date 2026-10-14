@@ -167,6 +167,13 @@ void spell::reload() {
             if (auto *h = e->document()->findChild<QSyntaxHighlighter *>()) h->rehighlight();
 }
 
+void spell::addWord(const QString &word) {
+    QSettings st;
+    const QString key = "spell/user/" + g_spellLang;
+    st.setValue(key, st.value(key).toStringList() << word);
+    reload(); // reload applies the user list
+}
+
 // Suggestions and "Add to dictionary" for a misspelled word under the mouse.
 void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
     std::unique_ptr<QMenu> m(createStandardContextMenu(e->pos()));
@@ -202,12 +209,7 @@ void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
                 m->insertAction(first, none);
             }
             auto *add = new QAction(tr("Add \"%1\" to dictionary").arg(word), m.get());
-            connect(add, &QAction::triggered, this, [word] {
-                QSettings st;
-                const QString key = "spell/user/" + g_spellLang;
-                st.setValue(key, st.value(key).toStringList() << word);
-                spell::reload(); // reload applies the user list
-            });
+            connect(add, &QAction::triggered, this, [word] { spell::addWord(word); });
             m->insertAction(first, add);
             m->insertSeparator(first);
             break;
@@ -740,6 +742,13 @@ void EditBox::commit(const char *field) {
 }
 
 void EditBox::focusText() { m_text->setFocus(); }
+
+void EditBox::selectText(int from, int length) {
+    QTextCursor c(m_text->document());
+    c.setPosition(from);
+    c.setPosition(from + length, QTextCursor::KeepAnchor);
+    m_text->setTextCursor(c);
+}
 
 void EditBox::nextLine() {
     const auto vis = m_tab->grid()->visibleRows();

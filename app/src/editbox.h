@@ -26,6 +26,7 @@ fsb::Speller *get(); // nullptr when disabled or no dictionary could be loaded
 void reload();       // after a settings change: reload the dictionary, re-highlight
 QString dir();
 QStringList languages();
+void addWord(const QString &word); // to the user dictionary of the loaded language
 } // namespace spell
 
 class TimeEdit : public QLineEdit {
@@ -68,6 +69,7 @@ public:
     void load(int row);
     void reload();
     void focusText();
+    void selectText(int from, int length); // UTF-16 positions in the line text
     int row() const { return m_row; }
 
 protected:

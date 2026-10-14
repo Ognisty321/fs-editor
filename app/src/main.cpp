@@ -5,6 +5,7 @@
 
 #include <QAbstractButton>
 #include <QApplication>
+#include <QDialog>
 #include <QDropEvent>
 #include <QMimeData>
 #include <QSettings>
@@ -46,6 +47,15 @@ static LONG WINAPI crashHandler(EXCEPTION_POINTERS *ep) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 #endif
+
+// The dialog a smoke action opened: a modal one, else the newest visible modeless one.
+static QWidget *smokeDialog(QWidget &w) {
+    QWidget *top = QApplication::activeModalWidget();
+    if (!top)
+        for (auto *d : w.findChildren<QDialog *>())
+            if (d->isVisible()) top = d;
+    return top;
+}
 
 int main(int argc, char **argv) {
 #ifdef _WIN32
@@ -105,14 +115,14 @@ int main(int argc, char **argv) {
         });
     // FSED_SMOKE_CLICK="Check" presses that button in the open dialog.
     if (const QString text = qEnvironmentVariable("FSED_SMOKE_CLICK"); !text.isEmpty())
-        QTimer::singleShot(std::max(800, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 5 / 6), &w, [text] {
-            if (auto *top = QApplication::activeModalWidget())
+        QTimer::singleShot(std::max(800, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 5 / 6), &w, [&w, text] {
+            if (auto *top = smokeDialog(w))
                 for (auto *b : top->findChildren<QAbstractButton *>())
                     if (b->text() == text) return b->click();
         });
     if (const QString out = qEnvironmentVariable("FSED_SMOKE"); !out.isEmpty())
         QTimer::singleShot(std::max(1000, qEnvironmentVariableIntValue("FSED_SMOKE_MS")), &w, [&w, out] {
-            QWidget *top = QApplication::activeModalWidget();
+            QWidget *top = smokeDialog(w);
             (top ? top : &w)->grab().save(out);
             QApplication::exit(0);
         });
