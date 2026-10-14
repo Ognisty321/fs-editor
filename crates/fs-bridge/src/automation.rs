@@ -424,7 +424,7 @@ impl Automation {
             .frames
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .set(video, session.script_for_render(false));
+            .set(video, session.script_for_render(false, -1));
         let out = match self.scripts[s].run_macro(m, &session.ed.doc, &sel, act, &ctx) {
             Ok(o) => o,
             Err(RunError::Cancelled) => return Ok(MacroResult::default()),

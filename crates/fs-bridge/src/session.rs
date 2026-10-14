@@ -1477,12 +1477,26 @@ impl Session {
 
     /// The script libass renders: in TL mode with "hide original" only the
     /// translations are shown.
-    pub fn script_for_render(&self, hide_original: bool) -> String {
-        if self.tl && hide_original {
-            tlmode::translation_only(&self.ed.doc).to_ass_string()
+    /// The script for libass. `at_ms >= 0` keeps only the lines shown at that
+    /// time: Aegisub sends just those after an edit, and the whole file once
+    /// another frame is wanted.
+    pub fn script_for_render(&self, hide_original: bool, at_ms: i64) -> String {
+        let mut doc = if self.tl && hide_original {
+            tlmode::translation_only(&self.ed.doc)
+        } else if at_ms >= 0 {
+            self.ed.doc.clone() // sections are shared, only the kept lines are copied
         } else {
-            self.ed.doc.to_ass_string()
+            return self.ed.doc.to_ass_string();
+        };
+        if at_ms >= 0 {
+            // libass reads centiseconds: keep lines within 10 ms of the frame time
+            let (t, slack) = (Time(at_ms), Time(10));
+            doc.event_entries_mut().retain(|e| {
+                let e = &e.event;
+                !e.is_comment() && e.start <= t + slack && e.end + slack > t
+            });
         }
+        doc.to_ass_string()
     }
 
     // ---- translation mode -------------------------------------------------
@@ -1778,6 +1792,17 @@ mod tests {
     const ASS: &str = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,one\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,two\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,three\n";
 
     #[test]
+    fn render_script_of_one_frame_keeps_its_lines() {
+        let s = session(ASS);
+        let text = s.script_for_render(false, 3500);
+        assert!(text.contains(",,two") && !text.contains(",,one") && !text.contains(",,three"));
+        assert!(text.contains("Style: Default"));
+        // the end of a line (centisecond-rounded) still counts within 10 ms
+        assert!(s.script_for_render(false, 1995).contains(",,one"));
+        assert_eq!(s.script_for_render(false, -1), s.ed.doc.to_ass_string());
+    }
+
+    #[test]
     fn open_as_forces_the_encoding() {
         let p = std::env::temp_dir().join(format!("fsb-cp1251-{}.srt", std::process::id()));
         let (bytes, _, _) = encoding_rs::WINDOWS_1251.encode("1\n00:00:01,000 --> 00:00:02,000\nПривет\n");
@@ -2049,7 +2074,8 @@ mod tests {
             f(&mut s);
             eprintln!("{what}: {:?}", t0.elapsed());
         };
-        time("script_for_render", &mut |s| drop(std::hint::black_box(s.script_for_render(false))));
+        time("script_for_render", &mut |s| drop(std::hint::black_box(s.script_for_render(false, -1))));
+        time("script_for_render at", &mut |s| drop(std::hint::black_box(s.script_for_render(false, 100_000))));
         time("copy all", &mut |s| drop(std::hint::black_box(s.copy_rows(&all))));
         time("set style all", &mut |s| s.set_rows_field(&all, "style", "Other"));
         time("sort by end", &mut |s| s.sort_rows(1, false, &[]));

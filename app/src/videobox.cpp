@@ -43,7 +43,7 @@ void FrameWorker::render(quint64 id, qint64 frame, qint64 ms, bool subs) {
         else img.fill(QColor(0x30, 0x30, 0x30)); // dummy video
         if (subs && m_media->renderer) {
             if (m_media->scriptDirty) {
-                (*m_media->renderer)->set_script(fs::Utf8(m_media->script));
+                (*m_media->renderer)->set_script(m_media->script);
                 m_media->scriptDirty = false;
             }
             (*m_media->renderer)->blend(ms, size_t(img.width()), size_t(img.height()), size_t(img.width()),
@@ -443,6 +443,7 @@ void VideoBox::setTimecodes(std::vector<std::int64_t> tc) {
         tc.assign(own.begin(), own.end());
     }
     m_timecodes = std::move(tc);
+    m_scriptAt = -2; // frame times moved
     updateTimeField();
 }
 
@@ -484,6 +485,7 @@ void VideoBox::open(const QString &path) {
             m_dummyFps = 0;
             m_path = path;
             m_frame = 0;
+            m_scriptAt = -2;
             m_seek->setRange(0, int(std::max<qint64>(0, m_frames - 1)));
             m_tab->main()->status(QString());
             emit opened();
@@ -513,6 +515,7 @@ void VideoBox::openDummy(int w, int h, double fps, qint64 ms) {
     m_keyframes.clear();
     m_path.clear();
     m_frame = 0;
+    m_scriptAt = -2;
     m_seek->setRange(0, int(std::max<qint64>(0, m_frames - 1)));
     emit opened();
 }
@@ -570,6 +573,7 @@ void VideoBox::seekFrame(qint64 n) {
 
 void VideoBox::request() {
     if (!hasVideo()) return;
+    ensureScript();
     if (m_busy) {
         m_pending = true;
         return;
@@ -581,12 +585,24 @@ void VideoBox::request() {
                               Q_ARG(qint64, time()), Q_ARG(bool, true));
 }
 
+// Aegisub's export strategy: right after an edit libass gets only the lines of
+// the shown frame (cheap for long scripts); the whole script once another frame
+// is wanted, since edits and seeks tend to come in runs.
+void VideoBox::loadScript(bool shownFrameOnly) {
+    auto script = m_tab->s().script_for_render(m_tab->hideOriginal(), shownFrameOnly ? time() : -1);
+    std::lock_guard g(m_media->m);
+    m_media->script = std::move(script);
+    m_media->scriptDirty = true;
+    m_scriptAt = shownFrameOnly ? m_frame : -1;
+}
+
+void VideoBox::ensureScript() {
+    if (m_scriptAt != -1 && m_scriptAt != m_frame) loadScript(false);
+}
+
 void VideoBox::subsChanged() {
-    {
-        std::lock_guard g(m_media->m);
-        m_media->script = fs::q(m_tab->s().script_for_render(m_tab->hideOriginal()));
-        m_media->scriptDirty = true;
-    }
+    if (hasVideo()) loadScript(true);
+    else m_scriptAt = -2; // built when a video opens
     m_tools->reload();
     m_view->updateOverlay();
     request();
@@ -687,6 +703,7 @@ void VideoBox::resetZoom() { m_view->setZoom({0, 0, 1, 1}); }
 
 QImage VideoBox::grabFrame(bool withSubs) {
     if (!hasVideo()) return {};
+    ensureScript();
     std::lock_guard g(m_media->m);
     QImage img(m_media->width, m_media->height, QImage::Format_RGBA8888);
     const rust::Slice<uint8_t> px(img.bits(), size_t(img.sizeInBytes()));
@@ -694,7 +711,8 @@ QImage VideoBox::grabFrame(bool withSubs) {
         if (m_media->video) (*m_media->video)->frame(m_frame, px);
         else img.fill(QColor(0x30, 0x30, 0x30));
         if (withSubs && m_media->renderer) {
-            (*m_media->renderer)->set_script(fs::Utf8(m_media->script));
+            (*m_media->renderer)->set_script(m_media->script);
+            m_media->scriptDirty = false;
             (*m_media->renderer)->blend(time(), size_t(img.width()), size_t(img.height()), size_t(img.width()),
                                         size_t(img.height()), px);
         }

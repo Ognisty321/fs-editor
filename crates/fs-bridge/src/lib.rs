@@ -424,7 +424,7 @@ pub mod ffi {
         fn set_style(self: &mut Session, index: i64, style: &StyleData);
         fn delete_style(self: &mut Session, index: usize);
         fn clean_styles(self: &mut Session) -> Vec<String>;
-        fn script_for_render(self: &Session, hide_original: bool) -> String;
+        fn script_for_render(self: &Session, hide_original: bool, at_ms: i64) -> String;
 
         fn tl_enable(self: &mut Session, on: bool);
         fn set_doubtful(self: &mut Session, rows: &[usize], on: bool);

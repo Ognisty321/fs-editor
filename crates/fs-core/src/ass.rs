@@ -766,8 +766,8 @@ impl Document {
         for (i, e) in old.into_iter().enumerate() {
             if gone.next_if_eq(&i).is_some() {
                 removed += 1;
-                let e = Arc::unwrap_or_clone(e);
-                carry.extend(e.leading.into_iter().filter(|l| !l.text.trim().is_empty()));
+                // copy the comments only: the entry may be shared with an undo state
+                carry.extend(e.leading.iter().filter(|l| !l.text.trim().is_empty()).cloned());
                 continue;
             }
             let mut e = e;

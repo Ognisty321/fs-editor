@@ -30,7 +30,7 @@ struct VideoMedia {
     std::optional<rust::Box<fsb::Video>> video;
     std::optional<rust::Box<fsb::Renderer>> renderer;
     int width = 640, height = 480;
-    QString script;
+    rust::String script;
     bool scriptDirty = false;
 };
 
@@ -148,6 +148,8 @@ protected:
 
 private:
     void request();
+    void loadScript(bool shownFrameOnly);
+    void ensureScript();
     void tick();
     void updateTimeField();
     void openSibling(int dir);
@@ -161,6 +163,7 @@ private:
     QString m_path;
     fsb::VideoInfo m_info{};
     qint64 m_frames = 0, m_frame = 0;
+    qint64 m_scriptAt = -2; // frame of a one-frame script; -1 the whole script; -2 out of date
     std::vector<std::int64_t> m_timecodes, m_keyframes;
     double m_dummyFps = 0;
     bool m_playing = false, m_zoomMode = false;
