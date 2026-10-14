@@ -1,5 +1,6 @@
 #include "dialogs.h"
 
+#include "audiobox.h"
 #include "editbox.h"
 #include "grid.h"
 #include "mainwindow.h"
@@ -12,6 +13,7 @@
 #include <QClipboard>
 #include <QColorDialog>
 #include <QComboBox>
+#include <QCompleter>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QDateTime>
@@ -1396,4 +1398,90 @@ void AttachmentsDialog::refresh() {
                                                 a.font ? tr("Fonts") : tr("Graphics")});
         it->setData(0, Qt::UserRole, a.font);
     }
+}
+
+// ---- styling assistant ----------------------------------------------------------
+
+StylingAssistant::StylingAssistant(QWidget *parent, TabPanel *tab) : QDialog(parent), m_tab(tab) {
+    setWindowTitle(tr("Styling assistant"));
+    setAttribute(Qt::WA_DeleteOnClose);
+    auto *g = new QGridLayout(this);
+    m_text = new QPlainTextEdit(this);
+    m_text->setReadOnly(true);
+    m_text->setFixedHeight(64);
+    m_styles = new QListWidget(this);
+    QStringList names;
+    for (const auto &s : tab->s().styles()) names << fs::q(s.name);
+    m_styles->addItems(names);
+    m_name = new QLineEdit(this);
+    // Aegisub completes the typed prefix to the first matching style
+    auto *c = new QCompleter(names, m_name);
+    c->setCaseSensitivity(Qt::CaseInsensitive);
+    c->setCompletionMode(QCompleter::InlineCompletion);
+    m_name->setCompleter(c);
+    m_seek = new QCheckBox(tr("Seek video to line start time"), this);
+    m_seek->setChecked(QSettings().value("styling/seek", true).toBool());
+    auto *playAudio = new QPushButton(tr("Play audio"), this), *playVideo = new QPushButton(tr("Play video"), this);
+    for (auto *b : {playAudio, playVideo}) b->setAutoDefault(false);
+    g->addWidget(new QLabel(tr("Current line"), this), 0, 0, 1, 2);
+    g->addWidget(m_text, 1, 0, 1, 2);
+    g->addWidget(new QLabel(tr("Styles available"), this), 2, 0);
+    g->addWidget(m_styles, 3, 0, 4, 1);
+    g->addWidget(new QLabel(tr("Set style (Enter: set and go to the next line)"), this), 2, 1);
+    g->addWidget(m_name, 3, 1);
+    g->addWidget(m_seek, 4, 1);
+    auto *h = new QHBoxLayout;
+    h->addWidget(playAudio);
+    h->addWidget(playVideo);
+    g->addLayout(h, 5, 1);
+    g->setRowStretch(6, 1);
+
+    connect(m_name, &QLineEdit::returnPressed, this, [this] { commit(true); });
+    connect(m_name, &QLineEdit::textChanged, this, [this](const QString &t) {
+        const bool known = !m_styles->findItems(t, Qt::MatchFixedString).isEmpty();
+        m_name->setStyleSheet(t.isEmpty() || known ? QString() : "background: #803030");
+    });
+    connect(m_styles, &QListWidget::itemClicked, this, [this](QListWidgetItem *it) {
+        m_name->setText(it->text());
+        commit(false);
+    });
+    connect(m_styles, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *it) {
+        m_name->setText(it->text());
+        commit(true);
+    });
+    connect(m_seek, &QCheckBox::toggled, this, [](bool on) { QSettings().setValue("styling/seek", on); });
+    connect(playAudio, &QPushButton::clicked, this, [this] {
+        if (!m_tab) return;
+        const fsb::Row r = m_tab->s().row(size_t(m_tab->active()));
+        m_tab->audio()->play(r.start, r.end);
+        m_name->setFocus();
+    });
+    connect(playVideo, &QPushButton::clicked, this, [this] {
+        if (m_tab) m_tab->playLine(m_tab->active());
+        m_name->setFocus();
+    });
+    connect(tab, &TabPanel::activeChanged, this, &StylingAssistant::lineChanged);
+    lineChanged();
+}
+
+void StylingAssistant::lineChanged() {
+    if (!m_tab || m_tab->active() < 0) return;
+    const fsb::Row r = m_tab->s().row(size_t(m_tab->active()));
+    m_text->setPlainText(fs::q(r.text));
+    m_name->setText(fs::q(r.style));
+    m_name->selectAll();
+    m_name->setFocus();
+    for (auto *it : m_styles->findItems(fs::q(r.style), Qt::MatchFixedString)) m_styles->setCurrentItem(it);
+    if (m_seek->isChecked()) m_tab->seekVideo(r.start);
+}
+
+void StylingAssistant::commit(bool next) {
+    if (!m_tab || m_tab->active() < 0) return;
+    const auto found = m_styles->findItems(m_name->text(), Qt::MatchFixedString);
+    if (found.isEmpty()) return; // Aegisub: only existing styles
+    const std::vector<size_t> row{size_t(m_tab->active())};
+    m_tab->s().set_rows_field(fs::slice(row), "style", fs::Utf8(found[0]->text()));
+    m_tab->changed();
+    if (next && size_t(m_tab->active() + 1) < m_tab->s().row_count()) m_tab->setActive(m_tab->active() + 1);
+    else lineChanged();
 }

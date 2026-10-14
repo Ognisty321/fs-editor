@@ -20,6 +20,7 @@ class QDoubleSpinBox;
 class QLabel;
 class QTabWidget;
 class QTreeWidget;
+class QPlainTextEdit;
 
 class TagButtonDialog : public QDialog {
     Q_OBJECT
@@ -180,4 +181,21 @@ private:
     void refresh();
     TabPanel *m_tab;
     QTreeWidget *m_list;
+};
+
+// Aegisub's styling assistant: type the start of a style name, Enter sets it on
+// the active line and moves to the next one.
+class StylingAssistant : public QDialog {
+    Q_OBJECT
+public:
+    StylingAssistant(QWidget *parent, TabPanel *tab);
+
+private:
+    void lineChanged();
+    void commit(bool next);
+    QPointer<TabPanel> m_tab;
+    QPlainTextEdit *m_text;
+    QListWidget *m_styles;
+    QLineEdit *m_name;
+    QCheckBox *m_seek;
 };
