@@ -5,8 +5,12 @@
 
 #include <QAbstractButton>
 #include <QApplication>
+#include <QDropEvent>
+#include <QMimeData>
 #include <QSettings>
+#include <QTextEdit>
 #include <QTimer>
+#include <QUrl>
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -84,6 +88,20 @@ int main(int argc, char **argv) {
     if (const QString id = qEnvironmentVariable("FSED_SMOKE_ACTION"); !id.isEmpty())
         QTimer::singleShot(std::max(700, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 2 / 3), &w, [&w, id] {
             if (auto *a = w.action(id)) a->trigger();
+        });
+    // FSED_SMOKE_DROP=file drops it onto the line edit box, like a file dragged from the desktop.
+    if (const QString f = qEnvironmentVariable("FSED_SMOKE_DROP"); !f.isEmpty())
+        QTimer::singleShot(std::max(600, qEnvironmentVariableIntValue("FSED_SMOKE_MS") / 3), &w, [&w, f] {
+            QMimeData md;
+            md.setUrls({QUrl::fromLocalFile(f)});
+            QWidget *target = &w;
+            for (auto *te : w.findChildren<QTextEdit *>())
+                if (te->isVisible()) target = te->viewport();
+            // Qt only delivers a drop to the widget that accepted the drag enter
+            QDragEnterEvent enter(QPointF(5, 5), Qt::CopyAction, &md, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(target, &enter);
+            QDropEvent drop(QPointF(5, 5), Qt::CopyAction, &md, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(target, &drop);
         });
     // FSED_SMOKE_CLICK="Check" presses that button in the open dialog.
     if (const QString text = qEnvironmentVariable("FSED_SMOKE_CLICK"); !text.isEmpty())

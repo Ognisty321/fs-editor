@@ -122,6 +122,7 @@ cd app/build-windows && cpack -C Release
 * `FSED_SMOKE_ACTION=id` uruchamia polecenie menu, np. `styleManager`, `fontCollector` albo `macro:Strip tags/Strip tags`;
 * `FSED_SMOKE_TOOL=N` włącza narzędzie wizualne nr N (kolejność jak na pasku pod wideo);
 * `FSED_SMOKE_CLICK=tekst` klika przycisk o tym napisie w otwartym dialogu, np. `Check`;
+* `FSED_SMOKE_DROP=plik` upuszcza plik na pole edycji linii, tak jak przeciągnięty z pulpitu;
 * `FSED_SMOKE_SET="klucz=wartość;..."` ustawia opcje przed startem, np. `spell/dir=...;spell/lang=pl_PL`.
 
 Smoke test używa osobnej gałęzi ustawień („FS Editor smoke test”), więc nie rusza twojej konfiguracji.
