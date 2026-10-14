@@ -1381,27 +1381,24 @@ impl Writer {
     }
 
     fn event_entry(&mut self, e: &EventEntry, fmt: &[EventField]) {
-        if let Some(o) = e.orig.as_deref() {
-            let reparsed = parse_event_line(o, fmt);
-            if reparsed.as_ref() == Some(&e.event) {
-                self.line(o, e.ending);
-                return;
-            }
-        }
-        let hint = e.orig.as_deref().and_then(|o| {
-            split_key(o).map(|(k, p)| {
-                (
-                    EventKind::from_key(k),
-                    &o[..p],
-                    split_fields(&o[p..], fmt.len()).0,
-                )
-            })
+        let ev = &e.event;
+        // the source line split once: (prefix "Dialogue: ", same kind, fields)
+        let orig = e.orig.as_deref().and_then(|o| {
+            let (k, p) = split_key(o)?;
+            let same_kind = EventKind::from_key(k) == Some(ev.kind);
+            Some((o, &o[..p], same_kind, split_fields(&o[p..], fmt.len()).0))
         });
-        let mut s = String::with_capacity(64 + e.event.text.len());
-        match &hint {
-            Some((Some(k), prefix, _)) if *k == e.event.kind => s.push_str(prefix),
+        if let Some((o, _, true, fields)) = &orig
+            && fmt.iter().zip(fields).all(|(f, v)| ev.field_matches(f, v))
+        {
+            self.line(o, e.ending);
+            return;
+        }
+        let mut s = String::with_capacity(64 + ev.text.len());
+        match &orig {
+            Some((_, prefix, true, _)) => s.push_str(prefix),
             _ => {
-                s.push_str(e.event.kind.key());
+                s.push_str(ev.kind.key());
                 s.push_str(": ");
             }
         }
@@ -1409,18 +1406,11 @@ impl Writer {
             if i > 0 {
                 s.push(',');
             }
-            let new = e.event.get_field(f);
-            if let Some((_, _, fields)) = &hint
-                && let Some(old) = fields.get(i)
-            {
-                let mut tmp = Event::default();
-                tmp.set_field(f, old);
-                if tmp.get_field(f) == new {
-                    s.push_str(old);
-                    continue;
-                }
+            match orig.as_ref().and_then(|(_, _, _, fields)| fields.get(i)) {
+                // an unchanged field keeps its original spelling
+                Some(old) if ev.field_matches(f, old) => s.push_str(old),
+                _ => s.push_str(&ev.get_field(f)),
             }
-            s.push_str(&new);
         }
         self.line(&s, e.ending);
     }
@@ -1434,18 +1424,4 @@ fn parse_style_line(line: &str, fmt: &[StyleField], version: AssVersion) -> Opti
         st.set_field(f, v, version);
     }
     Some(st)
-}
-
-fn parse_event_line(line: &str, fmt: &[EventField]) -> Option<Event> {
-    let (k, p) = split_key(line)?;
-    let kind = EventKind::from_key(k)?;
-    let (fields, _) = split_fields(&line[p..], fmt.len());
-    let mut ev = Event {
-        kind,
-        ..Default::default()
-    };
-    for (f, v) in fmt.iter().zip(fields) {
-        ev.set_field(f, v);
-    }
-    Some(ev)
 }

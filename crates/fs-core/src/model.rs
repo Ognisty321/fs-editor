@@ -671,6 +671,29 @@ impl Event {
         }
     }
 
+    /// Whether `v` holds this event's value of `f` (what `set_field` would store),
+    /// without allocating: the writer asks this of every field of every line.
+    pub fn field_matches(&self, f: &EventField, v: &str) -> bool {
+        match f {
+            EventField::Layer => self.layer == parse_i32(v),
+            EventField::Marked => true,
+            EventField::Start => self.start == Time::parse_ass(v).unwrap_or_default(),
+            EventField::End => self.end == Time::parse_ass(v).unwrap_or_default(),
+            EventField::Style => self.style == trim_sp(v),
+            EventField::Name => self.actor == trim_sp(v),
+            EventField::MarginL => self.margin_l == parse_i32(v),
+            EventField::MarginR => self.margin_r == parse_i32(v),
+            EventField::MarginV | EventField::MarginT => self.margin_v == parse_i32(v),
+            EventField::MarginB => self.margin_b == parse_i32(v),
+            EventField::Effect => self.effect == trim_sp(v),
+            EventField::Text => self.text == v,
+            EventField::Unknown(name) => {
+                let cur = self.extra.iter().find(|(n, _)| n == name);
+                cur.map_or("", |(_, x)| x.as_str()) == v
+            }
+        }
+    }
+
     pub fn get_field(&self, f: &EventField) -> String {
         match f {
             EventField::Layer => self.layer.to_string(),
