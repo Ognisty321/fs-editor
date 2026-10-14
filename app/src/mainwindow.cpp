@@ -442,7 +442,6 @@ void MainWindow::buildMenus() {
     ask->setChecked(QSettings().value("main/askSession", true).toBool());
     connect(ask, &QAction::toggled, this, [](bool on) { QSettings().setValue("main/askSession", on); });
     file->addSeparator();
-    add("fontCollector", tr("Fonts collector"), {}, file, [=, this] { FontCollectorDialog(tab()).exec(); });
     add("settings", tr("Settings"), {}, file, [this] { SettingsDialog(this).exec(); });
     add("exit", tr("Exit"), QKeySequence("Alt+F4"), file, [this] { close(); });
 
@@ -650,6 +649,8 @@ void MainWindow::buildMenus() {
     connect(shift, &QAction::triggered, this, [this](bool on) {
         for (auto *t : tabs()) t->showShiftPanel(on);
     });
+    add("fontCollector", tr("Fonts collector"), {}, subs, [=, this] { FontCollectorDialog(tab()).exec(); });
+    add("resample", tr("Resample subtitles"), {}, subs, [=] { ResampleDialog(tab()).exec(); });
     auto *spellOn = add("spellCheck", tr("Spell checker"), {}, subs, {});
     spellOn->setCheckable(true);
     spellOn->setChecked(QSettings().value("spell/enabled", true).toBool());
@@ -657,7 +658,6 @@ void MainWindow::buildMenus() {
         QSettings().setValue("spell/enabled", on);
         spell::reload();
     });
-    add("resample", tr("Resample subtitles"), {}, subs, [=] { ResampleDialog(tab()).exec(); });
     auto *hide = add("hideTags", tr("Hide tags"), {}, subs, {});
     hide->setCheckable(true);
     hide->setChecked(QSettings().value("grid/hideTags").toBool());

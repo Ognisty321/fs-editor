@@ -52,7 +52,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # vcpkg binary packages, so FFmpeg is only compiled when vcpkg.json or the overlay ports change
-      - uses: actions/cache@v6
+      - uses: actions/cache/restore@v6
+        id: vcpkg-cache
         with:
           path: ${{ github.workspace }}/../vcpkg-bin
           key: vcpkg-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'tools/vcpkg-ports/**') }}
@@ -84,6 +85,12 @@ jobs:
       - name: Media dependencies (Unix)
         if: runner.os != 'Windows'
         run: TRIPLET=${{ matrix.triplet }} tools/deps.sh
+      # saved right after the deps build, so a later failing step does not throw it away
+      - uses: actions/cache/save@v6
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ github.workspace }}/../vcpkg-bin
+          key: vcpkg-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'tools/vcpkg-ports/**') }}
       - name: Media tests
         shell: bash
         run: cargo test --locked -p fs-media -p fs-bridge
