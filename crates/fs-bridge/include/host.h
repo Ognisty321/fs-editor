@@ -3,6 +3,8 @@
 #pragma once
 #include "rust/cxx.h"
 
+#include <cstdint>
+
 namespace fsb {
 struct DialogData;
 struct DialogReply;
@@ -20,6 +22,13 @@ public:
     virtual void task(rust::Str text) const = 0;
     virtual void title(rust::Str text) const = 0;
     virtual bool is_cancelled() const = 0;
+};
+
+// Progress of a long open (indexing, decoding), called on the opening thread; false cancels.
+class Progress {
+public:
+    virtual ~Progress() = default;
+    virtual bool report(int64_t done, int64_t total) const = 0;
 };
 
 // Told about a Rust panic on the GUI thread, just before the bridge aborts the process.

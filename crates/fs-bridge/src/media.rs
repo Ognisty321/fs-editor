@@ -24,11 +24,14 @@ pub struct Video {
 }
 
 impl Video {
-    pub fn open(path: &str, cache_dir: &str) -> Result<Self, String> {
-        // shortcut: no progress/cancel while indexing; the GUI runs this on a worker thread with a busy indicator.
-        let inner =
-            fs_media::Video::open(Path::new(path), -1, Some(&cache(cache_dir)), |_, _| true)
-                .map_err(|e| format!("{path}: {e}"))?;
+    /// `progress(done, total)` while indexing; false cancels.
+    pub fn open(
+        path: &str,
+        cache_dir: &str,
+        progress: impl FnMut(i64, i64) -> bool,
+    ) -> Result<Self, String> {
+        let inner = fs_media::Video::open(Path::new(path), -1, Some(&cache(cache_dir)), progress)
+            .map_err(|e| format!("{path}: {e}"))?;
         let fr = inner.framerate();
         Ok(Video { inner, fr })
     }
@@ -127,13 +130,19 @@ impl Audio {
         })
     }
 
-    pub fn open(path: &str, cache_dir: &str) -> Result<Self, String> {
-        let open = || {
-            fs_media::Audio::open(Path::new(path), -1, Some(&cache(cache_dir)), |_, _| true)
+    /// `progress(done, total)` while indexing (first open only) and again while decoding;
+    /// false cancels.
+    pub fn open(
+        path: &str,
+        cache_dir: &str,
+        mut progress: impl FnMut(i64, i64) -> bool,
+    ) -> Result<Self, String> {
+        let open = |progress: &mut dyn FnMut(i64, i64) -> bool| {
+            fs_media::Audio::open(Path::new(path), -1, Some(&cache(cache_dir)), progress)
                 .map_err(|e| format!("{path}: {e}"))
         };
         // the first one indexes the file (once, cached) for the others
-        let first = open()?;
+        let first = open(&mut progress)?;
         let p = first.props();
         // A track over a minute decodes in parts, each with its own decoder; BestSource
         // seeks sample-exactly, so this gives the same samples (checked by bench_media).
@@ -145,14 +154,16 @@ impl Audio {
             1
         };
         let more: Vec<fs_media::Audio> = std::thread::scope(|sc| {
-            let h: Vec<_> = (1..n).map(|_| sc.spawn(open)).collect();
+            let h: Vec<_> = (1..n)
+                .map(|_| sc.spawn(|| open(&mut |_, _| true)))
+                .collect();
             h.into_iter().filter_map(|h| h.join().ok()?.ok()).collect()
         });
         let srcs: Vec<&dyn AudioSource> = std::iter::once(&first)
             .chain(&more)
             .map(|s| s as &dyn AudioSource)
             .collect();
-        let pcm = PcmBuffer::load_parts(&srcs, |_, _| true).map_err(|_| "cancelled".to_string())?;
+        let pcm = PcmBuffer::load_parts(&srcs, progress).map_err(|_| "cancelled".to_string())?;
         Ok(Self::from_pcm(pcm))
     }
 
@@ -263,7 +274,7 @@ mod tests {
     fn spectrum_rows_and_playback() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/media/cfr.mkv");
         let cache = std::env::temp_dir().join("fs-bridge-test-cache");
-        let mut a = Audio::open(path, cache.to_str().unwrap()).unwrap();
+        let mut a = Audio::open(path, cache.to_str().unwrap(), |_, _| true).unwrap();
 
         let (w, h) = (8usize, 200usize);
         let mut out = vec![0f32; w * h];
@@ -372,7 +383,7 @@ mod tests {
         drop(fs_audio::player::Player::new(pcm, None));
         eprintln!("player: {:?}", t0.elapsed());
         let t0 = Instant::now();
-        let a = Audio::open(&path, cache).unwrap();
+        let a = Audio::open(&path, cache, |_, _| true).unwrap();
         eprintln!(
             "audio open: {:?} ({} ms of audio)",
             t0.elapsed(),
@@ -405,7 +416,7 @@ mod tests {
             eprintln!("spectrum 10 s view #{k}: {:?}", t0.elapsed());
         }
         let t0 = Instant::now();
-        let mut v = super::Video::open(&path, cache).unwrap();
+        let mut v = super::Video::open(&path, cache, |_, _| true).unwrap();
         let info = v.info();
         eprintln!(
             "video open: {:?} ({}x{}, {} frames)",

@@ -158,6 +158,8 @@ private:
     std::shared_ptr<VideoMedia> m_media;
     QThread m_thread;
     FrameWorker *m_worker;
+    // set to stop an open still indexing (close, a newer open, destruction)
+    std::shared_ptr<std::atomic_bool> m_openCancel = std::make_shared<std::atomic_bool>(false);
     quint64 m_reqId = 0;
     bool m_busy = false, m_pending = false;
     QString m_path;

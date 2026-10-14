@@ -8,6 +8,8 @@
 
 #include <QRhiWidget>
 #include <QWidget>
+#include <atomic>
+#include <memory>
 #include <optional>
 
 class TabPanel;
@@ -106,6 +108,8 @@ private:
     TabPanel *m_tab;
     std::optional<rust::Box<fsb::Audio>> m_audio;
     QString m_path;
+    // set to stop a load still decoding (close, a newer open, destruction)
+    std::shared_ptr<std::atomic_bool> m_openCancel = std::make_shared<std::atomic_bool>(false);
     qint64 m_duration = 0;
     qint64 m_left = 0;
     double m_msPerPx = 10;

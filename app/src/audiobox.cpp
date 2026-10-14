@@ -425,7 +425,10 @@ AudioBox::AudioBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     connect(m_timer, &QTimer::timeout, this, &AudioBox::tick);
 }
 
-AudioBox::~AudioBox() { stop(); }
+AudioBox::~AudioBox() {
+    *m_openCancel = true;
+    stop();
+}
 
 QWidget *AudioBox::buttonRow() {
     auto *row = new QWidget(this);
@@ -497,21 +500,33 @@ QWidget *AudioBox::buttonRow() {
 }
 
 void AudioBox::open(const QString &path) {
-    close();
+    close(); // also stops a load still decoding
+    m_openCancel = std::make_shared<std::atomic_bool>(false);
     m_tab->main()->status(tr("Loading audio %1…").arg(path));
     const QString cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex";
     QPointer<AudioBox> self(this);
-    std::thread([self, path, cache] {
+    auto cancel = m_openCancel;
+    std::thread([self, path, cache, cancel] {
         std::optional<rust::Box<fsb::Audio>> a;
         QString err;
         try {
-            a.emplace(fsb::open_audio(fs::Utf8(path), fs::Utf8(cache)));
+            const fs::PercentProgress progress([self, path, cancel](int pct) {
+                QMetaObject::invokeMethod(qApp, [self, path, pct, cancel] {
+                    if (self && !*cancel) self->m_tab->main()->status(tr("Loading audio %1… %2%").arg(path).arg(pct));
+                });
+                return !*cancel;
+            });
+            a.emplace(fsb::open_audio(fs::Utf8(path), fs::Utf8(cache), progress));
         } catch (const rust::Error &e) {
             err = QString::fromUtf8(e.what());
         }
         auto holder = std::make_shared<std::optional<rust::Box<fsb::Audio>>>(std::move(a));
-        QMetaObject::invokeMethod(qApp, [self, holder, err, path] {
+        QMetaObject::invokeMethod(qApp, [self, holder, err, path, cancel] {
             if (!self) return;
+            if (*cancel) { // closed, or replaced by a newer open (which has its own status)
+                if (cancel == self->m_openCancel) self->m_tab->main()->status(QString());
+                return;
+            }
             if (!err.isEmpty()) {
                 self->m_tab->main()->error(err);
                 return;
@@ -540,6 +555,7 @@ void AudioBox::loaded() {
 }
 
 void AudioBox::close() {
+    *m_openCancel = true;
     stop();
     m_audio.reset();
     m_path.clear();

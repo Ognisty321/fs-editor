@@ -51,7 +51,7 @@ impl Frames {
             return None;
         }
         if self.video.is_none() {
-            self.video = Some(Video::open(&self.path, &self.cache_dir).ok()?);
+            self.video = Some(Video::open(&self.path, &self.cache_dir, |_, _| true).ok()?);
         }
         let v = self.video.as_mut()?;
         let info = v.info();
@@ -541,7 +541,7 @@ end)"#,
         let mut s = Session::default();
         let video = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/media/cfr.mkv");
         s.set_project_value("Video File", video);
-        let v = Video::open(video, dir.join("cache").to_str().unwrap()).unwrap();
+        let v = Video::open(video, dir.join("cache").to_str().unwrap(), |_, _| true).unwrap();
         let i = v.info();
         s.set_video_context(i.width, i.height, &v.timecodes(), &[]);
         // a full-screen white box from 0 s, so the subtitle frame's corner differs

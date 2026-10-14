@@ -424,6 +424,7 @@ VideoBox::VideoBox(TabPanel *tab) : QWidget(tab), m_tab(tab), m_media(std::make_
 }
 
 VideoBox::~VideoBox() {
+    *m_openCancel = true;
     m_worker->latest = ~0ull; // drop queued renders
     m_thread.quit();
     m_thread.wait();
@@ -448,15 +449,25 @@ void VideoBox::setTimecodes(std::vector<std::int64_t> tc) {
 }
 
 void VideoBox::open(const QString &path) {
-    m_tab->main()->status(tr("Indexing %1…").arg(QFileInfo(path).fileName()));
+    const QString name = QFileInfo(path).fileName();
+    m_tab->main()->status(tr("Indexing %1…").arg(name));
+    *m_openCancel = true; // a file still indexing is replaced
+    m_openCancel = std::make_shared<std::atomic_bool>(false);
     auto media = m_media;
+    auto cancel = m_openCancel;
     const QString cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex";
-    QMetaObject::invokeMethod(m_worker, [this, media, path, cache] {
+    QMetaObject::invokeMethod(m_worker, [this, media, path, name, cache, cancel] {
         QString err;
         {
             std::lock_guard g(media->m);
             try {
-                auto v = fsb::open_video(fs::Utf8(path), fs::Utf8(cache));
+                const fs::PercentProgress progress([this, name, cancel](int pct) {
+                    QMetaObject::invokeMethod(this, [this, name, pct, cancel] {
+                        if (!*cancel) m_tab->main()->status(tr("Indexing %1… %2%").arg(name).arg(pct));
+                    });
+                    return !*cancel;
+                });
+                auto v = fsb::open_video(fs::Utf8(path), fs::Utf8(cache), progress);
                 const auto info = v->info();
                 media->width = info.width;
                 media->height = info.height;
@@ -468,7 +479,11 @@ void VideoBox::open(const QString &path) {
                 err = QString::fromUtf8(e.what());
             }
         }
-        QMetaObject::invokeMethod(this, [this, path, err] {
+        QMetaObject::invokeMethod(this, [this, path, err, cancel] {
+            if (*cancel) { // closed, or replaced by a newer open (which has its own status)
+                if (cancel == m_openCancel) m_tab->main()->status(QString());
+                return;
+            }
             if (!err.isEmpty()) {
                 m_tab->main()->error(err);
                 return;
@@ -522,6 +537,7 @@ void VideoBox::openDummy(int w, int h, double fps, qint64 ms) {
 
 void VideoBox::close() {
     pause();
+    *m_openCancel = true; // else the lock below waits for the indexing to finish
     {
         std::lock_guard g(m_media->m);
         m_media->video.reset();

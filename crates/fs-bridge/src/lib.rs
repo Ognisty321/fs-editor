@@ -340,6 +340,9 @@ pub mod ffi {
 
         type PanicHandler;
         fn fatal(self: &PanicHandler, message: &str);
+
+        type Progress;
+        fn report(self: &Progress, done: i64, total: i64) -> bool;
     }
 
     extern "Rust" {
@@ -511,7 +514,7 @@ pub mod ffi {
         fn save_timecodes(path: &str, timecodes: &[i64]) -> Result<()>;
 
         type Video;
-        fn open_video(path: &str, cache_dir: &str) -> Result<Box<Video>>;
+        fn open_video(path: &str, cache_dir: &str, progress: &Progress) -> Result<Box<Video>>;
         /// Empty when the file cannot be read or has no text subtitles.
         fn subtitle_tracks(path: &str) -> Vec<SubTrack>;
         fn info(self: &Video) -> VideoInfo;
@@ -543,7 +546,7 @@ pub mod ffi {
         fn add_word(self: &mut Speller, word: &str);
 
         type Audio;
-        fn open_audio(path: &str, cache_dir: &str) -> Result<Box<Audio>>;
+        fn open_audio(path: &str, cache_dir: &str, progress: &Progress) -> Result<Box<Audio>>;
         fn blank_audio(ms: i64) -> Box<Audio>;
         fn duration_ms(self: &Audio) -> i64;
         fn save_clip(self: &Audio, path: &str, start_ms: i64, end_ms: i64) -> Result<()>;
@@ -710,16 +713,16 @@ fn subtitle_tracks(path: &str) -> Vec<ffi::SubTrack> {
         .collect()
 }
 
-fn open_video(path: &str, cache_dir: &str) -> Result<Box<Video>, String> {
-    Video::open(path, cache_dir).map(Box::new)
+fn open_video(path: &str, cache_dir: &str, progress: &ffi::Progress) -> Result<Box<Video>, String> {
+    Video::open(path, cache_dir, |d, t| progress.report(d, t)).map(Box::new)
 }
 
 fn new_renderer() -> Result<Box<Renderer>, String> {
     Renderer::new().map(Box::new)
 }
 
-fn open_audio(path: &str, cache_dir: &str) -> Result<Box<Audio>, String> {
-    Audio::open(path, cache_dir).map(Box::new)
+fn open_audio(path: &str, cache_dir: &str, progress: &ffi::Progress) -> Result<Box<Audio>, String> {
+    Audio::open(path, cache_dir, |d, t| progress.report(d, t)).map(Box::new)
 }
 
 fn blank_audio(ms: i64) -> Box<Audio> {

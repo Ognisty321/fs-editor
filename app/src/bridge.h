@@ -5,6 +5,8 @@
 
 #include <QString>
 #include <QStringList>
+#include <algorithm>
+#include <functional>
 #include <vector>
 
 namespace fs {
@@ -41,6 +43,25 @@ inline rust::Slice<const size_t> slice(const std::vector<size_t> &v) {
 }
 
 inline std::vector<size_t> vec(const rust::Vec<size_t> &v) { return {v.begin(), v.end()}; }
+
+// fsb::Progress handing whole percents to `fn` on the opening thread; `fn` returns false to cancel.
+class PercentProgress final : public fsb::Progress {
+public:
+    explicit PercentProgress(std::function<bool(int)> fn) : m_fn(std::move(fn)) {}
+    bool report(int64_t done, int64_t total) const override {
+        const int pct = total > 0 ? int(std::clamp<int64_t>(done * 100 / total, 0, 100)) : 0;
+        if (pct != m_last) {
+            m_last = pct;
+            m_go = m_fn(pct);
+        }
+        return m_go;
+    }
+
+private:
+    std::function<bool(int)> m_fn;
+    mutable int m_last = -1;
+    mutable bool m_go = true;
+};
 
 inline QString fmtTime(qint64 ms) { return q(fsb::fmt_time(ms)); }
 inline qint64 parseTime(const QString &s) { return fsb::parse_time(Utf8(s)); }
