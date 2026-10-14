@@ -116,15 +116,81 @@ pub fn shift_times(
     changed
 }
 
-/// Scale all times by `from_fps / to_fps` (convert a script timed to one
-/// constant frame rate to another, e.g. 25 → 23.976).
+/// Retime a script from one frame rate (CFR or VFR) to another, keeping every
+/// line on the same frames (Aegisub's "Transform Framerate" export filter):
+/// times inside a frame are interpolated, and the relative times of `\t`,
+/// `\move`, `\fad`, `\fade` and karaoke tags are converted too.
 pub fn change_fps(doc: &mut Document, from: &Framerate, to: &Framerate) {
+    let convert = |t: i64| -> i64 {
+        let f = from.frame_at_time(t, TimeType::Exact);
+        let (fs, fe) = (
+            from.time_at_frame(f, TimeType::Exact),
+            from.time_at_frame(f + 1, TimeType::Exact),
+        );
+        let dist = if fe > fs {
+            (t - fs) as f64 / (fe - fs) as f64
+        } else {
+            0.0
+        };
+        let (ns, ne) = (
+            to.time_at_frame(f, TimeType::Exact),
+            to.time_at_frame(f + 1, TimeType::Exact),
+        );
+        ns + ((ne - ns) as f64 * dist) as i64
+    };
+    let cs = |t: i64| t.div_euclid(10) * 10;
     for i in 0..doc.event_count() {
         let ev = doc.event_mut(i).unwrap();
-        let sf = from.frame_at_time(ev.start.ms(), TimeType::Start);
-        let ef = from.frame_at_time(ev.end.ms(), TimeType::End);
-        ev.start = Time(to.time_at_frame(sf, TimeType::Start).max(0));
-        ev.end = Time(to.time_at_frame(ef, TimeType::End).max(0));
+        let (old_start, old_end) = (cs(ev.start.ms()), cs(ev.end.ms()));
+        let new_start = cs(convert(ev.start.ms()));
+        let new_end = cs(convert(ev.end.ms()) + 9);
+        let rel_start = |v: i64| {
+            let n = convert(old_start + v) - new_start;
+            // 0 means "line end" in some tags, so a nonzero time never becomes 0
+            if n == 0 && v != 0 { 1 } else { n }
+        };
+        let (mut old_k, mut new_k) = (0i64, 0i64);
+        let mut line = Line::parse(&ev.text);
+        line.for_each_tag_mut(|t| {
+            let int = |t: &Tag, k: usize| t.arg_f64(k).map(|v| v as i64);
+            let starts: &[usize] = match t.name.as_str() {
+                "move" if t.args.len() >= 6 => &[4, 5],
+                "fade" if t.args.len() >= 7 => &[3, 4, 5, 6],
+                "fad" if t.args.len() >= 2 => &[0],
+                "t" if t.args.len() >= 3 => &[0, 1],
+                "k" | "K" | "kf" | "ko" => {
+                    if let Some(v) = int(t, 0) {
+                        let start = old_start / 10 + old_k + v;
+                        let n = (convert(start * 10) - new_start) / 10 - new_k;
+                        old_k += v;
+                        new_k += n;
+                        t.set_args(vec![n.to_string()]);
+                    }
+                    &[]
+                }
+                _ => &[],
+            };
+            if starts.is_empty() && t.name != "fad" {
+                return;
+            }
+            let mut a = t.args.clone();
+            for &k in starts {
+                if let Some(v) = int(t, k) {
+                    a[k] = rel_start(v).to_string();
+                }
+            }
+            if t.name == "fad"
+                && let Some(v) = int(t, 1)
+            {
+                a[1] = (new_end - convert(old_end - v)).to_string();
+            }
+            if a != t.args {
+                t.set_args(a);
+            }
+        });
+        ev.text = line.to_text();
+        ev.start = Time(new_start.max(0));
+        ev.end = Time(new_end.max(0));
     }
 }
 
@@ -1500,6 +1566,21 @@ mod tests {
         };
         translate_positions(&mut d, &Rows::All, 1.0, 2.0, drawing);
         assert_eq!(d.event(0).unwrap().text, r"{\p2}m 2 4 l 6 8");
+    }
+
+    #[test]
+    fn change_fps_converts_tag_times() {
+        let mut d = doc(&[(
+            "0:00:01.00",
+            "0:00:02.00",
+            "Default",
+            r"{\move(0,0,1,1,200,400)\fad(200,400)\k50}a{\k50}b",
+        )]);
+        let fr = |n| Framerate::from_rational(n, 1, false).unwrap();
+        change_fps(&mut d, &fr(25), &fr(50));
+        let e = d.event(0).unwrap();
+        assert_eq!((e.start.ms(), e.end.ms()), (500, 1000));
+        assert_eq!(e.text, r"{\move(0,0,1,1,100,200)\fad(100,200)\k25}a{\k25}b");
     }
 
     #[test]

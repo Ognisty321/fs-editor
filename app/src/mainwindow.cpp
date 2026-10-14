@@ -17,6 +17,7 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QDesktopServices>
+#include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDateTime>
 #include <QDir>
@@ -91,7 +92,7 @@ const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"openAudio", {"music", kTeal}}, {"audioFromVideo", {"file-music", kTeal}}, {"blankAudio", {"wave-square", kTeal}},
     {"closeAudio", {"music-off", kRed}}, {"splitView", {"layout-columns", {}}}, {"compareTabs", {"git-compare", {}}},
     {"editor", {"edit", kBlue}}, {"properties", {"file-info", kPurple}}, {"styleManager", {"palette", kPurple}},
-    {"shiftTimes", {"clock-edit", kBlue}}, {"spellCheck", {"text-spellcheck", kGreen}},
+    {"shiftTimes", {"clock-edit", kBlue}}, {"changeFps", {"clock-play", kPurple}}, {"spellCheck", {"text-spellcheck", kGreen}},
     {"resample", {"aspect-ratio", kPurple}}, {"hideTags", {"code-off", kOrange}}, {"help", {"help", kBlue}},
     {"about", {"info-circle", kBlue}}};
 
@@ -734,6 +735,42 @@ void MainWindow::buildMenus() {
     shift->setChecked(QSettings().value("layout/shiftTimes", true).toBool());
     connect(shift, &QAction::triggered, this, [this](bool on) {
         for (auto *t : tabs()) t->showShiftPanel(on);
+    });
+    // Kainote "Set new FPS" / Aegisub "Transform Framerate": keep every line on its frames
+    add("changeFps", tr("Change frame rate..."), {}, subs, [=, this] {
+        auto *t = tab();
+        const bool video = t->video()->hasVideo();
+        QDialog d(this);
+        d.setWindowTitle(tr("Change frame rate"));
+        auto *f = new QFormLayout(&d);
+        const QStringList rates = {"23.976", "24", "25", "29.97", "30", "48", "50", "59.94", "60"};
+        auto rate = [&](const QString &def) {
+            auto *c = new QComboBox(&d);
+            c->setEditable(true);
+            if (video) c->addItem(tr("From video"), "video");
+            c->addItems(rates);
+            c->setCurrentText(def);
+            return c;
+        };
+        auto *from = rate(video ? tr("From video") : "23.976");
+        auto *to = rate("25");
+        f->addRow(tr("Subtitles timed to:"), from);
+        f->addRow(tr("Convert to:"), to);
+        auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+        connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+        f->addRow(bb);
+        if (d.exec() != QDialog::Accepted) return;
+        auto value = [](QComboBox *c) {
+            return c->currentText() == c->itemText(0) && c->itemData(0).isValid() ? QString("video") : c->currentText();
+        };
+        const auto tc = t->video()->timecodes();
+        try {
+            t->s().change_fps(fs::Utf8(value(from)), fs::Utf8(value(to)), {tc.data(), tc.size()});
+            t->changed();
+        } catch (const rust::Error &e) {
+            error(QString::fromUtf8(e.what()));
+        }
     });
     add("fontCollector", tr("Fonts collector"), {}, subs, [=, this] { FontCollectorDialog(tab()).exec(); });
     add("resample", tr("Resample subtitles"), {}, subs, [=] { ResampleDialog(tab()).exec(); });

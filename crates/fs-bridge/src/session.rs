@@ -581,6 +581,22 @@ impl Session {
         });
     }
 
+    /// Retime the whole script between frame rates (Aegisub "Transform
+    /// Framerate"); `video` as a rate stands for the video's timecodes.
+    pub fn change_fps(&mut self, from: &str, to: &str, video: &[i64]) -> Result<(), String> {
+        let rate = |s: &str| {
+            if s == "video" {
+                Framerate::from_timecodes(video.to_vec())
+            } else {
+                Framerate::parse(s)
+            }
+            .map_err(|e| format!("{s}: {e}"))
+        };
+        let (from, to) = (rate(from)?, rate(to)?);
+        self.edit("Change frame rate", |d| ops::change_fps(d, &from, &to));
+        Ok(())
+    }
+
     /// Aegisub "Recombine Lines"; returns the rows left of the selection.
     pub fn recombine_rows(&mut self, rows: &[usize]) -> Vec<usize> {
         // shortcut: not in TL mode (pairs would need recombining together); add when asked.

@@ -68,6 +68,30 @@ impl Default for Framerate {
 }
 
 impl Framerate {
+    /// Parse a user-typed rate: `24000/1001`, `25`, `23.976` (common NTSC
+    /// values map to their exact rationals), with `,` accepted as decimal point.
+    pub fn parse(s: &str) -> Result<Self, VfrError> {
+        let s = s.trim();
+        if let Some((n, d)) = s.split_once('/') {
+            let num = |x: &str| {
+                x.trim()
+                    .parse::<i64>()
+                    .map_err(|_| invalid("invalid frame rate"))
+            };
+            return Self::from_rational(num(n)?, num(d)?, true);
+        }
+        let s = s.replace(',', ".");
+        let v: f64 = s.parse().map_err(|_| invalid("invalid frame rate"))?;
+        match s.as_str() {
+            "23.976" | "23.98" => Self::from_rational(24000, 1001, true),
+            "29.97" => Self::from_rational(30000, 1001, true),
+            "59.94" => Self::from_rational(60000, 1001, true),
+            "47.952" => Self::from_rational(48000, 1001, true),
+            _ if v.fract() == 0.0 => Self::from_rational(v as i64, 1, true),
+            _ => Self::from_fps(v),
+        }
+    }
+
     /// Constant frame rate from a floating-point FPS value.
     pub fn from_fps(fps: f64) -> Result<Self, VfrError> {
         if !fps.is_finite() || fps < 0.0 {

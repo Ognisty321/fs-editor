@@ -395,25 +395,7 @@ enum FieldArg {
 // ---------------------------------------------------------------------------
 
 fn parse_fps(s: &str) -> Result<Framerate> {
-    let s = s.trim();
-    let fr = if let Some((n, d)) = s.split_once('/') {
-        Framerate::from_rational(n.trim().parse()?, d.trim().parse()?, true)?
-    } else {
-        // common NTSC values map to exact rationals
-        let v: f64 = s
-            .replace(',', ".")
-            .parse()
-            .with_context(|| format!("invalid frame rate '{s}'"))?;
-        match s {
-            "23.976" | "23.98" => Framerate::from_rational(24000, 1001, true)?,
-            "29.97" => Framerate::from_rational(30000, 1001, true)?,
-            "59.94" => Framerate::from_rational(60000, 1001, true)?,
-            "47.952" => Framerate::from_rational(48000, 1001, true)?,
-            _ if v.fract() == 0.0 => Framerate::from_rational(v as i64, 1, true)?,
-            _ => Framerate::from_fps(v)?,
-        }
-    };
-    Ok(fr)
+    Framerate::parse(s).with_context(|| format!("invalid frame rate '{s}'"))
 }
 
 impl TimingArgs {
