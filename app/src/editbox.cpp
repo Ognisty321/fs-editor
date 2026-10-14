@@ -1,0 +1,761 @@
+#include "editbox.h"
+
+#include "dialogs.h"
+#include "grid.h"
+#include "mainwindow.h"
+#include "tabpanel.h"
+#include "videobox.h"
+
+#include <QAbstractItemView>
+#include <QApplication>
+#include <QCheckBox>
+#include <QColorDialog>
+#include <QComboBox>
+#include <QCompleter>
+#include <QContextMenuEvent>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFontDialog>
+#include <QInputDialog>
+#include <QLabel>
+#include <QMenu>
+#include <QPushButton>
+#include <QRadioButton>
+#include <QRegularExpression>
+#include <QScrollBar>
+#include <QSettings>
+#include <QSpinBox>
+#include <QStringListModel>
+#include <QSyntaxHighlighter>
+#include <QTextBlock>
+#include <QToolButton>
+#include <QVBoxLayout>
+#include <QWheelEvent>
+
+#include <optional>
+
+// ---- TimeEdit ---------------------------------------------------------------
+
+TimeEdit::TimeEdit(QWidget *parent) : QLineEdit(parent) {
+    setFrames(false);
+    connect(this, &QLineEdit::textEdited, this, [this] { emit edited(); });
+}
+
+void TimeEdit::setFrames(bool on) {
+    m_frames = on;
+    setInputMask(on ? QString() : "9:99:99.99;0");
+    setFixedWidth(fontMetrics().horizontalAdvance("0:00:00.00") + 14);
+}
+
+void TimeEdit::setMs(qint64 ms, qint64 frame) {
+    const int pos = cursorPosition();
+    setText(m_frames ? QString::number(frame) : fs::fmtTime(ms));
+    setCursorPosition(pos);
+}
+
+qint64 TimeEdit::ms() const { return m_frames ? -1 : fs::parseTime(text()); }
+qint64 TimeEdit::frame() const {
+    bool ok;
+    const qint64 f = text().toLongLong(&ok);
+    return ok ? f : -1;
+}
+
+void TimeEdit::wheelEvent(QWheelEvent *e) {
+    const int step = e->angleDelta().y() > 0 ? 1 : -1;
+    if (m_frames) setText(QString::number(std::max<qint64>(0, frame() + step)));
+    else setText(fs::fmtTime(std::max<qint64>(0, ms() + step * 10)));
+    emit edited();
+}
+
+// ---- text editor --------------------------------------------------------------
+
+namespace {
+class TagHighlighter : public QSyntaxHighlighter {
+public:
+    using QSyntaxHighlighter::QSyntaxHighlighter;
+protected:
+    void highlightBlock(const QString &t) override {
+        static const QColor brace(0xc6, 0x78, 0xdd), name(0x6c, 0xb4, 0xee), value(0xd1, 0x9a, 0x66),
+            newline(0xe5, 0xc0, 0x7b), comment(0x80, 0x88, 0x90);
+        static const QRegularExpression block("\\{[^}]*\\}"), tag("\\\\(\\d?[a-zA-Z]+)([^\\\\}]*)"),
+            nl("\\\\[Nnh]");
+        for (auto it = block.globalMatch(t); it.hasNext();) {
+            const auto m = it.next();
+            const int s = int(m.capturedStart()), l = int(m.capturedLength());
+            const bool hasTag = m.captured().contains('\\');
+            setFormat(s, l, hasTag ? value : comment);
+            setFormat(s, 1, brace);
+            setFormat(s + l - 1, 1, brace);
+            if (!hasTag) continue;
+            for (auto ti = tag.globalMatch(m.captured()); ti.hasNext();) {
+                const auto tm = ti.next();
+                setFormat(s + int(tm.capturedStart()), int(tm.capturedLength(1)) + 1, name);
+            }
+        }
+        for (auto it = nl.globalMatch(t); it.hasNext();) {
+            const auto m = it.next();
+            if (format(int(m.capturedStart())).foreground().color() != value)
+                setFormat(int(m.capturedStart()), 2, newline);
+        }
+        if (auto *sp = spell::get()) {
+            const auto bad = sp->misspelled(fs::Utf8(t));
+            for (size_t i = 0; i + 1 < bad.size(); i += 2)
+                for (int j = int(bad[i]); j < int(bad[i] + bad[i + 1]); ++j) {
+                    QTextCharFormat f = format(j);
+                    f.setUnderlineStyle(QTextCharFormat::SpellCheckUnderline);
+                    f.setUnderlineColor(Qt::red);
+                    setFormat(j, 1, f);
+                }
+        }
+    }
+};
+
+std::optional<rust::Box<fsb::Speller>> g_speller;
+bool g_spellLoaded = false;
+QString g_spellLang; // the dictionary actually loaded
+
+const QStringList kTags = {
+    "an", "b", "i", "u", "s", "bord", "xbord", "ybord", "shad", "xshad", "yshad", "be", "blur", "fn", "fs",
+    "fscx", "fscy", "fsp", "frx", "fry", "frz", "fax", "fay", "fe", "c", "1c", "2c", "3c", "4c", "alpha",
+    "1a", "2a", "3a", "4a", "k", "K", "kf", "ko", "q", "r", "pos", "move", "org", "fad", "fade", "clip",
+    "iclip", "p", "pbo", "t"};
+
+// UTF-8 byte offset of a QString index (the core splits at byte positions).
+size_t bytePos(const QString &s, int index) { return size_t(s.left(index).toUtf8().size()); }
+} // namespace
+
+QString spell::dir() {
+    return QSettings().value("spell/dir", QCoreApplication::applicationDirPath() + "/dictionaries").toString();
+}
+
+QStringList spell::languages() {
+    QStringList out;
+    for (const QFileInfo &fi : QDir(dir()).entryInfoList({"*.dic"}, QDir::Files, QDir::Name))
+        if (QFileInfo::exists(fi.absolutePath() + "/" + fi.completeBaseName() + ".aff")) out << fi.completeBaseName();
+    return out;
+}
+
+fsb::Speller *spell::get() {
+    QSettings st;
+    if (!st.value("spell/enabled", true).toBool()) return nullptr;
+    if (!g_spellLoaded) {
+        g_spellLoaded = true;
+        const QStringList langs = languages();
+        QString lang = st.value("spell/lang").toString();
+        if (!langs.contains(lang)) lang = langs.contains("pl_PL") ? "pl_PL" : langs.value(0);
+        g_spellLang = lang;
+        if (!lang.isEmpty()) {
+            const QString base = dir() + "/" + lang;
+            try {
+                g_speller = fsb::new_speller(fs::Utf8(base + ".aff"), fs::Utf8(base + ".dic"));
+                for (const QString &w : st.value("spell/user/" + lang).toStringList()) (*g_speller)->add_word(fs::Utf8(w));
+            } catch (const std::exception &e) {
+                qWarning("spell: %s", e.what());
+            }
+        }
+    }
+    return g_speller ? &**g_speller : nullptr;
+}
+
+void spell::reload() {
+    g_speller.reset();
+    g_spellLoaded = false;
+    for (QWidget *w : QApplication::allWidgets())
+        if (auto *e = qobject_cast<SubsTextEdit *>(w))
+            if (auto *h = e->document()->findChild<QSyntaxHighlighter *>()) h->rehighlight();
+}
+
+// Suggestions and "Add to dictionary" for a misspelled word under the mouse.
+void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
+    std::unique_ptr<QMenu> m(createStandardContextMenu(e->pos()));
+    if (auto *sp = spell::get()) {
+        const QTextCursor at = cursorForPosition(e->pos());
+        const QTextBlock block = at.block();
+        const QString t = block.text();
+        const auto bad = sp->misspelled(fs::Utf8(t));
+        for (size_t i = 0; i + 1 < bad.size(); i += 2) {
+            const int s = int(bad[i]), l = int(bad[i + 1]);
+            if (at.positionInBlock() < s || at.positionInBlock() > s + l) continue;
+            const QString word = t.mid(s, l);
+            QAction *first = m->actions().value(0);
+            auto replace = [this, block, s, l](const QString &with) {
+                QTextCursor c(block);
+                c.setPosition(block.position() + s);
+                c.setPosition(block.position() + s + l, QTextCursor::KeepAnchor);
+                c.insertText(with);
+            };
+            const auto sugg = sp->suggest(fs::Utf8(word));
+            for (size_t k = 0; k < std::min<size_t>(sugg.size(), 8); ++k) {
+                const QString w = fs::q(sugg[k]);
+                auto *a = new QAction(w, m.get());
+                QFont f = a->font();
+                f.setBold(true);
+                a->setFont(f);
+                connect(a, &QAction::triggered, this, [replace, w] { replace(w); });
+                m->insertAction(first, a);
+            }
+            if (sugg.empty()) {
+                auto *none = new QAction(tr("(no suggestions)"), m.get());
+                none->setEnabled(false);
+                m->insertAction(first, none);
+            }
+            auto *add = new QAction(tr("Add \"%1\" to dictionary").arg(word), m.get());
+            connect(add, &QAction::triggered, this, [word] {
+                QSettings st;
+                const QString key = "spell/user/" + g_spellLang;
+                st.setValue(key, st.value(key).toStringList() << word);
+                spell::reload(); // reload applies the user list
+            });
+            m->insertAction(first, add);
+            m->insertSeparator(first);
+            break;
+        }
+    }
+    m->exec(e->globalPos());
+}
+
+SubsTextEdit::SubsTextEdit(QWidget *parent) : QPlainTextEdit(parent) {
+    new TagHighlighter(document());
+    setTabChangesFocus(true);
+    m_completer = new QCompleter(new QStringListModel(kTags, this), this);
+    m_completer->setWidget(this);
+    m_completer->setCaseSensitivity(Qt::CaseSensitive);
+    connect(m_completer, qOverload<const QString &>(&QCompleter::activated), this, [this](const QString &c) {
+        auto cur = textCursor();
+        cur.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, int(m_completer->completionPrefix().size()));
+        cur.insertText(c);
+        setTextCursor(cur);
+    });
+}
+
+void SubsTextEdit::setText(const QString &t) {
+    if (t == toPlainText()) return;
+    const int pos = textCursor().position();
+    setPlainText(t);
+    auto c = textCursor();
+    c.setPosition(std::min<int>(pos, int(t.size())));
+    setTextCursor(c);
+}
+
+// Insert `\tag` into the override block at the cursor, or a new `{\tag}`;
+// an existing tag of the same name in that block is replaced.
+void SubsTextEdit::insertTag(const QString &tag) {
+    static const QRegularExpression nameRe("^\\\\(\\d?[a-zA-Z]+)");
+    const QString name = nameRe.match(tag).captured(1);
+    QString t = toPlainText();
+    int pos = textCursor().position();
+    const int open = int(t.lastIndexOf('{', pos - 1)), close = int(t.indexOf('}', pos));
+    const bool inside = open >= 0 && close >= 0 && t.lastIndexOf('}', pos - 1) < open;
+    if (inside) {
+        QString blk = t.mid(open + 1, close - open - 1);
+        const QRegularExpression same("\\\\" + QRegularExpression::escape(name) + "(?![a-zA-Z])[^\\\\]*");
+        if (blk.contains(same)) blk.replace(same, tag);
+        else blk += tag;
+        t.replace(open + 1, close - open - 1, blk);
+        pos = open + 1 + int(blk.size()) + 1;
+    } else {
+        t.insert(pos, "{" + tag + "}");
+        pos += int(tag.size()) + 2;
+    }
+    setPlainText(t);
+    auto c = textCursor();
+    c.setPosition(pos);
+    setTextCursor(c);
+}
+
+// \b, \i, \u, \s: wrap the selection, or flip the state at the cursor.
+void SubsTextEdit::toggleTag(const QString &name) {
+    auto c = textCursor();
+    if (c.hasSelection()) {
+        const QString sel = c.selectedText();
+        c.insertText("{\\" + name + "1}" + sel + "{\\" + name + "0}");
+        return;
+    }
+    const QString before = toPlainText().left(c.position());
+    const QRegularExpression re("\\\\" + name + "([01])(?![0-9a-zA-Z])");
+    QString state = "0";
+    for (auto it = re.globalMatch(before); it.hasNext();) state = it.next().captured(1);
+    insertTag("\\" + name + (state == "1" ? "0" : "1"));
+}
+
+void SubsTextEdit::keyPressEvent(QKeyEvent *e) {
+    if (m_completer->popup()->isVisible() &&
+        (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter || e->key() == Qt::Key_Tab ||
+         e->key() == Qt::Key_Escape)) {
+        e->ignore();
+        return;
+    }
+    const auto mods = e->modifiers();
+    const bool ctrl = mods & Qt::ControlModifier;
+    if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter ||
+        (ctrl && (e->key() == Qt::Key_D || e->key() == Qt::Key_R || e->key() == Qt::Key_B ||
+                  e->key() == Qt::Key_I || e->key() == Qt::Key_Comma || e->key() == Qt::Key_Period)) ||
+        ((mods & Qt::AltModifier) && e->key() == Qt::Key_Down)) {
+        emit keyCommand(e->key(), mods);
+        return;
+    }
+    QPlainTextEdit::keyPressEvent(e);
+    // tag autocomplete after a backslash
+    const QString before = toPlainText().left(textCursor().position());
+    static const QRegularExpression tail("\\\\([0-9a-zA-Z]*)$");
+    const auto m = tail.match(before);
+    if (m.hasMatch() && before.lastIndexOf('{') > before.lastIndexOf('}')) {
+        m_completer->setCompletionPrefix(m.captured(1));
+        QRect r = cursorRect();
+        r.setWidth(m_completer->popup()->sizeHintForColumn(0) + 30);
+        m_completer->complete(r);
+    } else {
+        m_completer->popup()->hide();
+    }
+}
+
+// ---- EditBox ------------------------------------------------------------------
+
+EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
+    auto *v = new QVBoxLayout(this);
+    v->setContentsMargins(2, 2, 2, 2);
+    v->setSpacing(3);
+
+    // tag bar
+    m_tagBar = new QHBoxLayout;
+    m_tagBar->setSpacing(2);
+    auto tool = [this](const QString &text, const QString &tip) {
+        auto *b = new QToolButton(this);
+        b->setText(text);
+        b->setToolTip(tip);
+        b->setAutoRaise(true);
+        m_tagBar->addWidget(b);
+        return b;
+    };
+    connect(tool("F", tr("Font selection")), &QToolButton::clicked, this, [this] {
+        bool ok;
+        const QFont f = QFontDialog::getFont(&ok, QFont(fs::q(m_tab->s().row(size_t(m_row)).style)), this);
+        if (ok) m_text->insertTag("\\fn" + f.family() + "\\fs" + QString::number(f.pointSize()));
+    });
+    const char *toggles[][2] = {{"b", "Bold"}, {"i", "Italic"}, {"u", "Underline"}, {"s", "Strikethrough"}};
+    for (auto &t : toggles) {
+        auto *b = tool(QString(t[0]).toUpper(), tr(t[1]));
+        QFont f = b->font();
+        f.setBold(t[0][0] == 'b');
+        f.setItalic(t[0][0] == 'i');
+        f.setUnderline(t[0][0] == 'u');
+        f.setStrikeOut(t[0][0] == 's');
+        b->setFont(f);
+        connect(b, &QToolButton::clicked, this, [this, n = QString(t[0])] { m_text->toggleTag(n); });
+    }
+    const char *colors[] = {"Primary color", "Secondary color for karaoke", "Border color", "Shadow color"};
+    for (int k = 0; k < 4; ++k)
+        connect(tool(QString("C%1").arg(k + 1), tr(colors[k])), &QToolButton::clicked, this,
+                [this, k] { setColorTag(k + 1); });
+    m_an = new QComboBox(this);
+    m_an->setToolTip(tr("Text position"));
+    const char *an[] = {"Bottom-left", "Bottom-center", "Bottom-right", "Middle-left", "Middle-center",
+                        "Middle-right", "Top-left", "Top-center", "Top-right"};
+    for (int k = 0; k < 9; ++k) m_an->addItem(QString("%1 (an%2)").arg(tr(an[k])).arg(k + 1));
+    m_an->setCurrentIndex(1);
+    connect(m_an, &QComboBox::activated, this, [this](int k) {
+        m_tab->s().set_tags(fs::slice(m_tab->selection()), fs::Utf8(QString("\\an%1").arg(k + 1)), "");
+        m_tab->changed();
+    });
+    m_tagBar->addWidget(m_an);
+    m_userTags = new QHBoxLayout;
+    m_userTags->setSpacing(2);
+    m_tagBar->addLayout(m_userTags);
+    m_tagBar->addStretch();
+    v->addLayout(m_tagBar);
+    rebuildTagButtons();
+
+    // info row
+    auto *info = new QHBoxLayout;
+    m_lineLabel = new QLabel(this);
+    m_wrapsLabel = new QLabel(this);
+    m_wrapsLabel->setToolTip(tr("About 43 characters per line and at most 2 lines"));
+    m_cpsLabel = new QLabel(this);
+    m_tlMode = new QCheckBox(tr("Translator mode"), this);
+    m_timeRadio = new QRadioButton(tr("Time"), this);
+    m_frameRadio = new QRadioButton(tr("Frames"), this);
+    m_timeRadio->setChecked(true);
+    for (QWidget *w : {static_cast<QWidget *>(m_lineLabel), static_cast<QWidget *>(m_wrapsLabel),
+                       static_cast<QWidget *>(m_cpsLabel)})
+        info->addWidget(w);
+    info->addStretch();
+    info->addWidget(m_tlMode);
+    info->addWidget(m_timeRadio);
+    info->addWidget(m_frameRadio);
+    v->addLayout(info);
+    connect(m_tlMode, &QCheckBox::clicked, this, [this](bool on) {
+        if (!on && !m_tab->main()->confirm(tr("Turning translation mode off deletes the original text. Continue?"))) {
+            m_tlMode->setChecked(true);
+            return;
+        }
+        m_tab->s().tl_enable(on);
+        m_tab->changed();
+    });
+    connect(m_frameRadio, &QRadioButton::toggled, this, [this](bool on) {
+        m_framesMode = on;
+        for (auto *t : {m_start, m_end, m_duration}) t->setFrames(on);
+        reload();
+    });
+
+    // TL original + buttons
+    m_tlBox = new QWidget(this);
+    auto *tlv = new QVBoxLayout(m_tlBox);
+    tlv->setContentsMargins(0, 0, 0, 0);
+    m_original = new SubsTextEdit(m_tlBox);
+    tlv->addWidget(m_original, 1);
+    auto *tlb = new QHBoxLayout;
+    auto *pasteSel = new QPushButton(tr("Paste the selected"), m_tlBox);
+    auto *pasteAll = new QPushButton(tr("Paste all"), m_tlBox);
+    m_hideOriginal = new QCheckBox(tr("Hide original"), m_tlBox);
+    m_doubtful = new QCheckBox(tr("Not confirmed"), m_tlBox);
+    m_movingTags = new QCheckBox(tr("Moving tags"), m_tlBox);
+    for (QWidget *w : std::initializer_list<QWidget *>{pasteSel, pasteAll, m_hideOriginal, m_doubtful, m_movingTags})
+        tlb->addWidget(w);
+    tlb->addStretch();
+    tlv->addLayout(tlb);
+    v->addWidget(m_tlBox, 1);
+    auto pasted = [this](QString t) {
+        return m_movingTags->isChecked() ? t : fs::q(fsb::strip_tags(fs::Utf8(t)));
+    };
+    connect(pasteSel, &QPushButton::clicked, this, [this, pasted] {
+        m_text->insertPlainText(pasted(m_original->textCursor().selectedText()));
+    });
+    connect(pasteAll, &QPushButton::clicked, this, [this, pasted] {
+        m_text->setPlainText(pasted(m_original->text()));
+        commit("text");
+    });
+    connect(m_hideOriginal, &QCheckBox::toggled, m_tab, &TabPanel::setHideOriginal);
+    connect(m_doubtful, &QCheckBox::clicked, this, [this] { commit("doubtful"); });
+    connect(m_original, &QPlainTextEdit::textChanged, this, [this] { commit("original"); });
+
+    m_text = new SubsTextEdit(this);
+    v->addWidget(m_text, 2);
+    connect(m_text, &QPlainTextEdit::textChanged, this, [this] { commit("text"); });
+    for (auto *e : {m_text, m_original}) connect(e, &SubsTextEdit::keyCommand, this, &EditBox::onKey);
+
+    // fields row (wraps into two rows when narrow)
+    m_fields1 = new QWidget(this);
+    m_fields2 = new QWidget(this);
+    m_row1 = new QHBoxLayout(m_fields1);
+    m_row2 = new QHBoxLayout(m_fields2);
+    for (auto *l : {m_row1, m_row2}) {
+        l->setContentsMargins(0, 0, 0, 0);
+        l->setSpacing(3);
+    }
+    m_comment = new QCheckBox(tr("Comment"), this);
+    m_comment->setToolTip(tr("Comments are not shown"));
+    auto spin = [this](const QString &tip, int max) {
+        auto *s = new QSpinBox(this);
+        s->setRange(0, max);
+        s->setToolTip(tip);
+        s->setButtonSymbols(QAbstractSpinBox::NoButtons);
+        s->setFixedWidth(fontMetrics().horizontalAdvance("00000") + 10);
+        return s;
+    };
+    m_layer = spin(tr("Layer: higher layers are drawn on top"), 99999);
+    m_start = new TimeEdit(this);
+    m_end = new TimeEdit(this);
+    m_duration = new TimeEdit(this);
+    m_start->setToolTip(tr("Start time"));
+    m_end->setToolTip(tr("End time"));
+    m_duration->setToolTip(tr("Duration"));
+    m_style = new QComboBox(this);
+    m_style->setMinimumContentsLength(10);
+    m_styleEdit = new QToolButton(this);
+    m_styleEdit->setText(tr("Edit"));
+    m_actor = new QComboBox(this);
+    m_actor->setEditable(true);
+    m_actor->setMinimumContentsLength(8);
+    m_actor->setToolTip(tr("Actor"));
+    m_ml = spin(tr("Left margin"), 9999);
+    m_mr = spin(tr("Right margin"), 9999);
+    m_mv = spin(tr("Vertical margin"), 9999);
+    m_effect = new QComboBox(this);
+    m_effect->setEditable(true);
+    m_effect->setMinimumContentsLength(8);
+    m_effect->setToolTip(tr("Effect"));
+    for (QWidget *w : std::initializer_list<QWidget *>{m_layer, m_start, m_end, m_duration, m_style, m_styleEdit})
+        m_row1->addWidget(w);
+    m_wrapWidgets = {m_comment, m_actor, m_ml, m_mr, m_mv, m_effect};
+    v->addWidget(m_fields1);
+    v->addWidget(m_fields2);
+    wrapFields();
+
+    connect(m_comment, &QCheckBox::clicked, this, [this] { commit("comment"); });
+    for (auto *s : {m_layer, m_ml, m_mr, m_mv})
+        connect(s, &QSpinBox::valueChanged, this, [this, s] { commit(s == m_layer ? "layer" : "margins"); });
+    connect(m_start, &TimeEdit::edited, this, [this] { commit("start"); });
+    connect(m_end, &TimeEdit::edited, this, [this] { commit("end"); });
+    connect(m_duration, &TimeEdit::edited, this, [this] { commit("duration"); });
+    connect(m_style, &QComboBox::activated, this, [this] { commit("style"); });
+    connect(m_actor, &QComboBox::currentTextChanged, this, [this] { commit("actor"); });
+    connect(m_effect, &QComboBox::currentTextChanged, this, [this] { commit("effect"); });
+    connect(m_styleEdit, &QToolButton::clicked, this, [this] {
+        m_tab->main()->editStyle(m_style->currentText());
+    });
+    m_tlBox->setVisible(false);
+}
+
+void EditBox::wrapFields() {
+    const bool narrow = width() < 850;
+    auto *target = narrow ? m_row2 : m_row1;
+    for (auto *w : m_wrapWidgets) target->addWidget(w);
+    m_row1->addStretch();
+    m_row2->addStretch();
+    // remove duplicate stretches left from earlier passes
+    for (auto *l : {m_row1, m_row2}) {
+        for (int i = l->count() - 2; i >= 0; --i)
+            if (l->itemAt(i)->spacerItem()) delete l->takeAt(i);
+    }
+    m_fields2->setVisible(narrow);
+}
+
+void EditBox::resizeEvent(QResizeEvent *e) {
+    QWidget::resizeEvent(e);
+    const bool narrow = width() < 850;
+    if (narrow != m_fields2->isVisible()) wrapFields();
+}
+
+void EditBox::rebuildTagButtons() {
+    while (auto *it = m_userTags->takeAt(0)) {
+        delete it->widget();
+        delete it;
+    }
+    QSettings st;
+    QStringList defs = st.value("edit/tagButtons", QStringList{"fad|\\fad(200,200)|0", "blur|\\blur1|0",
+                                                                "bord|\\bord0|0"}).toStringList();
+    for (int k = 0; k < defs.size(); ++k) {
+        const auto parts = defs[k].split('|');
+        auto *b = new QToolButton(this);
+        b->setText(parts.value(0, QString("T%1").arg(k + 1)));
+        b->setToolTip(parts.value(1));
+        b->setAutoRaise(true);
+        b->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(b, &QToolButton::customContextMenuRequested, this, [this, k] { configureTagButton(k); });
+        connect(b, &QToolButton::clicked, this, [this, parts] {
+            const QString tag = parts.value(1);
+            const int mode = parts.value(2).toInt();
+            if (mode == 2) m_text->insertPlainText(tag);
+            else if (mode == 1) {
+                auto c = m_text->textCursor();
+                c.setPosition(m_text->text().startsWith('{') ? 1 : 0);
+                m_text->setTextCursor(c);
+                m_text->insertTag(tag);
+            } else m_text->insertTag(tag);
+        });
+        m_userTags->addWidget(b);
+    }
+    auto *more = new QToolButton(this);
+    more->setText("+");
+    more->setToolTip(tr("Manage tag buttons"));
+    more->setAutoRaise(true);
+    connect(more, &QToolButton::clicked, this, [this] {
+        QSettings st;
+        auto defs = st.value("edit/tagButtons").toStringList();
+        if (defs.size() >= 20) return;
+        defs << QString("T%1|\\|0").arg(defs.size() + 1);
+        st.setValue("edit/tagButtons", defs);
+        configureTagButton(int(defs.size()) - 1);
+    });
+    m_userTags->addWidget(more);
+}
+
+void EditBox::configureTagButton(int index) {
+    QSettings st;
+    auto defs = st.value("edit/tagButtons").toStringList();
+    if (index >= defs.size()) return;
+    auto parts = defs[index].split('|');
+    TagButtonDialog d(parts.value(0), parts.value(1), parts.value(2).toInt(), this);
+    const int r = d.exec();
+    if (r == TagButtonDialog::Delete) defs.removeAt(index);
+    else if (r == QDialog::Accepted) defs[index] = d.name() + "|" + d.tag() + "|" + QString::number(d.mode());
+    else return;
+    st.setValue("edit/tagButtons", defs);
+    rebuildTagButtons();
+}
+
+void EditBox::setColorTag(int which) {
+    const QColor c = QColorDialog::getColor(Qt::white, this, tr("Color"), QColorDialog::ShowAlphaChannel);
+    if (!c.isValid()) return;
+    m_text->insertTag(QString::asprintf("\\%dc&H%02X%02X%02X&", which, c.blue(), c.green(), c.red()));
+    if (c.alpha() != 255) m_text->insertTag(QString::asprintf("\\%da&H%02X&", which, 255 - c.alpha()));
+}
+
+void EditBox::load(int row) {
+    m_row = row;
+    reload();
+}
+
+void EditBox::reload() {
+    auto &s = m_tab->s();
+    if (m_row < 0 || size_t(m_row) >= s.row_count()) {
+        m_row = s.row_count() ? 0 : -1;
+        if (m_row < 0) return;
+    }
+    m_loading = true;
+    const fsb::Row r = s.row(size_t(m_row));
+    const auto info = s.file_info();
+    const QString fmt = fs::q(info.format);
+    const bool ass = fmt == "ASS" || fmt == "SSA";
+    m_tlMode->setEnabled(ass);
+    m_tlMode->setChecked(info.tl_mode);
+    m_tlBox->setVisible(info.tl_mode);
+    m_text->setText(fs::q(r.text));
+    m_original->setText(fs::q(r.original));
+    m_doubtful->setChecked(r.doubtful);
+    m_comment->setChecked(r.comment);
+    m_layer->setValue(r.layer);
+    auto *v = m_tab->video();
+    auto fr = [v](qint64 ms) { return v->hasVideo() ? v->frameAt(ms) : 0; };
+    if (m_framesMode && !v->hasVideo()) m_timeRadio->setChecked(true);
+    m_start->setMs(r.start, fr(r.start));
+    m_end->setMs(r.end, fr(r.end));
+    m_duration->setMs(r.end - r.start, fr(r.end) - fr(r.start));
+    // style list
+    m_style->clear();
+    for (const auto &st : s.styles()) m_style->addItem(fs::q(st.name));
+    m_style->setCurrentText(fs::q(r.style));
+    QSet<QString> actors, effects;
+    for (size_t i = 0, n = s.row_count(); i < n && i < 5000; ++i) {
+        const auto x = s.row(i);
+        if (!x.actor.empty()) actors.insert(fs::q(x.actor));
+        if (!x.effect.empty()) effects.insert(fs::q(x.effect));
+    }
+    auto fill = [](QComboBox *c, QSet<QString> items, const QString &cur) {
+        QStringList l(items.begin(), items.end());
+        l.sort();
+        c->clear();
+        c->addItems(l);
+        c->setCurrentText(cur);
+    };
+    fill(m_actor, actors, fs::q(r.actor));
+    fill(m_effect, effects, fs::q(r.effect));
+    m_ml->setValue(r.margin_l);
+    m_mr->setValue(r.margin_r);
+    m_mv->setValue(r.margin_v);
+    for (QWidget *w : std::initializer_list<QWidget *>{m_style, m_styleEdit, m_actor, m_ml, m_mr, m_mv, m_effect,
+                                                       m_layer, m_an})
+        w->setEnabled(ass);
+    updateInfo(r);
+    m_loading = false;
+}
+
+void EditBox::updateInfo(const fsb::Row &r) {
+    m_lineLabel->setText(tr("Line: %1").arg(m_row + 1));
+    const auto parts = fs::q(r.wraps).split('/');
+    bool bad = parts.size() > 2;
+    for (const auto &p : parts) bad |= p.toInt() > 43;
+    m_wrapsLabel->setText(tr("Wraps: %1").arg(fs::q(r.wraps)));
+    m_wrapsLabel->setStyleSheet(bad ? "color: #e05050" : "");
+    const int cps = int(r.cps + 0.5);
+    m_cpsLabel->setText(tr("Characters per second: %1<=15").arg(cps));
+    m_cpsLabel->setStyleSheet(cps > 15 ? "color: #e05050" : "");
+}
+
+void EditBox::commit(const char *field) {
+    if (m_loading || m_row < 0) return;
+    auto &s = m_tab->s();
+    fsb::Row r = s.row(size_t(m_row));
+    const QString f(field);
+    auto *v = m_tab->video();
+    auto ms = [&](TimeEdit *t) {
+        if (!m_framesMode) return t->ms();
+        return t->frame() < 0 ? qint64(-1) : v->timeAt(t->frame());
+    };
+    r.text = fs::rs(m_text->text().replace('\n', "\\N"));
+    r.original = fs::rs(m_original->text().replace('\n', "\\N"));
+    r.doubtful = m_doubtful->isChecked();
+    r.comment = m_comment->isChecked();
+    r.layer = m_layer->value();
+    if (f == "start" && ms(m_start) >= 0) {
+        const qint64 dur = r.end - r.start;
+        r.start = ms(m_start);
+        r.end = std::max(r.start, r.end);
+        Q_UNUSED(dur);
+    } else if (f == "end" && ms(m_end) >= 0) {
+        r.end = std::max<std::int64_t>(r.start, ms(m_end));
+    } else if (f == "duration") {
+        const qint64 d = m_framesMode ? (m_duration->frame() < 0 ? -1 : v->timeAt(v->frameAt(r.start) + m_duration->frame()) - r.start)
+                                      : m_duration->ms();
+        if (d >= 0) r.end = r.start + d;
+    }
+    r.style = fs::rs(m_style->currentText());
+    r.actor = fs::rs(m_actor->currentText());
+    r.effect = fs::rs(m_effect->currentText());
+    r.margin_l = m_ml->value();
+    r.margin_r = m_mr->value();
+    r.margin_v = m_mv->value();
+    s.set_row(size_t(m_row), r, fs::Utf8(QString("edit:%1:%2").arg(m_row).arg(f)));
+    m_tab->changed(TabPanel::FromEditBox);
+    m_loading = true;
+    const fsb::Row now = s.row(size_t(m_row));
+    if (f != "start") m_start->setMs(now.start, v->hasVideo() ? v->frameAtStart(now.start) : 0);
+    if (f != "end") m_end->setMs(now.end, v->hasVideo() ? v->frameAt(now.end) : 0);
+    if (f != "duration")
+        m_duration->setMs(now.end - now.start,
+                          v->hasVideo() ? v->frameAt(now.end) - v->frameAt(now.start) : 0);
+    updateInfo(now);
+    m_loading = false;
+}
+
+void EditBox::focusText() { m_text->setFocus(); }
+
+void EditBox::nextLine() {
+    const auto vis = m_tab->grid()->visibleRows();
+    auto it = std::upper_bound(vis.begin(), vis.end(), size_t(m_row));
+    if (it != vis.end()) m_tab->setActive(int(*it));
+    else {
+        // Enter on the last line appends a new one, as in Kainote
+        m_tab->grid()->insertRow(true, 0);
+    }
+    m_text->setFocus();
+}
+
+void EditBox::onKey(int key, Qt::KeyboardModifiers mods) {
+    auto &s = m_tab->s();
+    const bool tl = s.file_info().tl_mode;
+    switch (key) {
+    case Qt::Key_Return:
+    case Qt::Key_Enter:
+        if (mods & Qt::ShiftModifier) {
+            const QString t = m_text->text();
+            const auto r = s.split_row(size_t(m_row), bytePos(t, m_text->textCursor().position()), -1);
+            m_tab->changed();
+            if (r >= 0) m_tab->setActive(int(r));
+        } else if (!(mods & Qt::ControlModifier)) {
+            nextLine();
+        }
+        break;
+    case Qt::Key_D:
+        if (tl) {
+            const auto r = s.next_doubtful(size_t(m_row));
+            if (r >= 0) m_tab->setActive(int(r));
+            else m_tab->main()->status(tr("No unconfirmed lines found"));
+        }
+        break;
+    case Qt::Key_R:
+        if (tl) {
+            const auto r = s.next_untranslated(size_t(m_row));
+            if (r >= 0) m_tab->setActive(int(r));
+            else m_tab->main()->status(tr("No untranslated lines found"));
+        }
+        break;
+    case Qt::Key_B: m_text->toggleTag("b"); break;
+    case Qt::Key_I: m_text->toggleTag("i"); break;
+    case Qt::Key_Comma:
+    case Qt::Key_Period: {
+        const fsb::Row r = s.row(size_t(m_row));
+        const qint64 base = key == Qt::Key_Comma ? r.start : r.end;
+        m_text->insertPlainText(QString::number(m_tab->videoTime() - base));
+        break;
+    }
+    case Qt::Key_Down:
+        if (tl) {
+            const size_t row = size_t(m_row);
+            s.set_doubtful({&row, 1}, true);
+            m_tab->changed();
+            nextLine();
+        }
+        break;
+    }
+}

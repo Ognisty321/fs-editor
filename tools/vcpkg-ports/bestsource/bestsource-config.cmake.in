@@ -1,0 +1,6 @@
+@PACKAGE_INIT@
+include(CMakeFindDependencyMacro)
+find_dependency(FFMPEG)
+find_dependency(xxHash CONFIG)
+include("${CMAKE_CURRENT_LIST_DIR}/bestsource-targets.cmake")
+set_property(TARGET bestsource::bestsource APPEND PROPERTY INTERFACE_LINK_LIBRARIES xxHash::xxhash ${FFMPEG_LIBRARIES})

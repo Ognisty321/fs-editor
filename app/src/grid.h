@@ -1,0 +1,84 @@
+// The subtitle grid (Kainote layout): custom-painted rows with number-cell
+// states, collisions, lines visible on video, filtering and tag hiding.
+#pragma once
+
+#include "bridge.h"
+
+#include <QAbstractScrollArea>
+#include <set>
+
+class TabPanel;
+
+class Grid : public QAbstractScrollArea {
+    Q_OBJECT
+public:
+    enum Col { Num, Layer, Start, End, Style, Actor, MarginL, MarginR, MarginV, Effect, Cps, Wraps, Original, Text, ColCount };
+
+    explicit Grid(TabPanel *tab);
+
+    void refresh();
+    void ensureVisible(int row);
+    void setVideoTime(qint64 ms);
+    // rows that differ from the compared tab (Kainote subtitle comparison)
+    void setCompare(std::set<size_t> rows);
+    void setHideTags(bool on);
+    bool hideTags() const { return m_hideTags; }
+    static QString colName(int c);
+    void setColumnHidden(int c, bool hidden);
+    bool columnHidden(int c) const { return m_userHidden.contains(c); }
+
+    // filtering
+    fsb::FilterSpec filterSpec;
+    bool filterOn = false;
+    bool ignoreFilterInActions = false;
+    void applyFilter();
+    std::vector<size_t> visibleRows() const { return m_vis; }
+    int syncMarker() const { return m_marker; }
+
+    // edit actions shared with the main menu
+    void copy();
+    void cut();
+    void paste();
+    void duplicate();
+    void deleteRows();
+    void deleteText();
+    void insertRow(bool after, int timeMode);
+    void moveSelection(int delta);
+    void selectVisibleOnVideo();
+    void splitRows(int how);
+    void contextMenu(const QPoint &global);
+
+protected:
+    void paintEvent(QPaintEvent *) override;
+    void resizeEvent(QResizeEvent *) override;
+    void mousePressEvent(QMouseEvent *) override;
+    void mouseMoveEvent(QMouseEvent *) override;
+    void mouseReleaseEvent(QMouseEvent *) override;
+    void mouseDoubleClickEvent(QMouseEvent *) override;
+    void keyPressEvent(QKeyEvent *) override;
+    void wheelEvent(QWheelEvent *) override;
+    void contextMenuEvent(QContextMenuEvent *) override;
+
+private:
+    void layoutColumns();
+    void updateScroll();
+    int rowAt(int y) const;      // index into m_vis, -1 outside
+    int colAt(int x) const;
+    int rowHeight() const;
+    QString cell(const fsb::Row &r, int col, size_t index) const;
+    void clickRow(int vi, Qt::KeyboardModifiers mods);
+
+    TabPanel *m_tab;
+    std::vector<fsb::Row> m_rows;
+    std::vector<size_t> m_vis;
+    std::vector<int> m_cols;     // visible columns in order
+    std::vector<int> m_widths;
+    std::set<int> m_userHidden;
+    std::set<size_t> m_collisions, m_onVideo, m_compare;
+    quint64 m_gen = ~0ull;
+    qint64 m_videoMs = -1;
+    bool m_hideTags = false;
+    int m_marker = -1;
+    int m_anchor = 0;
+    int m_dragFrom = -1;         // Alt+drag moving rows
+};

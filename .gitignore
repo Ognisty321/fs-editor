@@ -1,0 +1,13 @@
+/target/
+/build/
+/out/
+/app/build*/
+/vcpkg_installed/
+*.user
+.vs/
+.vscode/
+.idea/
+CMakeUserPresets.json
+# local, non-redistributable test corpus
+/tests/corpus-local/
+/.cargo/config.toml

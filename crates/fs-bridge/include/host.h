@@ -1,0 +1,24 @@
+// Callbacks the Rust side makes into the Qt app while an automation script
+// runs (dialogs, file pickers, progress). The app subclasses AutomationHost.
+#pragma once
+#include "rust/cxx.h"
+
+namespace fsb {
+struct DialogData;
+struct DialogReply;
+
+class AutomationHost {
+public:
+    virtual ~AutomationHost() = default;
+    virtual DialogReply dialog(const DialogData &d) const = 0;
+    // Empty result = cancelled.
+    virtual rust::Vec<rust::String> open_files(rust::Str title, rust::Str dir, rust::Str file,
+                                               rust::Str wildcard, bool multiple, bool must_exist) const = 0;
+    virtual rust::String save_file(rust::Str title, rust::Str dir, rust::Str file,
+                                   rust::Str wildcard, bool dont_prompt_overwrite) const = 0;
+    virtual void progress(double percent) const = 0;
+    virtual void task(rust::Str text) const = 0;
+    virtual void title(rust::Str text) const = 0;
+    virtual bool is_cancelled() const = 0;
+};
+} // namespace fsb

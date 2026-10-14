@@ -1,0 +1,1041 @@
+#include "dialogs.h"
+
+#include "editbox.h"
+#include "grid.h"
+#include "mainwindow.h"
+#include "tabpanel.h"
+#include "videobox.h"
+
+#include <QApplication>
+#include <QButtonGroup>
+#include <QCheckBox>
+#include <QClipboard>
+#include <QColorDialog>
+#include <QComboBox>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
+#include <QDir>
+#include <QFile>
+#include <QFileDialog>
+#include <QFontDatabase>
+#include <QFontDialog>
+#include <QFormLayout>
+#include <QGridLayout>
+#include <QGroupBox>
+#include <QInputDialog>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QPainter>
+#include <QPlainTextEdit>
+#include <QPushButton>
+#include <QRadioButton>
+#include <QSettings>
+#include <QSpinBox>
+#include <QTabWidget>
+#include <QToolButton>
+#include <QVBoxLayout>
+
+// ---- tag buttons --------------------------------------------------------------
+
+TagButtonDialog::TagButtonDialog(const QString &name, const QString &tag, int mode, QWidget *parent)
+    : QDialog(parent) {
+    setWindowTitle(tr("Tag button"));
+    auto *f = new QFormLayout(this);
+    m_tag = new QLineEdit(tag, this);
+    m_name = new QLineEdit(name, this);
+    m_mode = new QComboBox(this);
+    m_mode->addItems({tr("Tag inserted in place of cursor"), tr("Insert tag at text beginning"), tr("Plain text")});
+    m_mode->setCurrentIndex(mode);
+    f->addRow(tr("Enter ASS tag"), m_tag);
+    f->addRow(tr("Button name"), m_name);
+    f->addRow(tr("Mode"), m_mode);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
+    auto *del = bb->addButton(tr("Delete"), QDialogButtonBox::DestructiveRole);
+    connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(del, &QPushButton::clicked, this, [this] { done(Delete); });
+    f->addRow(bb);
+}
+QString TagButtonDialog::name() const { return m_name->text().remove('|'); }
+QString TagButtonDialog::tag() const { return m_tag->text().remove('|'); }
+int TagButtonDialog::mode() const { return m_mode->currentIndex(); }
+
+// ---- find / replace -----------------------------------------------------------
+
+FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
+    setWindowTitle(tr("Find and replace"));
+    auto *v = new QVBoxLayout(this);
+    m_tabs = new QTabWidget(this);
+    m_tabs->addTab(new QWidget, tr("Find"));
+    m_tabs->addTab(new QWidget, tr("Find and replace"));
+    v->addWidget(m_tabs);
+    auto *f = new QFormLayout;
+    m_find = new QComboBox(this);
+    m_find->setEditable(true);
+    m_replace = new QComboBox(this);
+    m_replace->setEditable(true);
+    QSettings st;
+    m_find->addItems(st.value("find/recent").toStringList());
+    m_replace->addItems(st.value("find/recentReplace").toStringList());
+    f->addRow(tr("Search text"), m_find);
+    auto *replLabel = new QLabel(tr("Replace with"), this);
+    f->addRow(replLabel, m_replace);
+    v->addLayout(f);
+    auto *checks = new QHBoxLayout;
+    m_case = new QCheckBox(tr("Match case"), this);
+    m_regex = new QCheckBox(tr("Regular expressions"), this);
+    m_comments = new QCheckBox(tr("Include comments"), this);
+    m_skipTags = new QCheckBox(tr("Skip tags"), this);
+    for (auto *c : {m_case, m_regex, m_comments, m_skipTags}) checks->addWidget(c);
+    v->addLayout(checks);
+    auto *groups = new QHBoxLayout;
+    auto *fg = new QGroupBox(tr("In field"), this);
+    auto *fl = new QVBoxLayout(fg);
+    const char *fields[] = {"Text", "Styles", "Actor", "Effect"};
+    for (int k = 0; k < 4; ++k) fl->addWidget(m_field[k] = new QRadioButton(tr(fields[k]), fg));
+    m_field[0]->setChecked(true);
+    auto *lg = new QGroupBox(tr("Lines"), this);
+    auto *ll = new QVBoxLayout(lg);
+    const char *lines[] = {"All", "Selected", "From selected"};
+    for (int k = 0; k < 3; ++k) ll->addWidget(m_lines[k] = new QRadioButton(tr(lines[k]), lg));
+    m_lines[0]->setChecked(true);
+    groups->addWidget(fg);
+    groups->addWidget(lg);
+    v->addLayout(groups);
+    auto *bb = new QHBoxLayout;
+    auto *find = new QPushButton(tr("Find"), this);
+    auto *replNext = new QPushButton(tr("Replace next"), this);
+    auto *replAll = new QPushButton(tr("Replace all"), this);
+    auto *replOpen = new QPushButton(tr("Replace in all open subtitles"), this);
+    auto *close = new QPushButton(tr("Close"), this);
+    find->setDefault(true);
+    for (auto *b : {find, replNext, replAll, replOpen, close}) bb->addWidget(b);
+    v->addLayout(bb);
+    connect(find, &QPushButton::clicked, this, &FindDialog::findNext);
+    connect(close, &QPushButton::clicked, this, &QDialog::hide);
+    auto remember = [this] {
+        QSettings st;
+        for (auto [box, key] : {std::pair{m_find, "find/recent"}, std::pair{m_replace, "find/recentReplace"}}) {
+            QStringList l = st.value(key).toStringList();
+            l.removeAll(box->currentText());
+            l.prepend(box->currentText());
+            st.setValue(key, l.mid(0, 20));
+        }
+    };
+    connect(replNext, &QPushButton::clicked, this, [this, remember] {
+        remember();
+        auto *tab = m_main->current();
+        auto spec = this->spec();
+        const int act = tab->active();
+        // replace in the active line if it matches, then move to the next match
+        spec.rows = {size_t(act)};
+        try {
+            if (tab->s().replace_all(spec)) tab->changed();
+        } catch (const rust::Error &e) {
+            m_main->error(QString::fromUtf8(e.what()));
+            return;
+        }
+        findNext();
+    });
+    connect(replAll, &QPushButton::clicked, this, [this, remember] {
+        remember();
+        auto *tab = m_main->current();
+        try {
+            const size_t n = tab->s().replace_all(spec());
+            tab->changed();
+            m_main->status(tr("Replaced %1 lines").arg(n));
+        } catch (const rust::Error &e) {
+            m_main->error(QString::fromUtf8(e.what()));
+        }
+    });
+    connect(replOpen, &QPushButton::clicked, this, [this, remember] {
+        remember();
+        size_t n = 0;
+        for (auto *tab : m_main->tabs()) {
+            auto s = spec();
+            s.rows.clear();
+            try {
+                n += tab->s().replace_all(s);
+            } catch (const rust::Error &e) {
+                m_main->error(QString::fromUtf8(e.what()));
+                return;
+            }
+            tab->changed();
+        }
+        m_main->status(tr("Replaced %1 lines").arg(n));
+    });
+    connect(m_tabs, &QTabWidget::currentChanged, this, [=](int i) {
+        for (QWidget *w : std::initializer_list<QWidget *>{replLabel, m_replace, replNext, replAll, replOpen})
+            w->setVisible(i == 1);
+        adjustSize();
+    });
+    showTab(0);
+}
+
+void FindDialog::showTab(int tab) {
+    m_tabs->setCurrentIndex(tab);
+    emit m_tabs->currentChanged(tab);
+    show();
+    raise();
+    m_find->setFocus();
+    m_find->lineEdit()->selectAll();
+}
+
+fsb::FindSpec FindDialog::spec() const {
+    fsb::FindSpec s;
+    s.pattern = fs::rs(m_find->currentText());
+    s.replacement = fs::rs(m_replace->currentText());
+    s.regex = m_regex->isChecked();
+    s.match_case = m_case->isChecked();
+    s.skip_tags = m_skipTags->isChecked();
+    for (int k = 0; k < 4; ++k)
+        if (m_field[k]->isChecked()) s.field = uint8_t(k);
+    s.include_comments = m_comments->isChecked();
+    auto *tab = m_main->current();
+    if (m_lines[1]->isChecked())
+        for (size_t r : tab->selection()) s.rows.push_back(r);
+    else if (m_lines[2]->isChecked())
+        for (size_t r = tab->selection().empty() ? 0 : tab->selection().front(); r < tab->s().row_count(); ++r)
+            s.rows.push_back(r);
+    return s;
+}
+
+void FindDialog::findNext() {
+    auto *tab = m_main->current();
+    if (!tab || m_find->currentText().isEmpty()) return;
+    try {
+        const auto r = tab->s().find(spec(), size_t(std::max(0, tab->active())));
+        if (r < 0) m_main->status(tr("Nothing found"));
+        else tab->setActive(int(r));
+    } catch (const rust::Error &e) {
+        m_main->error(QString::fromUtf8(e.what()));
+    }
+}
+
+// ---- select lines -------------------------------------------------------------
+
+SelectLinesDialog::SelectLinesDialog(MainWindow *main) : QDialog(main), m_main(main) {
+    setWindowTitle(tr("Select lines"));
+    auto *v = new QVBoxLayout(this);
+    auto *row = new QHBoxLayout;
+    m_with = new QRadioButton(tr("With"), this);
+    m_without = new QRadioButton(tr("Without"), this);
+    m_with->setChecked(true);
+    m_find = new QLineEdit(this);
+    row->addWidget(m_with);
+    row->addWidget(m_without);
+    row->addWidget(m_find, 1);
+    v->addLayout(row);
+    auto *f = new QFormLayout;
+    m_field = new QComboBox(this);
+    m_field->addItems({tr("Text"), tr("Styles"), tr("Actor"), tr("Effect")});
+    f->addRow(tr("Field"), m_field);
+    m_case = new QCheckBox(tr("Match case"), this);
+    m_regex = new QCheckBox(tr("Regular expressions"), this);
+    f->addRow(m_case, m_regex);
+    m_dialogue = new QRadioButton(tr("Dialogue"), this);
+    m_comments = new QRadioButton(tr("Comments"), this);
+    m_dialogue->setChecked(true);
+    auto *types = new QButtonGroup(this);
+    types->addButton(m_dialogue);
+    types->addButton(m_comments);
+    f->addRow(m_dialogue, m_comments);
+    m_add = new QRadioButton(tr("Add to selection"), this);
+    m_deselect = new QRadioButton(tr("Deselect"), this);
+    auto *modes = new QButtonGroup(this);
+    modes->addButton(m_add);
+    modes->addButton(m_deselect);
+    m_add->setChecked(true);
+    f->addRow(m_add, m_deselect);
+    m_action = new QComboBox(this);
+    m_action->addItems({tr("Do nothing"), tr("Copy"), tr("Cut"), tr("Move to beginning"), tr("Move to end"),
+                        tr("Set as comment"), tr("Delete")});
+    f->addRow(tr("Action"), m_action);
+    v->addLayout(f);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Apply | QDialogButtonBox::Cancel, this);
+    connect(bb, &QDialogButtonBox::accepted, this, [this] {
+        apply();
+        accept();
+    });
+    connect(bb->button(QDialogButtonBox::Apply), &QPushButton::clicked, this, &SelectLinesDialog::apply);
+    connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    v->addWidget(bb);
+}
+
+void SelectLinesDialog::apply() {
+    auto *tab = m_main->current();
+    auto &s = tab->s();
+    fsb::FindSpec spec;
+    spec.pattern = fs::rs(m_find->text());
+    spec.regex = m_regex->isChecked();
+    spec.match_case = m_case->isChecked();
+    spec.field = uint8_t(m_field->currentIndex());
+    spec.include_comments = true;
+    std::set<size_t> hits;
+    try {
+        const size_t n = s.row_count();
+        size_t from = n ? n - 1 : 0;
+        for (size_t k = 0; k < n; ++k) {
+            const auto r = s.find(spec, from);
+            if (r < 0 || hits.contains(size_t(r))) break;
+            hits.insert(size_t(r));
+            from = size_t(r);
+        }
+    } catch (const rust::Error &e) {
+        m_main->error(QString::fromUtf8(e.what()));
+        return;
+    }
+    std::vector<size_t> rows;
+    for (size_t i = 0; i < s.row_count(); ++i) {
+        const bool match = hits.contains(i) == m_with->isChecked();
+        const bool type = s.row(i).comment == m_comments->isChecked();
+        if (match && type) rows.push_back(i);
+    }
+    std::set<size_t> sel;
+    if (m_add->isChecked()) {
+        auto cur = tab->selection();
+        sel.insert(cur.begin(), cur.end());
+        sel.insert(rows.begin(), rows.end());
+    } else {
+        auto cur = tab->selection();
+        sel.insert(cur.begin(), cur.end());
+        for (size_t r : rows) sel.erase(r);
+    }
+    std::vector<size_t> v(sel.begin(), sel.end());
+    if (v.empty()) return;
+    tab->setSelection(v, int(v.front()));
+    switch (m_action->currentIndex()) {
+    case 1: tab->grid()->copy(); break;
+    case 2: tab->grid()->cut(); break;
+    case 3: tab->grid()->moveSelection(-int(v.front())); break;
+    case 4: tab->grid()->moveSelection(int(s.row_count()) - 1 - int(v.back())); break;
+    case 5:
+        s.set_rows_field(fs::slice(v), "comment", "1");
+        tab->changed();
+        break;
+    case 6: tab->grid()->deleteRows(); break;
+    }
+    m_main->status(tr("Selected %1 lines").arg(v.size()));
+}
+
+// ---- style editor -------------------------------------------------------------
+
+namespace {
+QColor assColor(const QString &s) {
+    QString h = s;
+    h.remove("&H", Qt::CaseInsensitive).remove('&');
+    const uint v = h.toUInt(nullptr, 16);
+    return QColor(int(v & 0xff), int(v >> 8 & 0xff), int(v >> 16 & 0xff), 255 - int(v >> 24 & 0xff));
+}
+QString assColorString(const QColor &c) {
+    return QString::asprintf("&H%02X%02X%02X%02X", 255 - c.alpha(), c.blue(), c.green(), c.red());
+}
+QString styleLine(const fsb::StyleData &s) {
+    return QString("Style: %1,%2,%3,%4,%5,%6,%7,%8,%9,%10,%11,%12,%13,%14,%15,%16,%17,%18,%19,%20,%21,%22,%23")
+        .arg(fs::q(s.name), fs::q(s.font)).arg(s.size).arg(fs::q(s.primary), fs::q(s.secondary),
+                                                              fs::q(s.outline_color), fs::q(s.back))
+        .arg(s.bold ? -1 : 0).arg(s.italic ? -1 : 0).arg(s.underline ? -1 : 0).arg(s.strikeout ? -1 : 0)
+        .arg(s.scale_x).arg(s.scale_y).arg(s.spacing).arg(s.angle).arg(s.border_style).arg(s.outline)
+        .arg(s.shadow).arg(s.alignment).arg(s.margin_l).arg(s.margin_r).arg(s.margin_v).arg(s.encoding);
+}
+QVariantMap toMap(const fsb::StyleData &s) {
+    return {{"line", styleLine(s)}};
+}
+} // namespace
+
+StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog(parent), m_style(style) {
+    setWindowTitle(tr("Style editor"));
+    auto *v = new QVBoxLayout(this);
+    auto *f = new QFormLayout;
+    m_name = new QLineEdit(fs::q(style.name), this);
+    f->addRow(tr("Name"), m_name);
+    auto *fontRow = new QHBoxLayout;
+    m_font = new QComboBox(this);
+    m_font->setEditable(true);
+    m_font->addItems(QFontDatabase::families());
+    m_font->setCurrentText(fs::q(style.font));
+    if (!QFontDatabase::families().contains(m_font->currentText())) m_font->setToolTip(tr("Font is not installed"));
+    auto dspin = [this](double v, double lo, double hi) {
+        auto *s = new QDoubleSpinBox(this);
+        s->setRange(lo, hi);
+        s->setDecimals(2);
+        s->setValue(v);
+        return s;
+    };
+    m_size = dspin(style.size, 1, 1000);
+    fontRow->addWidget(m_font, 1);
+    fontRow->addWidget(m_size);
+    f->addRow(tr("Font"), fontRow);
+    auto *flags = new QHBoxLayout;
+    m_bold = new QCheckBox(tr("Bold"), this);
+    m_italic = new QCheckBox(tr("Italic"), this);
+    m_underline = new QCheckBox(tr("Underline"), this);
+    m_strike = new QCheckBox(tr("Strikeout"), this);
+    m_bold->setChecked(style.bold);
+    m_italic->setChecked(style.italic);
+    m_underline->setChecked(style.underline);
+    m_strike->setChecked(style.strikeout);
+    for (auto *c : {m_bold, m_italic, m_underline, m_strike}) flags->addWidget(c);
+    f->addRow(flags);
+    auto *colors = new QHBoxLayout;
+    const char *names[] = {"Primary", "Secondary", "Outline", "Shadow"};
+    const rust::String *src[] = {&style.primary, &style.secondary, &style.outline_color, &style.back};
+    for (int k = 0; k < 4; ++k) {
+        m_colors[k] = fs::q(*src[k]);
+        auto *b = m_colorButtons[k] = new QToolButton(this);
+        b->setText(tr(names[k]));
+        b->setToolTip(tr("Alpha is set next to the button"));
+        m_alpha[k] = new QSpinBox(this);
+        m_alpha[k]->setRange(0, 255);
+        m_alpha[k]->setValue(255 - assColor(m_colors[k]).alpha());
+        m_alpha[k]->setToolTip(tr("Transparency (0 = opaque)"));
+        auto paint = [this, k] {
+            QPixmap px(14, 14);
+            QColor c = assColor(m_colors[k]);
+            c.setAlpha(255);
+            px.fill(c);
+            m_colorButtons[k]->setIcon(px);
+            m_colorButtons[k]->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        };
+        paint();
+        connect(b, &QToolButton::clicked, this, [this, k, paint] {
+            QColor c = QColorDialog::getColor(assColor(m_colors[k]), this);
+            if (!c.isValid()) return;
+            c.setAlpha(255 - m_alpha[k]->value());
+            m_colors[k] = assColorString(c);
+            paint();
+            preview();
+        });
+        colors->addWidget(b);
+        colors->addWidget(m_alpha[k]);
+    }
+    f->addRow(tr("Colors"), colors);
+    auto *geo = new QGridLayout;
+    m_outline = dspin(style.outline, 0, 100);
+    m_shadow = dspin(style.shadow, 0, 100);
+    m_scaleX = dspin(style.scale_x, 0, 1000);
+    m_scaleY = dspin(style.scale_y, 0, 1000);
+    m_angle = dspin(style.angle, -360, 360);
+    m_spacing = dspin(style.spacing, -100, 100);
+    const std::pair<const char *, QDoubleSpinBox *> g[] = {{"Border", m_outline}, {"Shadow", m_shadow},
+                                                           {"Scale X", m_scaleX}, {"Scale Y", m_scaleY},
+                                                           {"Angle", m_angle}, {"Spacing", m_spacing}};
+    for (int k = 0; k < 6; ++k) {
+        geo->addWidget(new QLabel(tr(g[k].first), this), k / 3, (k % 3) * 2);
+        geo->addWidget(g[k].second, k / 3, (k % 3) * 2 + 1);
+    }
+    f->addRow(geo);
+    m_box = new QCheckBox(tr("Opaque box"), this);
+    m_box->setChecked(style.border_style == 3);
+    f->addRow(m_box);
+    auto ispin = [this](int v, int hi) {
+        auto *s = new QSpinBox(this);
+        s->setRange(0, hi);
+        s->setValue(v);
+        return s;
+    };
+    auto *margins = new QHBoxLayout;
+    m_ml = ispin(style.margin_l, 9999);
+    m_mr = ispin(style.margin_r, 9999);
+    m_mv = ispin(style.margin_v, 9999);
+    for (auto *s : {m_ml, m_mr, m_mv}) margins->addWidget(s);
+    f->addRow(tr("Margins (left, right, vertical)"), margins);
+    auto *align = new QGridLayout;
+    auto *ag = new QButtonGroup(this);
+    for (int k = 0; k < 9; ++k) {
+        m_align[k] = new QRadioButton(QString::number(k + 1), this);
+        ag->addButton(m_align[k]);
+        align->addWidget(m_align[k], 2 - k / 3, k % 3);
+    }
+    m_align[std::clamp(style.alignment, 1, 9) - 1]->setChecked(true);
+    f->addRow(tr("Alignment"), align);
+    m_encoding = ispin(style.encoding, 255);
+    f->addRow(tr("Encoding"), m_encoding);
+    v->addLayout(f);
+    m_preview = new QLabel(this);
+    m_preview->setFixedSize(480, 120);
+    v->addWidget(m_preview);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    v->addWidget(bb);
+    for (auto *w : findChildren<QDoubleSpinBox *>()) connect(w, &QDoubleSpinBox::valueChanged, this, &StyleEditor::preview);
+    for (auto *w : findChildren<QSpinBox *>()) connect(w, &QSpinBox::valueChanged, this, &StyleEditor::preview);
+    for (auto *w : findChildren<QCheckBox *>()) connect(w, &QCheckBox::toggled, this, &StyleEditor::preview);
+    connect(m_font, &QComboBox::currentTextChanged, this, &StyleEditor::preview);
+    preview();
+}
+
+fsb::StyleData StyleEditor::style() const {
+    fsb::StyleData s = m_style;
+    s.name = fs::rs(m_name->text().replace(',', ';'));
+    s.font = fs::rs(m_font->currentText());
+    s.size = m_size->value();
+    rust::String *dst[] = {&s.primary, &s.secondary, &s.outline_color, &s.back};
+    for (int k = 0; k < 4; ++k) {
+        QColor c = assColor(m_colors[k]);
+        c.setAlpha(255 - m_alpha[k]->value());
+        *dst[k] = fs::rs(assColorString(c));
+    }
+    s.bold = m_bold->isChecked();
+    s.italic = m_italic->isChecked();
+    s.underline = m_underline->isChecked();
+    s.strikeout = m_strike->isChecked();
+    s.scale_x = m_scaleX->value();
+    s.scale_y = m_scaleY->value();
+    s.spacing = m_spacing->value();
+    s.angle = m_angle->value();
+    s.border_style = m_box->isChecked() ? 3 : 1;
+    s.outline = m_outline->value();
+    s.shadow = m_shadow->value();
+    for (int k = 0; k < 9; ++k)
+        if (m_align[k]->isChecked()) s.alignment = k + 1;
+    s.margin_l = m_ml->value();
+    s.margin_r = m_mr->value();
+    s.margin_v = m_mv->value();
+    s.encoding = m_encoding->value();
+    return s;
+}
+
+// Render a sample line with libass on a checkerboard.
+void StyleEditor::preview() {
+    const int w = 480, h = 120;
+    QImage img(w, h, QImage::Format_RGBA8888);
+    {
+        QPainter p(&img);
+        for (int y = 0; y < h; y += 10)
+            for (int x = 0; x < w; x += 10)
+                p.fillRect(x, y, 10, 10, ((x + y) / 10) % 2 ? QColor(0x99, 0x99, 0x99) : QColor(0x66, 0x66, 0x66));
+    }
+    auto st = style();
+    st.name = "Preview";
+    const QString script =
+        QString("[Script Info]\nScriptType: v4.00+\nPlayResX: %1\nPlayResY: %2\n\n[V4+ Styles]\nFormat: Name, Fontname, "
+                "Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, "
+                "StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, "
+                "MarginR, MarginV, Encoding\n%3\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, "
+                "MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:01:00.00,Preview,,0,0,0,,{\\an5}%4\n")
+            .arg(w).arg(h).arg(styleLine(st), tr("Sample text 0123 ĄĘŻŹ"));
+    try {
+        static std::optional<rust::Box<fsb::Renderer>> r;
+        if (!r) r.emplace(fsb::new_renderer());
+        (*r)->set_script(fs::Utf8(script));
+        (*r)->blend(1000, w, h, w, h, {img.bits(), size_t(img.sizeInBytes())});
+    } catch (const rust::Error &) {
+        // no preview without libass; the editor still works
+    }
+    m_preview->setPixmap(QPixmap::fromImage(img));
+}
+
+// ---- style manager ------------------------------------------------------------
+
+StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
+    setWindowTitle(tr("Style manager"));
+    auto *g = new QGridLayout(this);
+    auto *catRow = new QHBoxLayout;
+    m_catalog = new QComboBox(this);
+    QSettings st;
+    QStringList cats = st.value("styles/catalogs", QStringList{"Default"}).toStringList();
+    m_catalog->addItems(cats);
+    auto *newCat = new QPushButton(tr("New"), this);
+    auto *delCat = new QPushButton(tr("Delete"), this);
+    catRow->addWidget(new QLabel(tr("Catalog:"), this));
+    catRow->addWidget(m_catalog, 1);
+    catRow->addWidget(newCat);
+    catRow->addWidget(delCat);
+    g->addLayout(catRow, 0, 0, 1, 2);
+    g->addWidget(new QLabel(tr("Styles stored"), this), 1, 0);
+    m_storage = new QListWidget(this);
+    m_storage->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    g->addWidget(m_storage, 2, 0);
+    auto *sb = new QVBoxLayout;
+    auto *sNew = new QPushButton(tr("New"), this), *sEdit = new QPushButton(tr("Edit"), this),
+         *sDel = new QPushButton(tr("Delete"), this), *sSort = new QPushButton(tr("Sort"), this);
+    for (auto *b : {sNew, sEdit, sDel, sSort}) sb->addWidget(b);
+    sb->addStretch();
+    g->addLayout(sb, 2, 1);
+    auto *mid = new QHBoxLayout;
+    auto *toStore = new QPushButton(tr("Add to storage ▲"), this);
+    auto *toFile = new QPushButton(tr("Add to ASS ▼"), this);
+    auto *toAll = new QPushButton(tr("Add to all open ASS files"), this);
+    for (auto *b : {toStore, toFile, toAll}) mid->addWidget(b);
+    g->addLayout(mid, 3, 0, 1, 2);
+    g->addWidget(new QLabel(tr("Styles in ASS file"), this), 4, 0);
+    m_file = new QListWidget(this);
+    m_file->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    g->addWidget(m_file, 5, 0);
+    auto *fb = new QVBoxLayout;
+    auto *fNew = new QPushButton(tr("New"), this), *fCopy = new QPushButton(tr("Copy"), this),
+         *fEdit = new QPushButton(tr("Edit"), this), *fDel = new QPushButton(tr("Delete"), this),
+         *fClear = new QPushButton(tr("Clear"), this);
+    for (auto *b : {fNew, fCopy, fEdit, fDel, fClear}) fb->addWidget(b);
+    fb->addStretch();
+    g->addLayout(fb, 5, 1);
+    auto *close = new QPushButton(tr("Close"), this);
+    g->addWidget(close, 6, 1);
+    connect(close, &QPushButton::clicked, this, &QDialog::accept);
+
+    auto session = [this]() -> fsb::Session & { return m_main->current()->s(); };
+    auto edited = [this] {
+        m_main->current()->changed();
+        reload();
+    };
+    auto defaultStyle = [] {
+        fsb::StyleData d;
+        d.name = "Default";
+        d.font = "Arial";
+        d.size = 48;
+        d.primary = "&H00FFFFFF";
+        d.secondary = "&H000000FF";
+        d.outline_color = "&H00000000";
+        d.back = "&H00000000";
+        d.scale_x = d.scale_y = 100;
+        d.border_style = 1;
+        d.outline = 2;
+        d.shadow = 2;
+        d.alignment = 2;
+        d.margin_l = d.margin_r = d.margin_v = 10;
+        d.encoding = 1;
+        return d;
+    };
+    connect(fNew, &QPushButton::clicked, this, [=, this] {
+        StyleEditor e(defaultStyle(), this);
+        if (e.exec() == QDialog::Accepted) {
+            session().set_style(-1, e.style());
+            edited();
+        }
+    });
+    connect(fCopy, &QPushButton::clicked, this, [=, this] {
+        const int i = m_file->currentRow();
+        if (i < 0) return;
+        auto s = session().styles()[size_t(i)];
+        s.name = fs::rs(fs::q(s.name) + tr(" - copy"));
+        session().set_style(-1, s);
+        edited();
+    });
+    auto editFile = [=, this] {
+        const int i = m_file->currentRow();
+        if (i < 0) return;
+        StyleEditor e(session().styles()[size_t(i)], this);
+        if (e.exec() == QDialog::Accepted) {
+            session().set_style(i, e.style());
+            edited();
+        }
+    };
+    connect(fEdit, &QPushButton::clicked, this, editFile);
+    connect(m_file, &QListWidget::itemDoubleClicked, this, editFile);
+    connect(fDel, &QPushButton::clicked, this, [=, this] {
+        auto rows = m_file->selectionModel()->selectedRows();
+        std::sort(rows.begin(), rows.end(), [](auto &a, auto &b) { return a.row() > b.row(); });
+        for (const auto &r : rows) session().delete_style(size_t(r.row()));
+        edited();
+    });
+    connect(fClear, &QPushButton::clicked, this, [=, this] {
+        if (!m_main->confirm(tr("Delete all styles from the file?"))) return;
+        for (size_t n = session().styles().size(); n > 0; --n) session().delete_style(n - 1);
+        edited();
+    });
+    connect(toFile, &QPushButton::clicked, this, [=, this] {
+        auto styles = session().styles();
+        for (auto *it : m_storage->selectedItems()) {
+            const auto &st = m_stored[size_t(m_storage->row(it))];
+            int idx = -1;
+            for (size_t k = 0; k < styles.size(); ++k)
+                if (fs::q(styles[k].name) == fs::q(st.name)) idx = int(k);
+            session().set_style(idx, st);
+        }
+        edited();
+    });
+    connect(toAll, &QPushButton::clicked, this, [=, this] {
+        for (auto *tab : m_main->tabs()) {
+            auto styles = tab->s().styles();
+            for (auto *it : m_storage->selectedItems()) {
+                const auto &st = m_stored[size_t(m_storage->row(it))];
+                int idx = -1;
+                for (size_t k = 0; k < styles.size(); ++k)
+                    if (fs::q(styles[k].name) == fs::q(st.name)) idx = int(k);
+                tab->s().set_style(idx, st);
+            }
+            tab->changed();
+        }
+        reload();
+    });
+    connect(toStore, &QPushButton::clicked, this, [=, this] {
+        const auto styles = session().styles();
+        for (auto *it : m_file->selectedItems()) {
+            const auto &st = styles[size_t(m_file->row(it))];
+            auto same = std::find_if(m_stored.begin(), m_stored.end(), [&](auto &x) { return fs::q(x.name) == fs::q(st.name); });
+            if (same != m_stored.end()) *same = st;
+            else m_stored.push_back(st);
+        }
+        saveCatalog();
+        reload();
+    });
+    connect(sNew, &QPushButton::clicked, this, [=, this] {
+        StyleEditor e(defaultStyle(), this);
+        if (e.exec() != QDialog::Accepted) return;
+        m_stored.push_back(e.style());
+        saveCatalog();
+        reload();
+    });
+    auto editStored = [this] {
+        const int i = m_storage->currentRow();
+        if (i < 0) return;
+        StyleEditor e(m_stored[size_t(i)], this);
+        if (e.exec() != QDialog::Accepted) return;
+        m_stored[size_t(i)] = e.style();
+        saveCatalog();
+        reload();
+    };
+    connect(sEdit, &QPushButton::clicked, this, editStored);
+    connect(m_storage, &QListWidget::itemDoubleClicked, this, editStored);
+    connect(sDel, &QPushButton::clicked, this, [this] {
+        auto rows = m_storage->selectionModel()->selectedRows();
+        std::sort(rows.begin(), rows.end(), [](auto &a, auto &b) { return a.row() > b.row(); });
+        for (const auto &r : rows) m_stored.erase(m_stored.begin() + r.row());
+        saveCatalog();
+        reload();
+    });
+    connect(sSort, &QPushButton::clicked, this, [this] {
+        std::sort(m_stored.begin(), m_stored.end(), [](auto &a, auto &b) { return fs::q(a.name) < fs::q(b.name); });
+        saveCatalog();
+        reload();
+    });
+    connect(newCat, &QPushButton::clicked, this, [this] {
+        bool ok;
+        const QString n = QInputDialog::getText(this, tr("Catalog"), tr("Name"), QLineEdit::Normal, {}, &ok);
+        if (!ok || n.isEmpty()) return;
+        m_catalog->addItem(n);
+        QStringList all;
+        for (int k = 0; k < m_catalog->count(); ++k) all << m_catalog->itemText(k);
+        QSettings().setValue("styles/catalogs", all);
+        m_catalog->setCurrentText(n);
+    });
+    connect(delCat, &QPushButton::clicked, this, [this] {
+        if (m_catalog->count() <= 1) return;
+        QSettings().remove("styles/catalog/" + m_catalog->currentText());
+        m_catalog->removeItem(m_catalog->currentIndex());
+        QStringList all;
+        for (int k = 0; k < m_catalog->count(); ++k) all << m_catalog->itemText(k);
+        QSettings().setValue("styles/catalogs", all);
+    });
+    connect(m_catalog, &QComboBox::currentTextChanged, this, [this] {
+        loadCatalog();
+        reload();
+        m_main->current()->s().set_info_value("Last Style Storage", fs::Utf8(m_catalog->currentText()));
+    });
+    const QString last = fs::q(m_main->current()->s().info_value("Last Style Storage"));
+    if (!last.isEmpty() && cats.contains(last)) m_catalog->setCurrentText(last);
+    loadCatalog();
+    reload();
+    resize(560, 640);
+}
+
+void StyleManager::loadCatalog() {
+    m_stored.clear();
+    const QStringList lines = QSettings().value("styles/catalog/" + m_catalog->currentText()).toStringList();
+    // stored as ASS "Style:" lines; parse them through a throwaway session
+    if (lines.isEmpty()) return;
+    const QString script = "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, "
+                           "PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, "
+                           "StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
+                           "MarginL, MarginR, MarginV, Encoding\n" + lines.join('\n') + "\n";
+    const QString tmp = QDir::temp().filePath(QString("fsed-styles-%1.ass").arg(QCoreApplication::applicationPid()));
+    QFile f(tmp);
+    if (!f.open(QIODevice::WriteOnly)) return;
+    f.write(script.toUtf8());
+    f.close();
+    auto s = fsb::new_session();
+    try {
+        s->open(fs::Utf8(tmp));
+        for (const auto &st : s->styles()) m_stored.push_back(st);
+    } catch (const rust::Error &) {
+    }
+    QFile::remove(tmp);
+}
+
+void StyleManager::saveCatalog() {
+    QStringList lines;
+    for (const auto &s : m_stored) lines << styleLine(s);
+    QSettings().setValue("styles/catalog/" + m_catalog->currentText(), lines);
+}
+
+void StyleManager::reload() {
+    m_storage->clear();
+    for (const auto &s : m_stored) m_storage->addItem(fs::q(s.name));
+    m_file->clear();
+    for (const auto &s : m_main->current()->s().styles()) m_file->addItem(fs::q(s.name));
+}
+
+void StyleManager::editStyle(const QString &name) {
+    const auto items = m_file->findItems(name, Qt::MatchExactly);
+    if (items.isEmpty()) return;
+    m_file->setCurrentItem(items.first());
+    const int i = m_file->currentRow();
+    StyleEditor e(m_main->current()->s().styles()[size_t(i)], this);
+    if (e.exec() == QDialog::Accepted) {
+        m_main->current()->s().set_style(i, e.style());
+        m_main->current()->changed();
+        reload();
+    }
+}
+
+// ---- properties ---------------------------------------------------------------
+
+PropertiesDialog::PropertiesDialog(TabPanel *tab) : QDialog(tab), m_tab(tab) {
+    setWindowTitle(tr("ASS file properties"));
+    auto &s = tab->s();
+    auto *f = new QFormLayout(this);
+    const std::pair<const char *, const char *> info[] = {
+        {"Title", "Title"}, {"Author", "Original Script"}, {"Translator", "Original Translation"},
+        {"Proofreading", "Original Editing"}, {"Timer", "Original Timing"}, {"Editing", "Script Updated By"}};
+    for (auto [label, key] : info) {
+        auto *e = new QLineEdit(fs::q(s.info_value(key)), this);
+        f->addRow(tr(label), e);
+        m_fields.emplace_back(key, e);
+    }
+    auto spin = [this](const QString &v) {
+        auto *sp = new QSpinBox(this);
+        sp->setRange(0, 16384);
+        sp->setValue(v.toInt());
+        return sp;
+    };
+    const auto fi = s.file_info();
+    m_w = spin(QString::number(fi.play_res_x));
+    m_h = spin(QString::number(fi.play_res_y));
+    auto *res = new QHBoxLayout;
+    res->addWidget(m_w);
+    res->addWidget(new QLabel("x", this));
+    res->addWidget(m_h);
+    auto *fromVideo = new QPushButton(tr("From video"), this);
+    fromVideo->setEnabled(tab->video()->hasVideo());
+    connect(fromVideo, &QPushButton::clicked, this, [this] {
+        m_w->setValue(m_tab->video()->info().width);
+        m_h->setValue(m_tab->video()->info().height);
+    });
+    res->addWidget(fromVideo);
+    f->addRow(tr("Resolution"), res);
+    m_lw = spin(fs::q(s.info_value("LayoutResX")));
+    m_lh = spin(fs::q(s.info_value("LayoutResY")));
+    auto *lres = new QHBoxLayout;
+    lres->addWidget(m_lw);
+    lres->addWidget(new QLabel("x", this));
+    lres->addWidget(m_lh);
+    f->addRow(tr("Layout resolution"), lres);
+    m_matrix = new QComboBox(this);
+    m_matrix->addItems({"None", "TV.601", "PC.601", "TV.709", "PC.709", "TV.FCC", "PC.FCC", "TV.240M", "PC.240M"});
+    m_matrix->setCurrentText(fs::q(s.info_value("YCbCr Matrix")).isEmpty() ? "None" : fs::q(s.info_value("YCbCr Matrix")));
+    f->addRow(tr("YCbCr matrix"), m_matrix);
+    m_wrap = new QComboBox(this);
+    m_wrap->addItems({tr("0: Smart wrapping, top line is wider"), tr("1: End-of-line word wrapping, only \\N breaks"),
+                      tr("2: No word wrapping, \\n and \\N break"), tr("3: Smart wrapping, bottom line is wider")});
+    m_wrap->setCurrentIndex(std::clamp(fs::q(s.info_value("WrapStyle")).toInt(), 0, 3));
+    f->addRow(tr("Wrap style"), m_wrap);
+    m_collisions = new QComboBox(this);
+    m_collisions->addItems({"Normal", "Reverse"});
+    m_collisions->setCurrentText(fs::q(s.info_value("Collisions")).isEmpty() ? "Normal" : fs::q(s.info_value("Collisions")));
+    f->addRow(tr("Colliding lines"), m_collisions);
+    m_scaled = new QCheckBox(tr("Scale border and shadow"), this);
+    m_scaled->setChecked(fs::q(s.info_value("ScaledBorderAndShadow")).compare("yes", Qt::CaseInsensitive) == 0);
+    f->addRow(m_scaled);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    f->addRow(bb);
+}
+
+void PropertiesDialog::accept() {
+    auto &s = m_tab->s();
+    auto set = [&](const QString &k, const QString &v) {
+        if (fs::q(s.info_value(fs::Utf8(k))) != v) s.set_info_value(fs::Utf8(k), fs::Utf8(v));
+    };
+    for (auto &[k, e] : m_fields) set(k, e->text());
+    const auto fi = s.file_info();
+    if (m_w->value() != fi.play_res_x) set("PlayResX", QString::number(m_w->value()));
+    if (m_h->value() != fi.play_res_y) set("PlayResY", QString::number(m_h->value()));
+    set("LayoutResX", m_lw->value() ? QString::number(m_lw->value()) : QString());
+    set("LayoutResY", m_lh->value() ? QString::number(m_lh->value()) : QString());
+    set("YCbCr Matrix", m_matrix->currentText());
+    set("WrapStyle", QString::number(m_wrap->currentIndex()));
+    set("Collisions", m_collisions->currentText());
+    set("ScaledBorderAndShadow", m_scaled->isChecked() ? "yes" : "no");
+    m_tab->changed();
+    QDialog::accept();
+}
+
+// ---- history ------------------------------------------------------------------
+
+HistoryDialog::HistoryDialog(TabPanel *tab) : QDialog(tab) {
+    setWindowTitle(tr("History"));
+    auto *v = new QVBoxLayout(this);
+    auto *list = new QListWidget(this);
+    list->addItem(tr("(current state)"));
+    for (const auto &h : tab->s().history()) list->addItem(fs::q(h));
+    v->addWidget(list);
+    v->addWidget(new QLabel(tr("Click a step to undo back to before it."), this));
+    connect(list, &QListWidget::itemClicked, this, [this, tab, list](QListWidgetItem *it) {
+        const int steps = list->row(it);
+        if (steps <= 0) return;
+        tab->s().undo_to(size_t(steps));
+        tab->changed();
+        accept();
+    });
+    resize(360, 420);
+}
+
+// ---- resample -----------------------------------------------------------------
+
+ResampleDialog::ResampleDialog(TabPanel *tab) : QDialog(tab) {
+    setWindowTitle(tr("Resample subtitles"));
+    auto *f = new QFormLayout(this);
+    const auto fi = tab->s().file_info();
+    f->addRow(tr("Source resolution"), new QLabel(QString("%1 x %2").arg(fi.play_res_x).arg(fi.play_res_y), this));
+    auto *w = new QSpinBox(this), *h = new QSpinBox(this);
+    for (auto *s : {w, h}) s->setRange(1, 16384);
+    w->setValue(tab->video()->hasVideo() ? tab->video()->info().width : fi.play_res_x);
+    h->setValue(tab->video()->hasVideo() ? tab->video()->info().height : fi.play_res_y);
+    auto *row = new QHBoxLayout;
+    row->addWidget(w);
+    row->addWidget(new QLabel("x", this));
+    row->addWidget(h);
+    f->addRow(tr("Target resolution"), row);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    connect(bb, &QDialogButtonBox::accepted, this, [this, tab, w, h] {
+        tab->s().resample(w->value(), h->value());
+        tab->changed();
+        accept();
+    });
+    connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    f->addRow(bb);
+}
+
+// ---- font collector -----------------------------------------------------------
+
+FontCollectorDialog::FontCollectorDialog(TabPanel *tab) : QDialog(tab) {
+    setWindowTitle(tr("Fonts collector"));
+    resize(760, 460);
+    QSettings st;
+    auto *f = new QFormLayout(this);
+    auto folderRow = [this](QLineEdit *e) {
+        auto *row = new QHBoxLayout;
+        auto *b = new QPushButton(tr("Browse..."), this);
+        connect(b, &QPushButton::clicked, this, [this, e] {
+            const QString d = QFileDialog::getExistingDirectory(this, {}, e->text());
+            if (!d.isEmpty()) e->setText(QDir::toNativeSeparators(d));
+        });
+        row->addWidget(e, 1);
+        row->addWidget(b);
+        return row;
+    };
+    auto *extra = new QLineEdit(st.value("fonts/extraDir").toString(), this);
+    f->addRow(tr("Also search folder"), folderRow(extra));
+    const QString media = tab->video()->hasVideo() ? tab->video()->path() : QString();
+    auto *attached = new QCheckBox(tr("Fonts attached to the video"), this);
+    attached->setEnabled(!media.isEmpty());
+    attached->setChecked(!media.isEmpty());
+    f->addRow(QString(), attached);
+    auto *dest = new QLineEdit(st.value("fonts/destDir").toString(), this);
+    f->addRow(tr("Copy fonts to"), folderRow(dest));
+    auto *report = new QPlainTextEdit(this);
+    report->setReadOnly(true);
+    report->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    f->addRow(report);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, this);
+    auto *check = bb->addButton(tr("Check"), QDialogButtonBox::ActionRole);
+    auto *copy = bb->addButton(tr("Copy"), QDialogButtonBox::ActionRole);
+    // shortcut: runs on the GUI thread (scanning system fonts takes a few seconds), move to a worker if it gets slow
+    auto run = [=, this](bool doCopy) {
+        if (doCopy && dest->text().isEmpty()) return report->setPlainText(tr("Choose a destination folder first."));
+        QSettings s;
+        s.setValue("fonts/extraDir", extra->text());
+        s.setValue("fonts/destDir", dest->text());
+        rust::Vec<rust::String> dirs;
+        if (!extra->text().isEmpty()) dirs.push_back(fs::rs(extra->text()));
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        try {
+            const QString r = fs::q(tab->s().collect_fonts(std::move(dirs), fs::Utf8(attached->isChecked() ? media : QString()),
+                                                          fs::Utf8(doCopy ? dest->text() : QString())));
+            const int missing = r.count("MISSING") + r.count("missing glyphs");
+            report->setPlainText(r + "\n" + (missing ? tr("%n problem(s) found.", nullptr, missing) : tr("All fonts found.")) +
+                                 (doCopy ? "\n" + tr("Copied to %1").arg(dest->text()) : QString()));
+        } catch (const std::exception &e) {
+            report->setPlainText(QString::fromUtf8(e.what()));
+        }
+        QApplication::restoreOverrideCursor();
+    };
+    connect(check, &QPushButton::clicked, this, [run] { run(false); });
+    connect(copy, &QPushButton::clicked, this, [run] { run(true); });
+    connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    f->addRow(bb);
+}
+
+// ---- settings -----------------------------------------------------------------
+
+SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
+    setWindowTitle(tr("Settings"));
+    // shortcut: a single page with the options the panels read; the full Kainote settings tree (themes, file associations) is not built yet.
+    QSettings st;
+    auto *f = new QFormLayout(this);
+    struct Check { const char *key; const char *label; bool def; };
+    const Check checks[] = {
+        {"video/openAudio", "Open audio together with video", true},
+        {"video/openWithSubs", "Open video and audio named in the subtitles", true},
+        {"audio/snapKeyframes", "Snap audio boundaries to keyframes", false},
+        {"audio/snapLines", "Snap audio boundaries to other lines", false},
+        {"audio/wheelZooms", "Mouse wheel zooms the audio (Shift scrolls)", false},
+        {"main/askSession", "Load the last session at startup", true},
+    };
+    std::vector<std::pair<QString, QCheckBox *>> boxes;
+    for (const auto &c : checks) {
+        auto *b = new QCheckBox(tr(c.label), this);
+        b->setChecked(st.value(c.key, c.def).toBool());
+        f->addRow(b);
+        boxes.emplace_back(c.key, b);
+    }
+    auto *leadIn = new QSpinBox(this), *leadOut = new QSpinBox(this);
+    for (auto *s : {leadIn, leadOut}) {
+        s->setRange(0, 5000);
+        s->setSuffix(" ms");
+    }
+    leadIn->setValue(st.value("audio/leadIn", 200).toInt());
+    leadOut->setValue(st.value("audio/leadOut", 300).toInt());
+    f->addRow(tr("Audio lead-in"), leadIn);
+    f->addRow(tr("Audio lead-out"), leadOut);
+    auto *font = new QPushButton(st.value("grid/font", QFont("Tahoma", 10)).value<QFont>().toString(), this);
+    connect(font, &QPushButton::clicked, this, [font] {
+        bool ok;
+        const QFont f = QFontDialog::getFont(&ok, QSettings().value("grid/font", QFont("Tahoma", 10)).value<QFont>());
+        if (ok) {
+            QSettings().setValue("grid/font", f);
+            font->setText(f.toString());
+        }
+    });
+    f->addRow(tr("Grid font (applies to new tabs)"), font);
+    auto *dictDir = new QLineEdit(QDir::toNativeSeparators(spell::dir()), this);
+    f->addRow(tr("Dictionary folder (Hunspell .aff/.dic)"), dictDir);
+    auto *dictLang = new QComboBox(this);
+    dictLang->addItems(spell::languages());
+    dictLang->setCurrentText(st.value("spell/lang").toString());
+    connect(dictDir, &QLineEdit::editingFinished, this, [dictDir, dictLang] {
+        const QString keep = dictLang->currentText();
+        QSettings().setValue("spell/dir", QDir::fromNativeSeparators(dictDir->text()));
+        dictLang->clear();
+        dictLang->addItems(spell::languages());
+        dictLang->setCurrentText(keep);
+    });
+    f->addRow(tr("Spell check language"), dictLang);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    connect(bb, &QDialogButtonBox::accepted, this, [this, boxes, leadIn, leadOut, dictDir, dictLang] {
+        QSettings st;
+        st.setValue("spell/dir", QDir::fromNativeSeparators(dictDir->text()));
+        st.setValue("spell/lang", dictLang->currentText());
+        spell::reload();
+        for (auto &[k, b] : boxes) st.setValue(k, b->isChecked());
+        st.setValue("audio/leadIn", leadIn->value());
+        st.setValue("audio/leadOut", leadOut->value());
+        accept();
+    });
+    connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    f->addRow(bb);
+}

@@ -1,0 +1,16 @@
+[package]
+name = "fs-audio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+cpal = "=0.18.2"  # 0.19 renames play()/start(); keep 0.18.x
+realfft = "3.5.0"
+thiserror = "2.0.21"
+
+[lints]
+workspace = true

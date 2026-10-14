@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Core, formats, audio, automation and the CLI: no native media stack needed.
+  core:
+    strategy:
+      fail-fast: false
+      matrix:
+        # shortcut: macOS dropped from CI for now, re-add macos-latest when a Mac build is wanted.
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: ALSA headers (cpal)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --locked -- -D warnings
+      - run: cargo test --locked
+
+  # Full GUI build: vcpkg media deps + Qt + Rust via Corrosion, packaged with CPack.
+  gui:
+    needs: core
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            preset: windows
+            triplet: x64-windows
+          - os: ubuntu-latest
+            preset: unix
+            triplet: x64-linux-dynamic
+    runs-on: ${{ matrix.os }}
+    env:
+      FS_DEPS_ROOT: ${{ github.workspace }}/../deps
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../vcpkg-bin
+    steps:
+      - uses: actions/checkout@v4
+      # vcpkg binary packages, so FFmpeg is only compiled when vcpkg.json or the overlay ports change
+      - uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/../vcpkg-bin
+          key: vcpkg-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'tools/vcpkg-ports/**') }}
+          restore-keys: vcpkg-${{ matrix.triplet }}-
+      - name: Binary cache dir
+        shell: bash
+        run: mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+      - name: System packages
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev ninja-build nasm libgl1-mesa-dev libxkbcommon-dev autoconf-archive bison flex gperf zip
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.12.*'
+          modules: qtshadertools
+          cache: true
+      - uses: Swatinem/rust-cache@v2
+      - name: vcpkg
+        shell: bash
+        run: |
+          git clone https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
+          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics || "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.bat"
+          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+      - name: Media dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tools/deps.ps1 -Root "$env:FS_DEPS_ROOT"
+      - name: Media dependencies (Unix)
+        if: runner.os != 'Windows'
+        run: TRIPLET=${{ matrix.triplet }} tools/deps.sh
+      - name: Media tests
+        shell: bash
+        run: cargo test --locked -p fs-media -p fs-bridge
+      - name: Configure
+        shell: bash
+        run: cd app && cmake --preset ${{ matrix.preset }} -DFS_DEPS_DIR="$FS_DEPS_ROOT/installed/${{ matrix.triplet }}"
+      - name: Build
+        shell: bash
+        run: cmake --build app/build-${{ matrix.preset }} --config Release
+      - name: Package
+        shell: bash
+        run: cd app/build-${{ matrix.preset }} && cpack -C Release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fs-editor-${{ matrix.os }}
+          path: app/build-${{ matrix.preset }}/*.zip

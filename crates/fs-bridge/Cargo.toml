@@ -1,0 +1,27 @@
+[package]
+name = "fs-bridge"
+description = "cxx bridge between the Rust core and the Qt GUI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+cxx = "1.0.205"
+fs-audio = { path = "../fs-audio" }
+fs-automation = { path = "../fs-automation" }
+fs-core = { path = "../fs-core", features = ["fontdb"] }
+fontdb = "0.24.0"
+fs-formats = { path = "../fs-formats" }
+fs-media = { path = "../fs-media" }
+encoding_rs = "0.8.42"
+spellbook = "0.4.2"
+
+[build-dependencies]
+cxx-build = "1.0.205"
+
+[lints]
+workspace = true

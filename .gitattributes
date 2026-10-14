@@ -1,0 +1,3 @@
+# Test corpus must be kept byte-exact (line endings, BOMs).
+tests/corpus/** -text
+* text=auto

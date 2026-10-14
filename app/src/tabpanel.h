@@ -1,0 +1,107 @@
+// One editor tab (Kainote "TabPanel"): a subtitle session with its video,
+// audio, edit box, grid and Shift Times panel, plus the shared selection.
+#pragma once
+
+#include "bridge.h"
+
+#include <QWidget>
+#include <set>
+
+class MainWindow;
+class Grid;
+class EditBox;
+class ShiftPanel;
+class VideoBox;
+class AudioBox;
+class QSplitter;
+
+class TabPanel : public QWidget {
+    Q_OBJECT
+public:
+    // Flags for changed(): who caused the change, so it is not reloaded.
+    enum Source { Other = 0, FromEditBox = 1, FromAudio = 2, FromVideo = 4 };
+    enum ViewMode { All = 1, VideoSubs, AudioSubs, OnlyVideo, OnlySubs };
+
+    explicit TabPanel(MainWindow *main);
+    ~TabPanel() override;
+
+    fsb::Session &s() { return *m_session; }
+    MainWindow *main() const { return m_main; }
+    Grid *grid() const { return m_grid; }
+    EditBox *edit() const { return m_edit; }
+    ShiftPanel *shift() const { return m_shift; }
+    VideoBox *video() const { return m_video; }
+    AudioBox *audio() const { return m_audio; }
+
+    // file
+    bool openSubs(const QString &path);
+    bool save(const QString &path = {});
+    bool saveTranslation(const QString &path);
+    // Drop the subtitles, keep video and audio (Kainote "Remove subtitles from the editor").
+    void clearSubs();
+    QString path() const;
+    QString title() const;
+    bool modified() const;
+
+    // selection; rows are logical grid rows
+    int active() const { return m_active; }
+    std::vector<size_t> selection() const { return {m_sel.begin(), m_sel.end()}; }
+    bool isSelected(size_t r) const { return m_sel.contains(r); }
+    void setActive(int row, bool select = true);
+    void setSelection(const std::vector<size_t> &rows, int active);
+    void toggleSelected(size_t r);
+
+    // call after every document mutation
+    void changed(int source = Other);
+    // undo/redo keep the selection when possible
+    void undo();
+    void redo();
+
+    // media
+    void openVideo(const QString &path);
+    void openDummyVideo(int w, int h, double fps, qint64 ms);
+    void openAudio(const QString &path);
+    void openBlankAudio(qint64 ms);
+    void closeAudio();
+    void openKeyframes(const QString &path);
+    std::vector<std::int64_t> keyframes() const { return m_keyframes; }
+    void setKeyframes(std::vector<std::int64_t> kf);
+    qint64 videoTime() const;
+    void seekVideo(qint64 ms);
+    void playLine(int row);
+
+    void setViewMode(int mode);
+    int viewMode() const { return m_viewMode; }
+    void setPlayerMode(bool on);
+    bool playerMode() const { return m_playerMode; }
+    void showShiftPanel(bool on);
+    bool shiftPanelVisible() const;
+    bool hideOriginal() const { return m_hideOriginal; }
+    void setHideOriginal(bool on);
+    // the video context the core needs for frame shifting and automation
+    void updateVideoContext();
+
+signals:
+    void docChanged(int source);
+    void activeChanged(int row);
+    void titleChanged();
+    void statusChanged();
+
+private:
+    void applyLayout();
+
+    MainWindow *m_main;
+    rust::Box<fsb::Session> m_session;
+    Grid *m_grid;
+    EditBox *m_edit;
+    ShiftPanel *m_shift;
+    VideoBox *m_video;
+    AudioBox *m_audio;
+    QSplitter *m_vsplit, *m_top, *m_right, *m_bottom;
+    std::set<size_t> m_sel;
+    int m_active = 0;
+    int m_viewMode = All;
+    bool m_playerMode = false;
+    bool m_hideOriginal = false;
+    std::vector<std::int64_t> m_keyframes;
+};

@@ -1,0 +1,34 @@
+[package]
+name = "fs-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "fsed"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+encoding_rs = "0.8.42"
+fs-core = { version = "0.1.0", path = "../fs-core", features = ["fontdb"] }
+fontdb = "0.24.0"
+fs-formats = { version = "0.1.0", path = "../fs-formats" }
+fs-audio = { path = "../fs-audio", optional = true }
+fs-automation = { path = "../fs-automation", optional = true }
+fs-media = { path = "../fs-media", optional = true }
+
+[features]
+default = ["lua"]
+lua = ["dep:fs-automation"]
+# Media commands need the native stack (tools/deps): cargo build -p fs-cli --features media
+media = ["dep:fs-media", "dep:fs-audio"]
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+fs-formats = { path = "../fs-formats" }
+tempfile = "3.27.0"

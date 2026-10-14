@@ -1,0 +1,38 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build-${presetName}",
+      "cacheVariables": { "FS_CARGO_PROFILE": "release" }
+    },
+    {
+      "name": "windows",
+      "inherits": "base",
+      "displayName": "Windows (Visual Studio 2026)",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "windows-dev",
+      "inherits": "windows",
+      "displayName": "Windows, fast Rust builds (cargo profile gui-dev)",
+      "cacheVariables": { "FS_CARGO_PROFILE": "gui-dev" }
+    },
+    {
+      "name": "unix",
+      "inherits": "base",
+      "displayName": "Linux / macOS (Ninja)",
+      "generator": "Ninja",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" },
+      "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "windows", "configurePreset": "windows", "configuration": "Release" },
+    { "name": "windows-dev", "configurePreset": "windows-dev", "configuration": "RelWithDebInfo" },
+    { "name": "unix", "configurePreset": "unix" }
+  ]
+}

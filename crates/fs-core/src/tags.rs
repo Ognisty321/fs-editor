@@ -1,0 +1,839 @@
+//! Override tag parsing (`{\tag...}` blocks) and vector drawings (`\p`).
+//!
+//! Parsing is lossless: every block and tag keeps its exact source text, and
+//! [`Line::to_text`] reproduces the input byte-for-byte unless something was
+//! modified.
+
+use std::fmt::Write as _;
+
+use crate::model::fmt_f64;
+
+/// Known tag names, longest first so prefix matching picks e.g. `fscx` over
+/// `fs`. Case matters (`K` ≠ `k`).
+const TAG_NAMES: &[&str] = &[
+    "xbord", "ybord", "xshad", "yshad", "iclip", "blur", "bord", "shad", "fscx", "fscy", "fade",
+    "move", "clip", "alpha", "kf", "ko", "kt", "fax", "fay", "frx", "fry", "frz", "fsp", "pbo",
+    "pos", "org", "fad", "1a", "2a", "3a", "4a", "1c", "2c", "3c", "4c", "an", "be", "fe", "fn",
+    "fr", "fs", "a", "b", "c", "i", "k", "K", "p", "q", "r", "s", "t", "u",
+];
+
+/// Tags whose arguments are written in parentheses.
+fn is_paren_tag(name: &str) -> bool {
+    matches!(
+        name,
+        "pos" | "move" | "org" | "fad" | "fade" | "clip" | "iclip" | "t"
+    )
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tag {
+    /// Tag name without backslash (`pos`, `1c`, `fn`, …). For unknown tags,
+    /// the leading alphabetic part.
+    pub name: String,
+    /// Arguments. For parenthesised tags each comma-separated argument; for
+    /// `\t` the last argument is the nested tag string. For simple tags a
+    /// single element (possibly empty).
+    pub args: Vec<String>,
+    pub paren: bool,
+    /// Exact source text including the leading backslash. Cleared by setters;
+    /// when `None` the tag is serialised from `name`/`args`.
+    pub raw: Option<String>,
+}
+
+impl Tag {
+    pub fn new(name: &str, args: Vec<String>) -> Tag {
+        Tag {
+            name: name.to_string(),
+            paren: is_paren_tag(name),
+            args,
+            raw: None,
+        }
+    }
+
+    pub fn simple(name: &str, arg: impl Into<String>) -> Tag {
+        Tag {
+            name: name.to_string(),
+            paren: false,
+            args: vec![arg.into()],
+            raw: None,
+        }
+    }
+
+    pub fn is_known(&self) -> bool {
+        TAG_NAMES.contains(&self.name.as_str())
+    }
+
+    pub fn arg(&self, i: usize) -> Option<&str> {
+        self.args.get(i).map(|s| s.as_str())
+    }
+
+    pub fn arg_f64(&self, i: usize) -> Option<f64> {
+        let a = self.args.get(i)?.trim();
+        a.parse::<f64>().ok().or_else(|| {
+            // tolerate trailing junk ("\fs20.5x")
+            let end = a
+                .char_indices()
+                .find(|&(j, c)| {
+                    !(c.is_ascii_digit() || c == '.' || ((c == '-' || c == '+') && j == 0))
+                })
+                .map(|(j, _)| j)
+                .unwrap_or(a.len());
+            a[..end].parse().ok()
+        })
+    }
+
+    pub fn set_args(&mut self, args: Vec<String>) {
+        self.args = args;
+        self.raw = None;
+    }
+
+    /// For `\t`: the nested tags.
+    pub fn transform_tags(&self) -> Option<Vec<Tag>> {
+        if self.name != "t" {
+            return None;
+        }
+        let inner = self.args.last()?;
+        Some(parse_tags(inner))
+    }
+
+    pub fn write(&self, out: &mut String) {
+        if let Some(r) = &self.raw {
+            out.push_str(r);
+            return;
+        }
+        out.push('\\');
+        out.push_str(&self.name);
+        if self.paren {
+            out.push('(');
+            out.push_str(&self.args.join(","));
+            out.push(')');
+        } else if let Some(a) = self.args.first() {
+            out.push_str(a);
+        }
+    }
+
+    pub fn to_text(&self) -> String {
+        let mut s = String::new();
+        self.write(&mut s);
+        s
+    }
+}
+
+/// A piece of a dialogue line.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Block {
+    /// Plain text (may contain `\N`, `\n`, `\h`).
+    Text(String),
+    /// Text while a drawing mode `\p` > 0 is active.
+    Drawing { scale: u32, commands: String },
+    /// `{...}` override block containing tags (and possibly junk between
+    /// tags, kept in `junk`).
+    Override { tags: Vec<Tag>, raw: Option<String> },
+    /// `{...}` block without any backslash — a comment.
+    Comment(String),
+}
+
+/// A parsed dialogue line.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Line {
+    pub blocks: Vec<Block>,
+}
+
+impl Line {
+    pub fn parse(text: &str) -> Line {
+        let mut blocks = Vec::new();
+        let mut drawing: u32 = 0;
+        let mut rest = text;
+        while !rest.is_empty() {
+            if let Some(after) = rest.strip_prefix('{') {
+                match after.find('}') {
+                    Some(end) => {
+                        let inner = &after[..end];
+                        if inner.contains('\\') {
+                            let tags = parse_tags(inner);
+                            for t in &tags {
+                                if t.name == "p" {
+                                    drawing = t.arg_f64(0).map(|v| v.max(0.0) as u32).unwrap_or(0);
+                                }
+                            }
+                            blocks.push(Block::Override {
+                                tags,
+                                raw: Some(format!("{{{inner}}}")),
+                            });
+                        } else {
+                            blocks.push(Block::Comment(inner.to_string()));
+                        }
+                        rest = &after[end + 1..];
+                    }
+                    None => {
+                        // unterminated '{': rest is text (VSFilter shows it)
+                        push_text(&mut blocks, rest, drawing);
+                        rest = "";
+                    }
+                }
+            } else {
+                let end = rest.find('{').unwrap_or(rest.len());
+                push_text(&mut blocks, &rest[..end], drawing);
+                rest = &rest[end..];
+            }
+        }
+        Line { blocks }
+    }
+
+    pub fn to_text(&self) -> String {
+        let mut s = String::new();
+        for b in &self.blocks {
+            match b {
+                Block::Text(t) => s.push_str(t),
+                Block::Drawing { commands, .. } => s.push_str(commands),
+                Block::Comment(c) => {
+                    s.push('{');
+                    s.push_str(c);
+                    s.push('}');
+                }
+                Block::Override { tags, raw } => match raw {
+                    Some(r) => s.push_str(r),
+                    None => {
+                        s.push('{');
+                        for t in tags {
+                            t.write(&mut s);
+                        }
+                        s.push('}');
+                    }
+                },
+            }
+        }
+        s
+    }
+
+    /// All tags in order (excluding those nested inside `\t`).
+    pub fn tags(&self) -> impl Iterator<Item = &Tag> {
+        self.blocks.iter().flat_map(|b| match b {
+            Block::Override { tags, .. } => tags.as_slice(),
+            _ => &[],
+        })
+    }
+
+    /// Last occurrence of a tag (the one that takes effect for line-wide tags
+    /// like `\pos`, VSFilter uses the first `\pos`; libass the first too).
+    pub fn first_tag(&self, name: &str) -> Option<&Tag> {
+        self.tags().find(|t| t.name == name)
+    }
+
+    /// Mutable access to every tag with the given name (marks blocks dirty).
+    pub fn for_each_tag_mut(&mut self, mut f: impl FnMut(&mut Tag)) {
+        for b in &mut self.blocks {
+            if let Block::Override { tags, raw } = b {
+                let before = tags.clone();
+                for t in tags.iter_mut() {
+                    f(t);
+                }
+                if *tags != before {
+                    *raw = None;
+                }
+            }
+        }
+    }
+
+    /// Insert or replace a tag in the first override block (creating one at
+    /// the start if needed). Used for `\pos`, `\an`, `\clip` etc.
+    pub fn set_line_tag(&mut self, tag: Tag) {
+        let aliases: &[&str] = match tag.name.as_str() {
+            "pos" | "move" => &["pos", "move"],
+            "clip" | "iclip" => &["clip", "iclip"],
+            "fad" | "fade" => &["fad", "fade"],
+            "an" | "a" => &["an", "a"],
+            n => std::slice::from_ref(match TAG_NAMES.iter().find(|x| **x == n) {
+                Some(x) => x,
+                None => &"",
+            }),
+        };
+        for b in &mut self.blocks {
+            if let Block::Override { tags, raw } = b
+                && let Some(t) = tags.iter_mut().find(|t| aliases.contains(&t.name.as_str()))
+            {
+                *t = tag;
+                *raw = None;
+                return;
+            }
+        }
+        match self.blocks.first_mut() {
+            Some(Block::Override { tags, raw }) => {
+                tags.push(tag);
+                *raw = None;
+            }
+            _ => self.blocks.insert(
+                0,
+                Block::Override {
+                    tags: vec![tag],
+                    raw: None,
+                },
+            ),
+        }
+    }
+
+    /// Remove all tags with any of the given names. Empty override blocks are
+    /// dropped.
+    pub fn remove_tags(&mut self, names: &[&str]) {
+        for b in &mut self.blocks {
+            if let Block::Override { tags, raw } = b {
+                let n = tags.len();
+                tags.retain(|t| !names.contains(&t.name.as_str()));
+                if tags.len() != n {
+                    *raw = None;
+                }
+            }
+        }
+        self.blocks
+            .retain(|b| !matches!(b, Block::Override { tags, .. } if tags.is_empty()));
+    }
+
+    /// Plain text with all override blocks and comments removed.
+    pub fn plain_text(&self) -> String {
+        let mut s = String::new();
+        for b in &self.blocks {
+            if let Block::Text(t) = b {
+                s.push_str(t);
+            }
+        }
+        s
+    }
+}
+
+fn push_text(blocks: &mut Vec<Block>, t: &str, drawing: u32) {
+    if t.is_empty() {
+        return;
+    }
+    if drawing > 0 {
+        blocks.push(Block::Drawing {
+            scale: drawing,
+            commands: t.to_string(),
+        });
+    } else {
+        blocks.push(Block::Text(t.to_string()));
+    }
+}
+
+/// Parse the inside of an override block into tags. Text before the first
+/// backslash and between tags that does not belong to any tag is attached to
+/// the preceding tag's raw text (or kept as an unnamed tag) so nothing is lost.
+pub fn parse_tags(s: &str) -> Vec<Tag> {
+    let mut tags = Vec::new();
+    let b = s.as_bytes();
+    let mut i = 0;
+    // leading junk before the first backslash
+    if let Some(first) = s.find('\\') {
+        if first > 0 {
+            tags.push(Tag {
+                name: String::new(),
+                args: vec![s[..first].to_string()],
+                paren: false,
+                raw: Some(s[..first].to_string()),
+            });
+        }
+        i = first;
+    } else if !s.is_empty() {
+        tags.push(Tag {
+            name: String::new(),
+            args: vec![s.to_string()],
+            paren: false,
+            raw: Some(s.to_string()),
+        });
+        return tags;
+    }
+    while i < b.len() {
+        debug_assert_eq!(b[i], b'\\');
+        let start = i;
+        i += 1;
+        // skip whitespace after backslash (VSFilter tolerates "\ pos")
+        while i < b.len() && (b[i] == b' ' || b[i] == b'\t') {
+            i += 1;
+        }
+        let name_start = i;
+        let rest = &s[name_start..];
+        let name: String = match TAG_NAMES.iter().find(|n| rest.starts_with(**n)) {
+            Some(n) => n.to_string(),
+            None => rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphabetic())
+                .collect(),
+        };
+        i = name_start + name.len();
+        let paren = i < b.len()
+            && b[i] == b'('
+            && (is_paren_tag(&name) || !TAG_NAMES.contains(&name.as_str()));
+        let args;
+        if paren {
+            // find the matching ')' (nested for \t), or end of block
+            let mut depth = 0i32;
+            let mut j = i;
+            let mut close = None;
+            while j < b.len() {
+                match b[j] {
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            close = Some(j);
+                            break;
+                        }
+                    }
+                    // a backslash at depth 1 outside \t ends an unclosed paren tag
+                    b'\\' if name != "t" && depth == 1 => break,
+                    _ => {}
+                }
+                j += 1;
+            }
+            let inner_end = close.unwrap_or(j);
+            let inner = &s[i + 1..inner_end];
+            args = split_paren_args(&name, inner);
+            i = match close {
+                Some(c) => c + 1,
+                None => inner_end,
+            };
+            // junk after ')' up to the next backslash belongs to this tag's raw
+            while i < b.len() && b[i] != b'\\' {
+                i += 1;
+            }
+        } else {
+            let end = s[i..].find('\\').map(|p| i + p).unwrap_or(b.len());
+            args = vec![s[i..end].to_string()];
+            i = end;
+        }
+        tags.push(Tag {
+            name,
+            args,
+            paren,
+            raw: Some(s[start..i].to_string()),
+        });
+    }
+    tags
+}
+
+fn split_paren_args(name: &str, inner: &str) -> Vec<String> {
+    if name == "t" {
+        // \t([t1,t2,][accel,]tags) — the tag list starts at the first backslash
+        match inner.find('\\') {
+            Some(p) => {
+                let mut v: Vec<String> = inner[..p]
+                    .split(',')
+                    .map(|x| x.trim().to_string())
+                    .filter(|x| !x.is_empty())
+                    .collect();
+                v.push(inner[p..].to_string());
+                v
+            }
+            None => inner.split(',').map(|x| x.trim().to_string()).collect(),
+        }
+    } else if name == "clip" || name == "iclip" {
+        // vector clip: \clip([scale,]drawing); rectangular: \clip(x1,y1,x2,y2)
+        match inner.split_once(',') {
+            Some((a, d)) if a.trim().parse::<i32>().is_ok() && looks_like_drawing(d) => {
+                vec![a.trim().to_string(), d.to_string()]
+            }
+            _ if looks_like_drawing(inner) => vec![inner.to_string()],
+            _ => inner.split(',').map(|x| x.trim().to_string()).collect(),
+        }
+    } else {
+        inner.split(',').map(|x| x.trim().to_string()).collect()
+    }
+}
+
+fn looks_like_drawing(s: &str) -> bool {
+    s.trim_start().starts_with(['m', 'n', 'M', 'N'])
+}
+
+/// Remove all override blocks and comments; optionally convert `\N`/`\n` to
+/// newlines and `\h` to non-breaking space.
+pub fn strip_tags(text: &str) -> String {
+    let mut s = String::with_capacity(text.len());
+    let mut depth = false;
+    for c in text.chars() {
+        match c {
+            '{' if !depth => depth = true,
+            '}' if depth => depth = false,
+            _ if !depth => s.push(c),
+            _ => {}
+        }
+    }
+    s
+}
+
+/// Plain readable text: tags stripped, `\N`/`\n` → ' ', `\h` → ' '.
+pub fn display_text(text: &str) -> String {
+    strip_tags(text)
+        .replace("\\N", " ")
+        .replace("\\n", " ")
+        .replace("\\h", "\u{a0}")
+}
+
+/// Character count used for CPS, following Aegisub's default: tags,
+/// whitespace and punctuation are ignored; `\N` counts as nothing.
+pub fn char_count(text: &str, ignore_whitespace: bool, ignore_punctuation: bool) -> usize {
+    let t = strip_tags(text)
+        .replace("\\N", "")
+        .replace("\\n", "")
+        .replace("\\h", " ");
+    t.chars()
+        .filter(|c| !(ignore_whitespace && c.is_whitespace()))
+        .filter(|c| !(ignore_punctuation && (c.is_ascii_punctuation() || is_unicode_punct(*c))))
+        .count()
+}
+
+fn is_unicode_punct(c: char) -> bool {
+    matches!(
+        c,
+        '…' | '–'
+            | '—'
+            | '„'
+            | '”'
+            | '“'
+            | '«'
+            | '»'
+            | '‘'
+            | '’'
+            | '¿'
+            | '¡'
+            | '。'
+            | '、'
+            | '「'
+            | '」'
+            | '・'
+    )
+}
+
+/// Characters per second as Aegisub computes it (0 for zero-length lines).
+pub fn cps(text: &str, duration_ms: i64) -> f64 {
+    if duration_ms <= 0 {
+        return 0.0;
+    }
+    char_count(text, true, true) as f64 * 1000.0 / duration_ms as f64
+}
+
+// ---------------------------------------------------------------------------
+// Karaoke
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Syllable {
+    /// Start relative to line start, ms.
+    pub start_ms: i64,
+    pub duration_ms: i64,
+    /// `k`, `K`, `kf`, `ko`.
+    pub kind: String,
+    /// Syllable text including any tags other than the karaoke tag.
+    pub text: String,
+}
+
+/// Split a line into karaoke syllables (like karaskel / Aegisub's karaoke
+/// mode). Text before the first `\k` forms a zero-length syllable if non-empty.
+pub fn karaoke_syllables(text: &str) -> Vec<Syllable> {
+    let line = Line::parse(text);
+    let mut syls: Vec<Syllable> = Vec::new();
+    let mut cur = Syllable {
+        start_ms: 0,
+        duration_ms: 0,
+        kind: "k".into(),
+        text: String::new(),
+    };
+    let mut pos = 0i64;
+    let mut started = false;
+    for b in &line.blocks {
+        match b {
+            Block::Override { tags, .. } => {
+                let mut other = String::new();
+                for t in tags {
+                    if matches!(t.name.as_str(), "k" | "K" | "kf" | "ko") {
+                        if started || !cur.text.is_empty() {
+                            syls.push(std::mem::take(&mut cur));
+                        }
+                        started = true;
+                        let cs = t.arg_f64(0).unwrap_or(0.0).max(0.0);
+                        cur = Syllable {
+                            start_ms: pos,
+                            duration_ms: (cs * 10.0).round() as i64,
+                            kind: t.name.clone(),
+                            text: String::new(),
+                        };
+                        pos += cur.duration_ms;
+                    } else if t.name == "kt" {
+                        // \kt sets the absolute syllable start
+                        pos = (t.arg_f64(0).unwrap_or(0.0) * 10.0).round() as i64;
+                    } else {
+                        t.write(&mut other);
+                    }
+                }
+                if !other.is_empty() {
+                    cur.text.push('{');
+                    cur.text.push_str(&other);
+                    cur.text.push('}');
+                }
+            }
+            Block::Text(t) => cur.text.push_str(t),
+            Block::Drawing { commands, .. } => cur.text.push_str(commands),
+            Block::Comment(c) => {
+                cur.text.push('{');
+                cur.text.push_str(c);
+                cur.text.push('}');
+            }
+        }
+    }
+    if started || !cur.text.is_empty() {
+        syls.push(cur);
+    }
+    syls
+}
+
+/// Rebuild line text from syllables using `\k`-style tags (centiseconds).
+pub fn join_syllables(syls: &[Syllable]) -> String {
+    let mut s = String::new();
+    for sy in syls {
+        let _ = write!(
+            s,
+            "{{\\{}{}}}",
+            sy.kind,
+            (sy.duration_ms as f64 / 10.0).round() as i64
+        );
+        s.push_str(&sy.text);
+    }
+    s
+}
+
+// ---------------------------------------------------------------------------
+// Drawings
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DrawCmd {
+    Move(f64, f64),
+    /// `n`: move without closing the previous shape.
+    MoveNoClose(f64, f64),
+    Line(f64, f64),
+    Bezier([(f64, f64); 3]),
+    /// `s`: cubic b-spline points (variable count, here split per point).
+    Spline(f64, f64),
+    /// `p`: extend b-spline.
+    Extend(f64, f64),
+    /// `c`: close b-spline.
+    Close,
+}
+
+/// Parse vector drawing commands (`m 0 0 l 100 0 100 100 b ...`).
+pub fn parse_drawing(s: &str) -> Vec<DrawCmd> {
+    let toks: Vec<&str> = s.split_whitespace().collect();
+    let mut out = Vec::new();
+    let mut cmd = 'm';
+    let mut nums: Vec<f64> = Vec::new();
+    let flush = |cmd: char, nums: &mut Vec<f64>, out: &mut Vec<DrawCmd>| {
+        let pairs: Vec<(f64, f64)> = nums
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| (c[0], c[1]))
+            .collect();
+        match cmd {
+            'm' => out.extend(pairs.iter().map(|&(x, y)| DrawCmd::Move(x, y))),
+            'n' => out.extend(pairs.iter().map(|&(x, y)| DrawCmd::MoveNoClose(x, y))),
+            'l' => out.extend(pairs.iter().map(|&(x, y)| DrawCmd::Line(x, y))),
+            'b' => out.extend(
+                pairs
+                    .as_chunks::<3>()
+                    .0
+                    .iter()
+                    .map(|c| DrawCmd::Bezier([c[0], c[1], c[2]])),
+            ),
+            's' => out.extend(pairs.iter().map(|&(x, y)| DrawCmd::Spline(x, y))),
+            'p' => out.extend(pairs.iter().map(|&(x, y)| DrawCmd::Extend(x, y))),
+            _ => {}
+        }
+        nums.clear();
+    };
+    for t in toks {
+        let lower = t.to_ascii_lowercase();
+        if lower.len() == 1 && "mnlbspc".contains(lower.as_str()) {
+            flush(cmd, &mut nums, &mut out);
+            cmd = lower.chars().next().unwrap();
+            if cmd == 'c' {
+                out.push(DrawCmd::Close);
+            }
+        } else if let Ok(v) = t.parse::<f64>() {
+            nums.push(v);
+        }
+    }
+    flush(cmd, &mut nums, &mut out);
+    out
+}
+
+/// Serialise drawing commands, merging consecutive commands of the same kind
+/// (`l 1 2 3 4`).
+pub fn write_drawing(cmds: &[DrawCmd]) -> String {
+    let mut s = String::new();
+    let mut last: Option<char> = None;
+    let mut emit = |s: &mut String, c: char, pts: &[(f64, f64)]| {
+        if last != Some(c) || c == 'm' || c == 'n' {
+            if !s.is_empty() {
+                s.push(' ');
+            }
+            s.push(c);
+        }
+        for (x, y) in pts {
+            let _ = write!(s, " {} {}", fmt_f64(*x), fmt_f64(*y));
+        }
+        last = Some(c);
+    };
+    for c in cmds {
+        match *c {
+            DrawCmd::Move(x, y) => emit(&mut s, 'm', &[(x, y)]),
+            DrawCmd::MoveNoClose(x, y) => emit(&mut s, 'n', &[(x, y)]),
+            DrawCmd::Line(x, y) => emit(&mut s, 'l', &[(x, y)]),
+            DrawCmd::Bezier(p) => emit(&mut s, 'b', &p),
+            DrawCmd::Spline(x, y) => emit(&mut s, 's', &[(x, y)]),
+            DrawCmd::Extend(x, y) => emit(&mut s, 'p', &[(x, y)]),
+            DrawCmd::Close => emit(&mut s, 'c', &[]),
+        }
+    }
+    s
+}
+
+/// Apply a point transform to every coordinate of a drawing.
+pub fn transform_drawing(cmds: &mut [DrawCmd], f: impl Fn(f64, f64) -> (f64, f64)) {
+    for c in cmds {
+        match c {
+            DrawCmd::Move(x, y)
+            | DrawCmd::MoveNoClose(x, y)
+            | DrawCmd::Line(x, y)
+            | DrawCmd::Spline(x, y)
+            | DrawCmd::Extend(x, y) => {
+                let (nx, ny) = f(*x, *y);
+                *x = nx;
+                *y = ny;
+            }
+            DrawCmd::Bezier(p) => {
+                for (x, y) in p.iter_mut() {
+                    let (nx, ny) = f(*x, *y);
+                    *x = nx;
+                    *y = ny;
+                }
+            }
+            DrawCmd::Close => {}
+        }
+    }
+}
+
+/// Bounding box `(min_x, min_y, max_x, max_y)` of a drawing's control points.
+pub fn drawing_bounds(cmds: &[DrawCmd]) -> Option<(f64, f64, f64, f64)> {
+    let mut b: Option<(f64, f64, f64, f64)> = None;
+    let mut add = |x: f64, y: f64| {
+        b = Some(match b {
+            None => (x, y, x, y),
+            Some((a, c, d, e)) => (a.min(x), c.min(y), d.max(x), e.max(y)),
+        });
+    };
+    for c in cmds {
+        match *c {
+            DrawCmd::Move(x, y)
+            | DrawCmd::MoveNoClose(x, y)
+            | DrawCmd::Line(x, y)
+            | DrawCmd::Spline(x, y)
+            | DrawCmd::Extend(x, y) => add(x, y),
+            DrawCmd::Bezier(p) => p.iter().for_each(|&(x, y)| add(x, y)),
+            DrawCmd::Close => {}
+        }
+    }
+    b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lossless() {
+        for t in [
+            r"{\pos(100,200)\c&H0000FF&}Hello{comment} world\N{\i1}x",
+            r"{\t(0,500,\fscx120\frz10)\fad(100,200)}abc",
+            r"{\clip(m 0 0 l 100 0 100 100 0 100)}clip",
+            r"{\p1}m 0 0 l 10 0 10 10{\p0}after",
+            r"{unterminated",
+            r"{\pos(1,2}broken",
+            r"{junk\b1 trailing\i1}x",
+            r"{\fn Arial\fs20.5}y",
+            "",
+        ] {
+            assert_eq!(Line::parse(t).to_text(), t, "{t}");
+        }
+    }
+
+    #[test]
+    fn tag_names_and_args() {
+        let l = Line::parse(r"{\fscx120\fs20\1c&HFF&\pos(10.5, 20)\move(1,2,3,4,0,500)\K30\kf20}x");
+        let tags: Vec<_> = l
+            .tags()
+            .map(|t| (t.name.as_str(), t.args.clone()))
+            .collect();
+        assert_eq!(tags[0], ("fscx", vec!["120".to_string()]));
+        assert_eq!(tags[1], ("fs", vec!["20".to_string()]));
+        assert_eq!(tags[2], ("1c", vec!["&HFF&".to_string()]));
+        assert_eq!(tags[3], ("pos", vec!["10.5".to_string(), "20".to_string()]));
+        assert_eq!(tags[4].1.len(), 6);
+        assert_eq!(tags[5].0, "K");
+        assert_eq!(tags[6].0, "kf");
+    }
+
+    #[test]
+    fn transform_nested() {
+        let l = Line::parse(r"{\t(0,500,0.5,\fscx120\t(\frz10))}x");
+        let t = l.first_tag("t").unwrap();
+        assert_eq!(t.args[0], "0");
+        assert_eq!(t.args[2], "0.5");
+        let inner = t.transform_tags().unwrap();
+        assert_eq!(inner[0].name, "fscx");
+    }
+
+    #[test]
+    fn vector_clip() {
+        let l = Line::parse(r"{\clip(2,m 0 0 l 1 1)}x{\iclip(1,2,3,4)}");
+        let c = l.first_tag("clip").unwrap();
+        assert_eq!(c.args, vec!["2".to_string(), "m 0 0 l 1 1".to_string()]);
+        assert_eq!(l.first_tag("iclip").unwrap().args.len(), 4);
+    }
+
+    #[test]
+    fn set_pos() {
+        let mut l = Line::parse(r"{\an8\pos(1,2)}x");
+        l.set_line_tag(Tag::new("pos", vec!["5".into(), "6".into()]));
+        assert_eq!(l.to_text(), r"{\an8\pos(5,6)}x");
+        let mut l = Line::parse("plain");
+        l.set_line_tag(Tag::new("pos", vec!["5".into(), "6".into()]));
+        assert_eq!(l.to_text(), r"{\pos(5,6)}plain");
+        l.remove_tags(&["pos"]);
+        assert_eq!(l.to_text(), "plain");
+    }
+
+    #[test]
+    fn karaoke() {
+        let s = karaoke_syllables(r"{\k20}ka{\k30\b1}ra{\kf50}o ke");
+        assert_eq!(s.len(), 3);
+        assert_eq!(s[0].text, "ka");
+        assert_eq!(s[1].start_ms, 200);
+        assert_eq!(s[1].text, r"{\b1}ra");
+        assert_eq!(s[2].kind, "kf");
+        assert_eq!(s[2].duration_ms, 500);
+        assert_eq!(join_syllables(&s), r"{\k20}ka{\k30}{\b1}ra{\kf50}o ke");
+    }
+
+    #[test]
+    fn drawing() {
+        let d = parse_drawing("m 0 0 l 100 0 100 100 b 1 2 3 4 5 6 c");
+        assert_eq!(d.len(), 5);
+        assert_eq!(write_drawing(&d), "m 0 0 l 100 0 100 100 b 1 2 3 4 5 6 c");
+        assert_eq!(drawing_bounds(&d), Some((0.0, 0.0, 100.0, 100.0)));
+    }
+
+    #[test]
+    fn counting() {
+        assert_eq!(strip_tags(r"{\b1}Hel{x}lo"), "Hello");
+        assert_eq!(char_count(r"{\b1}Hel lo,\Nworld!", true, true), 10);
+        assert!((cps("abcdefghij", 1000) - 10.0).abs() < 1e-9);
+    }
+}

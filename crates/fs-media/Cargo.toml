@@ -1,0 +1,24 @@
+[package]
+name = "fs-media"
+description = "Frame-exact video/audio decoding (BestSource) and subtitle rendering (libass)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+links = "fs_media_cpp"
+
+[dependencies]
+cxx = "1.0.205"
+fs-audio = { path = "../fs-audio" }
+fs-core = { path = "../fs-core" }
+thiserror = "2.0.21"
+
+[build-dependencies]
+cxx-build = "1.0.205"
+
+[dev-dependencies]
+fs-formats = { path = "../fs-formats" }
+tempfile = "3.27.0"
+
+[lints]
+workspace = true

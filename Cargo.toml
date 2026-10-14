@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+# Crates that build without the native media stack (FFmpeg/libass/BestSource).
+# `cargo test` covers these; fs-media needs `tools/deps` first:
+# `cargo test -p fs-media`.
+default-members = ["crates/fs-core", "crates/fs-formats", "crates/fs-cli", "crates/fs-audio", "crates/fs-automation"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "BSD-3-Clause"
+authors = ["FS Editor contributors"]
+repository = "https://github.com/fs-editor/fs-editor"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# Fast optimised builds for GUI development (app/CMakePresets "dev").
+[profile.gui-dev]
+inherits = "release"
+lto = false
+codegen-units = 16
+debug = "line-tables-only"
+incremental = true
