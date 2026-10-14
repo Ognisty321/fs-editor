@@ -21,4 +21,11 @@ public:
     virtual void title(rust::Str text) const = 0;
     virtual bool is_cancelled() const = 0;
 };
+
+// Told about a Rust panic on the GUI thread, just before the bridge aborts the process.
+class PanicHandler {
+public:
+    virtual ~PanicHandler() = default;
+    virtual void fatal(rust::Str message) const = 0;
+};
 } // namespace fsb

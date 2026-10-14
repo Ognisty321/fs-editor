@@ -1,3 +1,4 @@
+#include "dialogs.h"
 #include "mainwindow.h"
 #include "tabpanel.h"
 #include "videobox.h"
@@ -6,6 +7,7 @@
 #include <QAbstractButton>
 #include <QApplication>
 #include <QDialog>
+#include <QDir>
 #include <QDropEvent>
 #include <QMimeData>
 #include <QMouseEvent>
@@ -14,20 +16,42 @@
 #include <QTimer>
 #include <QUrl>
 
+#include <atomic>
+#include <csignal>
+#include <cstdio>
+
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
 #include <dbghelp.h>
-#include <cstdio>
+#endif
 
-// Print a symbolised stack of the faulting thread to stderr; release builds
+static MainWindow *g_main = nullptr;
+
+// Last chance for unsaved work (Aegisub saves on a fatal exception too): modified tabs go to
+// the autosave folder, where File > Open autosave file lists them.
+static void recoverTabs() {
+    static std::atomic_flag once;
+    if (once.test_and_set() || !g_main || !g_main->autosaveTabs()) return;
+    const QString msg = QObject::tr("FS Editor has crashed. Unsaved subtitles were written to %1 "
+                                    "and can be opened with File > Open autosave file.")
+                            .arg(QDir::toNativeSeparators(autosaveDir()));
+#ifdef _WIN32
+    // a smoke run is unattended: a modal box would only hang it
+    if (!qEnvironmentVariableIsSet("FSED_SMOKE"))
+        MessageBoxW(nullptr, reinterpret_cast<const wchar_t *>(msg.utf16()), L"FS Editor", MB_OK | MB_ICONERROR);
+#else
+    std::fprintf(stderr, "%s\n", qPrintable(msg));
+#endif
+}
+
+#ifdef _WIN32
+// Print a symbolised stack of the current thread to stderr; release builds
 // carry PDBs (RelWithDebInfo), so crash reports from users are readable.
-static LONG WINAPI crashHandler(EXCEPTION_POINTERS *ep) {
+static void printStack() {
     HANDLE proc = GetCurrentProcess();
     SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
     SymInitialize(proc, nullptr, TRUE);
-    std::fprintf(stderr, "fsed crashed: exception 0x%08lx at %p\n", ep->ExceptionRecord->ExceptionCode,
-                 ep->ExceptionRecord->ExceptionAddress);
     void *frames[64];
     const USHORT n = CaptureStackBackTrace(0, 64, frames, nullptr);
     alignas(SYMBOL_INFO) char buf[sizeof(SYMBOL_INFO) + 256];
@@ -45,9 +69,32 @@ static LONG WINAPI crashHandler(EXCEPTION_POINTERS *ep) {
                      hasLine ? line.LineNumber : 0);
     }
     std::fflush(stderr);
+}
+
+static LONG WINAPI crashHandler(EXCEPTION_POINTERS *ep) {
+    std::fprintf(stderr, "fsed crashed: exception 0x%08lx at %p\n", ep->ExceptionRecord->ExceptionCode,
+                 ep->ExceptionRecord->ExceptionAddress);
+    printStack();
+    recoverTabs();
     return EXCEPTION_CONTINUE_SEARCH;
 }
 #endif
+
+// A panic on the GUI thread: the bridge aborts the process right after.
+struct PanicRecovery final : fsb::PanicHandler {
+    void fatal(rust::Str) const override { recoverTabs(); } // Rust already printed the message
+};
+
+// abort() (qFatal, the bridge after a panic) and, outside Windows, faults.
+static void fatalSignal(int sig) {
+    std::signal(sig, SIG_DFL);
+    std::fprintf(stderr, "fsed: fatal signal %d\n", sig);
+#ifdef _WIN32
+    printStack();
+#endif
+    recoverTabs();
+    std::raise(sig);
+}
 
 // The dialog a smoke action opened: a modal one, else the newest visible modeless one.
 static QWidget *smokeDialog(QWidget &w) {
@@ -61,7 +108,11 @@ static QWidget *smokeDialog(QWidget &w) {
 int main(int argc, char **argv) {
 #ifdef _WIN32
     SetUnhandledExceptionFilter(crashHandler);
+#else
+    for (int sig : {SIGSEGV, SIGBUS, SIGFPE, SIGILL}) std::signal(sig, fatalSignal);
 #endif
+    std::signal(SIGABRT, fatalSignal);
+    fsb::install_panic_hook(std::make_unique<PanicRecovery>());
     QApplication app(argc, argv);
     QApplication::setOrganizationName("FS Editor");
     QApplication::setApplicationName("FS Editor");
@@ -78,6 +129,7 @@ int main(int argc, char **argv) {
             st.setValue(kv.section('=', 0, 0), kv.section('=', 1));
     }
     MainWindow w;
+    g_main = &w;
     w.show();
     const QStringList files = app.arguments().mid(1);
     // from the event loop: opening may ask a question (subtitles inside a video)
@@ -139,5 +191,7 @@ int main(int argc, char **argv) {
             (top ? top : &w)->grab().save(out);
             QApplication::exit(0);
         });
-    return app.exec();
+    const int rc = app.exec();
+    g_main = nullptr; // the window is being destroyed: nothing left to recover
+    return rc;
 }

@@ -20,6 +20,7 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDateTime>
+#include <QSet>
 #include <limits>
 #include <numeric>
 #include <QDir>
@@ -1062,20 +1063,27 @@ QMenu *MainWindow::recentMenu(const QString &kind) {
     return m;
 }
 
-void MainWindow::autosaveTabs() {
+bool MainWindow::autosaveTabs() {
     QDir().mkpath(autosaveDir());
     const QString stamp = QDateTime::currentDateTime().toString("yyyy-MM-dd-HH-mm-ss");
+    QSet<QString> used; // two untitled tabs in the same second must not share a file
+    bool any = false;
     for (auto *t : tabs()) {
         const quint64 gen = t->s().generation();
         if (!t->modified() || t->property("autosaved").toULongLong() == gen) continue;
-        const QString name = t->path().isEmpty() ? tr("Untitled") : QFileInfo(t->path()).completeBaseName();
+        const QString base = t->path().isEmpty() ? tr("Untitled") : QFileInfo(t->path()).completeBaseName();
+        QString name = base;
+        for (int k = 2; used.contains(name); ++k) name = QString("%1 (%2)").arg(base).arg(k);
+        used.insert(name);
         try {
             t->s().autosave(fs::Utf8(autosaveDir() + "/" + name + "." + stamp + ".AUTOSAVE.ass"));
             t->setProperty("autosaved", gen);
+            any = true;
         } catch (const rust::Error &e) {
             status(QString::fromUtf8(e.what()));
         }
     }
+    return any;
 }
 
 void MainWindow::addRecent(const QString &kind, const QString &path) {

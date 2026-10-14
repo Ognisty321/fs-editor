@@ -337,9 +337,16 @@ pub mod ffi {
         fn task(self: &AutomationHost, text: &str);
         fn title(self: &AutomationHost, text: &str);
         fn is_cancelled(self: &AutomationHost) -> bool;
+
+        type PanicHandler;
+        fn fatal(self: &PanicHandler, message: &str);
     }
 
     extern "Rust" {
+        /// Call once from the GUI thread: a panic there reaches the bridge, which aborts
+        /// the process, so `handler` gets the message first to save the open work.
+        fn install_panic_hook(handler: UniquePtr<PanicHandler>);
+
         type Session;
         fn new_session() -> Box<Session>;
         fn open(self: &mut Session, path: &str) -> Result<()>;
@@ -607,6 +614,31 @@ pub mod ffi {
         ) -> Result<MacroResult>;
         fn take_log(self: &Automation) -> String;
     }
+}
+
+struct GuiPanicHandler(cxx::UniquePtr<ffi::PanicHandler>);
+// SAFETY: only called on the GUI thread, the one that installed it.
+unsafe impl Send for GuiPanicHandler {}
+unsafe impl Sync for GuiPanicHandler {}
+
+impl GuiPanicHandler {
+    fn fatal(&self, message: &str) {
+        if let Some(h) = self.0.as_ref() {
+            h.fatal(message);
+        }
+    }
+}
+
+fn install_panic_hook(handler: cxx::UniquePtr<ffi::PanicHandler>) {
+    let (gui, handler) = (std::thread::current().id(), GuiPanicHandler(handler));
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        default(info);
+        // worker threads' panics end at their join; only the GUI thread's are fatal
+        if std::thread::current().id() == gui {
+            handler.fatal(&info.to_string());
+        }
+    }));
 }
 
 fn new_session() -> Box<Session> {

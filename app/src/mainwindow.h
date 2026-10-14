@@ -29,6 +29,8 @@ public:
     TabPanel *newTab();
     // Opens subtitles, video, audio or keyframes by extension.
     void openFile(const QString &path, const QString &encoding = {});
+    // Copies modified tabs to autosaveDir(); true if any file was written.
+    bool autosaveTabs();
 
     QAction *action(const QString &id) const { return m_actions.value(id); }
     QMenu *recentMenu(const QString &kind);
@@ -54,7 +56,6 @@ private:
     void buildToolbar();
     void buildStatusBar();
     void buildAutomationMenu();
-    void autosaveTabs();
     void assignHotkey(QAction *a);
     bool closeTab(int index);
     TabPanel *panel(int index) const;
