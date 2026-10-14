@@ -507,10 +507,14 @@ impl Document {
     }
 
     pub fn remove_info(&mut self, key: &str) -> bool {
-        if self.find_section(SectionKind::ScriptInfo).is_none() {
+        self.kv_remove(SectionKind::ScriptInfo, key)
+    }
+
+    pub fn kv_remove(&mut self, kind: SectionKind, key: &str) -> bool {
+        if self.find_section(kind).is_none() {
             return false;
         }
-        let sec = self.kv_section_mut(SectionKind::ScriptInfo);
+        let sec = self.kv_section_mut(kind);
         let before = sec.entries.len();
         sec.entries.retain(|e| !e.key.eq_ignore_ascii_case(key));
         before != sec.entries.len()

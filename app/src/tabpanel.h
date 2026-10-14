@@ -68,6 +68,8 @@ public:
     void openKeyframes(const QString &path);
     std::vector<std::int64_t> keyframes() const { return m_keyframes; }
     void setKeyframes(std::vector<std::int64_t> kf);
+    void closeKeyframes(); // back to the video's own
+    void openTimecodes(const QString &path); // empty: the video's own; applied when a video opens
     qint64 videoTime() const;
     void seekVideo(qint64 ms);
     void playLine(int row);
@@ -106,4 +108,5 @@ private:
     bool m_playerMode = false;
     bool m_hideOriginal = false;
     std::vector<std::int64_t> m_keyframes;
+    QString m_keyframesPath, m_timecodesPath; // loaded from files, kept over the video's own
 };

@@ -314,6 +314,7 @@ pub mod ffi {
         fn file_info(self: &Session) -> FileInfo;
         fn set_info_value(self: &mut Session, key: &str, value: &str);
         fn set_project_value(self: &mut Session, key: &str, value: &str);
+        fn project_value(self: &Session, key: &str) -> String;
         fn info_value(self: &Session, key: &str) -> String;
         fn generation(self: &Session) -> u64;
 
@@ -436,8 +437,10 @@ pub mod ffi {
         fn load_keyframes(path: &str) -> Result<Vec<i64>>;
         /// Write keyframes in Aegisub's v1 format.
         fn save_keyframes(path: &str, keyframes: &[i64]) -> Result<()>;
-        /// Frame timestamps from a v1/v2 timecodes file.
-        fn load_timecodes(path: &str) -> Result<Vec<i64>>;
+        /// Frame timestamps from a v1/v2 timecodes file, extended to `frames + 1` entries.
+        fn load_timecodes(path: &str, frames: i64) -> Result<Vec<i64>>;
+        /// Write a v2 timecodes file.
+        fn save_timecodes(path: &str, timecodes: &[i64]) -> Result<()>;
 
         type Video;
         fn open_video(path: &str, cache_dir: &str) -> Result<Box<Video>>;
@@ -558,10 +561,19 @@ fn save_keyframes(path: &str, keyframes: &[i64]) -> Result<(), String> {
     std::fs::write(path, fs_core::keyframes::write(keyframes)).map_err(|e| format!("{path}: {e}"))
 }
 
-fn load_timecodes(path: &str) -> Result<Vec<i64>, String> {
+fn load_timecodes(path: &str, frames: i64) -> Result<Vec<i64>, String> {
+    use fs_core::vfr::TimeType;
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     let f = fs_core::vfr::Framerate::parse_timecodes(&text).map_err(|e| format!("{path}: {e}"))?;
-    Ok(f.timecodes().to_vec())
+    Ok((0..=frames.max(0))
+        .map(|n| f.time_at_frame(n, TimeType::Exact))
+        .collect())
+}
+
+fn save_timecodes(path: &str, timecodes: &[i64]) -> Result<(), String> {
+    let f =
+        fs_core::vfr::Framerate::from_timecodes(timecodes.to_vec()).map_err(|e| e.to_string())?;
+    std::fs::write(path, f.to_v2_string(timecodes.len())).map_err(|e| format!("{path}: {e}"))
 }
 
 fn subtitle_tracks(path: &str) -> Vec<ffi::SubTrack> {

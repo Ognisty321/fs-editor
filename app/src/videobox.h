@@ -107,6 +107,7 @@ public:
     fsb::VideoInfo info() const { return m_info; }
     std::vector<std::int64_t> timecodes() const; // int64_t = cxx i64 (qint64 is long long, int64_t is long on Linux)
     std::vector<std::int64_t> keyframes() const;
+    void setTimecodes(std::vector<std::int64_t> tc); // empty: the video's own
 
     qint64 frameAt(qint64 ms) const;      // frame shown at ms
     qint64 frameAtStart(qint64 ms) const; // first frame a line starting at ms is visible on (Aegisub START)

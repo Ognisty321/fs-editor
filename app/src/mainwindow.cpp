@@ -592,10 +592,28 @@ void MainWindow::buildMenus() {
         }
     });
     add("closeKeyframes", tr("Close keyframes"), {}, video, [=, this] {
-        // back to the video's own keyframes, like Aegisub
-        tab()->setKeyframes(tab()->video()->keyframes());
-        tab()->s().set_project_value("Keyframes File", "");
+        tab()->closeKeyframes(); // back to the video's own, like Aegisub
     });
+    // Aegisub's timecodes: override the video's frame times (VFR typesetting on a CFR encode)
+    add("openTimecodes", tr("Open timecodes..."), {}, video, [=, this] {
+        if (!tab()->video()->hasVideo()) return status(tr("Open a video first"));
+        const QString f = QFileDialog::getOpenFileName(this, tr("Open timecodes"), QFileInfo(tab()->path()).absolutePath(),
+                                                       tr("Timecodes (*.txt);;All files (*)"));
+        if (!f.isEmpty()) tab()->openTimecodes(f);
+    });
+    add("saveTimecodes", tr("Save timecodes..."), {}, video, [=, this] {
+        const auto tc = tab()->video()->timecodes();
+        if (tc.size() < 2) return;
+        const QString f = QFileDialog::getSaveFileName(this, tr("Save timecodes"), QFileInfo(tab()->path()).absolutePath(),
+                                                       tr("Timecodes (*.txt);;All files (*)"));
+        if (f.isEmpty()) return;
+        try {
+            fsb::save_timecodes(fs::Utf8(f), {tc.data(), tc.size()});
+        } catch (const std::exception &e) {
+            QMessageBox::warning(this, tr("Save timecodes"), QString::fromUtf8(e.what()));
+        }
+    });
+    add("closeTimecodes", tr("Close timecodes"), {}, video, [=] { tab()->openTimecodes({}); });
     add("openDummy", tr("Open dummy video"), {}, video, [=, this] {
         QDialog d(this);
         d.setWindowTitle(tr("Dummy video"));

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use encoding_rs::Encoding;
+use fs_core::ass::SectionKind;
 use fs_core::history::Editor;
 use fs_core::karaoke::Karaoke;
 use fs_core::model::{AssVersion, EventField, Style};
@@ -351,12 +352,28 @@ impl Session {
     /// Project data (opened video/audio paths) like Aegisub's Project Garbage:
     /// saved with the file but neither an undo step nor a reason to ask "save changes?".
     // shortcut: undoing past this point restores the old value with the document snapshot; harmless for paths.
+    /// Project values (video, audio, keyframes, active line) live in Aegisub's
+    /// `[Aegisub Project Garbage]` when the file has one, else in `[Script Info]` like Kainote.
+    pub fn project_value(&self, key: &str) -> String {
+        let d = &self.ed.doc;
+        d.kv_get(SectionKind::ProjectGarbage, key)
+            .or_else(|| d.info(key))
+            .unwrap_or("")
+            .to_string()
+    }
+
     pub fn set_project_value(&mut self, key: &str, value: &str) {
-        if self.info_value(key) == value {
-        } else if value.is_empty() {
-            self.ed.doc.remove_info(key);
+        let d = &mut self.ed.doc;
+        let kind = if d.kv_section(SectionKind::ProjectGarbage).is_some() {
+            SectionKind::ProjectGarbage
         } else {
-            self.ed.doc.set_info(key, value);
+            SectionKind::ScriptInfo
+        };
+        if d.kv_get(kind, key).unwrap_or("") == value {
+        } else if value.is_empty() {
+            d.kv_remove(kind, key);
+        } else {
+            d.kv_set(kind, key, value);
         }
     }
 
@@ -1570,6 +1587,26 @@ mod tests {
     }
 
     const ASS: &str = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,one\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,two\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,three\n";
+
+    #[test]
+    fn project_values_follow_the_files_section() {
+        // Kainote style: [Script Info]
+        let mut s = session(ASS);
+        s.set_project_value("Video File", "a.mkv");
+        assert_eq!(s.info_value("Video File"), "a.mkv");
+        // Aegisub style: [Aegisub Project Garbage]
+        let aegi = ASS.replace(
+            "\n[V4+ Styles]",
+            "\n[Aegisub Project Garbage]\nVideo File: b.mkv\n\n[V4+ Styles]",
+        );
+        let mut s = session(&aegi);
+        assert_eq!(s.project_value("Video File"), "b.mkv");
+        s.set_project_value("Keyframes File", "k.txt");
+        s.set_project_value("Video File", "");
+        assert_eq!(s.project_value("Keyframes File"), "k.txt");
+        assert_eq!(s.project_value("Video File"), "");
+        assert_eq!(s.info_value("Keyframes File"), "");
+    }
 
     #[test]
     fn rows_edit_undo_and_state() {

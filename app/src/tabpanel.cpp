@@ -51,7 +51,8 @@ TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fs
 
     connect(m_video, &VideoBox::opened, this, [this] {
         updateVideoContext();
-        setKeyframes(m_video->keyframes());
+        if (m_keyframesPath.isEmpty()) setKeyframes(m_video->keyframes());
+        if (!m_timecodesPath.isEmpty()) openTimecodes(m_timecodesPath);
         if (!m_video->path().isEmpty()) {
             s().set_project_value("Video File", fs::Utf8(m_video->path()));
             if (QSettings().value("video/openAudio", true).toBool() && !m_audio->hasAudio())
@@ -105,11 +106,11 @@ bool TabPanel::openSubs(const QString &path) {
     m_sel.clear();
     m_active = 0;
     changed();
-    setActive(std::clamp(fs::q(s().info_value("Active Line")).toInt(), 0, std::max(0, int(s().row_count()) - 1)));
+    setActive(std::clamp(fs::q(s().project_value("Active Line")).toInt(), 0, std::max(0, int(s().row_count()) - 1)));
     // reopen the media remembered in the script, as Kainote does
     const QDir dir = QFileInfo(path).dir();
     auto resolve = [&](const QString &key) {
-        const QString v = fs::q(s().info_value(fs::Utf8(key)));
+        const QString v = fs::q(s().project_value(fs::Utf8(key)));
         if (v.isEmpty() || v.startsWith("?dummy")) return QString();
         const QString abs = QFileInfo(v).isAbsolute() ? v : dir.filePath(v);
         return QFileInfo::exists(abs) ? abs : QString();
@@ -118,6 +119,7 @@ bool TabPanel::openSubs(const QString &path) {
         if (const QString v = resolve("Video File"); !v.isEmpty()) openVideo(v);
         if (const QString a = resolve("Audio File"); !a.isEmpty() && a != resolve("Video File")) openAudio(a);
         if (const QString k = resolve("Keyframes File"); !k.isEmpty()) openKeyframes(k);
+        if (const QString t = resolve("Timecodes File"); !t.isEmpty()) openTimecodes(t);
     }
     emit titleChanged();
     return true;
@@ -263,11 +265,37 @@ void TabPanel::openKeyframes(const QString &path) {
     try {
         const auto kf = fsb::load_keyframes(fs::Utf8(path));
         setKeyframes({kf.begin(), kf.end()});
+        m_keyframesPath = path;
         s().set_project_value("Keyframes File", fs::Utf8(path));
         m_main->addRecent("keyframes", path);
     } catch (const rust::Error &e) {
         m_main->error(QString::fromUtf8(e.what()));
     }
+}
+
+void TabPanel::closeKeyframes() {
+    m_keyframesPath.clear();
+    s().set_project_value("Keyframes File", "");
+    setKeyframes(m_video->keyframes());
+}
+
+void TabPanel::openTimecodes(const QString &path) {
+    std::vector<std::int64_t> tc;
+    if (!path.isEmpty() && m_video->hasVideo()) {
+        try {
+            const auto v = fsb::load_timecodes(fs::Utf8(path), m_video->info().frames);
+            tc.assign(v.begin(), v.end());
+        } catch (const rust::Error &e) {
+            m_main->error(QString::fromUtf8(e.what()));
+            return;
+        }
+    }
+    m_timecodesPath = path;
+    s().set_project_value("Timecodes File", fs::Utf8(path));
+    if (!m_video->hasVideo()) return;
+    m_video->setTimecodes(std::move(tc));
+    updateVideoContext();
+    m_audio->docChanged();
 }
 
 void TabPanel::setKeyframes(std::vector<std::int64_t> kf) {

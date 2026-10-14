@@ -408,6 +408,17 @@ int VideoBox::playOn() const { return m_playOn->currentIndex(); }
 std::vector<std::int64_t> VideoBox::timecodes() const { return m_dummyFps > 0 ? std::vector<std::int64_t>{} : m_timecodes; }
 std::vector<std::int64_t> VideoBox::keyframes() const { return m_keyframes; }
 
+void VideoBox::setTimecodes(std::vector<std::int64_t> tc) {
+    if (tc.empty()) {
+        std::lock_guard g(m_media->m);
+        if (!m_media->video) return; // a dummy keeps its constant rate
+        const auto own = (**m_media->video).timecodes();
+        tc.assign(own.begin(), own.end());
+    }
+    m_timecodes = std::move(tc);
+    updateTimeField();
+}
+
 void VideoBox::open(const QString &path) {
     m_tab->main()->status(tr("Indexing %1…").arg(QFileInfo(path).fileName()));
     auto media = m_media;
