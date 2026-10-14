@@ -220,6 +220,7 @@ void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
     m->addAction(tr("Split at cursor (estimate times)"), this, [this] { emit splitRequested(-1); });
     m->addAction(tr("Split at cursor (preserve times)"), this, [this] { emit splitRequested(-2); });
     m->addAction(tr("Split at cursor (at video frame)"), this, [this] { emit splitRequested(0); });
+    m->addAction(tr("Revert"), this, [this] { emit revertRequested(); });
     m->exec(e->globalPos());
 }
 
@@ -469,6 +470,7 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     connect(m_text, &SubsTextEdit::splitRequested, this, [this](qint64 at) {
         splitAtCursor(at == 0 ? m_tab->videoTime() : at);
     });
+    connect(m_text, &SubsTextEdit::revertRequested, this, [this] { m_text->setText(m_initial); });
 
     // fields row (wraps into two rows when narrow)
     m_fields1 = new QWidget(this);
@@ -616,8 +618,10 @@ void EditBox::setColorTag(int which) {
 }
 
 void EditBox::load(int row) {
+    const bool moved = row != m_row;
     m_row = row;
     reload();
+    if (moved && m_row >= 0) m_initial = fs::q(m_tab->s().row(size_t(m_row)).text);
 }
 
 void EditBox::updateTextInfo() {

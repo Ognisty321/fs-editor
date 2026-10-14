@@ -56,6 +56,7 @@ public:
 signals:
     void keyCommand(int key, Qt::KeyboardModifiers mods);
     void splitRequested(qint64 atMs); // -1 estimate, -2 keep both times, else at that time
+    void revertRequested();
 protected:
     void keyPressEvent(QKeyEvent *) override;
     void contextMenuEvent(QContextMenuEvent *) override;
@@ -89,6 +90,7 @@ private:
 
     TabPanel *m_tab;
     int m_row = -1;
+    QString m_initial; // the text when the line became active (Aegisub's edit/revert)
     bool m_loading = false;
     bool m_framesMode = false;
 

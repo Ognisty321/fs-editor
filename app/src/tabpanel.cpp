@@ -105,6 +105,7 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
     }
     m_sel.clear();
     m_active = 0;
+    m_edit->load(-1); // a new file: forget the revert text of the old one
     changed();
     setActive(std::clamp(fs::q(s().project_value("Active Line")).toInt(), 0, std::max(0, int(s().row_count()) - 1)));
     // reopen the media remembered in the script, as Kainote does
