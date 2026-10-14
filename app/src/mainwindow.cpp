@@ -75,7 +75,7 @@ const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"exit", {"logout", kRed}}, {"undo", {"arrow-back-up", {}}}, {"undoToSave", {"arrow-back-up-double", {}}},
     {"redo", {"arrow-forward-up", {}}}, {"history", {"history", {}}}, {"findReplace", {"replace", kOrange}},
     {"find", {"search", kOrange}}, {"findNext", {"search", kOrange}}, {"selectLines", {"list-check", kGreen}},
-    {"duplicate", {"copy", {}}}, {"deleteText", {"eraser", kRed}}, {"deleteLines", {"row-remove", kRed}},
+    {"duplicate", {"copy", {}}}, {"deleteText", {"eraser", kRed}}, {"deleteLines", {"row-remove", kRed}}, {"pasteOver", {"clipboard-text", kBlue}},
     {"prevLine", {"arrow-up", {}}}, {"nextLine", {"arrow-down", {}}}, {"joinPrev", {"arrows-join", {}}},
     {"joinNext", {"arrows-join-2", {}}}, {"recombine", {"arrows-join", kGreen}},
     {"splitKaraoke", {"arrows-split", kGreen}}, {"selectFromVideo", {"focus-2", kGreen}}, {"newTab", {"browser-plus", {}}},
@@ -505,6 +505,22 @@ void MainWindow::buildMenus() {
     add("duplicate", tr("Duplicate lines"), QKeySequence("Ctrl+D"), lines, [=] { tab()->grid()->duplicate(); });
     add("deleteText", tr("Delete text"), QKeySequence("Alt+Del"), lines, [=] { tab()->grid()->deleteText(); });
     add("deleteLines", tr("Delete lines"), QKeySequence("Shift+Del"), lines, [=] { tab()->grid()->deleteRows(); });
+    // Aegisub edit/line/paste/over: onto the selection, or downwards from the active line
+    add("pasteOver", tr("Paste lines over..."), QKeySequence("Ctrl+Shift+V"), lines, [=, this] {
+        const QString text = QApplication::clipboard()->text();
+        if (text.isEmpty() || tab()->active() < 0) return;
+        const int fields = pasteOverFields(this);
+        if (fields <= 0) return;
+        std::vector<size_t> rows = tab()->selection();
+        if (rows.size() < 2) {
+            rows.clear();
+            for (size_t r = size_t(tab()->active()); r < tab()->s().row_count(); ++r) rows.push_back(r);
+        }
+        std::sort(rows.begin(), rows.end());
+        const auto done = fs::vec(tab()->s().paste_over(fs::slice(rows), fs::Utf8(text), uint16_t(fields)));
+        tab()->changed();
+        if (!done.empty()) tab()->setSelection(done, int(done.front()));
+    });
     add("prevLine", tr("Previous line"), QKeySequence("Ctrl+Up"), lines, [=] { tab()->setActive(tab()->active() - 1); });
     add("nextLine", tr("Next line"), QKeySequence("Ctrl+Down"), lines, [=] { tab()->setActive(tab()->active() + 1); });
     auto join = [=, this](int other) {

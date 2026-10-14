@@ -1121,6 +1121,71 @@ impl Session {
         self.rows_of_events(&(ev_at..ev_at + n).collect::<Vec<_>>())
     }
 
+    /// Aegisub's "Paste lines over": clipboard line k goes onto `rows[k]`,
+    /// copying only the `fields` bits (Aegisub's order: 1 comment, 2 layer,
+    /// 4 start, 8 end, 16 style, 32 actor, 64/128/256 margins L/R/V,
+    /// 512 effect, 1024 text). Returns the rows changed.
+    pub fn paste_over(&mut self, rows: &[usize], text: &str, fields: u16) -> Vec<usize> {
+        let fmt = EventField::default_format(AssVersion::Ass)
+            .iter()
+            .map(|f| f.name().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        // a line that is not a Dialogue/Comment line is plain text (Aegisub: End 0)
+        let pasted: Vec<Event> = text
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| {
+                let d = Document::parse(&format!("[Events]\nFormat: {fmt}\n{}\n", l.trim()));
+                d.event(0)
+                    .cloned()
+                    .unwrap_or_else(|| Event::dialogue(Time(0), Time(0), "", l.trim()))
+            })
+            .collect();
+        let n = pasted.len().min(rows.len());
+        let evs = self.main_events(&rows[..n]);
+        self.edit("Paste lines over", |d| {
+            for (src, &e) in pasted.iter().zip(&evs) {
+                let ev = d.event_mut(e).unwrap();
+                let on = |bit: u16| fields & bit != 0;
+                if on(1) {
+                    ev.kind = src.kind;
+                }
+                if on(2) {
+                    ev.layer = src.layer;
+                }
+                if on(4) {
+                    ev.start = src.start;
+                }
+                if on(8) {
+                    ev.end = src.end;
+                }
+                if on(16) {
+                    ev.style.clone_from(&src.style);
+                }
+                if on(32) {
+                    ev.actor.clone_from(&src.actor);
+                }
+                if on(64) {
+                    ev.margin_l = src.margin_l;
+                }
+                if on(128) {
+                    ev.margin_r = src.margin_r;
+                }
+                if on(256) {
+                    ev.margin_v = src.margin_v;
+                }
+                if on(512) {
+                    ev.effect.clone_from(&src.effect);
+                }
+                if on(1024) {
+                    ev.text.clone_from(&src.text);
+                }
+            }
+        });
+        rows[..n].to_vec()
+    }
+
     // ---- history ----------------------------------------------------------
 
     pub fn undo(&mut self) -> bool {
@@ -1519,6 +1584,25 @@ mod tests {
         assert_eq!(s.row(1).text, "two");
         assert_eq!(s.move_rows(&[2], -2), vec![0]);
         assert_eq!(s.row(0).text, "three");
+    }
+
+    #[test]
+    fn paste_over_copies_only_chosen_fields() {
+        let mut s = session(ASS);
+        let before = s.row(1);
+        let clip = "Dialogue: 5,0:00:09.00,0:00:10.00,Other,Bob,0,0,0,,new text\nplain";
+        let rows = s.paste_over(&[1, 0], clip, 4 | 1024);
+        assert_eq!(rows, [1, 0]);
+        let r = s.row(1);
+        assert_eq!(
+            (r.start, r.end, r.text.as_str()),
+            (9000, before.end, "new text")
+        );
+        assert_eq!(
+            (r.layer, r.style.as_str()),
+            (before.layer, before.style.as_str())
+        );
+        assert_eq!((s.row(0).start, s.row(0).text.as_str()), (0, "plain"));
     }
 
     #[test]

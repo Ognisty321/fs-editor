@@ -365,6 +365,7 @@ pub mod ffi {
         ) -> Result<String>;
         fn copy_rows(self: &Session, rows: &[usize]) -> String;
         fn paste_rows(self: &mut Session, at: usize, text: &str) -> Vec<usize>;
+        fn paste_over(self: &mut Session, rows: &[usize], text: &str, fields: u16) -> Vec<usize>;
 
         fn undo(self: &mut Session) -> bool;
         fn redo(self: &mut Session) -> bool;

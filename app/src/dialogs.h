@@ -165,3 +165,6 @@ private:
     int m_row = 0, m_pos = 0, m_start = 0, m_startRow = 0;
     bool m_wrapped = false;
 };
+
+// Aegisub's "Select fields to paste over": the Session::paste_over bits, or -1 when cancelled.
+int pasteOverFields(QWidget *parent);

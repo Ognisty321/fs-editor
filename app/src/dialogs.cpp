@@ -1272,3 +1272,42 @@ void SpellCheckDialog::replace(bool all) {
     if (all) m_ignored << word; // nothing left to find, unless the replacement is itself unknown
     findNext();
 }
+
+// ---- paste over ----------------------------------------------------------------
+
+int pasteOverFields(QWidget *parent) {
+    QDialog d(parent);
+    d.setWindowTitle(QDialog::tr("Select fields to paste over"));
+    auto *v = new QVBoxLayout(&d);
+    v->addWidget(new QLabel(QDialog::tr("Please select the fields that you want to paste over:"), &d));
+    auto *list = new QListWidget(&d);
+    const int saved = QSettings().value("edit/pasteOverFields", 1024).toInt();
+    for (const char *f : {"Comment", "Layer", "Start time", "End time", "Style", "Actor", "Margin left",
+                          "Margin right", "Margin vertical", "Effect", "Text"}) {
+        auto *it = new QListWidgetItem(QDialog::tr(f), list);
+        it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
+        it->setCheckState(saved & (1 << (list->count() - 1)) ? Qt::Checked : Qt::Unchecked);
+    }
+    v->addWidget(list);
+    auto *quick = new QHBoxLayout;
+    auto set = [list](int bits) {
+        for (int k = 0; k < list->count(); ++k) list->item(k)->setCheckState(bits & (1 << k) ? Qt::Checked : Qt::Unchecked);
+    };
+    for (auto [text, bits] : {std::pair{"All", 2047}, {"None", 0}, {"Times", 4 | 8}, {"Text", 1024}}) {
+        auto *b = new QPushButton(QDialog::tr(text), &d);
+        b->setAutoDefault(false);
+        QObject::connect(b, &QPushButton::clicked, &d, [set, bits] { set(bits); });
+        quick->addWidget(b);
+    }
+    v->addLayout(quick);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+    QObject::connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+    QObject::connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    v->addWidget(bb);
+    if (d.exec() != QDialog::Accepted) return -1;
+    int bits = 0;
+    for (int k = 0; k < list->count(); ++k)
+        if (list->item(k)->checkState() == Qt::Checked) bits |= 1 << k;
+    QSettings().setValue("edit/pasteOverFields", bits);
+    return bits;
+}
