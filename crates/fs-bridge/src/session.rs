@@ -1997,4 +1997,45 @@ mod tests {
         s.kara_set_boundary(2, 1, 5300, false);
         assert_eq!(s.syllables(2)[0].end, 5300);
     }
+
+    /// cargo test --release -p fs-bridge bench_large -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bench_large() {
+        use std::time::Instant;
+        let mut text = ASS.split("Dialogue:").next().unwrap().to_string();
+        for i in 0..100_000 {
+            let t = i * 2;
+            text += &format!(
+                "Dialogue: 0,{}:{:02}:{:02}.00,{}:{:02}:{:02}.50,Default,,0,0,0,,{{\\k20}}Line {{\\i1}}number{{\\i0}} {i} with some text\n",
+                t / 3600, t / 60 % 60, t % 60, t / 3600, t / 60 % 60, t % 60
+            );
+        }
+        let t0 = Instant::now();
+        std::hint::black_box(Document::parse(&text));
+        eprintln!("parse: {:?}", t0.elapsed());
+        let t0 = Instant::now();
+        let mut s = session(&text);
+        eprintln!("open 100k: {:?}", t0.elapsed());
+        let t0 = Instant::now();
+        for k in 0..100 {
+            let mut r = s.row(50_000);
+            r.text += &k.to_string();
+            s.set_row(50_000, &r, "typing");
+        }
+        eprintln!("100 keystrokes: {:?}", t0.elapsed() / 100);
+        let t0 = Instant::now();
+        for i in 0..60 {
+            std::hint::black_box(s.row(50_000 + i));
+        }
+        eprintln!("60 rows: {:?}", t0.elapsed());
+        let t0 = Instant::now();
+        s.undo();
+        eprintln!("undo: {:?}", t0.elapsed());
+        let out = std::env::temp_dir().join(format!("fsb-bench-{}.ass", std::process::id()));
+        let t0 = Instant::now();
+        s.save(out.to_str().unwrap()).unwrap();
+        eprintln!("save: {:?}", t0.elapsed());
+        std::fs::remove_file(out).ok();
+    }
 }

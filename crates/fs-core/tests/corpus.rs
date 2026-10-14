@@ -160,3 +160,16 @@ fn override_tags_parse_losslessly() {
     }
     println!("{n} lines");
 }
+
+#[test]
+fn later_format_line_applies_to_the_following_events() {
+    let src = "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n\
+               Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,first\n\
+               Format: Layer, Start, End, Style, Text\n\
+               Dialogue: 0,0:00:03.00,0:00:04.00,Top,second, with comma\n\
+               [Events]\nFormat: Start, Text\n";
+    let doc = Document::parse(src);
+    let ev: Vec<_> = doc.events().iter().map(|e| (e.event.style.clone(), e.event.text.clone())).collect();
+    assert_eq!(ev, [("Default".into(), "first".into()), ("Top".into(), "second, with comma".into())]);
+    assert_eq!(doc.to_ass_string(), src);
+}

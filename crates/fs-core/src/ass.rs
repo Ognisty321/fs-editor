@@ -826,6 +826,9 @@ impl Parser {
         let mut pending: Vec<RawLine> = Vec::new();
         // version guess for events when no styles section precedes them
         let mut version_hint: Option<AssVersion> = None;
+        // a later Format line in the current section overrides its first one
+        let mut style_fmt: Option<Vec<StyleField>> = None;
+        let mut event_fmt: Option<Vec<EventField>> = None;
 
         for (lineno0, (text, ending)) in lines.iter().enumerate() {
             let lineno = lineno0 + 1;
@@ -836,6 +839,7 @@ impl Parser {
             if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.len() >= 2 {
                 // flush pending to current section trailer
                 self.flush_pending(&mut doc, &cur, &mut pending);
+                (style_fmt, event_fmt) = (None, None);
                 let (mut kind, ver) = SectionKind::from_header(trimmed);
                 // Duplicate typed sections are kept verbatim.
                 let dup = matches!(
@@ -953,10 +957,19 @@ impl Parser {
                         } else {
                             // A later Format line: keep verbatim; the writer
                             // re-detects it to keep field order consistent.
+                            style_fmt = Some(fields);
                             pending.push(raw);
                         }
                     } else if key_l == "style" {
-                        let fmt = active_style_format(sec, &pending);
+                        let default;
+                        let fmt: &[StyleField] = match (&style_fmt, &sec.format) {
+                            (Some(f), _) => f,
+                            (None, Some(f)) => &f.fields,
+                            (None, None) => {
+                                default = StyleField::default_format(sec.version);
+                                &default
+                            }
+                        };
                         let (fields, complete) = split_fields(&text[p..], fmt.len());
                         if !complete {
                             self.warn(lineno, "style line has fewer fields than Format");
@@ -1001,11 +1014,19 @@ impl Parser {
                                 ending: *ending,
                             });
                         } else {
+                            event_fmt = Some(fields);
                             pending.push(raw);
                         }
                     } else if let Some(kind) = EventKind::from_key(key_t) {
-                        let v = version_hint.unwrap_or_default();
-                        let fmt = active_event_format(sec, &pending, v);
+                        let default;
+                        let fmt: &[EventField] = match (&event_fmt, &sec.format) {
+                            (Some(f), _) => f,
+                            (None, Some(f)) => &f.fields,
+                            (None, None) => {
+                                default = EventField::default_format(version_hint.unwrap_or_default());
+                                &default
+                            }
+                        };
                         let (fields, complete) = split_fields(&text[p..], fmt.len());
                         if !complete {
                             self.warn(lineno, "event line has fewer fields than Format");
@@ -1082,45 +1103,6 @@ fn raw_format_line(l: &RawLine) -> Option<&str> {
     key.trim()
         .eq_ignore_ascii_case("format")
         .then(|| &l.text[p..])
-}
-
-fn active_style_format(sec: &StyleSection, pending: &[RawLine]) -> Vec<StyleField> {
-    // latest Format line wins: pending lines, then previous entries' leading lines
-    for l in pending.iter().rev() {
-        if let Some(f) = raw_format_line(l) {
-            return f.split(',').map(StyleField::from_name).collect();
-        }
-    }
-    for e in sec.entries.iter().rev() {
-        for l in e.leading.iter().rev() {
-            if let Some(f) = raw_format_line(l) {
-                return f.split(',').map(StyleField::from_name).collect();
-            }
-        }
-    }
-    match &sec.format {
-        Some(f) => f.fields.clone(),
-        None => StyleField::default_format(sec.version),
-    }
-}
-
-fn active_event_format(sec: &EventSection, pending: &[RawLine], v: AssVersion) -> Vec<EventField> {
-    for l in pending.iter().rev() {
-        if let Some(f) = raw_format_line(l) {
-            return f.split(',').map(EventField::from_name).collect();
-        }
-    }
-    for e in sec.entries.iter().rev() {
-        for l in e.leading.iter().rev() {
-            if let Some(f) = raw_format_line(l) {
-                return f.split(',').map(EventField::from_name).collect();
-            }
-        }
-    }
-    match &sec.format {
-        Some(f) => f.fields.clone(),
-        None => EventField::default_format(v),
-    }
 }
 
 // ---------------------------------------------------------------------------
