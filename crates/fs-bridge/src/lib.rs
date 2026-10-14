@@ -51,6 +51,19 @@ pub mod ffi {
         markers: String,
     }
 
+    /// What the grid needs to size its columns, without fetching every row.
+    #[derive(Debug, Clone, Default)]
+    struct ColumnInfo {
+        any_layer: bool,
+        any_margin_l: bool,
+        any_margin_r: bool,
+        any_margin_v: bool,
+        /// Distinct values; actors and effects without the empty one.
+        styles: Vec<String>,
+        actors: Vec<String>,
+        effects: Vec<String>,
+    }
+
     #[derive(Debug, Clone, Default)]
     struct FileInfo {
         path: String,
@@ -354,6 +367,7 @@ pub mod ffi {
         fn generation(self: &Session) -> u64;
 
         fn row_count(self: &Session) -> usize;
+        fn column_info(self: &Session) -> ColumnInfo;
         fn row(self: &Session, i: usize) -> Row;
         fn set_row(self: &mut Session, i: usize, row: &Row, amend: &str);
         fn set_rows_field(self: &mut Session, rows: &[usize], field: &str, value: &str);

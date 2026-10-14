@@ -65,10 +65,7 @@ void Grid::refresh() {
     auto &s = m_tab->s();
     if (s.generation() != m_gen) {
         m_gen = s.generation();
-        const size_t n = s.row_count();
-        m_rows.clear();
-        m_rows.reserve(n);
-        for (size_t i = 0; i < n; ++i) m_rows.push_back(s.row(i));
+        m_colInfo = s.column_info();
         applyFilter();
         layoutColumns();
     }
@@ -79,13 +76,18 @@ void Grid::refresh() {
     viewport()->update();
 }
 
+const fsb::ColumnInfo &Grid::columnInfo() {
+    if (m_tab->s().generation() != m_gen) refresh();
+    return m_colInfo;
+}
+
 void Grid::applyFilter() {
     m_vis.clear();
     if (filterOn) {
         m_vis = fs::vec(m_tab->s().filter(filterSpec));
     } else {
-        m_vis.resize(m_rows.size());
-        for (size_t i = 0; i < m_rows.size(); ++i) m_vis[i] = i;
+        m_vis.resize(m_tab->s().row_count());
+        std::iota(m_vis.begin(), m_vis.end(), size_t(0));
     }
     updateScroll();
     viewport()->update();
@@ -110,7 +112,6 @@ void Grid::layoutColumns() {
     const QString fmt = fs::q(info.format);
     const bool ass = fmt == "ASS" || fmt == "SSA";
     const QFontMetrics fm(font());
-    auto any = [&](auto pred) { return std::any_of(m_rows.begin(), m_rows.end(), pred); };
     m_cols.clear();
     m_widths.clear();
     auto add = [&](int c, int w) {
@@ -119,7 +120,7 @@ void Grid::layoutColumns() {
         m_widths.push_back(w);
     };
     const int timeW = fm.horizontalAdvance("0:00:00.00") + 2 * Pad;
-    add(Num, fm.horizontalAdvance(QString::number(m_rows.size() + 1)) + 3 * Pad + 4);
+    add(Num, fm.horizontalAdvance(QString::number(m_tab->s().row_count() + 1)) + 3 * Pad + 4);
     if (fmt == "TMP") {
         add(Start, timeW);
         add(Wraps, fm.horizontalAdvance("00/00/00") + 2 * Pad);
@@ -129,22 +130,21 @@ void Grid::layoutColumns() {
         add(Cps, fm.horizontalAdvance("CPS") + 3 * Pad);
         add(Wraps, fm.horizontalAdvance("00/00/00") + 2 * Pad);
     } else {
-        auto maxw = [&](auto get, int cap) {
+        const auto &ci = m_colInfo;
+        auto maxw = [&](const rust::Vec<rust::String> &values, int cap) {
             int w = 40;
-            for (const auto &r : m_rows) w = std::max(w, fm.horizontalAdvance(get(r)));
+            for (const auto &v : values) w = std::max(w, fm.horizontalAdvance(fs::q(v)));
             return std::min(w, cap) + 2 * Pad;
         };
-        if (any([](auto &r) { return r.layer != 0; })) add(Layer, fm.horizontalAdvance("00") + 3 * Pad);
+        if (ci.any_layer) add(Layer, fm.horizontalAdvance("00") + 3 * Pad);
         add(Start, timeW);
         add(End, timeW);
-        add(Style, maxw([](auto &r) { return fs::q(r.style); }, 160));
-        if (any([](auto &r) { return !r.actor.empty(); }))
-            add(Actor, maxw([](auto &r) { return fs::q(r.actor); }, 140));
-        if (any([](auto &r) { return r.margin_l != 0; })) add(MarginL, fm.horizontalAdvance("0000") + 2 * Pad);
-        if (any([](auto &r) { return r.margin_r != 0; })) add(MarginR, fm.horizontalAdvance("0000") + 2 * Pad);
-        if (any([](auto &r) { return r.margin_v != 0; })) add(MarginV, fm.horizontalAdvance("0000") + 2 * Pad);
-        if (any([](auto &r) { return !r.effect.empty(); }))
-            add(Effect, maxw([](auto &r) { return fs::q(r.effect); }, 120));
+        add(Style, maxw(ci.styles, 160));
+        if (!ci.actors.empty()) add(Actor, maxw(ci.actors, 140));
+        if (ci.any_margin_l) add(MarginL, fm.horizontalAdvance("0000") + 2 * Pad);
+        if (ci.any_margin_r) add(MarginR, fm.horizontalAdvance("0000") + 2 * Pad);
+        if (ci.any_margin_v) add(MarginV, fm.horizontalAdvance("0000") + 2 * Pad);
+        if (!ci.effects.empty()) add(Effect, maxw(ci.effects, 120));
         add(Cps, fm.horizontalAdvance("CPS") + 3 * Pad);
         add(Wraps, fm.horizontalAdvance("00/00/00") + 2 * Pad);
     }
@@ -237,7 +237,7 @@ void Grid::paintEvent(QPaintEvent *) {
     const int first = verticalScrollBar()->value();
     for (int vi = first, y = rh; vi < int(m_vis.size()) && y < viewport()->height(); ++vi, y += rh) {
         const size_t i = m_vis[vi];
-        const fsb::Row &r = m_rows[i];
+        const fsb::Row r = m_tab->s().row(i);
         p.fillRect(0, y, w, rh, r.comment ? T.comment : T.dialogue);
         if (m_onVideo.contains(i)) p.fillRect(0, y, w, rh, T.onVideo);
         if (m_compare.contains(i)) p.fillRect(0, y, w, rh, T.compare);
@@ -332,8 +332,9 @@ void Grid::mousePressEvent(QMouseEvent *e) {
             return;
         }
         clickRow(vi, e->modifiers());
-        if (col == Num) m_tab->seekVideo(e->modifiers() & Qt::ShiftModifier ? m_rows[row].end : m_rows[row].start);
-        else if (col == Start || col == End) m_tab->seekVideo(col == Start ? m_rows[row].start : m_rows[row].end);
+        const auto r = m_tab->s().row(row);
+        if (col == Num) m_tab->seekVideo(e->modifiers() & Qt::ShiftModifier ? r.end : r.start);
+        else if (col == Start || col == End) m_tab->seekVideo(col == Start ? r.start : r.end);
     } else if (e->button() == Qt::MiddleButton) {
         if (e->modifiers() & Qt::ControlModifier) m_tab->setActive(int(row), false);
         else m_tab->playLine(int(row));
@@ -361,7 +362,8 @@ void Grid::mouseDoubleClickEvent(QMouseEvent *e) {
     if (vi < 0) return;
     const size_t row = m_vis[vi];
     const int col = colAt(int(e->position().x()));
-    m_tab->seekVideo(col == End ? m_rows[row].end : m_rows[row].start);
+    const auto r = m_tab->s().row(row);
+    m_tab->seekVideo(col == End ? r.end : r.start);
 }
 
 void Grid::wheelEvent(QWheelEvent *e) {

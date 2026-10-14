@@ -670,21 +670,17 @@ void EditBox::reload() {
     m_style->clear();
     for (const auto &st : s.styles()) m_style->addItem(fs::q(st.name));
     m_style->setCurrentText(fs::q(r.style));
-    QSet<QString> actors, effects;
-    for (size_t i = 0, n = s.row_count(); i < n && i < 5000; ++i) {
-        const auto x = s.row(i);
-        if (!x.actor.empty()) actors.insert(fs::q(x.actor));
-        if (!x.effect.empty()) effects.insert(fs::q(x.effect));
-    }
-    auto fill = [](QComboBox *c, QSet<QString> items, const QString &cur) {
-        QStringList l(items.begin(), items.end());
+    const auto &ci = m_tab->grid()->columnInfo();
+    auto fill = [](QComboBox *c, const rust::Vec<rust::String> &items, const QString &cur) {
+        QStringList l;
+        for (const auto &v : items) l << fs::q(v);
         l.sort();
         c->clear();
         c->addItems(l);
         c->setCurrentText(cur);
     };
-    fill(m_actor, actors, fs::q(r.actor));
-    fill(m_effect, effects, fs::q(r.effect));
+    fill(m_actor, ci.actors, fs::q(r.actor));
+    fill(m_effect, ci.effects, fs::q(r.effect));
     m_ml->setValue(r.margin_l);
     m_mr->setValue(r.margin_r);
     m_mv->setValue(r.margin_v);

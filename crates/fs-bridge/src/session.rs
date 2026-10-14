@@ -2,7 +2,7 @@
 //! translation-mode row mapping. Grid rows are logical rows: in TL mode an
 //! original/translation event pair is one row, otherwise one event.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -19,7 +19,7 @@ use fs_core::{Color, Document, Event, EventEntry, EventId, Time};
 use fs_formats::{Format, LoadOptions, SaveOptions};
 
 use crate::ffi::{
-    FileInfo, FilterSpec, FindSpec, PostSpec, Row, ShiftSpec, StyleData, Syllable, Visual,
+    ColumnInfo, FileInfo, FilterSpec, FindSpec, PostSpec, Row, ShiftSpec, StyleData, Syllable, Visual,
 };
 
 pub struct Session {
@@ -454,6 +454,40 @@ impl Session {
 
     pub fn row_count(&self) -> usize {
         self.rows.len()
+    }
+
+    pub fn column_info(&self) -> ColumnInfo {
+        let mut ci = ColumnInfo::default();
+        let (mut styles, mut actors, mut effects) = (HashSet::new(), HashSet::new(), HashSet::new());
+        let events = self.ed.doc.events();
+        let mut last = ("", "", "");
+        for r in &self.rows {
+            let ev = &events[r.main()].event;
+            ci.any_layer |= ev.layer != 0;
+            ci.any_margin_l |= ev.margin_l != 0;
+            ci.any_margin_r |= ev.margin_r != 0;
+            ci.any_margin_v |= ev.margin_v != 0;
+            let cur = (
+                ev.style.as_str(),
+                tlmode::split_actor(&ev.actor).1,
+                tlmode::strip_doubtful(&ev.effect),
+            );
+            // neighbouring lines mostly repeat these: hash only on a change
+            if cur.0 != last.0 || styles.is_empty() {
+                styles.insert(cur.0);
+            }
+            if cur.1 != last.1 {
+                actors.insert(cur.1);
+            }
+            if cur.2 != last.2 {
+                effects.insert(cur.2);
+            }
+            last = cur;
+        }
+        let owned = |set: HashSet<&str>| set.into_iter().filter(|s| !s.is_empty()).map(String::from).collect();
+        ci.styles = styles.into_iter().map(String::from).collect();
+        (ci.actors, ci.effects) = (owned(actors), owned(effects));
+        ci
     }
 
     pub fn row(&self, i: usize) -> Row {
@@ -1792,6 +1826,15 @@ mod tests {
     const ASS: &str = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,one\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,two\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,three\n";
 
     #[test]
+    fn column_info_lists_distinct_values() {
+        let mut s = session(ASS);
+        s.set_rows_field(&[1], "actor", "Ann");
+        let ci = s.column_info();
+        assert_eq!((ci.styles, ci.actors, ci.effects), (vec!["Default".to_string()], vec!["Ann".to_string()], vec![]));
+        assert!(!ci.any_layer && !ci.any_margin_v);
+    }
+
+    #[test]
     fn render_script_of_one_frame_keeps_its_lines() {
         let s = session(ASS);
         let text = s.script_for_render(false, 3500);
@@ -2079,6 +2122,7 @@ mod tests {
         time("copy all", &mut |s| drop(std::hint::black_box(s.copy_rows(&all))));
         time("set style all", &mut |s| s.set_rows_field(&all, "style", "Other"));
         time("sort by end", &mut |s| s.sort_rows(1, false, &[]));
+        time("column_info", &mut |s| drop(std::hint::black_box(s.column_info())));
         time("rows_at", &mut |s| drop(std::hint::black_box(s.rows_at(100_000_000))));
         let half: Vec<usize> = (0..50_000).map(|i| i * 2).collect();
         time("duplicate 50k", &mut |s| drop(s.duplicate_rows(&half)));

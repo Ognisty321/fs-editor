@@ -17,6 +17,7 @@ public:
     explicit Grid(TabPanel *tab);
 
     void refresh();
+    const fsb::ColumnInfo &columnInfo(); // distinct styles/actors/effects, current with the document
     void ensureVisible(int row);
     void setVideoTime(qint64 ms);
     // rows that differ from the compared tab (Kainote subtitle comparison)
@@ -69,7 +70,7 @@ private:
     void clickRow(int vi, Qt::KeyboardModifiers mods);
 
     TabPanel *m_tab;
-    std::vector<fsb::Row> m_rows;
+    fsb::ColumnInfo m_colInfo{}; // rows are fetched when painted, not copied (100k lines took 400 ms a change)
     std::vector<size_t> m_vis;
     std::vector<int> m_cols;     // visible columns in order
     std::vector<int> m_widths;
