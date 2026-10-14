@@ -1,6 +1,6 @@
 // Visual typesetting tools on the video (Kainote's tool row): position
 // pointer, \pos, \move, scale, Z and X/Y rotation, rectangle and vector
-// \clip / \iclip, \p drawings and the position shifter.
+// \clip / \iclip, \p drawings, the position shifter and the all-tags tool.
 #pragma once
 
 #include "bridge.h"
@@ -16,6 +16,8 @@ class QKeyEvent;
 class QWidget;
 class QStackedWidget;
 class QToolButton;
+class QComboBox;
+class QDoubleSpinBox;
 
 // A parsed ASS drawing: one command letter with its points each.
 struct Drawing {
@@ -35,7 +37,7 @@ struct Drawing {
 class VisualTools : public QObject {
     Q_OBJECT
 public:
-    enum Tool { Pointer, Pos, Move, Scale, RotZ, RotXY, RClip, VClip, Draw, Shifter, ToolCount };
+    enum Tool { Pointer, Pos, Move, Scale, RotZ, RotXY, RClip, VClip, Draw, Shifter, AllTags, ToolCount };
     enum VecMode { VecMove, VecLine, VecBezier, VecNewFigure, VecDelete };
 
     explicit VisualTools(VideoBox *box);
@@ -57,6 +59,7 @@ private:
     void apply(const QString &tags, bool allSelected = false);
     void applyPos(QPointF p);
     void toggleMove();
+    void applyAllTags(double value); // all-tags tool, from the texts in m_tagBase
     QString clipTag() const;
     void writeVector();
     // \p drawing origin and per-unit scale in script coordinates
@@ -81,5 +84,10 @@ private:
     QStackedWidget *m_sub = nullptr;
     int m_shiftWhat = 47; // all but drawing points
     QWidget *m_invert = nullptr;
+    QComboBox *m_tagName = nullptr, *m_tagMode = nullptr;
+    QDoubleSpinBox *m_tagValue = nullptr;
+    std::vector<size_t> m_tagRows;
+    rust::Vec<rust::String> m_tagBase; // the rows' texts when the drag started
+    double m_tagStart = 0;
     std::vector<QToolButton *> m_buttons;
 };

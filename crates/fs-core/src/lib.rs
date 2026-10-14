@@ -9,6 +9,7 @@ pub mod karaoke;
 pub mod keyframes;
 pub mod model;
 pub mod ops;
+pub mod tag_adjust;
 pub mod tags;
 pub mod text;
 pub mod time;

@@ -1289,6 +1289,45 @@ impl Session {
         });
     }
 
+    /// Kainote's all-tags tool: rewrite `tag` in the rows from `base` (their
+    /// texts when the drag started). `mode`: 0 add, 1 set, 2 multiply,
+    /// 3/4 gradient over characters up/down, 5/6 gradient over lines up/down.
+    pub fn adjust_tag(
+        &mut self,
+        rows: &[usize],
+        base: &[String],
+        tag: &str,
+        mode: u8,
+        delta: f64,
+        amend: &str,
+    ) {
+        use fs_core::tag_adjust::{TagAdjust, adjust_tag};
+        let mode = match mode {
+            1 => TagAdjust::Set,
+            2 => TagAdjust::Multiply,
+            3 | 4 => TagAdjust::GradientText {
+                increasing: mode == 3,
+            },
+            5 | 6 => TagAdjust::GradientLine {
+                increasing: mode == 5,
+            },
+            _ => TagAdjust::Add,
+        };
+        let evs = self.main_events(rows);
+        let base = base.to_vec();
+        let tag = tag.to_string();
+        self.edit_amend(amend, "Change tags", move |d| {
+            let n = evs.len().min(base.len());
+            for (k, &e) in evs.iter().take(n).enumerate() {
+                let style = d.style(&d.event(e).unwrap().style).cloned();
+                let text = adjust_tag(&base[k], style.as_ref(), &tag, mode, delta, k, n);
+                if d.event(e).unwrap().text != text {
+                    d.event_mut(e).unwrap().text = text;
+                }
+            }
+        });
+    }
+
     /// Remove tags by name (`pos,move`).
     pub fn remove_tags(&mut self, rows: &[usize], names: &str, amend: &str) {
         let evs = self.main_events(rows);
@@ -1480,6 +1519,17 @@ mod tests {
         assert_eq!(s.row(1).text, "two");
         assert_eq!(s.move_rows(&[2], -2), vec![0]);
         assert_eq!(s.row(0).text, "three");
+    }
+
+    #[test]
+    fn adjust_tag_rewrites_from_base_in_one_step() {
+        let mut s = session(ASS);
+        let base = vec![s.row(0).text];
+        s.adjust_tag(&[0], &base, "bord", 1, 3.0, "drag");
+        s.adjust_tag(&[0], &base, "bord", 1, 5.0, "drag");
+        assert!(s.row(0).text.starts_with(r"{\bord5}"));
+        s.undo();
+        assert_eq!(s.row(0).text, base[0]);
     }
 
     #[test]

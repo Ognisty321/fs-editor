@@ -6,12 +6,15 @@
 #include "videobox.h"
 
 #include <QButtonGroup>
+#include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QRegularExpression>
+#include <QSignalBlocker>
 #include <QStackedWidget>
 #include <QSettings>
 #include <QToolButton>
@@ -131,14 +134,14 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     h->setContentsMargins(0, 0, 0, 0);
     h->setSpacing(1);
     const char *icons[] = {"pointer", "crosshair", "route", "arrows-diagonal", "rotate-clockwise", "rotate-3d",
-                           "crop", "scissors", "vector-bezier", "arrows-move"};
+                           "crop", "scissors", "vector-bezier", "arrows-move", "typography"};
     const char *tips[] = {"Position pointer", "Text positioning", "Text moving", "Text scaling", "Z rotation",
                           "X/Y rotation", "Rectangle clipping", "Vector clipping", "Vector drawing",
-                          "Position shifter"};
+                          "Position shifter", "All tags (drag left/right to change the value)"};
     auto *group = new QButtonGroup(row);
     for (int t = 0; t < ToolCount; ++t) {
         auto *b = new QToolButton(row);
-        b->setIcon(icon(icons[t], QColor(t >= 6 && t <= 8 ? 0xb48cff : 0x4aa3ff)));
+        b->setIcon(icon(icons[t], QColor(t == AllTags ? 0xf2665c : t >= 6 && t <= 8 ? 0xb48cff : 0x4aa3ff)));
         b->setToolTip(tr(tips[t]));
         b->setCheckable(true);
         b->setAutoRaise(true);
@@ -147,13 +150,6 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
         h->addWidget(b);
         m_buttons.push_back(b);
     }
-    // shortcut: Hydra (multi-line tag gradients) is not implemented; the button is shown disabled for layout parity.
-    auto *hydra = new QToolButton(row);
-    hydra->setText("H");
-    hydra->setToolTip(tr("Hydra"));
-    hydra->setEnabled(false);
-    hydra->setFixedSize(26, 26);
-    h->addWidget(hydra);
     m_buttons[0]->setChecked(true);
     connect(group, &QButtonGroup::idClicked, this, &VisualTools::setTool);
 
@@ -221,6 +217,40 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     }
     sh->addStretch();
     m_sub->addWidget(shift);
+    // all tags (Kainote's tool): one numeric tag over the selected lines
+    auto *tags = new QWidget(m_sub);
+    auto *th = new QHBoxLayout(tags);
+    th->setContentsMargins(6, 0, 0, 0);
+    m_tagName = new QComboBox(tags);
+    for (const auto &t : fsb::adjustable_tags()) m_tagName->addItem("\\" + fs::q(t), fs::q(t));
+    m_tagName->setCurrentIndex(std::max(0, m_tagName->findData(QSettings().value("visual/allTagsTag", "blur"))));
+    m_tagMode = new QComboBox(tags);
+    for (const char *m : {"Add", "Set", "Multiply by line number", "Gradient text increasing",
+                          "Gradient text decreasing", "Gradient lines increasing", "Gradient lines decreasing"})
+        m_tagMode->addItem(tr(m));
+    m_tagMode->setCurrentIndex(QSettings().value("visual/allTagsMode", 0).toInt());
+    m_tagValue = new QDoubleSpinBox(tags);
+    m_tagValue->setRange(-10000, 10000);
+    m_tagValue->setDecimals(2);
+    m_tagValue->setToolTip(tr("Value; Enter applies it to the selected lines"));
+    th->addWidget(m_tagName);
+    th->addWidget(m_tagMode);
+    th->addWidget(m_tagValue);
+    th->addStretch();
+    connect(m_tagName, &QComboBox::currentIndexChanged, this,
+            [this] { QSettings().setValue("visual/allTagsTag", m_tagName->currentData()); });
+    connect(m_tagMode, &QComboBox::currentIndexChanged, this,
+            [this](int k) { QSettings().setValue("visual/allTagsMode", k); });
+    connect(m_tagValue, &QDoubleSpinBox::editingFinished, this, [this] {
+        if (m_drag || !m_valid) return;
+        auto *tab = m_box->tab();
+        m_tagRows = tab->selection();
+        m_tagBase.clear();
+        for (size_t r : m_tagRows) m_tagBase.push_back(tab->s().row(r).text);
+        m_amend = QString("visual-tags-%1").arg(++m_dragId);
+        applyAllTags(m_tagValue->value());
+    });
+    m_sub->addWidget(tags);
     h->addWidget(m_sub);
     h->addStretch();
     m_invert = invert;
@@ -231,7 +261,7 @@ void VisualTools::setTool(int t) {
     m_tool = t;
     if (t < int(m_buttons.size())) m_buttons[t]->setChecked(true);
     if (m_sub) {
-        m_sub->setCurrentIndex(t == VClip || t == Draw || t == RClip ? 1 : t == Pos || t == Move ? 2 : t == Shifter ? 3 : 0);
+        m_sub->setCurrentIndex(t == VClip || t == Draw || t == RClip ? 1 : t == Pos || t == Move ? 2 : t == Shifter ? 3 : t == AllTags ? 4 : 0);
         m_invert->setVisible(t == VClip || t == RClip);
         for (auto *b : m_sub->widget(1)->findChildren<QToolButton *>())
             if (b != m_invert) b->setVisible(t != RClip);
@@ -287,6 +317,14 @@ void VisualTools::toggleMove() {
     }
     tab->changed(TabPanel::FromVideo);
     reload();
+}
+
+void VisualTools::applyAllTags(double value) {
+    auto *tab = m_box->tab();
+    tab->s().adjust_tag(fs::slice(m_tagRows), {m_tagBase.data(), m_tagBase.size()},
+                        fs::Utf8(m_tagName->currentData().toString()), uint8_t(m_tagMode->currentIndex()), value,
+                        fs::Utf8(m_amend));
+    tab->changed(TabPanel::FromVideo);
 }
 
 void VisualTools::applyPos(QPointF p) {
@@ -476,6 +514,12 @@ bool VisualTools::press(QMouseEvent *e) {
     case Move:
         if (m_button == Qt::RightButton) m_drag = 2;
         break;
+    case AllTags:
+        m_tagRows = tab->selection();
+        m_tagBase.clear();
+        for (size_t r : m_tagRows) m_tagBase.push_back(tab->s().row(r).text);
+        m_tagStart = m_tagMode->currentIndex() == 1 ? m_tagValue->value() : 0;
+        break;
     case RotZ:
         if (near(w({m_v.org_x, m_v.org_y}), m_pressW, 9)) m_drag = 2;
         break;
@@ -641,6 +685,20 @@ bool VisualTools::move(QMouseEvent *e) {
                     pt = m_vec.at(h);
         m_vec.at(m_vecHandle) = pt;
         writeVector();
+        break;
+    }
+    case AllTags: {
+        // value per pixel dragged, scaled to the tag's usual range
+        const QString t = m_tagName->currentData().toString();
+        const double step = t.endsWith('a')                            ? 1    // alpha, 1a, 3a, 4a
+                            : t.startsWith("fa")                       ? 0.002
+                            : t == "fsp"                               ? 0.1
+                            : t.startsWith("fs") || t.startsWith("fr") ? 0.5
+                                                                       : 0.05;
+        const double v = std::round((m_tagStart + dw.x() * step) * 100) / 100;
+        const QSignalBlocker block(m_tagValue);
+        m_tagValue->setValue(v);
+        applyAllTags(v);
         break;
     }
     case Shifter: {

@@ -387,6 +387,15 @@ pub mod ffi {
 
         fn visual(self: &Session, row: usize) -> Visual;
         fn set_tags(self: &mut Session, rows: &[usize], tags: &str, amend: &str);
+        fn adjust_tag(
+            self: &mut Session,
+            rows: &[usize],
+            base: &[String],
+            tag: &str,
+            mode: u8,
+            delta: f64,
+            amend: &str,
+        );
         fn remove_tags(self: &mut Session, rows: &[usize], names: &str, amend: &str);
         fn set_drawing(self: &mut Session, row: usize, drawing: &str, amend: &str);
         fn shift_positions(
@@ -419,6 +428,8 @@ pub mod ffi {
 
         fn fmt_time(ms: i64) -> String;
         fn parse_time(s: &str) -> i64;
+        /// Tags the all-tags visual tool edits.
+        fn adjustable_tags() -> Vec<String>;
         fn strip_tags(s: &str) -> String;
         /// Keyframe frame numbers from an XviD/Aegisub/… keyframes file.
         fn load_keyframes(path: &str) -> Result<Vec<i64>>;
@@ -516,6 +527,13 @@ fn fmt_time(ms: i64) -> String {
 }
 
 /// Accepts `h:mm:ss.cc`, `h:mm:ss,mmm` and offsets like `1.5s`; -1 if invalid.
+fn adjustable_tags() -> Vec<String> {
+    fs_core::tag_adjust::ADJUSTABLE_TAGS
+        .iter()
+        .map(|t| t.to_string())
+        .collect()
+}
+
 fn parse_time(s: &str) -> i64 {
     let s = s.trim();
     fs_core::Time::parse_ass(s)
