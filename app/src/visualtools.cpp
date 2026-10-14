@@ -81,6 +81,11 @@ std::vector<std::pair<int, int>> Drawing::handles() const {
     return h;
 }
 
+void Drawing::translate(QPointF d) {
+    for (auto &c : cmds)
+        for (auto &p : c.pts) p += d;
+}
+
 QRectF Drawing::bounds() const {
     // QRectF::united skips zero-size rects, so track the extremes by hand
     double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
@@ -120,6 +125,16 @@ void line(QPainter &p, QPointF a, QPointF b, QColor c = kLine, Qt::PenStyle st =
 }
 
 bool near(QPointF a, QPointF b, double r = 7) { return QLineF(a, b).length() <= r; }
+
+// Shapes for the vector tools, drawn in a 0..100 box.
+const std::pair<const char *, const char *> kShapes[] = {
+    {"Rectangle", "m 0 0 l 100 0 100 100 0 100"},
+    {"Ellipse", "m 50 0 b 78 0 100 22 100 50 b 100 78 78 100 50 100 b 22 100 0 78 0 50 b 0 22 22 0 50 0"},
+    {"Rounded rectangle", "m 15 0 l 85 0 b 93 0 100 7 100 15 l 100 85 b 100 93 93 100 85 100 l 15 100 "
+                          "b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0"},
+    {"Triangle", "m 50 0 l 100 100 0 100"},
+    {"Star", "m 50 0 l 61 35 98 35 68 57 79 91 50 70 21 91 32 57 2 35 39 35"},
+};
 } // namespace
 
 VisualTools::VisualTools(VideoBox *box)
@@ -185,6 +200,13 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
         apply(clipTag());
     });
     vh->addWidget(invert);
+    m_shapeBox = new QComboBox(vec);
+    m_shapeBox->setToolTip(tr("Ready shape: pick one, then drag a rectangle on the video (Shift keeps it square)"));
+    m_shapeBox->addItem(tr("Shape..."));
+    for (auto [name, path] : kShapes) m_shapeBox->addItem(tr(name), QString(path));
+    m_shapeBox->setCurrentIndex(QSettings().value("visual/shape", 0).toInt());
+    connect(m_shapeBox, &QComboBox::currentIndexChanged, this, [](int k) { QSettings().setValue("visual/shape", k); });
+    vh->addWidget(m_shapeBox);
     vh->addStretch();
     // \pos / \move tools: Aegisub's "Toggle between \move and \pos" for the selected lines
     auto *drag = new QWidget(m_sub);
@@ -301,6 +323,7 @@ void VisualTools::setTool(int t) {
         m_invert->setVisible(t == VClip || t == RClip);
         for (auto *b : m_sub->widget(1)->findChildren<QToolButton *>())
             if (b != m_invert) b->setVisible(t != RClip);
+        m_shapeBox->setVisible(t != RClip);
     }
     reload();
     m_box->view()->setCursor(t == Pointer ? Qt::ArrowCursor : Qt::CrossCursor);
@@ -316,21 +339,22 @@ void VisualTools::reload() {
     if (m_drag) return; // keep the vector and its frame stable while dragging
     if (m_tool == VClip) m_vec = m_v.clip == 2 ? Drawing::parse(fs::q(m_v.clip_drawing)) : Drawing{};
     if (m_tool == Draw) {
+        // m_vec holds the points as offsets from \pos; libass also shifts them by the alignment
         m_vec = Drawing::parse(fs::q(m_v.drawing));
-        drawingFrame(m_drawOrigin, m_drawScale);
+        const double k = std::pow(2.0, -(std::max(1, m_v.drawing_scale) - 1));
+        m_drawScale = QPointF(m_v.fscx / 100 * k, m_v.fscy / 100 * k);
+        m_drawOrigin = QPointF(m_v.x, m_v.y);
+        m_vec.translate(-alignShift(m_vec));
     }
 }
 
-void VisualTools::drawingFrame(QPointF &origin, QPointF &scale) const {
-    const double k = std::pow(2.0, -(std::max(1, m_v.drawing_scale) - 1));
-    scale = QPointF(m_v.fscx / 100 * k, m_v.fscy / 100 * k);
-    const QRectF b = m_vec.bounds();
-    const double wsz = b.width() * scale.x(), hsz = b.height() * scale.y();
+// libass puts drawing point (0,0) at \pos minus the alignment share of the points' bounding box
+// (measured: \an7 keeps it at \pos, \an2 moves it left by width/2 and up by height).
+QPointF VisualTools::alignShift(const Drawing &d) const {
+    const QRectF b = d.bounds();
     const int an = m_v.align;
-    const double ox = an % 3 == 1 ? 0 : an % 3 == 2 ? -wsz / 2 : -wsz;
-    const double oy = an >= 7 ? 0 : an >= 4 ? -hsz / 2 : -hsz;
-    // shortcut: rotation and \org are ignored for drawings, and the origin assumes libass aligns the point bounding box; fine for upright shapes.
-    origin = QPointF(m_v.x + ox - b.left() * scale.x(), m_v.y + oy - b.top() * scale.y());
+    // shortcut: rotation and \org are ignored for drawings; fine for upright shapes.
+    return {b.width() * (an % 3 == 1 ? 0 : an % 3 == 2 ? 0.5 : 1), b.height() * (an >= 7 ? 0 : an >= 4 ? 0.5 : 1)};
 }
 
 void VisualTools::apply(const QString &tags, bool allSelected) {
@@ -383,7 +407,9 @@ void VisualTools::writeVector() {
         m_v.clip = 2;
         apply(clipTag(), true);
     } else {
-        tab->s().set_drawing(size_t(tab->active()), fs::Utf8(m_vec.toString()), fs::Utf8(m_amend));
+        Drawing out = m_vec;
+        out.translate(alignShift(out));
+        tab->s().set_drawing(size_t(tab->active()), fs::Utf8(out.toString()), fs::Utf8(m_amend));
         tab->changed(TabPanel::FromVideo);
     }
 }
@@ -601,6 +627,12 @@ bool VisualTools::press(QMouseEvent *e) {
             m_vecHandle = hs[h];
             return true;
         }
+        if (m_shapeBox->currentIndex() > 0 && e->button() == Qt::LeftButton) {
+            m_shapeFrom = m_vec.cmds.size();
+            m_shapeA = pt;
+            m_drag = 5;
+            return true;
+        }
         if (m_vec.cmds.empty() || m_vecMode == VecNewFigure) {
             m_vec.cmds.push_back({'m', {pt}});
         } else if (m_vecMode == VecBezier) {
@@ -733,10 +765,25 @@ bool VisualTools::move(QMouseEvent *e) {
     }
     case VClip:
     case Draw: {
-        if (m_vecHandle.first < 0) break;
+        if (m_vecHandle.first < 0 && m_drag != 5) break;
         QPointF pt = now;
         if (m_tool == VClip) pt *= std::pow(2.0, std::max(1, m_v.clip_scale) - 1);
         else pt = QPointF((now.x() - m_drawOrigin.x()) / m_drawScale.x(), (now.y() - m_drawOrigin.y()) / m_drawScale.y());
+        if (m_drag == 5) {
+            // the picked shape fitted into the dragged rectangle
+            QPointF d = pt - m_shapeA;
+            if (e->modifiers() & Qt::ShiftModifier) {
+                const double m = std::max(std::abs(d.x()), std::abs(d.y()));
+                d = QPointF(d.x() < 0 ? -m : m, d.y() < 0 ? -m : m);
+            }
+            m_vec.cmds.resize(m_shapeFrom);
+            Drawing shape = Drawing::parse(m_shapeBox->currentData().toString());
+            for (auto &c : shape.cmds)
+                for (QPointF &q : c.pts) q = m_shapeA + QPointF(q.x() / 100 * d.x(), q.y() / 100 * d.y());
+            m_vec.cmds.insert(m_vec.cmds.end(), shape.cmds.begin(), shape.cmds.end());
+            writeVector();
+            break;
+        }
         // Alt snaps to another point
         if (e->modifiers() & Qt::AltModifier)
             for (const auto &h : m_vec.handles())

@@ -32,6 +32,7 @@ struct Drawing {
     std::vector<std::pair<int, int>> handles() const;
     QPointF &at(std::pair<int, int> h) { return cmds[h.first].pts[h.second]; }
     QRectF bounds() const;
+    void translate(QPointF d);
 };
 
 class VisualTools : public QObject {
@@ -62,8 +63,8 @@ private:
     void applyAllTags(double value); // all-tags tool, from the texts in m_tagBase
     QString clipTag() const;
     void writeVector();
-    // \p drawing origin and per-unit scale in script coordinates
-    void drawingFrame(QPointF &origin, QPointF &scale) const;
+    // how far libass moves \p drawing points for the line's alignment
+    QPointF alignShift(const Drawing &d) const;
     int hitHandle(QPointF widgetPos) const;
 
     VideoBox *m_box;
@@ -84,6 +85,9 @@ private:
     QStackedWidget *m_sub = nullptr;
     int m_shiftWhat = 47; // all but drawing points
     int m_scaleWhat = 5;  // scale tool: 1 width, 2 keep proportions, 4 height
+    QComboBox *m_shapeBox = nullptr; // ready shapes dragged out on the video (Kainote)
+    size_t m_shapeFrom = 0;          // first command of the shape being dragged
+    QPointF m_shapeA;                // its press point in drawing units
     bool m_twoPoints = false; // Z rotation: the angle of a line dragged on the video
     QWidget *m_invert = nullptr;
     QComboBox *m_tagName = nullptr, *m_tagMode = nullptr;

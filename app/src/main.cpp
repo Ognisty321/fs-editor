@@ -8,6 +8,7 @@
 #include <QDialog>
 #include <QDropEvent>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QSettings>
 #include <QTextEdit>
 #include <QTimer>
@@ -93,6 +94,18 @@ int main(int argc, char **argv) {
                 // FSED_SMOKE_TOOL=n picks a visual tool (VisualTools::Tool order)
                 if (qEnvironmentVariableIsSet("FSED_SMOKE_TOOL"))
                     w.current()->video()->tools()->setTool(qEnvironmentVariableIntValue("FSED_SMOKE_TOOL"));
+                // FSED_SMOKE_DRAG="x1,y1,x2,y2": a left-button drag on the video, in view fractions 0..1
+                const QStringList d = qEnvironmentVariable("FSED_SMOKE_DRAG").split(',');
+                if (d.size() != 4) return;
+                QWidget *view = w.current()->video()->view();
+                const auto at = [&](int k) { return QPointF(d[k].toDouble() * view->width(), d[k + 1].toDouble() * view->height()); };
+                auto send = [view](QEvent::Type t, QPointF p, Qt::MouseButtons held) {
+                    QMouseEvent e(t, p, view->mapToGlobal(p), Qt::LeftButton, held, Qt::NoModifier);
+                    QApplication::sendEvent(view, &e);
+                };
+                send(QEvent::MouseButtonPress, at(0), Qt::LeftButton);
+                for (int k = 1; k <= 4; ++k) send(QEvent::MouseMove, at(0) + (at(2) - at(0)) * k / 4, Qt::LeftButton);
+                send(QEvent::MouseButtonRelease, at(2), Qt::NoButton);
             });
     // FSED_SMOKE_ACTION runs a menu command by id; a modal dialog it opens is grabbed instead.
     if (const QString id = qEnvironmentVariable("FSED_SMOKE_ACTION"); !id.isEmpty())
