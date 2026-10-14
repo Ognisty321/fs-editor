@@ -20,6 +20,7 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDateTime>
+#include <numeric>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
@@ -87,7 +88,7 @@ const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"playPause", {"player-play", kGreen}}, {"prevKeyframe", {"chevrons-left", kAmber}},
     {"nextKeyframe", {"chevrons-right", kAmber}}, {"audioToVideo", {"wave-sine", kTeal}},
     {"markToVideo", {"map-pin", kTeal}}, {"prevBoundary", {"arrow-bar-to-left", kBlue}},
-    {"nextBoundary", {"arrow-bar-to-right", kBlue}}, {"jumpTo", {"arrow-right-to-arc", kBlue}},
+    {"nextBoundary", {"arrow-bar-to-right", kBlue}}, {"jumpTo", {"arrow-right-to-arc", kBlue}}, {"videoDetails", {"info-circle", kBlue}},
     {"snapScene", {"keyframes", kAmber}}, {"shiftToFrame", {"clock-play", kGreen}}, {"zoomVideo", {"zoom-in", kBlue}}, {"resetZoom", {"zoom-reset", kBlue}},
     {"openAudio", {"music", kTeal}}, {"audioFromVideo", {"file-music", kTeal}}, {"blankAudio", {"wave-square", kTeal}},
     {"closeAudio", {"music-off", kRed}}, {"splitView", {"layout-columns", {}}}, {"compareTabs", {"git-compare", {}}},
@@ -699,6 +700,22 @@ void MainWindow::buildMenus() {
         connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
         f->addRow(bb);
         if (d.exec() == QDialog::Accepted) v->seekFrame(frame->value());
+    });
+    // Aegisub's Video details
+    add("videoDetails", tr("Video details..."), {}, video, [=, this] {
+        auto *v = tab()->video();
+        if (!v->hasVideo()) return;
+        const fsb::VideoInfo i = v->info();
+        const int g = std::gcd(i.width, i.height);
+        QMessageBox::information(
+            this, tr("Video details"),
+            tr("File name: %1\nFPS: %2%3\nResolution: %4x%5 (%6:%7)\nPixel aspect: %8:%9\nLength: %10 frames (%11)\nDecoder: BestSource")
+                .arg(QFileInfo(v->path()).fileName())
+                .arg(i.fps, 0, 'f', 3)
+                .arg(i.vfr ? tr(" (variable)") : QString())
+                .arg(i.width).arg(i.height).arg(i.width / std::max(1, g)).arg(i.height / std::max(1, g))
+                .arg(i.sar_num).arg(i.sar_den)
+                .arg(i.frames).arg(fs::fmtTime(i.duration_ms)));
     });
     add("audioToVideo", tr("Set audio position to video time"), {}, video,
         [=] { if (tab()->audio()->hasAudio()) tab()->audio()->centerOn(tab()->videoTime()); });
