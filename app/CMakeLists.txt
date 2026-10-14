@@ -26,6 +26,8 @@ corrosion_set_env_vars(fs_bridge FS_BRIDGE_INCLUDE_DIR=${FS_BRIDGE_INCLUDE_DIR})
 if(NOT FS_DEPS_DIR)
     set(FS_DEPS_DIR $ENV{FS_DEPS_DIR})
 endif()
+# CI passes D:\a\... ; backslashes would end up as escapes in cmake_install.cmake
+file(TO_CMAKE_PATH "${FS_DEPS_DIR}" FS_DEPS_DIR)
 if(NOT FS_DEPS_DIR)
     message(FATAL_ERROR "Set FS_DEPS_DIR to the tools/deps prefix (see README)")
 endif()
