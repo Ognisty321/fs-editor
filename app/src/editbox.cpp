@@ -138,10 +138,11 @@ QStringList spell::languages() {
 }
 
 fsb::Speller *spell::get() {
-    QSettings st;
-    if (!st.value("spell/enabled", true).toBool()) return nullptr;
+    // settings are read once here: every change of spell/* calls reload()
     if (!g_spellLoaded) {
         g_spellLoaded = true;
+        QSettings st;
+        if (!st.value("spell/enabled", true).toBool()) return nullptr;
         const QStringList langs = languages();
         QString lang = st.value("spell/lang").toString();
         if (!langs.contains(lang)) lang = langs.contains("pl_PL") ? "pl_PL" : langs.value(0);

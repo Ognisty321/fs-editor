@@ -367,7 +367,7 @@ pub mod ffi {
         fn generation(self: &Session) -> u64;
 
         fn row_count(self: &Session) -> usize;
-        fn column_info(self: &Session) -> ColumnInfo;
+        fn column_info(self: &mut Session) -> ColumnInfo;
         /// Kainote "compare by times": rows timed like a line of `other` whose text differs.
         fn compare_rows(self: &Session, other: &Session) -> Vec<usize>;
         fn row(self: &Session, i: usize) -> Row;

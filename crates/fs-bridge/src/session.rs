@@ -35,6 +35,9 @@ pub struct Session {
     rows: Vec<TlRow>,
     tl: bool,
     generation: u64,
+    /// Cached [`Session::column_info`]; every change drops it except typing that
+    /// leaves the column fields alone.
+    col_info: Option<ColumnInfo>,
     pub(crate) video_size: Option<(i32, i32)>,
     pub(crate) framerate: Option<Framerate>,
     pub(crate) keyframes: Vec<i64>,
@@ -53,6 +56,7 @@ impl Default for Session {
             rows: Vec::new(),
             tl: false,
             generation: 0,
+            col_info: None,
             video_size: None,
             framerate: None,
             keyframes: Vec::new(),
@@ -177,6 +181,19 @@ fn apply_style_data(s: &mut Style, d: &StyleData) {
     s.encoding = d.encoding;
 }
 
+/// The fields of a row's main event that [`Session::column_info`] reads.
+fn column_key(ev: &Event) -> (bool, bool, bool, bool, &str, &str, &str) {
+    (
+        ev.layer != 0,
+        ev.margin_l != 0,
+        ev.margin_r != 0,
+        ev.margin_v != 0,
+        ev.style.as_str(),
+        tlmode::split_actor(&ev.actor).1,
+        tlmode::strip_doubtful(&ev.effect),
+    )
+}
+
 /// `Dialogue: …` line of an event in the default v4+ field order.
 fn event_line(ev: &Event) -> String {
     let fields: Vec<String> = EventField::default_format(AssVersion::Ass)
@@ -197,6 +214,7 @@ impl Session {
         self.tl = tlmode::is_tl_mode(&self.ed.doc);
         self.rows = tlmode::rows(&self.ed.doc);
         self.generation += 1;
+        self.col_info = None;
     }
 
     fn edit<R>(&mut self, desc: &str, f: impl FnOnce(&mut Document) -> R) -> R {
@@ -490,23 +508,25 @@ impl Session {
         (!ev.is_comment()).then_some((ev.start, ev.end, text))
     }
 
-    pub fn column_info(&self) -> ColumnInfo {
+    pub fn column_info(&mut self) -> ColumnInfo {
+        let ci = self.col_info.take().unwrap_or_else(|| self.scan_columns());
+        self.col_info = Some(ci.clone());
+        ci
+    }
+
+    fn scan_columns(&self) -> ColumnInfo {
         let mut ci = ColumnInfo::default();
         let (mut styles, mut actors, mut effects) =
             (HashSet::new(), HashSet::new(), HashSet::new());
         let events = self.ed.doc.events();
         let mut last = ("", "", "");
         for r in &self.rows {
-            let ev = &events[r.main()].event;
-            ci.any_layer |= ev.layer != 0;
-            ci.any_margin_l |= ev.margin_l != 0;
-            ci.any_margin_r |= ev.margin_r != 0;
-            ci.any_margin_v |= ev.margin_v != 0;
-            let cur = (
-                ev.style.as_str(),
-                tlmode::split_actor(&ev.actor).1,
-                tlmode::strip_doubtful(&ev.effect),
-            );
+            let (layer, ml, mr, mv, style, actor, effect) = column_key(&events[r.main()].event);
+            ci.any_layer |= layer;
+            ci.any_margin_l |= ml;
+            ci.any_margin_r |= mr;
+            ci.any_margin_v |= mv;
+            let cur = (style, actor, effect);
             // neighbouring lines mostly repeat these: hash only on a change
             if cur.0 != last.0 || styles.is_empty() {
                 styles.insert(cur.0);
@@ -583,6 +603,9 @@ impl Session {
     /// Write every field of a row back (edit box commit).
     pub fn set_row(&mut self, i: usize, row: &Row, amend: &str) {
         let Some(r) = self.tl_row(i) else { return };
+        // typing leaves the columns alone: keep their info (a rescan of 100k lines per key)
+        let old = self.ed.doc.event(r.main()).cloned();
+        let (n, ci) = (self.rows.len(), self.col_info.take());
         let tl = self.tl;
         let row = row.clone();
         self.edit_amend(amend, "Edit line", move |d| {
@@ -637,6 +660,10 @@ impl Session {
                 }
             }
         });
+        let new = self.tl_row(i).and_then(|r| self.ed.doc.event(r.main()));
+        if self.rows.len() == n && old.as_ref().map(column_key) == new.map(column_key) {
+            self.col_info = ci;
+        }
     }
 
     pub fn set_texts(&mut self, rows: &[usize], texts: &[String], description: &str) {
@@ -1224,10 +1251,11 @@ impl Session {
         if me.is_comment() {
             return Vec::new();
         }
+        let events = self.ed.doc.events();
         (0..self.rows.len())
             .filter(|&i| i != row)
             .filter(|&i| {
-                let e = self.ed.doc.event(self.rows[i].main()).unwrap();
+                let e = &events[self.rows[i].main()].event;
                 !e.is_comment() && e.start < me.end && me.start < e.end
             })
             .collect()
@@ -1235,9 +1263,10 @@ impl Session {
 
     /// Rows visible at `ms` (grid tint, F2 select from video time).
     pub fn rows_at(&self, ms: i64) -> Vec<usize> {
+        let events = self.ed.doc.events();
         (0..self.rows.len())
             .filter(|&i| {
-                let e = self.ed.doc.event(self.rows[i].main()).unwrap();
+                let e = &events[self.rows[i].main()].event;
                 !e.is_comment() && e.start.ms() <= ms && ms < e.end.ms()
             })
             .collect()
@@ -1950,6 +1979,14 @@ mod tests {
             (vec!["Default".to_string()], vec!["Ann".to_string()], vec![])
         );
         assert!(!ci.any_layer && !ci.any_margin_v);
+        // typing keeps the cached info, a column field drops it
+        let mut r = s.row(1);
+        r.text += "x";
+        s.set_row(1, &r, "typing");
+        assert_eq!(s.column_info().actors, ["Ann"]);
+        r.actor = "Bob".into();
+        s.set_row(1, &r, "typing");
+        assert_eq!(s.column_info().actors, ["Bob"]);
     }
 
     #[test]
