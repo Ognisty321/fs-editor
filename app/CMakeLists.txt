@@ -71,6 +71,8 @@ if(MSVC)
     # LuaJIT's msvcbuild objects ask for the static CRT; the app uses /MD everywhere else.
     target_link_options(fsed PRIVATE /NODEFAULTLIB:LIBCMT)
     target_link_libraries(fsed PRIVATE dbghelp)
+else()
+    target_compile_options(fsed PRIVATE -Wall -Wextra)
 endif()
 
 # Runtime: media DLLs and the bundled automation tree beside the exe.
