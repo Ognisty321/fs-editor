@@ -529,6 +529,13 @@ impl Session {
                     }
                     "start" => ev.start = Time(value.parse().unwrap_or(0)),
                     "end" => ev.end = Time(value.parse().unwrap_or(0)),
+                    // "start,end" in one undo step (snap to scene)
+                    "times" => {
+                        if let Some((s, e)) = value.split_once(',') {
+                            ev.start = Time(s.trim().parse().unwrap_or(0));
+                            ev.end = Time(e.trim().parse().unwrap_or(0));
+                        }
+                    }
                     "markers" => {
                         let (_, a) = tlmode::split_actor(&ev.actor);
                         let a = a.to_string();

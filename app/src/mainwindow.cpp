@@ -84,7 +84,9 @@ const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"goStart", {"arrow-bar-to-left", kGreen}}, {"goEnd", {"arrow-bar-to-right", kGreen}},
     {"playPause", {"player-play", kGreen}}, {"prevKeyframe", {"chevrons-left", kAmber}},
     {"nextKeyframe", {"chevrons-right", kAmber}}, {"audioToVideo", {"wave-sine", kTeal}},
-    {"markToVideo", {"map-pin", kTeal}}, {"zoomVideo", {"zoom-in", kBlue}}, {"resetZoom", {"zoom-reset", kBlue}},
+    {"markToVideo", {"map-pin", kTeal}}, {"prevBoundary", {"arrow-bar-to-left", kBlue}},
+    {"nextBoundary", {"arrow-bar-to-right", kBlue}}, {"jumpTo", {"arrow-right-to-arc", kBlue}},
+    {"snapScene", {"keyframes", kAmber}}, {"shiftToFrame", {"clock-play", kGreen}}, {"zoomVideo", {"zoom-in", kBlue}}, {"resetZoom", {"zoom-reset", kBlue}},
     {"openAudio", {"music", kTeal}}, {"audioFromVideo", {"file-music", kTeal}}, {"blankAudio", {"wave-square", kTeal}},
     {"closeAudio", {"music-off", kRed}}, {"splitView", {"layout-columns", {}}}, {"compareTabs", {"git-compare", {}}},
     {"editor", {"edit", kBlue}}, {"properties", {"file-info", kPurple}}, {"styleManager", {"palette", kPurple}},
@@ -599,6 +601,54 @@ void MainWindow::buildMenus() {
     };
     add("prevKeyframe", tr("Go to previous keyframe"), {}, video, [=] { stepKeyframe(-1); });
     add("nextKeyframe", tr("Go to next keyframe"), {}, video, [=] { stepKeyframe(1); });
+    // Aegisub: video/frame/prev|next/boundary - the active line's start or end, then the neighbour line
+    add("prevBoundary", tr("Previous boundary"), {}, video, [=] {
+        auto *t = tab();
+        if (t->active() < 0 || !t->video()->hasVideo()) return;
+        auto *v = t->video();
+        const fsb::Row r = t->s().row(size_t(t->active()));
+        for (qint64 f : {v->frameAt(r.end - 1), v->frameAtStart(r.start)})
+            if (f < v->frame()) return v->seekFrame(f);
+        if (t->active() > 0) {
+            t->setActive(t->active() - 1);
+            v->seekFrame(v->frameAt(t->s().row(size_t(t->active())).end - 1));
+        }
+    });
+    add("nextBoundary", tr("Next boundary"), {}, video, [=] {
+        auto *t = tab();
+        if (t->active() < 0 || !t->video()->hasVideo()) return;
+        auto *v = t->video();
+        const fsb::Row r = t->s().row(size_t(t->active()));
+        for (qint64 f : {v->frameAtStart(r.start), v->frameAt(r.end - 1)})
+            if (f > v->frame()) return v->seekFrame(f);
+        if (size_t(t->active()) + 1 < t->s().row_count()) {
+            t->setActive(t->active() + 1);
+            v->seekStart(t->s().row(size_t(t->active())).start);
+        }
+    });
+    add("jumpTo", tr("Jump to..."), QKeySequence("Ctrl+G"), video, [=, this] {
+        auto *v = tab()->video();
+        if (!v->hasVideo()) return;
+        QDialog d(this);
+        d.setWindowTitle(tr("Jump to"));
+        auto *f = new QFormLayout(&d);
+        auto *time = new TimeEdit(&d);
+        auto *frame = new QSpinBox(&d);
+        frame->setRange(0, int(std::max<qint64>(0, v->info().frames - 1)));
+        time->setMs(v->time(), v->frame());
+        frame->setValue(int(v->frame()));
+        connect(time, &TimeEdit::edited, frame, [=] {
+            if (time->ms() >= 0) frame->setValue(int(v->frameAt(time->ms())));
+        });
+        connect(frame, &QSpinBox::valueChanged, time, [=](int n) { time->setMs(v->timeAt(n), n); });
+        f->addRow(tr("Frame:"), frame);
+        f->addRow(tr("Time:"), time);
+        auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+        connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+        f->addRow(bb);
+        if (d.exec() == QDialog::Accepted) v->seekFrame(frame->value());
+    });
     add("audioToVideo", tr("Set audio position to video time"), {}, video,
         [=] { if (tab()->audio()->hasAudio()) tab()->audio()->centerOn(tab()->videoTime()); });
     add("markToVideo", tr("Set audio marker to video time"), {}, video,
@@ -670,6 +720,37 @@ void MainWindow::buildMenus() {
     });
     add("fontCollector", tr("Fonts collector"), {}, subs, [=, this] { FontCollectorDialog(tab()).exec(); });
     add("resample", tr("Resample subtitles"), {}, subs, [=] { ResampleDialog(tab()).exec(); });
+    // Aegisub time/snap/scene: selected lines span the keyframes around the video frame
+    add("snapScene", tr("Snap to scene"), {}, subs, [=] {
+        auto *t = tab();
+        const auto kf = t->keyframes();
+        auto *v = t->video();
+        if (kf.empty() || !v->hasVideo()) return;
+        const qint64 cur = v->frame();
+        qint64 prev = 0, next = v->info().frames;
+        if (cur < kf.front()) next = kf.front();
+        else if (cur < kf.back()) {
+            auto it = std::upper_bound(kf.begin(), kf.end(), cur);
+            prev = *std::prev(it);
+            next = *it;
+        } else prev = kf.back();
+        t->s().set_rows_field(fs::slice(t->selection()), "times",
+                              fs::Utf8(QString("%1,%2").arg(v->timeAt(prev)).arg(v->timeAt(next))));
+        t->changed();
+    });
+    // Aegisub time/frame/current: shift the selection so the active line starts at the video frame
+    add("shiftToFrame", tr("Shift to current frame"), {}, subs, [=] {
+        auto *t = tab();
+        if (t->active() < 0 || !t->video()->hasVideo()) return;
+        fsb::ShiftSpec spec;
+        spec.amount = t->video()->time() - t->s().row(size_t(t->active())).start;
+        spec.lines = 1;
+        for (size_t r : t->selection()) spec.selected.push_back(r);
+        spec.active = size_t(t->active());
+        const auto tc = t->video()->timecodes();
+        t->s().shift(spec, {tc.data(), tc.size()});
+        t->changed();
+    });
     auto *spellOn = add("spellCheck", tr("Spell checker"), {}, subs, {});
     spellOn->setCheckable(true);
     spellOn->setChecked(QSettings().value("spell/enabled", true).toBool());
