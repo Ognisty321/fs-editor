@@ -40,7 +40,8 @@ pub struct StyleEntry {
     pub ending: LineEnding,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+// Eq lets `Arc<EventEntry>` compare by pointer first (std specialisation)
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventEntry {
     pub id: EventId,
     pub leading: Vec<RawLine>,
@@ -147,7 +148,7 @@ pub struct ParseWarning {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Document {
     /// Whether the source started with a byte-order mark.
     pub bom: bool,
@@ -157,6 +158,21 @@ pub struct Document {
     /// Line ending used for newly created lines.
     pub default_ending: LineEnding,
     next_id: EventId,
+}
+
+// Sections are compared by pointer first: an edit copies only the sections it
+// touches, so "did this edit change anything" skips the untouched ones.
+impl PartialEq for Document {
+    fn eq(&self, o: &Self) -> bool {
+        self.bom == o.bom
+            && self.preamble == o.preamble
+            && self.default_ending == o.default_ending
+            && self.next_id == o.next_id
+            && self.sections.len() == o.sections.len()
+            && (self.sections.iter())
+                .zip(&o.sections)
+                .all(|(a, b)| Arc::ptr_eq(a, b) || a == b)
+    }
 }
 
 impl Default for Document {

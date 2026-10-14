@@ -605,7 +605,7 @@ impl EventKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Event {
     pub kind: EventKind,
     pub layer: i32,

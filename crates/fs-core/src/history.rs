@@ -114,11 +114,6 @@ impl Editor {
         amend: Option<&str>,
         f: impl FnOnce(&mut Document) -> R,
     ) -> R {
-        let before = self.doc.clone();
-        let r = f(&mut self.doc);
-        if self.doc == before {
-            return r;
-        }
         let merge = amend.is_some()
             && self.redo.is_empty()
             && self
@@ -126,20 +121,32 @@ impl Editor {
                 .last()
                 .is_some_and(|s| s.amend_key.as_deref() == amend)
             && self.saved_generation != self.generation;
+        if merge {
+            // The step already holds the state before the first merged edit, so no
+            // snapshot: the sections stay unshared and typing edits them in place.
+            // The document is already modified, so a no-op here changes nothing visible.
+            let r = f(&mut self.doc);
+            self.generation = self.next_generation;
+            self.next_generation += 1;
+            return r;
+        }
+        let before = self.doc.clone();
+        let r = f(&mut self.doc);
+        if self.doc == before {
+            return r;
+        }
         self.redo.clear();
         self.redo_gen.clear();
-        if !merge {
-            self.undo.push(State {
-                description: description.to_string(),
-                doc: before,
-                selection: self.selection.clone(),
-                amend_key: amend.map(str::to_string),
-            });
-            self.undo_gen.push(self.generation);
-            if self.undo.len() > self.limit {
-                self.undo.remove(0);
-                self.undo_gen.remove(0);
-            }
+        self.undo.push(State {
+            description: description.to_string(),
+            doc: before,
+            selection: self.selection.clone(),
+            amend_key: amend.map(str::to_string),
+        });
+        self.undo_gen.push(self.generation);
+        if self.undo.len() > self.limit {
+            self.undo.remove(0);
+            self.undo_gen.remove(0);
         }
         self.generation = self.next_generation;
         self.next_generation += 1;
