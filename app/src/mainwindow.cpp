@@ -807,6 +807,13 @@ void MainWindow::buildMenus() {
         if (d.exec() == QDialog::Accepted) v->seekFrame(frame->value());
     });
     // Aegisub's Video details
+    auto *overscan = add("showOverscan", tr("Show overscan mask"), {}, video, {});
+    overscan->setCheckable(true);
+    overscan->setChecked(QSettings().value("video/overscan").toBool());
+    connect(overscan, &QAction::toggled, this, [this](bool on) {
+        QSettings().setValue("video/overscan", on);
+        for (auto *t : tabs()) t->video()->view()->updateOverlay();
+    });
     add("videoDetails", tr("Video details..."), {}, video, [=, this] {
         auto *v = tab()->video();
         if (!v->hasVideo()) return;

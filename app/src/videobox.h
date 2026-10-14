@@ -54,6 +54,7 @@ public:
     explicit VideoView(class VideoBox *box);
     void setFrame(const QImage &img);
     void updateOverlay() { m_overlayDirty = true; update(); }
+    void paintOverscan(QPainter &p) const;
     // video frame area in widget coordinates
     QRectF displayRect() const;
     // script (PlayRes) coordinates <-> widget coordinates, zoom aware

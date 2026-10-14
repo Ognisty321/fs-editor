@@ -21,6 +21,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QPainter>
+#include <QPainterPath>
 #include <QSettings>
 #include <QSlider>
 #include <QSplitter>
@@ -134,6 +135,7 @@ void VideoView::render(QRhiCommandBuffer *cb) {
         {
             QPainter p(&ov);
             p.setRenderHint(QPainter::Antialiasing);
+            if (QSettings().value("video/overscan").toBool()) paintOverscan(p);
             if (m_zoomDragging) {
                 p.setPen(QPen(Qt::yellow, 1, Qt::DashLine));
                 p.drawRect(QRectF(m_zoomDragStart, mapFromGlobal(QCursor::pos()).toPointF()));
@@ -155,6 +157,30 @@ void VideoView::render(QRhiCommandBuffer *cb) {
     if (!m_frame.isNull()) m_frameQuad.draw(cb, out);
     m_overlayQuad.draw(cb, out);
     cb->endPass();
+}
+
+// Aegisub's overscan mask (BBC guidelines): title safe and action safe areas, rounded corners.
+void VideoView::paintOverscan(QPainter &p) const {
+    const QRectF d = displayRect();
+    const bool wide = d.width() / d.height() > 1.75;
+    const QPointF areas[] = {wide ? QPointF(.1, .05) : QPointF(.067, .05), wide ? QPointF(.035, .035) : QPointF(.033, .035)};
+    for (const QPointF a : areas) {
+        const QPointF m(a.x() * d.width(), a.y() * d.height());
+        const QPointF c[] = {d.topLeft() + m, QPointF(d.right() - m.x(), d.top() + m.y()), d.bottomRight() - m,
+                             QPointF(d.left() + m.x(), d.bottom() - m.y())};
+        QPainterPath inner;
+        for (int i = 0; i < 4; ++i) {
+            const QPointF prev = c[(i + 3) % 4], next = c[(i + 1) % 4];
+            const QPointF from = (prev + c[i] * 4) / 5, to = (next + c[i] * 4) / 5;
+            if (i == 0) inner.moveTo(from);
+            else inner.lineTo(from);
+            inner.quadTo(c[i], to);
+        }
+        inner.closeSubpath();
+        QPainterPath mask;
+        mask.addRect(d);
+        p.fillPath(mask.subtracted(inner), QColor(30, 70, 200, 128));
+    }
 }
 
 void VideoView::releaseResources() {
