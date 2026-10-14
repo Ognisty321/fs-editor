@@ -58,6 +58,7 @@ public:
     ~AudioBox() override;
 
     bool hasAudio() const { return m_audio.has_value(); }
+    const fsb::Audio *source() const { return m_audio ? &**m_audio : nullptr; }
     void open(const QString &path);
     void openBlank(qint64 ms);
     void close();

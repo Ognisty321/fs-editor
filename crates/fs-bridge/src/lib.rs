@@ -478,6 +478,7 @@ pub mod ffi {
         fn open_audio(path: &str, cache_dir: &str) -> Result<Box<Audio>>;
         fn blank_audio(ms: i64) -> Box<Audio>;
         fn duration_ms(self: &Audio) -> i64;
+        fn save_clip(self: &Audio, path: &str, start_ms: i64, end_ms: i64) -> Result<()>;
         fn rate(self: &Audio) -> u32;
         /// `(min, max, avg)` per column for samples from `start` at `spp` samples per column.
         fn peaks(self: &Audio, start: f64, spp: f64, out: &mut [f32]);

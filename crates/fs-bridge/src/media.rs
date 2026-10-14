@@ -146,6 +146,16 @@ impl Audio {
         self.peaks.pcm().rate()
     }
 
+    /// Aegisub's "Save audio clip": `[start_ms, end_ms)` as a mono 16-bit WAV.
+    pub fn save_clip(&self, path: &str, start_ms: i64, end_ms: i64) -> Result<(), String> {
+        let pcm = self.peaks.pcm();
+        let clip = pcm.slice(pcm.ms_to_sample(start_ms), pcm.ms_to_sample(end_ms));
+        let mut f = std::io::BufWriter::new(
+            std::fs::File::create(path).map_err(|e| format!("{path}: {e}"))?,
+        );
+        fs_audio::wav::write_i16(&mut f, pcm.rate(), 1, clip).map_err(|e| format!("{path}: {e}"))
+    }
+
     pub fn peaks(&self, start: f64, spp: f64, out: &mut [f32]) {
         let mut cols = vec![Peak::SILENT; out.len() / 3];
         self.peaks.columns(start, spp, &mut cols);
@@ -208,6 +218,17 @@ impl Audio {
 #[cfg(test)]
 mod tests {
     use super::Audio;
+
+    #[test]
+    fn save_clip_writes_the_range() {
+        use fs_audio::AudioSource;
+        let a = Audio::blank(2000);
+        let out = std::env::temp_dir().join(format!("fsb-clip-{}.wav", std::process::id()));
+        a.save_clip(out.to_str().unwrap(), 500, 1500).unwrap();
+        let wav = fs_audio::wav::read(&std::fs::read(&out).unwrap()).unwrap();
+        assert_eq!(wav.num_frames(), i64::from(a.rate()));
+        std::fs::remove_file(out).unwrap();
+    }
 
     /// The GUI's audio path on tests/media/cfr.mkv (1 kHz left + 500 Hz right):
     /// both tones land on their rows of the log spectrogram, and playback runs.

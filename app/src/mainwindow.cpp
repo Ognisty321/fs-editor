@@ -20,6 +20,7 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDateTime>
+#include <limits>
 #include <numeric>
 #include <QDir>
 #include <QDoubleSpinBox>
@@ -757,6 +758,26 @@ void MainWindow::buildMenus() {
     });
     add("blankAudio", tr("Open blank 2h30m audio"), {}, audio, [=] { tab()->openBlankAudio(150LL * 60 * 1000); });
     add("closeAudio", tr("Close audio"), {}, audio, [=] { tab()->closeAudio(); });
+    // Aegisub's audio/save/clip: from the earliest start to the latest end of the selected lines
+    add("saveAudioClip", tr("Save audio clip..."), {}, audio, [=, this] {
+        auto *a = tab()->audio()->source();
+        const auto sel = tab()->selection();
+        if (!a || sel.empty()) return;
+        qint64 start = std::numeric_limits<qint64>::max(), end = 0;
+        for (size_t r : sel) {
+            const fsb::Row row = tab()->s().row(r);
+            start = std::min<qint64>(start, row.start);
+            end = std::max<qint64>(end, row.end);
+        }
+        const QString f = QFileDialog::getSaveFileName(this, tr("Save audio clip"), QFileInfo(tab()->path()).absolutePath(),
+                                                       tr("WAV audio (*.wav)"));
+        if (f.isEmpty()) return;
+        try {
+            a->save_clip(fs::Utf8(f), start, end);
+        } catch (const std::exception &e) {
+            QMessageBox::warning(this, tr("Save audio clip"), QString::fromUtf8(e.what()));
+        }
+    });
 
     // View
     auto *view = menu(tr("Vie&w"));
