@@ -385,7 +385,14 @@ pub mod ffi {
         fn set_tags(self: &mut Session, rows: &[usize], tags: &str, amend: &str);
         fn remove_tags(self: &mut Session, rows: &[usize], names: &str, amend: &str);
         fn set_drawing(self: &mut Session, row: usize, drawing: &str, amend: &str);
-        fn shift_positions(self: &mut Session, rows: &[usize], dx: f64, dy: f64, amend: &str);
+        fn shift_positions(
+            self: &mut Session,
+            rows: &[usize],
+            dx: f64,
+            dy: f64,
+            what: u8,
+            amend: &str,
+        );
 
         fn syllables(self: &Session, row: usize) -> Vec<Syllable>;
         fn kara_split(self: &mut Session, row: usize, syl: usize, char_pos: usize);

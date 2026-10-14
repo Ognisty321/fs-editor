@@ -1278,10 +1278,19 @@ impl Session {
         });
     }
 
-    pub fn shift_positions(&mut self, rows: &[usize], dx: f64, dy: f64, amend: &str) {
+    /// `what` bits: 1 \pos, 2 \move start, 4 \move end, 8 clips, 16 drawings, 32 \org.
+    pub fn shift_positions(&mut self, rows: &[usize], dx: f64, dy: f64, what: u8, amend: &str) {
         let evs = self.main_events(rows);
+        let what = ops::MoveTargets {
+            pos: what & 1 != 0,
+            move_start: what & 2 != 0,
+            move_end: what & 4 != 0,
+            clip: what & 8 != 0,
+            drawing: what & 16 != 0,
+            org: what & 32 != 0,
+        };
         self.edit_amend(amend, "Shift positions", move |d| {
-            ops::translate_positions(d, &Rows::Selected(evs), dx, dy)
+            ops::translate_positions(d, &Rows::Selected(evs), dx, dy, what)
         });
     }
 

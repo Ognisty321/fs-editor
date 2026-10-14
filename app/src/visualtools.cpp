@@ -13,6 +13,7 @@
 #include <QPainterPath>
 #include <QRegularExpression>
 #include <QStackedWidget>
+#include <QSettings>
 #include <QToolButton>
 #include <QtMath>
 #include <map>
@@ -118,7 +119,8 @@ void line(QPainter &p, QPointF a, QPointF b, QColor c = kLine, Qt::PenStyle st =
 bool near(QPointF a, QPointF b, double r = 7) { return QLineF(a, b).length() <= r; }
 } // namespace
 
-VisualTools::VisualTools(VideoBox *box) : QObject(box), m_box(box) {}
+VisualTools::VisualTools(VideoBox *box)
+    : QObject(box), m_box(box), m_shiftWhat(QSettings().value("visual/shiftWhat", 47).toInt()) {}
 
 QPointF VisualTools::w(QPointF p) const { return m_box->view()->toWidget(p); }
 QPointF VisualTools::s(QPointF p) const { return m_box->view()->toScript(p); }
@@ -199,6 +201,26 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     dh->addStretch();
     connect(conv, &QToolButton::clicked, this, &VisualTools::toggleMove);
     m_sub->addWidget(drag);
+    // position shifter: which tags move (Kainote's toggles), bits as in Session::shift_positions
+    auto *shift = new QWidget(m_sub);
+    auto *sh = new QHBoxLayout(shift);
+    sh->setContentsMargins(6, 0, 0, 0);
+    sh->setSpacing(1);
+    const char *what[] = {"\\pos", "\\move start", "\\move end", "clips", "drawings", "\\org"};
+    for (int k = 0; k < 6; ++k) {
+        auto *b = new QToolButton(shift);
+        b->setText(tr(what[k]));
+        b->setCheckable(true);
+        b->setAutoRaise(true);
+        b->setChecked(m_shiftWhat & (1 << k));
+        connect(b, &QToolButton::toggled, this, [this, k](bool on) {
+            m_shiftWhat = on ? m_shiftWhat | (1 << k) : m_shiftWhat & ~(1 << k);
+            QSettings().setValue("visual/shiftWhat", m_shiftWhat);
+        });
+        sh->addWidget(b);
+    }
+    sh->addStretch();
+    m_sub->addWidget(shift);
     h->addWidget(m_sub);
     h->addStretch();
     m_invert = invert;
@@ -209,7 +231,7 @@ void VisualTools::setTool(int t) {
     m_tool = t;
     if (t < int(m_buttons.size())) m_buttons[t]->setChecked(true);
     if (m_sub) {
-        m_sub->setCurrentIndex(t == VClip || t == Draw || t == RClip ? 1 : t == Pos || t == Move ? 2 : 0);
+        m_sub->setCurrentIndex(t == VClip || t == Draw || t == RClip ? 1 : t == Pos || t == Move ? 2 : t == Shifter ? 3 : 0);
         m_invert->setVisible(t == VClip || t == RClip);
         for (auto *b : m_sub->widget(1)->findChildren<QToolButton *>())
             if (b != m_invert) b->setVisible(t != RClip);
@@ -629,7 +651,8 @@ bool VisualTools::move(QMouseEvent *e) {
         }
         const QPointF step = delta - applied;
         applied = delta;
-        tab->s().shift_positions(fs::slice(tab->selection()), step.x(), step.y(), fs::Utf8(m_amend));
+        tab->s().shift_positions(fs::slice(tab->selection()), step.x(), step.y(), uint8_t(m_shiftWhat),
+                                   fs::Utf8(m_amend));
         tab->changed(TabPanel::FromVideo);
         break;
     }

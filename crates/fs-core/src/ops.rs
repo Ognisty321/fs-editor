@@ -929,23 +929,58 @@ pub fn resample(doc: &mut Document, r: &Resample) {
 // Positions (for visual tools / "move all")
 // ---------------------------------------------------------------------------
 
-/// Translate every \pos, \move, \org, \clip and drawing in the given rows.
-pub fn translate_positions(doc: &mut Document, rows: &Rows, dx: f64, dy: f64) {
+/// What the position shifter moves (Kainote's toggles under the tool).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MoveTargets {
+    pub pos: bool,
+    pub move_start: bool,
+    pub move_end: bool,
+    pub clip: bool,
+    /// Points of `\p` drawings (relative to the line position).
+    pub drawing: bool,
+    pub org: bool,
+}
+
+impl MoveTargets {
+    /// Everything except drawing points, which already follow \pos.
+    pub const DEFAULT: MoveTargets = MoveTargets {
+        pos: true,
+        move_start: true,
+        move_end: true,
+        clip: true,
+        drawing: false,
+        org: true,
+    };
+}
+
+/// Translate \pos, \move, \org, \clip and drawings in the given rows.
+pub fn translate_positions(doc: &mut Document, rows: &Rows, dx: f64, dy: f64, what: MoveTargets) {
     for i in rows.resolve(doc) {
         let mut line = Line::parse(&doc.event(i).unwrap().text);
         let s = |v: f64| crate::model::fmt_f64((v * 1000.0).round() / 1000.0);
         line.for_each_tag_mut(|t| {
             let n = |k: usize| t.arg_f64(k).unwrap_or(0.0);
             match t.name.as_str() {
-                "pos" | "org" if t.args.len() >= 2 => {
+                "pos" if what.pos && t.args.len() >= 2 => {
                     let a = vec![s(n(0) + dx), s(n(1) + dy)];
                     t.set_args(a)
                 }
-                "move" if t.args.len() >= 4 => {
-                    let mut a = vec![s(n(0) + dx), s(n(1) + dy), s(n(2) + dx), s(n(3) + dy)];
+                "org" if what.org && t.args.len() >= 2 => {
+                    let a = vec![s(n(0) + dx), s(n(1) + dy)];
+                    t.set_args(a)
+                }
+                "move" if (what.move_start || what.move_end) && t.args.len() >= 4 => {
+                    let (sx, sy) = if what.move_start {
+                        (dx, dy)
+                    } else {
+                        (0.0, 0.0)
+                    };
+                    let (ex, ey) = if what.move_end { (dx, dy) } else { (0.0, 0.0) };
+                    let mut a = vec![s(n(0) + sx), s(n(1) + sy), s(n(2) + ex), s(n(3) + ey)];
                     a.extend(t.args[4..].iter().cloned());
                     t.set_args(a)
                 }
+                _ if !what.clip => {}
                 "clip" | "iclip" if t.args.len() == 4 => {
                     let a = vec![s(n(0) + dx), s(n(1) + dy), s(n(2) + dx), s(n(3) + dy)];
                     t.set_args(a)
@@ -969,6 +1004,16 @@ pub fn translate_positions(doc: &mut Document, rows: &Rows, dx: f64, dy: f64) {
                 _ => {}
             }
         });
+        if what.drawing {
+            for b in &mut line.blocks {
+                if let Block::Drawing { scale, commands } = b {
+                    let f = 2f64.powi(scale.saturating_sub(1) as i32);
+                    let mut cmds = tags::parse_drawing(commands);
+                    tags::transform_drawing(&mut cmds, |x, y| (x + dx * f, y + dy * f));
+                    *commands = tags::write_drawing(&cmds);
+                }
+            }
+        }
         let t = line.to_text();
         if t != doc.event(i).unwrap().text {
             doc.event_mut(i).unwrap().text = t;
@@ -1285,11 +1330,29 @@ mod tests {
             "Default",
             r"{\move(1,2,3,4,0,100)\clip(m 0 0 l 1 1)}x",
         )]);
-        translate_positions(&mut d, &Rows::All, 10.0, -1.0);
+        translate_positions(&mut d, &Rows::All, 10.0, -1.0, MoveTargets::DEFAULT);
         assert_eq!(
             d.event(0).unwrap().text,
             r"{\move(11,1,13,3,0,100)\clip(m 10 -1 l 11 0)}x"
         );
+        let only_end = MoveTargets {
+            pos: false,
+            move_start: false,
+            clip: false,
+            ..MoveTargets::DEFAULT
+        };
+        translate_positions(&mut d, &Rows::All, 1.0, 1.0, only_end);
+        assert_eq!(
+            d.event(0).unwrap().text,
+            r"{\move(11,1,14,4,0,100)\clip(m 10 -1 l 11 0)}x"
+        );
+        let mut d = doc(&[("0:00:00.00", "0:00:01.00", "Default", r"{\p2}m 0 0 l 4 4")]);
+        let drawing = MoveTargets {
+            drawing: true,
+            ..MoveTargets::DEFAULT
+        };
+        translate_positions(&mut d, &Rows::All, 1.0, 2.0, drawing);
+        assert_eq!(d.event(0).unwrap().text, r"{\p2}m 2 4 l 6 8");
     }
 
     #[test]

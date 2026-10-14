@@ -79,6 +79,7 @@ private:
     int m_dragId = 0;
     QString m_amend;
     QStackedWidget *m_sub = nullptr;
+    int m_shiftWhat = 47; // all but drawing points
     QWidget *m_invert = nullptr;
     std::vector<QToolButton *> m_buttons;
 };
