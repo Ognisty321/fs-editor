@@ -30,8 +30,8 @@ pub struct Session {
     encoding: &'static Encoding,
     bom: bool,
     /// Events as loaded / as last saved, for the grid's number-cell state.
-    loaded: HashMap<EventId, Event>,
-    saved: HashMap<EventId, Event>,
+    loaded: HashMap<EventId, Arc<EventEntry>>,
+    saved: HashMap<EventId, Arc<EventEntry>>,
     rows: Vec<TlRow>,
     tl: bool,
     generation: u64,
@@ -69,11 +69,9 @@ impl Default for Session {
     }
 }
 
-fn events_by_id(doc: &Document) -> HashMap<EventId, Event> {
-    doc.events()
-        .iter()
-        .map(|e| (e.id, e.event.clone()))
-        .collect()
+/// The entries shared with the document, not copied: an unchanged line is the same Arc.
+fn events_by_id(doc: &Document) -> HashMap<EventId, Arc<EventEntry>> {
+    doc.events().iter().map(|e| (e.id, e.clone())).collect()
 }
 
 fn field_of(code: u8) -> Field {
@@ -558,9 +556,13 @@ impl Session {
         let entry: &Arc<EventEntry> = &doc.events()[r.main()];
         let ev = &entry.event;
         let (markers, actor) = tlmode::split_actor(&ev.actor);
-        let state = if self.loaded.get(&entry.id) == Some(ev) {
+        let same = |m: &HashMap<EventId, Arc<EventEntry>>| {
+            m.get(&entry.id)
+                .is_some_and(|e| Arc::ptr_eq(e, entry) || e.event == *ev)
+        };
+        let state = if same(&self.loaded) {
             0
-        } else if self.saved.get(&entry.id) == Some(ev) {
+        } else if same(&self.saved) {
             2
         } else {
             1
@@ -2067,6 +2069,16 @@ mod tests {
         r.text = "TWO".into();
         s.set_row(1, &r, "");
         assert_eq!((s.row(1).text.as_str(), s.row(1).state), ("TWO", 1));
+        let path = std::env::temp_dir().join(format!("fsb-state-{}.ass", std::process::id()));
+        s.save(path.to_str().unwrap()).unwrap();
+        std::fs::remove_file(&path).ok();
+        assert_eq!(s.row(1).state, 2);
+        // back to the loaded text in a new entry: unchanged by value
+        r.text = "two".into();
+        s.set_row(1, &r, "");
+        assert_eq!(s.row(1).state, 0);
+        assert!(s.undo());
+        assert_eq!(s.row(1).text, "TWO");
         assert!(s.undo());
         assert_eq!(s.row(1).text, "two");
         assert_eq!(s.move_rows(&[2], -2), vec![0]);
