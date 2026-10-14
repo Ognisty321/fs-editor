@@ -292,6 +292,18 @@ impl Session {
         Ok(())
     }
 
+    /// Write a backup copy as ASS (Aegisub's `.AUTOSAVE.ass`); path, format
+    /// and the modified state stay as they are.
+    pub fn autosave(&self, path: &str) -> Result<(), String> {
+        fs_formats::save_file(
+            &self.ed.doc,
+            Path::new(path),
+            Format::Ass,
+            &SaveOptions::default(),
+        )
+        .map_err(|e| format!("{path}: {e}"))
+    }
+
     pub fn save_translation(&self, path: &str) -> Result<(), String> {
         let doc = tlmode::translation_only(&self.ed.doc);
         let opts = SaveOptions {
@@ -1406,6 +1418,21 @@ mod tests {
         assert_eq!(s.row(1).text, "two");
         assert_eq!(s.move_rows(&[2], -2), vec![0]);
         assert_eq!(s.row(0).text, "three");
+    }
+
+    #[test]
+    fn autosave_keeps_path_and_modified_state() {
+        let mut s = session(ASS);
+        let path = s.file_info().path;
+        let mut r = s.row(0);
+        r.text = "edited".into();
+        s.set_row(0, &r, "");
+        let out = std::env::temp_dir().join(format!("fsb-autosave-{}.ass", std::process::id()));
+        s.autosave(out.to_str().unwrap()).unwrap();
+        assert!(s.file_info().modified);
+        assert_eq!(s.file_info().path, path);
+        assert!(std::fs::read_to_string(&out).unwrap().contains(",edited"));
+        std::fs::remove_file(out).unwrap();
     }
 
     #[test]

@@ -14,6 +14,7 @@
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -26,15 +27,19 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QLocale>
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QSettings>
 #include <QSpinBox>
+#include <QStandardPaths>
 #include <QTabWidget>
 #include <QToolButton>
 #include <QVBoxLayout>
+
+#include <numeric>
 
 // ---- tag buttons --------------------------------------------------------------
 
@@ -1002,6 +1007,12 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     leadOut->setValue(st.value("audio/leadOut", 300).toInt());
     f->addRow(tr("Audio lead-in"), leadIn);
     f->addRow(tr("Audio lead-out"), leadOut);
+    auto *autosave = new QSpinBox(this);
+    autosave->setRange(0, 3600);
+    autosave->setSuffix(" s");
+    autosave->setSpecialValueText(tr("off"));
+    autosave->setValue(st.value("main/autosaveSeconds", 60).toInt());
+    f->addRow(tr("Autosave every"), autosave);
     auto *font = new QPushButton(st.value("grid/font", QFont("Tahoma", 10)).value<QFont>().toString(), this);
     connect(font, &QPushButton::clicked, this, [font] {
         bool ok;
@@ -1026,7 +1037,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     });
     f->addRow(tr("Spell check language"), dictLang);
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    connect(bb, &QDialogButtonBox::accepted, this, [this, boxes, leadIn, leadOut, dictDir, dictLang] {
+    connect(bb, &QDialogButtonBox::accepted, this, [this, boxes, leadIn, leadOut, autosave, dictDir, dictLang] {
         QSettings st;
         st.setValue("spell/dir", QDir::fromNativeSeparators(dictDir->text()));
         st.setValue("spell/lang", dictLang->currentText());
@@ -1034,8 +1045,75 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         for (auto &[k, b] : boxes) st.setValue(k, b->isChecked());
         st.setValue("audio/leadIn", leadIn->value());
         st.setValue("audio/leadOut", leadOut->value());
+        st.setValue("main/autosaveSeconds", autosave->value());
         accept();
     });
     connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
     f->addRow(bb);
+}
+
+// ---- autosave -----------------------------------------------------------------
+
+QString autosaveDir() { return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/autosave"; }
+
+AutosaveDialog::AutosaveDialog(QWidget *parent) : QDialog(parent) {
+    setWindowTitle(tr("Open autosave file"));
+    resize(800, 350);
+    auto *v = new QVBoxLayout(this);
+    auto *h = new QHBoxLayout;
+    auto *files = new QGroupBox(tr("Files"), this);
+    auto *versions = new QGroupBox(tr("Versions"), this);
+    m_files = new QListWidget(files);
+    m_versions = new QListWidget(versions);
+    (new QVBoxLayout(files))->addWidget(m_files);
+    (new QVBoxLayout(versions))->addWidget(m_versions);
+    h->addWidget(files);
+    h->addWidget(versions);
+    v->addLayout(h, 1);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    bb->button(QDialogButtonBox::Ok)->setText(tr("Open"));
+    v->addWidget(bb);
+    connect(bb, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(m_versions, &QListWidget::itemDoubleClicked, this, &QDialog::accept);
+
+    const QString suffix = ".AUTOSAVE.ass";
+    QMap<QString, QList<std::pair<QDateTime, QString>>> byName;
+    for (const QFileInfo &fi : QDir(autosaveDir()).entryInfoList({"*" + suffix}, QDir::Files)) {
+        const QString stem = fi.fileName().chopped(suffix.size());
+        const QDateTime date = QDateTime::fromString(stem.section('.', -1), "yyyy-MM-dd-HH-mm-ss");
+        const QString name = date.isValid() ? stem.section('.', 0, -2) : stem;
+        byName[name].append({date.isValid() ? date : fi.lastModified(), fi.absoluteFilePath()});
+    }
+    QList<QList<std::pair<QDateTime, QString>>> groups = byName.values();
+    QStringList names = byName.keys();
+    for (auto &g : groups) std::ranges::sort(g, std::greater{});
+    std::vector<int> order(groups.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::ranges::sort(order, [&](int a, int b) { return groups[a][0].first > groups[b][0].first; });
+    for (int i : order) {
+        auto *it = new QListWidgetItem(names[i], m_files);
+        QStringList paths, labels;
+        for (const auto &[d, p] : groups[i]) {
+            paths << p;
+            labels << QLocale().toString(d, QLocale::LongFormat);
+        }
+        it->setData(Qt::UserRole, paths);
+        it->setData(Qt::UserRole + 1, labels);
+    }
+    connect(m_files, &QListWidget::currentRowChanged, this, [this](int row) {
+        m_versions->clear();
+        if (row < 0) return;
+        const QStringList paths = m_files->item(row)->data(Qt::UserRole).toStringList();
+        const QStringList labels = m_files->item(row)->data(Qt::UserRole + 1).toStringList();
+        for (int k = 0; k < paths.size(); ++k) (new QListWidgetItem(labels[k], m_versions))->setData(Qt::UserRole, paths[k]);
+        m_versions->setCurrentRow(0);
+    });
+    bb->button(QDialogButtonBox::Ok)->setEnabled(m_files->count() > 0);
+    m_files->setCurrentRow(0);
+}
+
+QString AutosaveDialog::chosen() const {
+    auto *it = m_versions->currentItem();
+    return it ? it->data(Qt::UserRole).toString() : QString();
 }

@@ -309,6 +309,7 @@ pub mod ffi {
         fn open_embedded(self: &mut Session, video: &str, index: i32) -> Result<()>;
         fn save(self: &mut Session, path: &str) -> Result<()>;
         fn save_translation(self: &Session, path: &str) -> Result<()>;
+        fn autosave(self: &Session, path: &str) -> Result<()>;
         fn convert(self: &mut Session, format: &str) -> Result<()>;
         fn file_info(self: &Session) -> FileInfo;
         fn set_info_value(self: &mut Session, key: &str, value: &str);

@@ -18,6 +18,7 @@
 #include <QCloseEvent>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
+#include <QDateTime>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
@@ -68,7 +69,7 @@ const QColor kAmber(0xf0b429), kBlue(0x4aa3ff), kGreen(0x4cc38a), kRed(0xf2665c)
 const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"openSubs", {"folder-open", kAmber}}, {"save", {"device-floppy", kBlue}}, {"saveAll", {"files", kBlue}},
     {"saveAs", {"file-export", kBlue}}, {"saveTranslation", {"language", kBlue}}, {"removeSubs", {"file-x", kRed}},
-    {"saveWithVideoName", {"file-symlink", kBlue}}, {"removeTemp", {"trash", kRed}}, {"showLog", {"terminal-2", {}}},
+    {"saveWithVideoName", {"file-symlink", kBlue}}, {"removeTemp", {"trash", kRed}}, {"openAutosave", {"restore", kAmber}}, {"showLog", {"terminal-2", {}}},
     {"loadSession", {"restore", {}}}, {"fontCollector", {"typography", kPurple}}, {"settings", {"settings", {}}},
     {"exit", {"logout", kRed}}, {"undo", {"arrow-back-up", {}}}, {"undoToSave", {"arrow-back-up-double", {}}},
     {"redo", {"arrow-forward-up", {}}}, {"history", {"history", {}}}, {"findReplace", {"replace", kOrange}},
@@ -195,6 +196,20 @@ MainWindow::MainWindow() {
     buildStatusBar();
     buildMenus();
     buildToolbar();
+
+    // Autosave (Aegisub): modified tabs are copied to autosaveDir() every N seconds; the oldest
+    // copies beyond 100 are removed at startup.
+    {
+        auto old = QDir(autosaveDir()).entryInfoList({"*.AUTOSAVE.ass"}, QDir::Files, QDir::Time);
+        for (qsizetype i = 100; i < old.size(); ++i) QFile::remove(old[i].absoluteFilePath());
+    }
+    auto *autosave = new QTimer(this);
+    connect(autosave, &QTimer::timeout, this, [this, autosave] {
+        const int secs = QSettings().value("main/autosaveSeconds", 60).toInt();
+        autosave->setInterval(std::max(secs, 10) * 1000);
+        if (secs > 0) autosaveTabs();
+    });
+    autosave->start(std::max(QSettings().value("main/autosaveSeconds", 60).toInt(), 10) * 1000);
     qApp->installEventFilter(this);
 
     // Automation: bundled scripts next to the executable, user scripts in the app data folder.
@@ -417,6 +432,10 @@ void MainWindow::buildMenus() {
     videoName->setCheckable(true);
     videoName->setChecked(QSettings().value("main/saveWithVideoName").toBool());
     connect(videoName, &QAction::toggled, this, [](bool on) { QSettings().setValue("main/saveWithVideoName", on); });
+    add("openAutosave", tr("Open autosave"), {}, file, [this] {
+        AutosaveDialog d(this);
+        if (d.exec() == QDialog::Accepted && !d.chosen().isEmpty()) openFile(d.chosen());
+    });
     add("removeTemp", tr("Remove temporary files"), {}, file, [this] {
         const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex";
         if (confirm(tr("Remove the video and audio index cache in\n%1?").arg(dir))) QDir(dir).removeRecursively();
@@ -716,6 +735,22 @@ QMenu *MainWindow::recentMenu(const QString &kind) {
     a->setIcon(kind == "subs" ? icon("file-time", kAmber) : kind == "video" ? icon("clock-play", kBlue) : icon("history", kTeal));
     m_actions.insert("recent" + QString(kind == "subs" ? "Subs" : kind == "video" ? "Video" : kind == "audio" ? "Audio" : "Keyframes"), a);
     return m;
+}
+
+void MainWindow::autosaveTabs() {
+    QDir().mkpath(autosaveDir());
+    const QString stamp = QDateTime::currentDateTime().toString("yyyy-MM-dd-HH-mm-ss");
+    for (auto *t : tabs()) {
+        const quint64 gen = t->s().generation();
+        if (!t->modified() || t->property("autosaved").toULongLong() == gen) continue;
+        const QString name = t->path().isEmpty() ? tr("Untitled") : QFileInfo(t->path()).completeBaseName();
+        try {
+            t->s().autosave(fs::Utf8(autosaveDir() + "/" + name + "." + stamp + ".AUTOSAVE.ass"));
+            t->setProperty("autosaved", gen);
+        } catch (const rust::Error &e) {
+            status(QString::fromUtf8(e.what()));
+        }
+    }
 }
 
 void MainWindow::addRecent(const QString &kind, const QString &path) {

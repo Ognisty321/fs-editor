@@ -54,6 +54,7 @@ private:
     void buildToolbar();
     void buildStatusBar();
     void buildAutomationMenu();
+    void autosaveTabs();
     void assignHotkey(QAction *a);
     bool closeTab(int index);
     TabPanel *panel(int index) const;
