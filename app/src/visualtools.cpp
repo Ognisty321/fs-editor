@@ -176,9 +176,10 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     vh->setContentsMargins(6, 0, 0, 0);
     vh->setSpacing(1);
     auto *modes = new QButtonGroup(vec);
-    const char *mt[] = {"Move points", "Add line", "Add Bézier curve", "Add separate point (move)", "Delete point"};
-    const char *mi[] = {"arrows-move", "line", "vector-bezier-2", "point", "x"};
-    for (int k = 0; k < 5; ++k) {
+    const char *mt[] = {"Move points", "Add line", "Add Bézier curve", "Add separate point (move)", "Delete point",
+                        "Draw freehand", "Insert a point into a segment", "Convert a segment between line and Bézier"};
+    const char *mi[] = {"arrows-move", "line", "vector-bezier-2", "point", "x", "scribble", "circle-plus", "replace"};
+    for (int k = 0; k < 8; ++k) {
         auto *b = new QToolButton(vec);
         b->setIcon(icon(mi[k], QColor(k == 4 ? 0xf2665c : 0xb48cff)));
         b->setToolTip(tr(mt[k]));
@@ -186,9 +187,13 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
         b->setAutoRaise(true);
         modes->addButton(b, k);
         vh->addWidget(b);
-        if (k == 0) b->setChecked(true);
     }
-    connect(modes, &QButtonGroup::idClicked, this, [this](int k) { m_vecMode = k; });
+    m_vecMode = std::clamp(QSettings().value("visual/vecMode", 0).toInt(), 0, 7);
+    modes->button(m_vecMode)->setChecked(true);
+    connect(modes, &QButtonGroup::idClicked, this, [this](int k) {
+        m_vecMode = k;
+        QSettings().setValue("visual/vecMode", k);
+    });
     m_sub->addWidget(vec);
     auto *invert = new QToolButton(row);
     invert->setText(tr("Invert clip"));
@@ -414,16 +419,36 @@ void VisualTools::writeVector() {
     }
 }
 
+QPointF VisualTools::vecW(QPointF pt) const {
+    if (m_tool == VClip) return w(pt / std::pow(2.0, std::max(1, m_v.clip_scale) - 1));
+    return w(m_drawOrigin + QPointF(pt.x() * m_drawScale.x(), pt.y() * m_drawScale.y()));
+}
+
 int VisualTools::hitHandle(QPointF wp) const {
     const auto hs = m_vec.handles();
-    for (int i = int(hs.size()) - 1; i >= 0; --i) {
-        const QPointF pt = m_vec.cmds[hs[i].first].pts[hs[i].second];
-        QPointF sp;
-        if (m_tool == VClip) sp = pt / std::pow(2.0, std::max(1, m_v.clip_scale) - 1);
-        else sp = m_drawOrigin + QPointF(pt.x() * m_drawScale.x(), pt.y() * m_drawScale.y());
-        if (near(w(sp), wp)) return i;
-    }
+    for (int i = int(hs.size()) - 1; i >= 0; --i)
+        if (near(vecW(m_vec.cmds[hs[i].first].pts[hs[i].second]), wp)) return i;
     return -1;
+}
+
+int VisualTools::hitSegment(QPointF wp, double &t) const {
+    int best = -1;
+    double bestD = 7;
+    for (int i = 1; i < int(m_vec.cmds.size()); ++i) {
+        const auto &c = m_vec.cmds[i];
+        if (c.type != 'l' && c.type != 'b') continue;
+        const QPointF p0 = m_vec.cmds[i - 1].pts.back();
+        // sample the segment; plenty for picking
+        for (int k = 0; k <= 32; ++k) {
+            const double u = k / 32.0, v = 1 - u;
+            const QPointF p = c.type == 'l' ? p0 * v + c.pts[0] * u
+                                            : p0 * (v * v * v) + c.pts[0] * (3 * v * v * u) + c.pts[1] * (3 * v * u * u) +
+                                                  c.pts[2] * (u * u * u);
+            const double d = QLineF(vecW(p), wp).length();
+            if (d < bestD) bestD = d, best = i, t = u;
+        }
+    }
+    return best;
 }
 
 // ---- painting -----------------------------------------------------------------
@@ -623,8 +648,45 @@ bool VisualTools::press(QMouseEvent *e) {
             writeVector();
             return true;
         }
-        if (h >= 0 && (m_vecMode == VecMove || e->button() != Qt::LeftButton)) {
+        if (h >= 0 && (m_vecMode == VecMove || m_vecMode >= VecFreehand || e->button() != Qt::LeftButton)) {
             m_vecHandle = hs[h];
+            return true;
+        }
+        if (m_vecMode == VecInsert || m_vecMode == VecConvert) {
+            // Aegisub's vector clip insert / convert modes act on the clicked segment
+            double t = 0;
+            const int i = hitSegment(m_pressW, t);
+            if (i < 0) {
+                m_drag = 0;
+                return false;
+            }
+            auto &c = m_vec.cmds[i];
+            const QPointF p0 = m_vec.cmds[i - 1].pts.back();
+            if (m_vecMode == VecConvert) {
+                const QPointF end = c.pts.back();
+                c = c.type == 'l' ? Drawing::Cmd{'b', {p0 + (end - p0) / 3, p0 + (end - p0) * 2 / 3, end}}
+                                  : Drawing::Cmd{'l', {end}};
+                m_drag = 0;
+            } else if (c.type == 'l') {
+                m_vec.cmds.insert(m_vec.cmds.begin() + i, {'l', {p0 + (c.pts[0] - p0) * t}});
+                m_vecHandle = {i, 0};
+            } else {
+                // de Casteljau split at t
+                auto lerp = [t](QPointF a, QPointF b) { return a + (b - a) * t; };
+                const QPointF a = lerp(p0, c.pts[0]), b = lerp(c.pts[0], c.pts[1]), d = lerp(c.pts[1], c.pts[2]);
+                const QPointF ab = lerp(a, b), bd = lerp(b, d), mid = lerp(ab, bd);
+                const QPointF end = c.pts[2];
+                c = {'b', {bd, d, end}};
+                m_vec.cmds.insert(m_vec.cmds.begin() + i, {'b', {a, ab, mid}});
+                m_vecHandle = {i, 2};
+            }
+            writeVector();
+            return true;
+        }
+        if (m_vecMode == VecFreehand && e->button() == Qt::LeftButton) {
+            m_vec.cmds.push_back({'m', {pt}});
+            m_drag = 6;
+            writeVector();
             return true;
         }
         if (m_shapeBox->currentIndex() > 0 && e->button() == Qt::LeftButton) {
@@ -765,7 +827,7 @@ bool VisualTools::move(QMouseEvent *e) {
     }
     case VClip:
     case Draw: {
-        if (m_vecHandle.first < 0 && m_drag != 5) break;
+        if (m_vecHandle.first < 0 && m_drag != 5 && m_drag != 6) break;
         QPointF pt = now;
         if (m_tool == VClip) pt *= std::pow(2.0, std::max(1, m_v.clip_scale) - 1);
         else pt = QPointF((now.x() - m_drawOrigin.x()) / m_drawScale.x(), (now.y() - m_drawOrigin.y()) / m_drawScale.y());
@@ -782,6 +844,14 @@ bool VisualTools::move(QMouseEvent *e) {
                 for (QPointF &q : c.pts) q = m_shapeA + QPointF(q.x() / 100 * d.x(), q.y() / 100 * d.y());
             m_vec.cmds.insert(m_vec.cmds.end(), shape.cmds.begin(), shape.cmds.end());
             writeVector();
+            break;
+        }
+        if (m_drag == 6) {
+            // freehand: a new line point once the cursor moved a few screen pixels (Aegisub's freehand mode)
+            if (QLineF(vecW(m_vec.cmds.back().pts.back()), e->position()).length() >= 4) {
+                m_vec.cmds.push_back({'l', {pt}});
+                writeVector();
+            }
             break;
         }
         // Alt snaps to another point

@@ -39,7 +39,7 @@ class VisualTools : public QObject {
     Q_OBJECT
 public:
     enum Tool { Pointer, Pos, Move, Scale, RotZ, RotXY, RClip, VClip, Draw, Shifter, AllTags, ToolCount };
-    enum VecMode { VecMove, VecLine, VecBezier, VecNewFigure, VecDelete };
+    enum VecMode { VecMove, VecLine, VecBezier, VecNewFigure, VecDelete, VecFreehand, VecInsert, VecConvert };
 
     explicit VisualTools(VideoBox *box);
     int tool() const { return m_tool; }
@@ -66,6 +66,9 @@ private:
     // how far libass moves \p drawing points for the line's alignment
     QPointF alignShift(const Drawing &d) const;
     int hitHandle(QPointF widgetPos) const;
+    QPointF vecW(QPointF pt) const; // vector point -> widget
+    // the l/b command whose segment passes near the point (t: where on it), or -1
+    int hitSegment(QPointF widgetPos, double &t) const;
 
     VideoBox *m_box;
     int m_tool = Pointer;
