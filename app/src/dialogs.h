@@ -19,6 +19,7 @@ class QSpinBox;
 class QDoubleSpinBox;
 class QLabel;
 class QTabWidget;
+class QTreeWidget;
 
 class TagButtonDialog : public QDialog {
     Q_OBJECT
@@ -168,3 +169,15 @@ private:
 
 // Aegisub's "Select fields to paste over": the Session::paste_over bits, or -1 when cancelled.
 int pasteOverFields(QWidget *parent);
+
+// Aegisub's attachment manager: fonts and graphics embedded in the script.
+class AttachmentsDialog : public QDialog {
+    Q_OBJECT
+public:
+    AttachmentsDialog(QWidget *parent, TabPanel *tab);
+
+private:
+    void refresh();
+    TabPanel *m_tab;
+    QTreeWidget *m_list;
+};

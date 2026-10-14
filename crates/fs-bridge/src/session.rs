@@ -1241,6 +1241,46 @@ impl Session {
 
     // ---- styles -----------------------------------------------------------
 
+    pub fn attachments(&self) -> Vec<crate::ffi::AttachmentRow> {
+        self.ed
+            .doc
+            .attachments()
+            .into_iter()
+            .map(|a| crate::ffi::AttachmentRow {
+                font: a.font,
+                name: a.name,
+                size: a.size,
+            })
+            .collect()
+    }
+
+    pub fn attach_file(&mut self, font: bool, path: &str) -> Result<String, String> {
+        let data = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+        let file = Path::new(path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let mut stored = String::new();
+        self.edit("Attach file", |d| stored = d.attach(font, &file, &data));
+        Ok(stored)
+    }
+
+    pub fn extract_attachment(&self, font: bool, name: &str, path: &str) -> Result<(), String> {
+        let data = self
+            .ed
+            .doc
+            .attachment_data(font, name)
+            .ok_or_else(|| format!("no attachment {name}"))?;
+        std::fs::write(path, data).map_err(|e| format!("{path}: {e}"))
+    }
+
+    pub fn remove_attachment(&mut self, font: bool, name: &str) {
+        let name = name.to_string();
+        self.edit("Delete attachment", move |d| {
+            d.remove_attachment(font, &name);
+        });
+    }
+
     pub fn styles(&self) -> Vec<StyleData> {
         self.ed.doc.styles().map(style_data).collect()
     }

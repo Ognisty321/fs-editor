@@ -94,7 +94,7 @@ const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"openAudio", {"music", kTeal}}, {"audioFromVideo", {"file-music", kTeal}}, {"blankAudio", {"wave-square", kTeal}},
     {"closeAudio", {"music-off", kRed}}, {"splitView", {"layout-columns", {}}}, {"compareTabs", {"git-compare", {}}},
     {"editor", {"edit", kBlue}}, {"properties", {"file-info", kPurple}}, {"styleManager", {"palette", kPurple}},
-    {"shiftTimes", {"clock-edit", kBlue}}, {"changeFps", {"clock-play", kPurple}}, {"spellChecker", {"text-spellcheck", kGreen}},
+    {"shiftTimes", {"clock-edit", kBlue}}, {"changeFps", {"clock-play", kPurple}}, {"spellChecker", {"text-spellcheck", kGreen}}, {"attachments", {"paperclip", kAmber}},
     {"resample", {"aspect-ratio", kPurple}}, {"hideTags", {"code-off", kOrange}}, {"help", {"help", kBlue}},
     {"about", {"info-circle", kBlue}}};
 
@@ -894,6 +894,7 @@ void MainWindow::buildMenus() {
         t->s().shift(spec, {tc.data(), tc.size()});
         t->changed();
     });
+    add("attachments", tr("Attachments..."), {}, subs, [=, this] { AttachmentsDialog(this, tab()).exec(); });
     add("spellChecker", tr("Spell checker..."), {}, subs, [=, this] {
         auto *d = new SpellCheckDialog(this, tab());
         if (d->findNext()) d->show();

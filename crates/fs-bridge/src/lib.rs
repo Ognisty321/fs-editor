@@ -195,6 +195,13 @@ pub mod ffi {
         text: String,
     }
 
+    /// A font or graphic embedded in the script.
+    struct AttachmentRow {
+        font: bool,
+        name: String,
+        size: usize,
+    }
+
     /// A text subtitle stream inside a media file.
     struct SubTrack {
         index: i32,
@@ -376,6 +383,13 @@ pub mod ffi {
         fn undo_to(self: &mut Session, steps: usize);
 
         fn styles(self: &Session) -> Vec<StyleData>;
+        fn attachments(self: &Session) -> Vec<AttachmentRow>;
+        /// Embed a file into [Fonts] or [Graphics]; returns the stored name.
+        fn attach_file(self: &mut Session, font: bool, path: &str) -> Result<String>;
+        fn extract_attachment(self: &Session, font: bool, name: &str, path: &str) -> Result<()>;
+        fn remove_attachment(self: &mut Session, font: bool, name: &str);
+        /// The file name an attachment extracts to (without SSA's `_0`).
+        fn attachment_file_name(name: &str) -> String;
         fn set_style(self: &mut Session, index: i64, style: &StyleData);
         fn delete_style(self: &mut Session, index: usize);
         fn clean_styles(self: &mut Session) -> Vec<String>;
@@ -534,6 +548,10 @@ fn fmt_time(ms: i64) -> String {
 }
 
 /// Accepts `h:mm:ss.cc`, `h:mm:ss,mmm` and offsets like `1.5s`; -1 if invalid.
+fn attachment_file_name(name: &str) -> String {
+    fs_core::attachments::file_name(name)
+}
+
 fn adjustable_tags() -> Vec<String> {
     fs_core::tag_adjust::ADJUSTABLE_TAGS
         .iter()

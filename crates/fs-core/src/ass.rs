@@ -270,7 +270,7 @@ impl Document {
         }
     }
 
-    fn find_section(&self, kind: SectionKind) -> Option<usize> {
+    pub(crate) fn find_section(&self, kind: SectionKind) -> Option<usize> {
         self.sections.iter().position(|s| {
             s.kind == kind
                 && match (&s.body, kind) {
@@ -342,7 +342,7 @@ impl Document {
 
     /// Insert a section and keep the blank-line separation that Aegisub writes
     /// between sections.
-    fn insert_section_with_spacing(&mut self, pos: usize, mut sec: Section) {
+    pub(crate) fn insert_section_with_spacing(&mut self, pos: usize, mut sec: Section) {
         let le = self.default_ending;
         if pos > 0 {
             // ensure previous section ends with a blank line

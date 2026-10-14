@@ -2,6 +2,7 @@
 //! timing (including VFR), undo history and editing operations.
 
 pub mod ass;
+pub mod attachments;
 pub mod color;
 pub mod fonts;
 pub mod history;
