@@ -283,6 +283,9 @@ AudioSource::AudioSource(const std::filesystem::path &file, int track, const std
         bs_ = std::make_unique<BestAudioSource>(file, track, has_video ? -1 : -2, 0,
                                                 cache.empty() ? bcmDisable : bcmAutoAbsolutePath, cache, nullptr, 0,
                                                 wrap(progress));
+        // we read each track once, front to back, into our own PCM buffer: BestSource's
+        // default 1 GB frame cache would only copy the whole track a second time
+        bs_->SetMaxCacheSize(16ull << 20);
         const auto &ap = bs_->GetAudioProperties();
         info_.sample_rate = ap.SampleRate;
         info_.channels = ap.Channels;

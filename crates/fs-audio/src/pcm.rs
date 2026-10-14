@@ -3,6 +3,7 @@
 //! Aegisub's RAM cache — which the waveform, spectrogram and player share.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 /// Something that can produce interleaved PCM (BestSource, a WAV file, a
 /// test signal).
@@ -83,28 +84,41 @@ impl PcmBuffer {
     /// returns `false` to cancel.
     pub fn load(
         src: &dyn AudioSource,
+        progress: impl FnMut(i64, i64) -> bool,
+    ) -> Result<Self, Cancelled> {
+        Self::load_parts(&[src], progress)
+    }
+
+    /// [`load`](Self::load) with each of `srcs` (separate decoders of the same
+    /// track) decoding its own part in a thread. Progress is reported from
+    /// the calling thread.
+    pub fn load_parts(
+        srcs: &[&dyn AudioSource],
         mut progress: impl FnMut(i64, i64) -> bool,
     ) -> Result<Self, Cancelled> {
-        let total = src.num_frames().max(0);
-        let ch = src.channels().max(1) as usize;
-        let mut out = Vec::with_capacity(total as usize);
-        const CHUNK: i64 = 1 << 16;
-        let mut buf = vec![0f32; CHUNK as usize * ch];
-        let mut pos = 0;
-        while pos < total {
-            let n = CHUNK.min(total - pos) as usize;
-            src.fill(pos, &mut buf[..n * ch]);
-            out.extend(
-                buf[..n * ch]
-                    .chunks_exact(ch)
-                    .map(|f| to_i16(f.iter().sum::<f32>() / ch as f32)),
-            );
-            pos += n as i64;
-            if !progress(pos, total) {
-                return Err(Cancelled);
+        let Some(first) = srcs.first() else {
+            return Ok(Self::new(1, Vec::new()));
+        };
+        let total = first.num_frames().max(0);
+        let mut out = vec![0i16; total as usize];
+        let part = (total as usize).div_ceil(srcs.len()).max(1);
+        let done = AtomicI64::new(0);
+        let cancel = AtomicBool::new(false);
+        std::thread::scope(|sc| {
+            let mut parts = out.chunks_mut(part).zip(srcs).enumerate();
+            let own = parts.next();
+            for (k, (slice, src)) in parts {
+                let (done, cancel) = (&done, &cancel);
+                sc.spawn(move || decode_part(*src, (k * part) as i64, slice, done, cancel, &mut |_| true));
             }
+            if let Some((_, (slice, src))) = own {
+                decode_part(*src, 0, slice, &done, &cancel, &mut |d| progress(d, total));
+            }
+        });
+        if cancel.load(Ordering::Relaxed) {
+            return Err(Cancelled);
         }
-        Ok(Self::new(src.sample_rate(), out))
+        Ok(Self::new(first.sample_rate(), out))
     }
 
     pub fn rate(&self) -> u32 {
@@ -144,6 +158,36 @@ impl PcmBuffer {
     }
 }
 
+/// Decode frames `start..start + out.len()` of `src` into mono `out`.
+fn decode_part(
+    src: &dyn AudioSource,
+    start: i64,
+    out: &mut [i16],
+    done: &AtomicI64,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(i64) -> bool,
+) {
+    let ch = src.channels().max(1) as usize;
+    const CHUNK: usize = 1 << 16;
+    let mut buf = vec![0f32; CHUNK * ch];
+    let mut pos = start;
+    for o in out.chunks_mut(CHUNK) {
+        let b = &mut buf[..o.len() * ch];
+        src.fill(pos, b);
+        for (o, f) in o.iter_mut().zip(b.chunks_exact(ch)) {
+            *o = to_i16(f.iter().sum::<f32>() / ch as f32);
+        }
+        pos += o.len() as i64;
+        let d = done.fetch_add(o.len() as i64, Ordering::Relaxed) + o.len() as i64;
+        if !progress(d) {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+    }
+}
+
 pub(crate) fn to_i16(x: f32) -> i16 {
     (x * 32767.0).round().clamp(-32768.0, 32767.0) as i16
 }
@@ -160,6 +204,11 @@ mod tests {
         assert_eq!(pcm.get(-1), 0);
         assert_eq!(pcm.get(3), 0);
         assert!(PcmBuffer::load(&src, |_, _| false).is_err());
+        // split over three decoders: the same samples
+        let long = MemorySource::new(8000, 2, (0..2002).map(|i| (i % 7) as f32 / 7.0).collect());
+        let one = PcmBuffer::load(&long, |_, _| true).unwrap();
+        let three = PcmBuffer::load_parts(&[&long, &long, &long], |_, _| true).unwrap();
+        assert_eq!(one.samples(), three.samples());
         assert_eq!(pcm.slice(1, 10), &[16384, -32767]);
     }
 }
