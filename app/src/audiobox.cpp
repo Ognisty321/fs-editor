@@ -485,13 +485,13 @@ QWidget *AudioBox::buttonRow() {
     btn("✓", tr("Apply changes (commit)"), [this] { commit(); }, true)->setIcon(icon("check", green));
     btn("⌖", tr("Go to selection"), [this] { ensureVisible(m_selStart, m_selEnd); })->setIcon(icon("focus-centered", teal));
     h->addSpacing(8);
-    toggle("K", tr("Enable / disable karaoke creation"), &m_karaoke, "karaoke", [this] { karaokeChanged(); });
-    toggle("Ks", tr("Enable / disable automatic splitting of syllables"), &m_autoSplit, "autoSplit", [] {});
+    toggle("K", tr("Enable / disable karaoke creation"), &m_karaoke, "karaoke", [this] { karaokeChanged(); })->setIcon(icon("microphone", teal));
+    toggle("Ks", tr("Enable / disable automatic splitting of syllables"), &m_autoSplit, "autoSplit", [] {})->setIcon(icon("wave-saw-tool", teal));
     toggle("AC", tr("Automatically apply changes"), &m_autoCommit, "autoCommit", [] {});
-    toggle("NL", tr("Go to the next line after applying changes"), &m_nextOnCommit, "nextOnCommit", [] {});
+    toggle("NL", tr("Go to the next line after applying changes"), &m_nextOnCommit, "nextOnCommit", [] {})->setIcon(icon("arrow-down-bar", teal));
     toggle("AS", tr("Automatic scrolling to the active line"), &m_autoScroll, "autoScroll", [] {});
-    toggle("Sp", tr("Spectrum mode"), &m_spectrum, "spectrum", [this] { m_view->dataChanged(); });
-    toggle("En", tr("Enhance speech frequencies in the spectrum"), &m_enhance, "enhance", [this] { m_view->dataChanged(); });
+    toggle("Sp", tr("Spectrum mode"), &m_spectrum, "spectrum", [this] { m_view->dataChanged(); })->setIcon(icon("chart-histogram", teal));
+    toggle("En", tr("Enhance speech frequencies in the spectrum"), &m_enhance, "enhance", [this] { m_view->dataChanged(); })->setIcon(icon("music-bolt", teal));
     h->addStretch();
     return row;
 }

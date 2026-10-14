@@ -50,7 +50,7 @@ qt_add_shaders(fsed "shaders"
     PREFIX "/"
     FILES shaders/quad.vert shaders/texture.frag shaders/audio.frag
 )
-file(GLOB FS_ICONS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} icons/*.svg)
+file(GLOB FS_ICONS CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} icons/*.svg)
 qt_add_resources(fsed "icons" PREFIX "/" FILES ${FS_ICONS})
 target_include_directories(fsed PRIVATE ${FS_BRIDGE_INCLUDE_DIR})
 target_link_directories(fsed PRIVATE ${FS_DEPS_DIR}/lib)
