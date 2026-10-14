@@ -144,11 +144,11 @@ fsb::DialogReply GuiAutomationHost::dialog(const fsb::DialogData &d) const {
         QWidget *w = widgets[i];
         if (auto *e = qobject_cast<QLineEdit *>(w)) c.text = fs::rs(e->text());
         else if (auto *t = qobject_cast<QPlainTextEdit *>(w)) c.text = fs::rs(t->toPlainText());
-        else if (auto *s = qobject_cast<QSpinBox *>(w)) c.num = s->value();
-        else if (auto *s = qobject_cast<QDoubleSpinBox *>(w)) c.num = s->value();
-        else if (auto *b = qobject_cast<QComboBox *>(w)) c.text = fs::rs(b->currentText());
-        else if (auto *b = qobject_cast<QCheckBox *>(w)) c.flag = b->isChecked();
-        else if (auto *b = qobject_cast<QPushButton *>(w)) c.text = fs::rs(b->property("color").toString());
+        else if (auto *sb = qobject_cast<QSpinBox *>(w)) c.num = sb->value();
+        else if (auto *db = qobject_cast<QDoubleSpinBox *>(w)) c.num = db->value();
+        else if (auto *cb = qobject_cast<QComboBox *>(w)) c.text = fs::rs(cb->currentText());
+        else if (auto *ch = qobject_cast<QCheckBox *>(w)) c.flag = ch->isChecked();
+        else if (auto *pb = qobject_cast<QPushButton *>(w)) c.text = fs::rs(pb->property("color").toString());
         r.controls.push_back(std::move(c));
     }
     return r;

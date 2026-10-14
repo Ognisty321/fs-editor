@@ -70,23 +70,23 @@ void AudioView::render(QRhiCommandBuffer *cb) {
         const int w = std::max(1, out.width());
         const double rate = (*b.m_audio)->rate();
         const double start = b.m_left * rate / 1000.0, spp = b.m_msPerPx / dpr * rate / 1000.0;
-        std::vector<float> data;
+        std::vector<float> texels;
         QSize sz;
         QRhiTexture::Format fmt;
         if (b.m_spectrum) {
             const int h = std::max(1, out.height());
-            data.resize(size_t(w) * size_t(h));
-            (*b.m_audio)->spectrum(start, spp, size_t(w), size_t(h), b.m_enhance, {data.data(), data.size()});
+            texels.resize(size_t(w) * size_t(h));
+            (*b.m_audio)->spectrum(start, spp, size_t(w), size_t(h), b.m_enhance, {texels.data(), texels.size()});
             sz = {w, h};
             fmt = QRhiTexture::R32F;
         } else {
             std::vector<float> peaks(size_t(w) * 3);
             (*b.m_audio)->peaks(start, spp, {peaks.data(), peaks.size()});
-            data.resize(size_t(w) * 4);
+            texels.resize(size_t(w) * 4);
             for (int x = 0; x < w; ++x) {
-                data[x * 4] = peaks[x * 3];
-                data[x * 4 + 1] = peaks[x * 3 + 1];
-                data[x * 4 + 2] = peaks[x * 3 + 2];
+                texels[x * 4] = peaks[x * 3];
+                texels[x * 4 + 1] = peaks[x * 3 + 1];
+                texels[x * 4 + 2] = peaks[x * 3 + 2];
             }
             sz = {w, 1};
             fmt = QRhiTexture::RGBA32F;
@@ -96,7 +96,7 @@ void AudioView::render(QRhiCommandBuffer *cb) {
             m_data->create();
             m_wave.setTexture(m_data.get());
         }
-        QRhiTextureSubresourceUploadDescription sub(data.data(), quint32(data.size() * sizeof(float)));
+        QRhiTextureSubresourceUploadDescription sub(texels.data(), quint32(texels.size() * sizeof(float)));
         u->uploadTexture(m_data.get(), QRhiTextureUploadDescription({QRhiTextureUploadEntry(0, 0, sub)}));
         m_dataDirty = false;
     }

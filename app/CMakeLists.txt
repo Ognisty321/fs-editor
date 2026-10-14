@@ -67,7 +67,7 @@ elseif(APPLE)
 endif()
 target_link_libraries(fsed PRIVATE fs_bridge Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::Concurrent Qt6::Svg)
 if(MSVC)
-    target_compile_options(fsed PRIVATE /utf-8 /W3 /permissive-)
+    target_compile_options(fsed PRIVATE /utf-8 /W4 /permissive-)
     # LuaJIT's msvcbuild objects ask for the static CRT; the app uses /MD everywhere else.
     target_link_options(fsed PRIVATE /NODEFAULTLIB:LIBCMT)
     target_link_libraries(fsed PRIVATE dbghelp)
