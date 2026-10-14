@@ -138,6 +138,32 @@ std::vector<std::pair<std::string, std::vector<uint8_t>>> attached_fonts(const s
     return out;
 }
 
+std::string subtitle_packets(const std::filesystem::path &file, int index, std::vector<SubPacket> &out) {
+    AVFormatContext *ctx = nullptr;
+    if (avformat_open_input(&ctx, reinterpret_cast<const char *>(file.u8string().c_str()), nullptr, nullptr) < 0)
+        throw MediaError("cannot open " + file.filename().string());
+    std::unique_ptr<AVFormatContext *, void (*)(AVFormatContext **)> guard(&ctx, avformat_close_input);
+    if (avformat_find_stream_info(ctx, nullptr) < 0 || index < 0 || unsigned(index) >= ctx->nb_streams ||
+        ctx->streams[index]->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE)
+        throw MediaError("no subtitle stream " + std::to_string(index));
+    const AVStream *st = ctx->streams[index];
+    for (unsigned i = 0; i < ctx->nb_streams; ++i)
+        if (int(i) != index) ctx->streams[i]->discard = AVDISCARD_ALL;
+    const auto *x = st->codecpar->extradata;
+    std::string header(x ? reinterpret_cast<const char *>(x) : "", x ? size_t(st->codecpar->extradata_size) : 0);
+    const AVRational ms{1, 1000};
+    AVPacket *pkt = av_packet_alloc();
+    while (av_read_frame(ctx, pkt) >= 0) {
+        if (pkt->stream_index == index && pkt->pts != AV_NOPTS_VALUE)
+            out.push_back(SubPacket{av_rescale_q(pkt->pts, st->time_base, ms),
+                                    av_rescale_q(pkt->duration, st->time_base, ms),
+                                    std::string(reinterpret_cast<const char *>(pkt->data), size_t(pkt->size))});
+        av_packet_unref(pkt);
+    }
+    av_packet_free(&pkt);
+    return header;
+}
+
 // ---------------------------------------------------------------------------
 // Video
 // ---------------------------------------------------------------------------

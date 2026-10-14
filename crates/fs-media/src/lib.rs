@@ -51,6 +51,64 @@ pub fn list_tracks(path: &Path) -> Result<Vec<TrackInfo>> {
     Ok(bridge::list_tracks(path_str(path)?)?)
 }
 
+/// Text subtitle streams of a file (ASS/SSA/SRT and plain text); bitmap
+/// formats such as PGS cannot be edited and are left out.
+pub fn subtitle_tracks(path: &Path) -> Result<Vec<TrackInfo>> {
+    const TEXT: [&str; 6] = ["ass", "ssa", "subrip", "srt", "text", "webvtt"];
+    Ok(list_tracks(path)?
+        .into_iter()
+        .filter(|t| t.kind == "subtitle" && TEXT.contains(&t.codec.as_str()))
+        .collect())
+}
+
+/// One embedded subtitle stream as file text plus its extension: an ASS
+/// script for ASS/SSA streams, SRT for the rest.
+pub fn extract_subtitles(path: &Path, index: i32) -> Result<(String, &'static str)> {
+    use fs_core::time::Time;
+    let mut packets = Vec::new();
+    let header = bridge::subtitle_packets(path_str(path)?, index, &mut packets)?;
+    let times = |p: &bridge::SubPacket| {
+        let start = Time::from_ms(p.start_ms);
+        (start, Time::from_ms(p.start_ms + p.duration_ms.max(0)))
+    };
+    if !header.contains("[Script Info]") {
+        let mut out = String::new();
+        for (n, p) in packets.iter().enumerate() {
+            let (a, b) = times(p);
+            let text = p.text.trim_end_matches(['\r', '\n', '\0']);
+            out += &format!("{}\n{} --> {}\n{text}\n\n", n + 1, a.to_srt(), b.to_srt());
+        }
+        return Ok((out, "srt"));
+    }
+    // Matroska ASS blocks: ReadOrder,Layer,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+    let mut lines: Vec<(i64, String)> = packets
+        .iter()
+        .enumerate()
+        .map(|(n, p)| {
+            let mut f = p.text.splitn(3, ',');
+            let order = f
+                .next()
+                .and_then(|o| o.trim().parse().ok())
+                .unwrap_or(n as i64);
+            let layer = f.next().unwrap_or("0");
+            let rest = f.next().unwrap_or("").trim_end_matches(['\r', '\n', '\0']);
+            let (a, b) = times(p);
+            (
+                order,
+                format!("Dialogue: {layer},{},{},{rest}\n", a.to_ass(), b.to_ass()),
+            )
+        })
+        .collect();
+    lines.sort_by_key(|l| l.0);
+    let mut out = header.trim_end_matches('\0').trim_end().to_owned();
+    out.push('\n');
+    if !out.contains("[Events]") {
+        out += "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n";
+    }
+    out.extend(lines.into_iter().map(|l| l.1));
+    Ok((out, "ass"))
+}
+
 /// Fonts attached to a Matroska file, as (file name, data).
 pub fn attached_fonts(path: &Path) -> Result<Vec<(String, Vec<u8>)>> {
     Ok(bridge::attached_fonts(path_str(path)?)?

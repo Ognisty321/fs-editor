@@ -37,6 +37,14 @@ rust::Vec<FontFile> attached_fonts(rust::Str path) {
     return out;
 }
 
+rust::String subtitle_packets(rust::Str path, int32_t index, rust::Vec<SubPacket> &out) {
+    std::vector<fsmedia::SubPacket> v;
+    const std::string header = fsmedia::subtitle_packets(to_path(path), index, v);
+    for (const auto &p : v)
+        out.push_back(SubPacket{p.start_ms, p.duration_ms, str(p.text)});
+    return str(header);
+}
+
 std::unique_ptr<VideoSource> open_video(rust::Str path, int32_t track, rust::Str cache_dir, ProgressSink &progress) {
     return std::make_unique<VideoSource>(to_path(path), track, to_path(cache_dir), progress_of(progress));
 }

@@ -43,6 +43,15 @@ std::vector<Track> list_tracks(const std::filesystem::path &file);
 /// Font attachments of a file (Matroska), as (filename, bytes).
 std::vector<std::pair<std::string, std::vector<uint8_t>>> attached_fonts(const std::filesystem::path &file);
 
+/// Packets of one subtitle stream: the codec header (ASS: the script up to the
+/// [Events] Format line) and each packet's text with times in milliseconds.
+struct SubPacket {
+    int64_t start_ms = 0;
+    int64_t duration_ms = 0;
+    std::string text;
+};
+std::string subtitle_packets(const std::filesystem::path &file, int index, std::vector<SubPacket> &out);
+
 /// Colour matrix used to convert YUV to RGB.
 enum class Matrix { Auto, Bt601, Bt709, Fcc, Smpte240m, Bt2020 };
 

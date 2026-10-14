@@ -192,6 +192,14 @@ pub mod ffi {
         text: String,
     }
 
+    /// A text subtitle stream inside a media file.
+    struct SubTrack {
+        index: i32,
+        codec: String,
+        language: String,
+        title: String,
+    }
+
     #[derive(Debug, Clone, Default)]
     struct VideoInfo {
         width: i32,
@@ -295,6 +303,7 @@ pub mod ffi {
         type Session;
         fn new_session() -> Box<Session>;
         fn open(self: &mut Session, path: &str) -> Result<()>;
+        fn open_embedded(self: &mut Session, video: &str, index: i32) -> Result<()>;
         fn save(self: &mut Session, path: &str) -> Result<()>;
         fn save_translation(self: &Session, path: &str) -> Result<()>;
         fn convert(self: &mut Session, format: &str) -> Result<()>;
@@ -396,6 +405,8 @@ pub mod ffi {
 
         type Video;
         fn open_video(path: &str, cache_dir: &str) -> Result<Box<Video>>;
+        /// Empty when the file cannot be read or has no text subtitles.
+        fn subtitle_tracks(path: &str) -> Vec<SubTrack>;
         fn info(self: &Video) -> VideoInfo;
         fn frame(self: &mut Video, n: i64, out: &mut [u8]) -> Result<()>;
         fn timecodes(self: &Video) -> Vec<i64>;
@@ -504,6 +515,19 @@ fn load_timecodes(path: &str) -> Result<Vec<i64>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     let f = fs_core::vfr::Framerate::parse_timecodes(&text).map_err(|e| format!("{path}: {e}"))?;
     Ok(f.timecodes().to_vec())
+}
+
+fn subtitle_tracks(path: &str) -> Vec<ffi::SubTrack> {
+    fs_media::subtitle_tracks(std::path::Path::new(path))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|t| ffi::SubTrack {
+            index: t.index,
+            codec: t.codec,
+            language: t.language,
+            title: t.title,
+        })
+        .collect()
 }
 
 fn open_video(path: &str, cache_dir: &str) -> Result<Box<Video>, String> {

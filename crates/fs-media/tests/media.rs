@@ -182,3 +182,43 @@ fn libass_renders_onto_frames() {
     assert!(!r.overlay(6000, w, h, (w, h), &mut ov).unwrap());
     assert!(ov.iter().all(|&b| b == 0));
 }
+
+#[test]
+fn embedded_subtitles() {
+    let path = media("subs.mkv");
+    let t = fs_media::subtitle_tracks(&path).unwrap();
+    let kinds: Vec<_> = t
+        .iter()
+        .map(|t| (t.index, t.codec.as_str(), t.language.as_str()))
+        .collect();
+    assert_eq!(kinds, [(0, "ass", "pol"), (1, "subrip", "eng")]);
+
+    let (ass, ext) = fs_media::extract_subtitles(&path, 0).unwrap();
+    assert_eq!(ext, "ass");
+    let doc = fs_core::Document::parse(&ass);
+    assert_eq!(doc.info("PlayResX"), Some("640"));
+    let ev: Vec<_> = doc
+        .events()
+        .iter()
+        .map(|e| &e.event)
+        .map(|e| (e.layer, e.start.ms(), e.end.ms(), e.text.as_ref()))
+        .collect();
+    // file order (ReadOrder), not time order; commas in the text survive
+    assert_eq!(
+        ev,
+        [
+            (1, 2000, 3500, r"{\i1}Druga, z przecinkiem{\i0}"),
+            (0, 500, 1250, r"Pierwsza\Nlinia"),
+        ]
+    );
+
+    let (srt, ext) = fs_media::extract_subtitles(&path, 1).unwrap();
+    assert_eq!(ext, "srt");
+    assert!(
+        srt.starts_with(
+            "1\n00:00:00,500 --> 00:00:01,250\nFirst\n\n2\n00:00:02,000 --> 00:00:03,500\n"
+        ),
+        "{srt}"
+    );
+    assert!(fs_media::extract_subtitles(&media("cfr.mkv"), 0).is_err());
+}

@@ -237,14 +237,29 @@ impl Session {
     pub fn open(&mut self, path: &str) -> Result<(), String> {
         let l = fs_formats::load_file(Path::new(path), &LoadOptions::default())
             .map_err(|e| format!("{path}: {e}"))?;
+        self.load(l, Some(PathBuf::from(path)));
+        Ok(())
+    }
+
+    /// Subtitle stream `index` of a video file, as an unsaved ASS script.
+    pub fn open_embedded(&mut self, video: &str, index: i32) -> Result<(), String> {
+        let (text, ext) = fs_media::extract_subtitles(Path::new(video), index)
+            .map_err(|e| format!("{video}: {e}"))?;
+        let mut l = fs_formats::load_bytes(text.as_bytes(), Some(ext), &LoadOptions::default())
+            .map_err(|e| format!("{video}: {e}"))?;
+        l.format = Format::Ass;
+        self.load(l, None);
+        Ok(())
+    }
+
+    fn load(&mut self, l: fs_formats::Loaded, path: Option<PathBuf>) {
         self.ed = Editor::new(l.doc);
-        self.path = Some(PathBuf::from(path));
+        self.path = path;
         self.format = l.format;
         self.encoding = l.encoding;
         self.bom = l.bom;
         self.snapshot_loaded();
         self.refresh();
-        Ok(())
     }
 
     pub fn save(&mut self, path: &str) -> Result<(), String> {
@@ -1372,6 +1387,16 @@ mod tests {
         assert_eq!(s.row(1).text, "two");
         assert_eq!(s.move_rows(&[2], -2), vec![0]);
         assert_eq!(s.row(0).text, "three");
+    }
+
+    #[test]
+    fn opens_embedded_srt_as_untitled_ass() {
+        let mut s = Session::default();
+        let mkv = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/media/subs.mkv");
+        s.open_embedded(mkv, 1).unwrap();
+        assert_eq!((s.row_count(), s.path.is_none()), (2, true));
+        assert_eq!(s.row(1).text, r"Second {\i1}line");
+        assert!(s.open_embedded(mkv, 5).is_err());
     }
 
     #[test]

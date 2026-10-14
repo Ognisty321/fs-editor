@@ -278,10 +278,32 @@ TabPanel *MainWindow::newTab() {
     return tab;
 }
 
+// An untitled tab holding only the empty starting line can take a file (it keeps its video/audio).
+static bool untouched(TabPanel *tab) {
+    return tab && tab->path().isEmpty() &&
+           (tab->s().row_count() == 0 || (tab->s().row_count() == 1 && tab->s().row(0).text.empty()));
+}
+
 void MainWindow::openFile(const QString &path) {
     const QString ext = QFileInfo(path).suffix().toLower();
     if (kVideoExt.contains(ext)) {
+        // like Kainote: an empty tab offers the subtitles stored in the video
+        if (const auto tracks = fsb::subtitle_tracks(fs::Utf8(path)); !tracks.empty() && untouched(current())) {
+            QStringList items;
+            for (const auto &t : tracks)
+                items << QString("#%1  %2%3%4")
+                             .arg(t.index)
+                             .arg(fs::q(t.codec))
+                             .arg(t.language.empty() ? QString() : " [" + fs::q(t.language) + "]")
+                             .arg(t.title.empty() ? QString() : "  " + fs::q(t.title));
+            bool ok = false;
+            const QString pick = QInputDialog::getItem(this, tr("Subtitles in the video"),
+                                                       tr("The video contains subtitles. Load them?"), items, 0, false,
+                                                       &ok);
+            if (ok) current()->openEmbedded(path, tracks[size_t(std::max(0, int(items.indexOf(pick))))].index);
+        }
         current()->openVideo(path);
+        updateActions();
     } else if (kAudioExt.contains(ext)) {
         current()->openAudio(path);
     } else if (ext == "txt" && isKeyframesFile(path)) {
@@ -289,10 +311,7 @@ void MainWindow::openFile(const QString &path) {
     } else {
         // reuse an empty, untouched tab, otherwise open a new one
         TabPanel *tab = current();
-        // an untitled tab with only the empty starting line takes the file (keeps its video/audio)
-        if (!tab || !tab->path().isEmpty() || tab->s().row_count() > 1 ||
-            (tab->s().row_count() == 1 && !tab->s().row(0).text.empty()))
-            tab = newTab();
+        if (!untouched(tab)) tab = newTab();
         if (tab->openSubs(path)) addRecent("subs", path);
         updateActions();
     }
@@ -902,8 +921,14 @@ void MainWindow::dragEnterEvent(QDragEnterEvent *e) {
 }
 
 void MainWindow::dropEvent(QDropEvent *e) {
+    QStringList files;
     for (const QUrl &u : e->mimeData()->urls())
-        if (u.isLocalFile()) openFile(u.toLocalFile());
+        if (u.isLocalFile()) files << u.toLocalFile();
+    e->acceptProposedAction();
+    // after the drop returns: openFile may ask a question, which must not block the drag source
+    QTimer::singleShot(0, this, [this, files] {
+        for (const QString &f : files) openFile(f);
+    });
 }
 
 // ---- hotkeys ------------------------------------------------------------------
@@ -942,6 +967,17 @@ void MainWindow::assignHotkey(QAction *a) {
 // panels that use plain keys (video, audio, grid, edit box) before the
 // global shortcuts take them, like Kainote's per-context hotkeys.
 bool MainWindow::eventFilter(QObject *o, QEvent *e) {
+    // files dropped anywhere in the window are opened; text fields would paste the path otherwise
+    if (e->type() == QEvent::DragEnter || e->type() == QEvent::DragMove || e->type() == QEvent::Drop) {
+        auto *de = static_cast<QDropEvent *>(e);
+        auto *w = qobject_cast<QWidget *>(o);
+        if (w && w != this && w->window() == this && de->mimeData()->hasUrls() &&
+            de->mimeData()->urls().value(0).isLocalFile()) {
+            if (e->type() == QEvent::Drop) dropEvent(de);
+            else de->acceptProposedAction();
+            return true;
+        }
+    }
     // a click in the split view's right half makes that tab active (the sides swap)
     if (e->type() == QEvent::MouseButtonPress && m_second)
         if (auto *w = qobject_cast<QWidget *>(o); w && m_second->isAncestorOf(w))

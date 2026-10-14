@@ -140,6 +140,10 @@ Testy na prawdziwych słownikach dostają ścieżkę bez rozszerzenia:
 FS_DICT=/sciezka/pl_PL FS_DICT_EN=/sciezka/en_US cargo test -p fs-bridge spell
 ```
 
+## Napisy wewnątrz wideo
+
+Plik można przeciągnąć w dowolne miejsce okna. Wideo z tekstowymi ścieżkami napisów (ASS/SSA/SRT) otwarte w pustej karcie wywołuje pytanie, czy wczytać napisy i którą ścieżkę. Linie trafiają do nowego, niezapisanego skryptu w kolejności z pliku. Ścieżki obrazkowe (PGS, VobSub) są pomijane.
+
 ## Kolekcjoner czcionek
 
 Plik → Kolekcjoner czcionek (albo `fsed fonts`) zbiera kroje użyte w liniach i szuka ich w czcionkach systemowych, w wybranym folderze i w załącznikach otwartego wideo MKV. Zgłasza brakujące czcionki, brakujące glify i sztuczne pogrubienie lub kursywę, a na życzenie kopiuje pliki do wskazanego folderu.

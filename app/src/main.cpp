@@ -65,8 +65,11 @@ int main(int argc, char **argv) {
     MainWindow w;
     w.show();
     const QStringList files = app.arguments().mid(1);
-    for (const QString &f : files) w.openFile(f);
-    if (files.isEmpty() && QSettings().value("main/askSession", true).toBool()) w.action("loadSession")->trigger();
+    // from the event loop: opening may ask a question (subtitles inside a video)
+    QTimer::singleShot(0, &w, [&w, files] {
+        for (const QString &f : files) w.openFile(f);
+        if (files.isEmpty() && QSettings().value("main/askSession", true).toBool()) w.action("loadSession")->trigger();
+    });
     // Smoke test: FSED_SMOKE=out.png grabs the window after loading and quits;
     // FSED_SMOKE_ROW selects a line first (seeks the video like a click).
     if (qEnvironmentVariableIsSet("FSED_SMOKE_ROW"))

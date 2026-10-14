@@ -123,6 +123,21 @@ bool TabPanel::openSubs(const QString &path) {
     return true;
 }
 
+bool TabPanel::openEmbedded(const QString &video, int index) {
+    try {
+        s().open_embedded(fs::Utf8(video), index);
+    } catch (const rust::Error &e) {
+        m_main->error(QString::fromUtf8(e.what()));
+        return false;
+    }
+    m_sel.clear();
+    m_active = 0;
+    changed();
+    setActive(0);
+    emit titleChanged();
+    return true;
+}
+
 bool TabPanel::save(const QString &target) {
     const QString p = target.isEmpty() ? path() : target;
     if (p.isEmpty()) return false;

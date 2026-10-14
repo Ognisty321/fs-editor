@@ -27,4 +27,24 @@ ffmpeg -v error -y -i "$out/cfr.mkv" -map 0:v -c copy "$tmp/v.h264"
 # native Windows tools need Windows paths under MSYS/Git Bash
 native() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else echo "$1"; fi; }
 mkvmerge -q -o "$(native "$out/vfr.mkv")" --timestamps "0:$(native "$out/vfr-timecodes.txt")" "$(native "$tmp/v.h264")"
+# Embedded subtitles: an ASS and an SRT stream (no video), for extract_subtitles.
+cat > "$tmp/s.ass" <<'EOF'
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 640
+PlayResY: 360
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 1,0:00:02.00,0:00:03.50,Default,B,0,0,0,,{\i1}Druga, z przecinkiem{\i0}
+Dialogue: 0,0:00:00.50,0:00:01.25,Default,A,0,0,0,,Pierwsza\Nlinia
+EOF
+printf '1\n00:00:00,500 --> 00:00:01,250\nFirst\n\n2\n00:00:02,000 --> 00:00:03,500\nSecond <i>line</i>\n\n' > "$tmp/s.srt"
+ffmpeg -v error -y -i "$tmp/s.ass" -i "$tmp/s.srt" -map 0 -map 1 -c copy \
+    -metadata:s:0 language=pol -metadata:s:1 language=eng "$out/subs.mkv"
+
 ls -l "$out"
