@@ -53,8 +53,10 @@ public:
 private:
     QPointF w(QPointF s) const; // script -> widget
     QPointF s(QPointF w) const; // widget -> script
+    // allSelected: scale, rotation and clips go to every selected line (Aegisub SetSelectedOverride)
     void apply(const QString &tags, bool allSelected = false);
     void applyPos(QPointF p);
+    void toggleMove();
     QString clipTag() const;
     void writeVector();
     // \p drawing origin and per-unit scale in script coordinates

@@ -374,7 +374,7 @@ VideoBox::VideoBox(TabPanel *tab) : QWidget(tab), m_tab(tab), m_media(std::make_
     tr_->addWidget(m_tools->toolRow(m_toolRow), 1);
     m_seekOn = new QComboBox(m_toolRow);
     m_seekOn->setToolTip(tr("Move video to selected line on:"));
-    m_seekOn->addItems({tr("Double-clicking a line"), tr("Every line change"), tr("Clicking a line or editing when paused"),
+    m_seekOn->addItems({tr("Double-clicking a line (always on)"), tr("Every line change"), tr("Clicking a line or editing when paused"),
                         tr("Clicking a line or editing"), tr("Editing line when paused"), tr("Editing")});
     m_playOn = new QComboBox(m_toolRow);
     m_playOn->setToolTip(tr("On moving to another line play:"));
@@ -385,8 +385,8 @@ VideoBox::VideoBox(TabPanel *tab) : QWidget(tab), m_tab(tab), m_media(std::make_
     m_playOn->setCurrentIndex(st.value("video/playOn", PlayNothing).toInt());
     connect(m_seekOn, &QComboBox::currentIndexChanged, this, [](int i) { QSettings().setValue("video/seekOn", i); });
     connect(m_playOn, &QComboBox::currentIndexChanged, this, [](int i) { QSettings().setValue("video/playOn", i); });
+    tr_->addWidget(m_playOn); // Kainote order: play mode, then seek mode
     tr_->addWidget(m_seekOn);
-    tr_->addWidget(m_playOn);
     v->addWidget(m_toolRow);
 
     m_timer = new QTimer(this);

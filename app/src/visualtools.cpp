@@ -186,7 +186,19 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
         apply(clipTag());
     });
     vh->addWidget(invert);
-    m_sub->addWidget(new QWidget(m_sub));
+    vh->addStretch();
+    // \pos / \move tools: Aegisub's "Toggle between \move and \pos" for the selected lines
+    auto *drag = new QWidget(m_sub);
+    auto *dh = new QHBoxLayout(drag);
+    dh->setContentsMargins(6, 0, 0, 0);
+    auto *conv = new QToolButton(drag);
+    conv->setIcon(icon("arrows-exchange", QColor(0x4aa3ff)));
+    conv->setToolTip(tr("Toggle between \\move and \\pos"));
+    conv->setAutoRaise(true);
+    dh->addWidget(conv);
+    dh->addStretch();
+    connect(conv, &QToolButton::clicked, this, &VisualTools::toggleMove);
+    m_sub->addWidget(drag);
     h->addWidget(m_sub);
     h->addStretch();
     m_invert = invert;
@@ -197,7 +209,7 @@ void VisualTools::setTool(int t) {
     m_tool = t;
     if (t < int(m_buttons.size())) m_buttons[t]->setChecked(true);
     if (m_sub) {
-        m_sub->setCurrentIndex(t == VClip || t == Draw || t == RClip ? 1 : 0);
+        m_sub->setCurrentIndex(t == VClip || t == Draw || t == RClip ? 1 : t == Pos || t == Move ? 2 : 0);
         m_invert->setVisible(t == VClip || t == RClip);
         for (auto *b : m_sub->widget(1)->findChildren<QToolButton *>())
             if (b != m_invert) b->setVisible(t != RClip);
@@ -240,6 +252,21 @@ void VisualTools::apply(const QString &tags, bool allSelected) {
     tab->changed(TabPanel::FromVideo);
 }
 
+void VisualTools::toggleMove() {
+    auto *tab = m_box->tab();
+    auto &s = tab->s();
+    const QString amend = QString("visual-toggle-move-%1").arg(++m_dragId); // one undo step
+    for (size_t r : tab->selection()) {
+        const fsb::Visual v = s.visual(r);
+        const fsb::Row row = s.row(r);
+        const QString t = v.has_move ? QString("\\pos(%1,%2)").arg(n2(v.x), n2(v.y))
+                                     : QString("\\move(%1,%2,%1,%2,0,%3)").arg(n2(v.x), n2(v.y)).arg(row.end - row.start);
+        s.set_tags(fs::slice(std::vector<size_t>{r}), fs::Utf8(t), fs::Utf8(amend));
+    }
+    tab->changed(TabPanel::FromVideo);
+    reload();
+}
+
 void VisualTools::applyPos(QPointF p) {
     apply(QString("\\pos(%1,%2)").arg(n2(p.x()), n2(p.y())));
 }
@@ -258,7 +285,7 @@ void VisualTools::writeVector() {
     if (m_tool == VClip) {
         if (m_v.clip != 2) m_v.clip_scale = 1;
         m_v.clip = 2;
-        apply(clipTag());
+        apply(clipTag(), true);
     } else {
         tab->s().set_drawing(size_t(tab->active()), fs::Utf8(m_vec.toString()), fs::Utf8(m_amend));
         tab->changed(TabPanel::FromVideo);
@@ -541,7 +568,7 @@ bool VisualTools::move(QMouseEvent *e) {
             sx *= f;
             sy *= f;
         }
-        apply(QString("\\fscx%1\\fscy%2").arg(n2(sx), n2(sy)));
+        apply(QString("\\fscx%1\\fscy%2").arg(n2(sx), n2(sy)), true);
         break;
     }
     case RotZ: {
@@ -554,14 +581,14 @@ bool VisualTools::move(QMouseEvent *e) {
         const double a0 = std::atan2(-(m_pressW.y() - c.y()), m_pressW.x() - c.x());
         const double a1 = std::atan2(-(e->position().y() - c.y()), e->position().x() - c.x());
         double frz = std::fmod(m_start.frz + qRadiansToDegrees(a1 - a0) + 720, 360);
-        apply(QString("\\frz%1").arg(n2(frz)));
+        apply(QString("\\frz%1").arg(n2(frz)), true);
         break;
     }
     case RotXY: {
         double frx = m_start.frx, fry = m_start.fry;
         if (m_button != Qt::RightButton) fry = m_start.fry + dw.x() * 0.5;
         if (m_button != Qt::LeftButton) frx = m_start.frx - dw.y() * 0.5;
-        apply(QString("\\frx%1\\fry%2").arg(n2(frx), n2(fry)));
+        apply(QString("\\frx%1\\fry%2").arg(n2(frx), n2(fry)), true);
         break;
     }
     case RClip: {
@@ -576,7 +603,7 @@ bool VisualTools::move(QMouseEvent *e) {
             (k % 2 ? m_v.clip_x2 : m_v.clip_x1) = (k % 2 ? m_start.clip_x2 : m_start.clip_x1) + delta.x();
             (k / 2 ? m_v.clip_y2 : m_v.clip_y1) = (k / 2 ? m_start.clip_y2 : m_start.clip_y1) + delta.y();
         }
-        apply(clipTag());
+        apply(clipTag(), true);
         break;
     }
     case VClip:

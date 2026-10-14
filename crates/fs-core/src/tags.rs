@@ -243,6 +243,9 @@ impl Line {
             "clip" | "iclip" => &["clip", "iclip"],
             "fad" | "fade" => &["fad", "fade"],
             "an" | "a" => &["an", "a"],
+            // Aegisub's SetOverride drops the legacy spelling too
+            "frz" | "fr" => &["frz", "fr"],
+            "1c" | "c" => &["1c", "c"],
             n => std::slice::from_ref(match TAG_NAMES.iter().find(|x| **x == n) {
                 Some(x) => x,
                 None => &"",
@@ -808,6 +811,14 @@ mod tests {
         assert_eq!(l.to_text(), r"{\pos(5,6)}plain");
         l.remove_tags(&["pos"]);
         assert_eq!(l.to_text(), "plain");
+    }
+
+    #[test]
+    fn set_replaces_legacy_spelling() {
+        let mut l = Line::parse(r"{\fr10\c&H0000FF&}x");
+        l.set_line_tag(Tag::new("frz", vec!["20".into()]));
+        l.set_line_tag(Tag::new("1c", vec!["&H00FF00&".into()]));
+        assert_eq!(l.to_text(), r"{\frz20\1c&H00FF00&}x");
     }
 
     #[test]
