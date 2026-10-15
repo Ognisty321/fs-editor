@@ -1355,7 +1355,8 @@ impl Session {
         if sel.is_empty() || delta == 0 {
             return sel;
         }
-        let delta = delta.clamp(-(sel[0] as i64), n - 1 - *sel.last().unwrap() as i64);
+        // the rows move as one block: it can reach the end even when they had gaps
+        let delta = delta.clamp(-(sel[0] as i64), n - sel.len() as i64 - sel[0] as i64);
         let mut groups: Vec<Option<Vec<Arc<EventEntry>>>> =
             self.groups().into_iter().map(Some).collect();
         let moving: Vec<Vec<Arc<EventEntry>>> =
@@ -3368,6 +3369,9 @@ mod tests {
         assert_eq!(s.row(1).text, "two");
         assert_eq!(s.move_rows(&[2], -2), vec![0]);
         assert_eq!(s.row(0).text, "three");
+        // "three" and "two" with a gap, to the end
+        assert_eq!(s.move_rows(&[0, 2], 9), vec![1, 2]);
+        assert_eq!(s.row(0).text, "one");
     }
 
     #[test]

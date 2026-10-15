@@ -558,8 +558,10 @@ void Grid::moveSelection(int delta) {
     const auto moved = fs::vec(m_tab->s().move_rows(fs::slice(m_tab->selection()), delta));
     m_tab->changed();
     if (!moved.empty()) {
-        const int act = m_tab->active() + int(moved.front()) - int(m_tab->selection().front());
-        m_tab->setSelection(moved, act);
+        // the active line is where its place in the selection went (the rows close their gaps)
+        const auto sel = m_tab->selection();
+        const auto at = std::ranges::find(sel, size_t(std::max(0, m_tab->active()))) - sel.begin();
+        m_tab->setSelection(moved, int(moved[size_t(at) < moved.size() ? size_t(at) : 0]));
     }
 }
 

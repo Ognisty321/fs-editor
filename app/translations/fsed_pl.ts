@@ -2237,8 +2237,16 @@ Filtry eksportu: %8</translation>
         <translation>Timing</translation>
     </message>
     <message>
+        <source>Synch point</source>
+        <translation>Punkt synchronizacji</translation>
+    </message>
+    <message>
         <source>Editing</source>
         <translation>Edycja</translation>
+    </message>
+    <message>
+        <source>Update details</source>
+        <translation>Szczegóły aktualizacji</translation>
     </message>
     <message>
         <source>From video</source>
@@ -2283,6 +2291,10 @@ Filtry eksportu: %8</translation>
     <message>
         <source>Scale border and shadow</source>
         <translation>Skaluj obwódkę i cień</translation>
+    </message>
+    <message>
+        <source>Scale border and shadow together with script/render resolution. If this is unchecked, relative border and shadow size will depend on renderer.</source>
+        <translation>Skaluje obwódkę i cień razem z rozdzielczością skryptu i renderowania. Gdy wyłączone, względny rozmiar obwódki i cienia zależy od renderera.</translation>
     </message>
 </context>
 <context>

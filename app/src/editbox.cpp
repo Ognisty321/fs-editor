@@ -1100,6 +1100,8 @@ std::pair<int, int> EditBox::textSelection(bool original) const {
     return {c.selectionStart(), c.selectionEnd()};
 }
 
+QString EditBox::selectedText(bool original) const { return (original ? m_original : m_text)->textCursor().selectedText(); }
+
 void EditBox::nextLine() {
     const auto vis = m_tab->grid()->visibleRows();
     auto it = std::upper_bound(vis.begin(), vis.end(), size_t(m_row));

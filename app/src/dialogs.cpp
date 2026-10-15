@@ -231,10 +231,26 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
         (i < 2 ? find : findFiles)->setDefault(true);
         adjustSize();
     });
+    // Enter replaces in the Replace with box, and finds in the Search text box
+    connect(qApp, &QApplication::focusChanged, this, [=, this](QWidget *, QWidget *now) {
+        if (now == m_replace->lineEdit()) replNext->setDefault(true);
+        else if (now == m_find->lineEdit()) (m_tabs->currentIndex() < 2 ? find : findFiles)->setDefault(true);
+    });
     showTab(0);
 }
 
 void FindDialog::showTab(int tab) {
+    // the text selected in the edit box is looked for, unless it is the match shown last (Kainote)
+    if (auto *t = m_main->current()) {
+        for (bool orig : {false, true}) {
+            const auto [a, b] = t->edit()->textSelection(orig);
+            if (a == b) continue;
+            const bool shown = m_hitTab == t && m_hit.row == t->active() && m_hit.original == orig &&
+                               a == int(m_hit.start) && b == int(m_hit.end);
+            if (!shown) m_find->setCurrentText(t->edit()->selectedText(orig));
+            break;
+        }
+    }
     m_tabs->setCurrentIndex(tab);
     emit m_tabs->currentChanged(tab);
     show();
@@ -295,7 +311,8 @@ fsb::FindSpec FindDialog::spec(TabPanel *tab) const {
     // selected" are the current tab's
     const auto vis = tab->grid()->visibleRows();
     const auto sel = tab->selection();
-    const int lines = tab != m_main->current() ? 0 : m_lines[1]->isChecked() ? 1 : m_lines[2]->isChecked() ? 2 : 0;
+    int lines = tab != m_main->current() ? 0 : m_lines[1]->isChecked() ? 1 : m_lines[2]->isChecked() ? 2 : 0;
+    if (lines == 1 && sel.size() < 2) lines = 0; // one line selected: all of them (Aegisub)
     if (lines == 1)
         for (size_t r : sel) s.rows.push_back(r);
     else if (lines == 2 || vis.size() != tab->s().row_count())
@@ -457,13 +474,22 @@ void FindDialog::findNext() {
     const bool on = m_hitTab == tab && m_hit.row == act;
     const bool orig = !on || m_hit.original;
     const size_t pos = !on ? 0 : s.field == 0 ? size_t(tab->edit()->textSelection(orig).second) : m_hit.end;
+    const size_t n = tab->s().row_count();
     try {
-        const auto hit = tab->s().find_next(s, size_t(act), orig, pos);
+        auto &subs = tab->s();
+        // the style, actor and effect are searched line by line (Aegisub); an empty match (^, $, \b)
+        // is passed by a character, and where that finds it again, by the half or line it is in
+        auto hit = on && s.field != 0                         ? subs.find_next(s, (size_t(act) + 1) % n, true, 0)
+                   : on && m_hit.start == m_hit.end && pos == m_hit.end ? subs.find_next(s, size_t(act), orig, pos + 1)
+                                                                        : subs.find_next(s, size_t(act), orig, pos);
+        if (on && hit.row == m_hit.row && hit.original == m_hit.original && hit.start == m_hit.start &&
+            hit.end == m_hit.end && hit.start == hit.end)
+            hit = m_hit.original ? subs.find_next(s, size_t(act), false, 0) : subs.find_next(s, (size_t(act) + 1) % n, true, 0);
         if (hit.row < 0) return m_main->status(tr("Nothing found"));
         m_hit = hit;
         m_hitTab = tab;
         // going through the selected lines leaves the selection as it is (Aegisub)
-        if (hit.row != tab->active()) tab->setActive(int(hit.row), !m_lines[1]->isChecked());
+        if (hit.row != tab->active()) tab->setActive(int(hit.row), !(m_lines[1]->isChecked() && tab->selection().size() > 1));
         if (s.field == 0) tab->edit()->selectText(int(hit.start), int(hit.end - hit.start), hit.original);
     } catch (const rust::Error &e) {
         m_main->error(QString::fromUtf8(e.what()));
@@ -589,7 +615,7 @@ void SelectLinesDialog::apply() {
     case 1: tab->grid()->copy(); break;
     case 2: tab->grid()->cut(); break;
     case 3: tab->grid()->moveSelection(-int(v.front())); break;
-    case 4: tab->grid()->moveSelection(int(s.row_count()) - 1 - int(v.back())); break;
+    case 4: tab->grid()->moveSelection(int(s.row_count() - v.size() - v.front())); break;
     case 5:
         s.set_rows_field(fs::slice(v), "comment", "1");
         tab->changed();
@@ -1315,7 +1341,8 @@ PropertiesDialog::PropertiesDialog(TabPanel *tab) : QDialog(tab), m_tab(tab) {
     const std::pair<const char *, const char *> info[] = {
         {QT_TR_NOOP("Title"), "Title"}, {QT_TR_NOOP("Author"), "Original Script"},
         {QT_TR_NOOP("Translator"), "Original Translation"}, {QT_TR_NOOP("Proofreading"), "Original Editing"},
-        {QT_TR_NOOP("Timer"), "Original Timing"}, {QT_TR_NOOP("Editing"), "Script Updated By"}};
+        {QT_TR_NOOP("Timer"), "Original Timing"}, {QT_TR_NOOP("Synch point"), "Synch Point"},
+        {QT_TR_NOOP("Editing"), "Script Updated By"}, {QT_TR_NOOP("Update details"), "Update Details"}};
     for (auto [label, key] : info) {
         auto *e = new QLineEdit(fs::q(s.info_value(key)), this);
         f->addRow(tr(label), e);
@@ -1334,13 +1361,17 @@ PropertiesDialog::PropertiesDialog(TabPanel *tab) : QDialog(tab), m_tab(tab) {
     res->addWidget(m_w);
     res->addWidget(new QLabel("x", this));
     res->addWidget(m_h);
-    auto *fromVideo = new QPushButton(tr("From video"), this);
-    fromVideo->setEnabled(tab->video()->hasVideo());
-    connect(fromVideo, &QPushButton::clicked, this, [this] {
+    // Aegisub's From video buttons: the resolutions and the matrix of the video open
+    const auto fromVideo = [this](QBoxLayout *row, auto set) {
+        auto *b = new QPushButton(tr("From video"), this);
+        b->setEnabled(m_tab->video()->hasVideo());
+        connect(b, &QPushButton::clicked, this, set);
+        row->addWidget(b);
+    };
+    fromVideo(res, [this] {
         m_w->setValue(m_tab->video()->info().width);
         m_h->setValue(m_tab->video()->info().height);
     });
-    res->addWidget(fromVideo);
     f->addRow(tr("Resolution"), res);
     m_lw = spin(fs::q(s.info_value("LayoutResX")));
     m_lh = spin(fs::q(s.info_value("LayoutResY")));
@@ -1348,13 +1379,25 @@ PropertiesDialog::PropertiesDialog(TabPanel *tab) : QDialog(tab), m_tab(tab) {
     lres->addWidget(m_lw);
     lres->addWidget(new QLabel("x", this));
     lres->addWidget(m_lh);
+    fromVideo(lres, [this] {
+        m_lw->setValue(m_tab->video()->info().width);
+        m_lh->setValue(m_tab->video()->info().height);
+    });
     f->addRow(tr("Layout resolution"), lres);
     m_matrix = new QComboBox(this);
     m_matrix->addItems({"None", "TV.601", "PC.601", "TV.709", "PC.709", "TV.FCC", "PC.FCC", "TV.240M", "PC.240M"});
     const QString matrix = fs::q(s.info_value("YCbCr Matrix"));
     if (m_matrix->findText(matrix) < 0) m_matrix->insertItem(0, matrix); // kept as it is, even left out: None changes the colours
     m_matrix->setCurrentText(matrix);
-    f->addRow(tr("YCbCr matrix"), m_matrix);
+    auto *mrow = new QHBoxLayout;
+    mrow->addWidget(m_matrix, 1);
+    fromVideo(mrow, [this] {
+        const QString tagged = fs::q(m_tab->video()->info().matrix); // untagged: None, as Aegisub's best practice
+        const QString v = tagged.isEmpty() ? QStringLiteral("None") : tagged;
+        if (m_matrix->findText(v) < 0) m_matrix->addItem(v);
+        m_matrix->setCurrentText(v);
+    });
+    f->addRow(tr("YCbCr matrix"), mrow);
     m_wrap = new QComboBox(this);
     m_wrap->addItems({tr("0: Smart wrapping, top line is wider"), tr("1: End-of-line word wrapping, only \\N breaks"),
                       tr("2: No word wrapping, \\n and \\N break"), tr("3: Smart wrapping, bottom line is wider")});
@@ -1365,6 +1408,8 @@ PropertiesDialog::PropertiesDialog(TabPanel *tab) : QDialog(tab), m_tab(tab) {
     m_collisions->setCurrentText(fs::q(s.info_value("Collisions")).isEmpty() ? "Normal" : fs::q(s.info_value("Collisions")));
     f->addRow(tr("Colliding lines"), m_collisions);
     m_scaled = new QCheckBox(tr("Scale border and shadow"), this);
+    m_scaled->setToolTip(tr("Scale border and shadow together with script/render resolution. If this is unchecked, "
+                            "relative border and shadow size will depend on renderer."));
     m_scaled->setChecked(fs::q(s.info_value("ScaledBorderAndShadow")).compare("yes", Qt::CaseInsensitive) == 0);
     f->addRow(m_scaled);
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
