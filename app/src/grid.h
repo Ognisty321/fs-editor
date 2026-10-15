@@ -6,6 +6,7 @@
 
 #include <QAbstractScrollArea>
 #include <QHash>
+#include <QSet>
 #include <algorithm>
 #include <map>
 #include <set>
@@ -113,6 +114,8 @@ private:
     int m_anchor = 0;
     int m_dragFrom = -1;         // Alt+drag moving rows
     int m_selectTo = -1;         // the row a left-button drag selects to
+    quint64 m_styleGen = ~quint64(0); // the generation m_styleNames was read at
+    QSet<QString> m_styleNames;
     QHash<QString, std::vector<size_t>> m_misspelled; // by line text: (start, length) pairs
     int m_spellGen = -1;
 };

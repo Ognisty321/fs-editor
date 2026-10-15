@@ -312,9 +312,13 @@ void Grid::paintEvent(QPaintEvent *) {
     const int rh = rowHeight(), w = viewport()->width();
     p.fillRect(viewport()->rect(), T.background);
     p.setFont(font());
-    const auto styles = m_tab->s().styles();
-    QSet<QString> styleNames;
-    for (const auto &st : styles) styleNames.insert(fs::q(st.name));
+    // the style names, read again only after an edit: a repaint follows every scroll step
+    if (m_styleGen != m_tab->s().generation()) {
+        m_styleGen = m_tab->s().generation();
+        m_styleNames.clear();
+        for (const auto &st : m_tab->s().styles()) m_styleNames.insert(fs::q(st.name));
+    }
+    const QSet<QString> &styleNames = m_styleNames;
 
     // header
     p.fillRect(0, 0, w, rh, T.header);
