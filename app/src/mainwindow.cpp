@@ -816,7 +816,7 @@ void MainWindow::buildMenus() {
             const qint64 at = start ? r.start : r.end, other = start ? r.end : r.start;
             std::vector<qint64> near;
             if (t->video()->hasVideo())
-                for (auto f : t->keyframes()) near.push_back(t->video()->timeAt(f));
+                for (auto f : t->keyframes()) near.push_back(t->video()->timeAtStart(f));
             for (int n : {t->active() - 1, t->active() + 1})
                 if (n >= 0 && size_t(n) < t->s().row_count()) {
                     const auto o = t->s().row(size_t(n));

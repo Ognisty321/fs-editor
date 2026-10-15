@@ -556,7 +556,7 @@ void Grid::splitRows(int how) {
         std::vector<std::int64_t> st, en;
         const QString text = fs::q(r.text);
         if (how == 0) {
-            const qint64 t = m_tab->videoTime();
+            const qint64 t = m_tab->videoStartTime();
             if (t <= r.start || t >= r.end) continue;
             parts = {text, text};
             st = {r.start, t};
@@ -564,10 +564,11 @@ void Grid::splitRows(int how) {
         } else if (how == 1) {
             auto *v = m_tab->video();
             if (!v->hasVideo()) return;
-            for (qint64 f = v->frameAt(r.start); v->timeAt(f) < r.end; ++f) {
+            // one line per frame the line is on, cut halfway between frames (Aegisub's START/END)
+            for (qint64 f = v->frameAtStart(r.start), last = v->frameAtEnd(r.end); f <= last; ++f) {
                 parts << text;
-                st.push_back(std::max<std::int64_t>(r.start, v->timeAt(f)));
-                en.push_back(std::min<std::int64_t>(r.end, v->timeAt(f + 1)));
+                st.push_back(std::max<std::int64_t>(r.start, v->timeAtStart(f)));
+                en.push_back(std::min<std::int64_t>(r.end, v->timeAtEnd(f)));
             }
         } else {
             if (how == 2) {
