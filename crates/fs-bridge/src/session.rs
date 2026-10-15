@@ -40,6 +40,8 @@ pub struct Session {
     col_info: Option<ColumnInfo>,
     pub(crate) video_size: Option<(i32, i32)>,
     pub(crate) framerate: Option<Framerate>,
+    /// The rate a file in frames (MicroDVD) was read in, to write it in the same.
+    subs_fps: Option<Framerate>,
     pub(crate) keyframes: Vec<i64>,
 }
 
@@ -59,6 +61,7 @@ impl Default for Session {
             col_info: None,
             video_size: None,
             framerate: None,
+            subs_fps: None,
             keyframes: Vec::new(),
         };
         // Document::new already holds the one empty line a new tab starts with
@@ -360,6 +363,11 @@ impl Session {
     }
 
     fn open_with(&mut self, path: &str, opts: &LoadOptions) -> Result<(), String> {
+        // frames in the video's rate when the file names none (Aegisub offers it)
+        let opts = &LoadOptions {
+            fps: self.framerate.clone().unwrap_or_else(|| opts.fps.clone()),
+            ..opts.clone()
+        };
         let l = match fs_formats::load_file(Path::new(path), opts) {
             // plain text as Aegisub imports it: a new script, so saving never overwrites the text
             Err(fs_formats::Error::UnknownFormat)
@@ -373,7 +381,11 @@ impl Session {
             }
             l => l.map_err(|e| format!("{path}: {e}"))?,
         };
+        let fps = (l.format == Format::MicroDvd).then(|| {
+            (l.declared_fps.and_then(|v| Framerate::from_fps(v).ok())).unwrap_or(opts.fps.clone())
+        });
         self.load(l, Some(PathBuf::from(path)));
+        self.subs_fps = fps;
         Ok(())
     }
 
@@ -390,6 +402,7 @@ impl Session {
 
     fn load(&mut self, l: fs_formats::Loaded, path: Option<PathBuf>) {
         self.ed = Editor::new(l.doc);
+        self.subs_fps = None;
         self.path = path;
         self.format = l.format;
         self.encoding = l.encoding;
@@ -424,9 +437,9 @@ impl Session {
         SaveOptions {
             encoding: self.encoding,
             bom: self.bom,
-            fps: self
-                .framerate
-                .clone()
+            // frames as they were read, so the lines no one moved keep theirs
+            fps: (self.subs_fps.clone())
+                .or_else(|| self.framerate.clone())
                 .unwrap_or_else(|| Framerate::from_rational(24000, 1001, false).unwrap()),
             ..Default::default()
         }
@@ -2993,6 +3006,28 @@ mod tests {
         s.open_as(p.to_str().unwrap(), "windows-1251", ":", "#", false)
             .unwrap();
         assert_eq!(s.row(0).text, "Привет");
+        std::fs::remove_file(p).ok();
+    }
+
+    #[test]
+    fn microdvd_saves_in_the_rate_it_was_read_in() {
+        let p = std::env::temp_dir().join(format!("fsb-mdvd-{}.sub", std::process::id()));
+        let path = p.to_str().unwrap();
+        std::fs::write(&p, "{1}{1}25\n{25}{50}a\n{77}{90}b\n").unwrap();
+        let mut s = Session::default();
+        s.open(path).unwrap();
+        assert_eq!((s.row(0).start, s.row(1).start), (980, 3060));
+        s.save(path).unwrap();
+        assert_eq!(
+            std::fs::read(&p).unwrap(),
+            b"{1}{1}25\r\n{25}{50}a\r\n{77}{90}b\r\n"
+        );
+        // none named: the video's
+        std::fs::write(&p, "{25}{50}a\n").unwrap();
+        let mut s = Session::default();
+        s.set_video_context(640, 480, &[0, 100, 200, 300], &[]);
+        s.open(path).unwrap();
+        assert_eq!(s.row(0).start, 2450); // frame 25 at 10 fps
         std::fs::remove_file(p).ok();
     }
 

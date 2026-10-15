@@ -336,13 +336,13 @@ fn merge(g: &Fmt, l: &Fmt) -> Fmt {
     }
 }
 
+/// The `{1}{1}fps` line is Aegisub's: for a constant rate only, to six places.
 pub fn write_microdvd(subs: &[Sub], fr: &Framerate, declare_fps: bool) -> String {
     let mut s = String::new();
-    if declare_fps {
-        s.push_str(&format!(
-            "{{1}}{{1}}{}\r\n",
-            fs_core::model::fmt_f64((fr.fps() * 1000.0).round() / 1000.0)
-        ));
+    if declare_fps && !fr.is_vfr() {
+        let fps = format!("{:.6}", fr.fps());
+        let fps = fps.trim_end_matches('0').trim_end_matches('.');
+        s.push_str(&format!("{{1}}{{1}}{fps}\r\n"));
     }
     for sub in subs {
         let sf = fr.frame_at_time(sub.start.ms(), TimeType::Start);
@@ -513,6 +513,14 @@ mod tests {
         assert_eq!(fs, 25);
         let out = write_microdvd(&subs[..1], &fr, true);
         assert_eq!(out, "{1}{1}25\r\n{25}{50}{y:i}Hej|ty\r\n");
+        let ntsc = Framerate::from_rational(24000, 1001, false).unwrap();
+        assert!(write_microdvd(&[], &ntsc, true).starts_with("{1}{1}23.976024\r\n"));
+        // a variable rate has none to name
+        let vfr = Framerate::from_timecodes(vec![0, 40, 80, 100]).unwrap();
+        assert_eq!(
+            write_microdvd(&subs[..1], &vfr, true),
+            "{30}{60}{y:i}Hej|ty\r\n"
+        );
     }
 
     #[test]
