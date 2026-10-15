@@ -91,6 +91,7 @@ public:
 
     void lineChanged();   // active row changed
     void docChanged();    // document edited elsewhere
+    void videoMoved() { m_view->overlayChanged(); } // the video's position is drawn
     void commit();        // writes the markers (auto-commit too)
     // the commit command: then the next line, when asked; resetNext (Shift+G) always goes on, the
     // next line timed from this one's end for the default duration (Aegisub's audio/commit/default)

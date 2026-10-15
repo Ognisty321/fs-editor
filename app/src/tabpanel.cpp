@@ -84,7 +84,7 @@ TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fs
     });
     connect(m_video, &VideoBox::timeChanged, this, [this](qint64 ms) {
         m_grid->setVideoTime(ms);
-        m_audio->docChanged();
+        m_audio->videoMoved();
         emit statusChanged();
     });
     connect(m_video, &VideoBox::heightDelta, this, [this](int dy) {
