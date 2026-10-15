@@ -179,6 +179,7 @@ MainWindow::MainWindow() {
         if (m_second && current() == m_second) setSplit(m_prev); // picking the right-hand tab swaps the sides
         m_prev = current();
         if (m_compareOn) compareTabs(true);
+        followActive();
         updateActions();
         updateStatus();
     });
@@ -310,6 +311,31 @@ void MainWindow::setSplit(TabPanel *second) {
     m_right->setVisible(m_second);
     if (auto *a = action("splitView")) a->setChecked(m_second);
     compareTabs(m_compareOn);
+    followActive();
+}
+
+// Kainote's subtitle preview, in the split view: the other tab marks and shows the lines timed with the
+// active line, or the nearest one
+void MainWindow::followActive() {
+    for (auto *t : tabs()) t->grid()->setLinked({});
+    auto *t = current();
+    if (!m_second || !t || t->active() < 0) return;
+    const auto r = t->s().row(size_t(t->active()));
+    const auto spans = m_second->s().row_spans();
+    std::set<size_t> rows;
+    size_t nearest = 0;
+    qint64 best = std::numeric_limits<qint64>::max();
+    for (size_t i = 0; i < spans.size(); ++i) {
+        if (spans[i].start < r.end && spans[i].end > r.start) rows.insert(i);
+        else if (const qint64 d = std::min(std::abs(spans[i].start - r.start), std::abs(spans[i].end - r.end)); d < best) {
+            best = d;
+            nearest = i;
+        }
+    }
+    if (rows.empty() && !spans.empty()) rows.insert(nearest);
+    if (rows.empty()) return;
+    m_second->grid()->ensureVisible(int(*rows.begin()));
+    m_second->grid()->setLinked(std::move(rows));
 }
 
 // Kainote's subtitle comparison: lines of the two tabs pair up in order, by the modes in "compare/by"
@@ -358,6 +384,9 @@ TabPanel *MainWindow::newTab() {
     const int i = m_tabs->addTab(slot, tab->title());
     connect(tab, &TabPanel::docChanged, this, [this] {
         if (m_compareOn) compareTabs(true);
+    });
+    connect(tab, &TabPanel::activeChanged, this, [this, tab] {
+        if (tab == current()) followActive();
     });
     auto refreshTitle = [this, tab] {
         const int idx = indexOfPanel(tab);

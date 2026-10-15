@@ -66,6 +66,7 @@ private:
     int indexOfPanel(TabPanel *t) const;
     void setSplit(TabPanel *second);
     void compareTabs(bool on);
+    void followActive();
     bool maybeSave(TabPanel *tab);
     int pickEmbeddedTrack(const rust::Vec<fsb::SubTrack> &tracks, const QString &question); // -1: cancelled
     bool saveAs(TabPanel *tab);

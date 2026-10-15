@@ -25,6 +25,8 @@ public:
     // rows that differ from the compared tab (Kainote subtitle comparison)
     // rows that differ from the compared tab, with the differing parts of their text (Kainote)
     void setCompare(std::map<size_t, std::vector<size_t>> rows);
+    // rows timed with the other split-view tab's active line, marked at the left edge
+    void setLinked(std::set<size_t> rows);
     void setTagMode(int mode); // Aegisub's: 0 show tags, 1 simplify them to ☀, 2 hide them
     static QString colName(int c);
     void setColumnHidden(int c, bool hidden);
@@ -87,7 +89,7 @@ private:
     std::vector<int> m_cols;     // visible columns in order
     std::vector<int> m_widths;
     std::set<int> m_userHidden;
-    std::set<size_t> m_collisions, m_onVideo;
+    std::set<size_t> m_collisions, m_onVideo, m_linked;
     std::map<size_t, std::vector<size_t>> m_compare;
     quint64 m_gen = ~0ull;
     qint64 m_videoMs = -1;

@@ -145,6 +145,11 @@ void Grid::setCompare(std::map<size_t, std::vector<size_t>> rows) {
     viewport()->update();
 }
 
+void Grid::setLinked(std::set<size_t> rows) {
+    m_linked = std::move(rows);
+    viewport()->update();
+}
+
 void Grid::setVideoTime(qint64 ms) {
     if (ms == m_videoMs) return;
     m_videoMs = ms;
@@ -368,6 +373,7 @@ void Grid::paintEvent(QPaintEvent *) {
         }
         p.setPen(T.lines);
         p.drawLine(0, y + rh - 1, w, y + rh - 1);
+        if (m_linked.contains(i)) p.fillRect(0, y + 1, 3, rh - 2, T.active);
         if (m_tab->isSelected(i)) p.fillRect(0, y, w, rh, T.selection);
         if (int(i) == m_tab->active()) {
             p.setPen(QPen(T.active, 2));
