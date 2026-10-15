@@ -113,6 +113,7 @@ private:
     QSpinBox *m_alpha[4], *m_ml, *m_mr, *m_mv;
     QRadioButton *m_align[9];
     QLabel *m_preview = nullptr;
+    QColor m_previewBg; // invalid: the checkerboard
 };
 
 class StyleManager : public QDialog {

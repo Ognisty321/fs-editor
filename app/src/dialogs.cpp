@@ -53,6 +53,7 @@
 #include <QtConcurrentRun>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QMenu>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -962,7 +963,27 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
     m_preview = new QLabel(this);
     m_preview->setMinimumSize(420, 110);
     m_preview->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored); // the pixmap must not dictate the size
-    prevL->addWidget(m_previewText);
+    // the preview's background, a colour or the checkerboard (Aegisub's colour button)
+    m_previewBg = QSettings().value("styles/previewBg").value<QColor>();
+    auto *bg = new QToolButton(this);
+    bg->setIcon(icon("palette"));
+    bg->setToolTip(tr("Preview background"));
+    bg->setPopupMode(QToolButton::InstantPopup);
+    auto *bgMenu = new QMenu(bg);
+    const auto setBg = [this](QColor c) {
+        m_previewBg = c;
+        QSettings().setValue("styles/previewBg", c);
+        preview();
+    };
+    bgMenu->addAction(tr("Checkerboard"), this, [setBg] { setBg({}); });
+    bgMenu->addAction(tr("Colour..."), this, [this, setBg] {
+        if (const QColor c = QColorDialog::getColor(m_previewBg.isValid() ? m_previewBg : Qt::black, this); c.isValid()) setBg(c);
+    });
+    bg->setMenu(bgMenu);
+    auto *textRow = new QHBoxLayout;
+    textRow->addWidget(m_previewText, 1);
+    textRow->addWidget(bg);
+    prevL->addLayout(textRow);
     prevL->addWidget(m_preview, 1);
     group(left, tr("Preview"), prevL);
     connect(m_previewText, &QLineEdit::textChanged, this, &StyleEditor::preview);
@@ -1087,7 +1108,8 @@ void StyleEditor::preview() {
     if (!m_preview) return;
     const int w = std::max(420, m_preview->width()), h = std::max(110, m_preview->height());
     QImage img(w, h, QImage::Format_RGBA8888);
-    {
+    if (m_previewBg.isValid()) img.fill(m_previewBg);
+    else {
         QPainter p(&img);
         for (int y = 0; y < h; y += 10)
             for (int x = 0; x < w; x += 10)

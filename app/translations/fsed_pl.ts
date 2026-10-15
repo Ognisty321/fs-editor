@@ -3305,6 +3305,18 @@ do czasu audio</translation>
         <translation>Przykładowy tekst 0123 ĄĘŻŹ</translation>
     </message>
     <message>
+        <source>Preview background</source>
+        <translation>Tło podglądu</translation>
+    </message>
+    <message>
+        <source>Checkerboard</source>
+        <translation>Szachownica</translation>
+    </message>
+    <message>
+        <source>Colour...</source>
+        <translation>Kolor...</translation>
+    </message>
+    <message>
         <source>Preview</source>
         <translation>Podgląd</translation>
     </message>
