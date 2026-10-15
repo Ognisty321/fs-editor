@@ -480,6 +480,12 @@ void VisualTools::apply(const QString &tags, bool allSelected) {
     tab->changed(TabPanel::FromVideo);
 }
 
+// A \move's times, from the line's start: none means the whole line (libass)
+static std::pair<qint64, qint64> moveTimes(const fsb::Visual &v, const fsb::Row &r) {
+    if (v.t1 <= 0 && v.t2 <= 0) return {0, r.end - r.start};
+    return {v.t1, v.t2};
+}
+
 void VisualTools::toggleMove() {
     auto *tab = m_box->tab();
     auto &s = tab->s();
@@ -618,6 +624,14 @@ void VisualTools::paint(QPainter &p) {
         line(p, pos, end);
         handle(p, pos);
         handle(p, end, true, kAccent);
+        if (m_v.has_move) { // where the line is on this frame (Kainote)
+            const auto r = m_box->tab()->s().row(size_t(m_box->tab()->active()));
+            const auto [t1, t2] = moveTimes(m_v, r);
+            const double k = std::clamp(double(m_box->time() - r.start - t1) / double(std::max<qint64>(1, t2 - t1)), 0.0, 1.0);
+            p.setPen(Qt::NoPen);
+            p.setBrush(kAccent);
+            p.drawEllipse(pos + (end - pos) * k, 3, 3);
+        }
         break;
     }
     case Scale: {
@@ -924,7 +938,14 @@ bool VisualTools::move(QMouseEvent *e) {
         if (m_drag == 2) b = m_start.has_move || near(w(b), m_pressW, 9) ? b + delta : now;
         else a += delta;
         QString t = QString("\\move(%1,%2,%3,%4").arg(n2(a.x()), n2(a.y()), n2(b.x()), n2(b.y()));
-        if (m_start.t2 > m_start.t1) t += QString(",%1,%2").arg(m_start.t1).arg(m_start.t2);
+        qint64 t1 = m_start.t1, t2 = m_start.t2;
+        if (m_start.has_move) {
+            // the end dragged is where the line is at this frame: its time is the frame's (Aegisub)
+            const auto r = tab->s().row(size_t(tab->active()));
+            std::tie(t1, t2) = moveTimes(m_start, r);
+            (m_drag == 2 ? t2 : t1) = m_box->time() - r.start;
+        }
+        if (t2 > t1) t += QString(",%1,%2").arg(t1).arg(t2);
         apply(t + ")");
         break;
     }
@@ -971,8 +992,9 @@ bool VisualTools::move(QMouseEvent *e) {
         };
         if (m_tool == RotXY) {
             double frx = m_start.frx, fry = m_start.fry;
-            if (m_button != Qt::RightButton) fry = angle(m_start.fry + dw.x() * 0.5);
-            if (m_button != Qt::LeftButton) frx = angle(m_start.frx - dw.y() * 0.5);
+            // two degrees a pixel (Aegisub)
+            if (m_button != Qt::RightButton) fry = angle(m_start.fry + dw.x() * 2);
+            if (m_button != Qt::LeftButton) frx = angle(m_start.frx - dw.y() * 2);
             apply(QString("\\frx%1\\fry%2").arg(n2(frx), n2(fry)), true);
             break;
         }
