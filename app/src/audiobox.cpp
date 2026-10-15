@@ -989,8 +989,70 @@ void AudioBox::modifyLength(int steps, bool shiftFollowing) {
     karaokeChanged();
 }
 
-void AudioBox::keyPressEvent(QKeyEvent *e) {
+// Kainote's audio hotkeys and defaults: a second key is a command of its own ("alternative")
+static const AudioKey kAudioKeys[] = {
+    {"audioCommit", QT_TRANSLATE_NOOP("AudioBox", "Commit"), "Return"},
+    {"audioCommitAlt", QT_TRANSLATE_NOOP("AudioBox", "Commit (alternative)"), "G"},
+    {"audioCommitDefault", QT_TRANSLATE_NOOP("AudioBox", "Commit and use default timing for next line"), "Shift+G"},
+    {"audioPrev", QT_TRANSLATE_NOOP("AudioBox", "Previous line (syllable in karaoke)"), "Left"},
+    {"audioPrevAlt", QT_TRANSLATE_NOOP("AudioBox", "Previous line"), "Z"},
+    {"audioNext", QT_TRANSLATE_NOOP("AudioBox", "Next line (syllable in karaoke)"), "Right"},
+    {"audioNextAlt", QT_TRANSLATE_NOOP("AudioBox", "Next line"), "X"},
+    {"audioPlay", QT_TRANSLATE_NOOP("AudioBox", "Play (the syllable in karaoke)"), "Down"},
+    {"audioPlayAlt", QT_TRANSLATE_NOOP("AudioBox", "Play (alternative)"), "S"},
+    {"audioPlayLine", QT_TRANSLATE_NOOP("AudioBox", "Play line"), "Up"},
+    {"audioPlayLineAlt", QT_TRANSLATE_NOOP("AudioBox", "Play line (alternative)"), "R"},
+    {"audioStop", QT_TRANSLATE_NOOP("AudioBox", "Stop"), "H"},
+    {"audioGoTo", QT_TRANSLATE_NOOP("AudioBox", "Go to selection"), "B"},
+    {"audioScrollLeft", QT_TRANSLATE_NOOP("AudioBox", "Scroll left"), "A"},
+    {"audioScrollRight", QT_TRANSLATE_NOOP("AudioBox", "Scroll right"), "F"},
+    {"audioBeforeMark", QT_TRANSLATE_NOOP("AudioBox", "Play before mark"), "0"},
+    {"audioAfterMark", QT_TRANSLATE_NOOP("AudioBox", "Play after mark"), "."},
+    {"audioFirst500", QT_TRANSLATE_NOOP("AudioBox", "Play first 500 ms"), "E"},
+    {"audioLast500", QT_TRANSLATE_NOOP("AudioBox", "Play last 500 ms"), "D"},
+    {"audioBefore500", QT_TRANSLATE_NOOP("AudioBox", "Play 500 ms before"), "Q"},
+    {"audioAfter500", QT_TRANSLATE_NOOP("AudioBox", "Play 500 ms after"), "W"},
+    {"audioToEnd", QT_TRANSLATE_NOOP("AudioBox", "Play to end"), "T"},
+    {"audioLeadIn", QT_TRANSLATE_NOOP("AudioBox", "Add lead-in"), "C"},
+    {"audioLeadOut", QT_TRANSLATE_NOOP("AudioBox", "Add lead-out"), "V"},
+};
+
+std::span<const AudioKey> AudioBox::keys() { return kAudioKeys; }
+
+void AudioBox::runCommand(const QString &id) {
     const qint64 span = qint64(m_view->width() * m_msPerPx);
+    if (id == "audioCommit" || id == "audioCommitAlt") commitAndNext();
+    else if (id == "audioCommitDefault") commitAndNext(true);
+    else if (id == "audioPrev") m_karaoke ? stepSyllable(-1) : void(stepLine(-1));
+    else if (id == "audioPrevAlt") stepLine(-1);
+    else if (id == "audioNext") m_karaoke ? stepSyllable(1) : void(stepLine(1));
+    else if (id == "audioNextAlt") stepLine(1);
+    else if (id == "audioPlay" || id == "audioPlayAlt") {
+        if (m_karaoke && size_t(m_activeSyl) < m_syl.size()) play(m_syl[m_activeSyl].start, m_syl[m_activeSyl].end);
+        else playSelection();
+    } else if (id == "audioPlayLine" || id == "audioPlayLineAlt") playSelection();
+    else if (id == "audioStop") {
+        m_tab->video()->pause();
+        stop();
+    } else if (id == "audioGoTo") ensureVisible(m_selStart, m_selEnd);
+    else if (id == "audioScrollLeft") setLeft(m_left - span / 4);
+    else if (id == "audioScrollRight") setLeft(m_left + span / 4);
+    else if (id == "audioBeforeMark") {
+        if (m_mark >= 0) play(std::max<qint64>(0, m_mark - 1000), m_mark);
+    } else if (id == "audioAfterMark") {
+        if (m_mark >= 0) play(m_mark, m_mark + 1000);
+    } else if (id == "audioFirst500") play(m_selStart, std::min(m_selEnd, m_selStart + 500));
+    else if (id == "audioLast500") play(std::max(m_selStart, m_selEnd - 500), m_selEnd);
+    else if (id == "audioBefore500") play(std::max<qint64>(0, m_selStart - 500), m_selStart);
+    else if (id == "audioAfter500") play(m_selEnd, m_selEnd + 500);
+    else if (id == "audioToEnd") play(m_selStart, m_duration);
+    else if (id == "audioLeadIn")
+        setSelection(std::max<qint64>(0, m_selStart - QSettings().value("audio/leadIn", 200).toInt()), m_selEnd, false);
+    else if (id == "audioLeadOut")
+        setSelection(m_selStart, m_selEnd + QSettings().value("audio/leadOut", 300).toInt(), false);
+}
+
+void AudioBox::keyPressEvent(QKeyEvent *e) {
     if (e->modifiers() & Qt::KeypadModifier) {
         // Aegisub's numpad: 4/6 move the start, 7/9 the end, -/+ the end (Shift: and the following syllables)
         const bool shift = e->modifiers() & Qt::ShiftModifier;
@@ -1004,43 +1066,10 @@ void AudioBox::keyPressEvent(QKeyEvent *e) {
         default: break;
         }
     }
-    switch (e->key()) {
-    case Qt::Key_Return:
-    case Qt::Key_Enter:
-    case Qt::Key_G: commitAndNext(e->modifiers() & Qt::ShiftModifier); break;
-    case Qt::Key_Left: m_karaoke ? stepSyllable(-1) : void(stepLine(-1)); break;
-    case Qt::Key_Z: stepLine(-1); break;
-    case Qt::Key_Right: m_karaoke ? stepSyllable(1) : void(stepLine(1)); break;
-    case Qt::Key_X: stepLine(1); break;
-    case Qt::Key_Down:
-    case Qt::Key_S:
-        if (m_karaoke && size_t(m_activeSyl) < m_syl.size()) play(m_syl[m_activeSyl].start, m_syl[m_activeSyl].end);
-        else playSelection();
-        break;
-    case Qt::Key_Up:
-    case Qt::Key_R: playSelection(); break;
-    case Qt::Key_H:
-        m_tab->video()->pause();
-        stop();
-        break;
-    case Qt::Key_B: ensureVisible(m_selStart, m_selEnd); break;
-    case Qt::Key_A: setLeft(m_left - span / 4); break;
-    case Qt::Key_F: setLeft(m_left + span / 4); break;
-    case Qt::Key_0:
-        if (m_mark >= 0) play(std::max<qint64>(0, m_mark - 1000), m_mark);
-        break;
-    case Qt::Key_Period:
-        if (m_mark >= 0) play(m_mark, m_mark + 1000);
-        break;
-    case Qt::Key_E: play(m_selStart, std::min(m_selEnd, m_selStart + 500)); break;
-    case Qt::Key_D: play(std::max(m_selStart, m_selEnd - 500), m_selEnd); break;
-    case Qt::Key_Q: play(std::max<qint64>(0, m_selStart - 500), m_selStart); break;
-    case Qt::Key_W: play(m_selEnd, m_selEnd + 500); break;
-    case Qt::Key_T: play(m_selStart, m_duration); break;
-    case Qt::Key_C:
-        setSelection(std::max<qint64>(0, m_selStart - QSettings().value("audio/leadIn", 200).toInt()), m_selEnd, false);
-        break;
-    case Qt::Key_V: setSelection(m_selStart, m_selEnd + QSettings().value("audio/leadOut", 300).toInt(), false); break;
-    default: QWidget::keyPressEvent(e); return;
-    }
+    // the keys the hotkey editor gives the audio commands; the numpad's Enter is Enter
+    const auto key = Qt::Key(e->key() == Qt::Key_Enter ? Qt::Key_Return : e->key());
+    const QKeySequence pressed(QKeyCombination(e->modifiers() & ~Qt::KeypadModifier, key));
+    for (const auto &k : kAudioKeys)
+        if (auto *a = m_tab->main()->action(k.id); a && a->shortcut() == pressed) return runCommand(k.id);
+    QWidget::keyPressEvent(e);
 }

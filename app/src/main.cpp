@@ -250,6 +250,12 @@ int main(int argc, char **argv) {
                     for (int k = 1; k <= 4; ++k) send(QEvent::MouseMove, at(x1 + (x2 - x1) * k / 4), button);
                     send(QEvent::MouseButtonRelease, at(x2), Qt::NoButton);
                 }
+                // FSED_SMOKE_AUDIOKEY="Shift+G": that key pressed in the audio
+                if (const QKeySequence k(qEnvironmentVariable("FSED_SMOKE_AUDIOKEY")); !k.isEmpty()) {
+                    auto *view = w.current()->audio()->findChild<AudioView *>();
+                    QKeyEvent e(QEvent::KeyPress, k[0].key(), k[0].keyboardModifiers());
+                    QApplication::sendEvent(view, &e);
+                }
                 // FSED_SMOKE_DRAG="x1,y1,x2,y2": a left-button drag on the video, in view fractions 0..1
                 const QStringList d = qEnvironmentVariable("FSED_SMOKE_DRAG").split(',');
                 if (d.size() != 4) return;

@@ -1093,6 +1093,16 @@ void MainWindow::buildMenus() {
     });
     add("blankAudio", tr("Open blank 2h30m audio"), {}, audio, [=] { tab()->openBlankAudio(150LL * 60 * 1000); });
     add("closeAudio", tr("Close audio"), {}, audio, [=] { tab()->closeAudio(); });
+    // the audio's own keys, which work while it has the keyboard (Kainote's audio hotkeys): listed
+    // here and in the hotkey editor, where they take other keys
+    auto *timingKeys = sub(audio, tr("Timing keys"));
+    for (const auto &k : AudioBox::keys()) {
+        auto *a = add(k.id, QCoreApplication::translate("AudioBox", k.name), QKeySequence(k.key), timingKeys,
+                      [=] { tab()->audio()->runCommand(k.id); });
+        a->setShortcutContext(Qt::WidgetShortcut); // not the window's: G and the arrows are typed elsewhere
+        removeAction(a);
+        a->setProperty("context", "audio");
+    }
     // Aegisub's audio/save/clip: from the earliest start to the latest end of the selected lines
     add("saveAudioClip", tr("Save audio clip..."), {}, audio, [=, this] {
         auto *a = tab()->audio()->source();
@@ -1724,7 +1734,8 @@ bool MainWindow::setHotkey(QAction *a, const QKeySequence &key) {
     };
     if (!key.isEmpty())
         for (auto *other : std::as_const(m_actions)) {
-            if (other == a || other->shortcut() != key) continue;
+            // the audio's keys and the window's are apart
+            if (other == a || other->shortcut() != key || other->property("context") != a->property("context")) continue;
             if (!confirm(tr("%1 is used by \"%2\". Take it over?").arg(key.toString(), QString(other->text()).remove('&'))))
                 return false;
             other->setShortcut({});

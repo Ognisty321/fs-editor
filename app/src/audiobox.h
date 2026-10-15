@@ -3,6 +3,8 @@
 // zoom/volume sliders and the 23-button row.
 #pragma once
 
+#include <span>
+
 #include "bridge.h"
 #include "rhiquad.h"
 
@@ -56,10 +58,18 @@ private:
     int m_hoverX = -1;
 };
 
+// A command of the audio's own keys (Kainote's audio hotkeys): the hotkey editor lists them, and
+// they run while the audio has the keyboard
+struct AudioKey {
+    const char *id, *name, *key; // name: translated in the AudioBox context
+};
+
 class AudioBox : public QWidget {
     Q_OBJECT
     friend class AudioView;
 public:
+    static std::span<const AudioKey> keys();
+    void runCommand(const QString &id);
     explicit AudioBox(TabPanel *tab);
     ~AudioBox() override;
 

@@ -186,6 +186,98 @@
         <source>Loading audio %1… %2%</source>
         <translation>Wczytywanie audio %1… %2%</translation>
     </message>
+    <message>
+        <source>Commit</source>
+        <translation>Zatwierdź</translation>
+    </message>
+    <message>
+        <source>Commit (alternative)</source>
+        <translation>Zatwierdź (zastępczo)</translation>
+    </message>
+    <message>
+        <source>Commit and use default timing for next line</source>
+        <translation>Zatwierdź i ustaw domyślny czas następnej linii</translation>
+    </message>
+    <message>
+        <source>Previous line (syllable in karaoke)</source>
+        <translation>Poprzednia linijka (sylaba w karaoke)</translation>
+    </message>
+    <message>
+        <source>Previous line</source>
+        <translation>Poprzednia linijka</translation>
+    </message>
+    <message>
+        <source>Next line (syllable in karaoke)</source>
+        <translation>Następna linijka (sylaba w karaoke)</translation>
+    </message>
+    <message>
+        <source>Next line</source>
+        <translation>Następna linijka</translation>
+    </message>
+    <message>
+        <source>Play (the syllable in karaoke)</source>
+        <translation>Odtwarzaj (sylabę w karaoke)</translation>
+    </message>
+    <message>
+        <source>Play (alternative)</source>
+        <translation>Odtwarzaj (zastępczo)</translation>
+    </message>
+    <message>
+        <source>Play line</source>
+        <translation>Odtwarzaj linię</translation>
+    </message>
+    <message>
+        <source>Play line (alternative)</source>
+        <translation>Odtwarzaj linię (zastępczo)</translation>
+    </message>
+    <message>
+        <source>Stop</source>
+        <translation>Zatrzymaj</translation>
+    </message>
+    <message>
+        <source>Scroll left</source>
+        <translation>Przewiń w lewo</translation>
+    </message>
+    <message>
+        <source>Scroll right</source>
+        <translation>Przewiń w prawo</translation>
+    </message>
+    <message>
+        <source>Play before mark</source>
+        <translation>Odtwarzaj przed znacznikiem</translation>
+    </message>
+    <message>
+        <source>Play after mark</source>
+        <translation>Odtwarzaj po znaczniku</translation>
+    </message>
+    <message>
+        <source>Play first 500 ms</source>
+        <translation>Odtwarzaj pierwsze 500 ms</translation>
+    </message>
+    <message>
+        <source>Play last 500 ms</source>
+        <translation>Odtwarzaj końcowe 500 ms</translation>
+    </message>
+    <message>
+        <source>Play 500 ms before</source>
+        <translation>Odtwarzaj 500 ms przed</translation>
+    </message>
+    <message>
+        <source>Play 500 ms after</source>
+        <translation>Odtwarzaj 500 ms po</translation>
+    </message>
+    <message>
+        <source>Play to end</source>
+        <translation>Odtwarzaj do końca</translation>
+    </message>
+    <message>
+        <source>Add lead-in</source>
+        <translation>Dodaj wstęp</translation>
+    </message>
+    <message>
+        <source>Add lead-out</source>
+        <translation>Dodaj zakończenie</translation>
+    </message>
 </context>
 <context>
     <name>AudioView</name>
@@ -1638,6 +1730,10 @@ Dekoder: BestSource</translation>
     <message>
         <source>Close audio</source>
         <translation>Zamknij audio</translation>
+    </message>
+    <message>
+        <source>Timing keys</source>
+        <translation>Klawisze timingu</translation>
     </message>
     <message>
         <source>Save audio clip...</source>
