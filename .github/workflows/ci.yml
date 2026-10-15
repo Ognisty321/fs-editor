@@ -50,13 +50,20 @@ jobs:
       FS_DEPS_ROOT: ${{ github.workspace }}/../deps
     steps:
       - uses: actions/checkout@v7
-      # vcpkg binary packages, so FFmpeg is only compiled when vcpkg.json or the overlay ports change
+      # The runner image is in the key: a new image can bring a new compiler, which changes every
+      # package's ABI, and an exact key hit would never save the rebuilt packages.
+      - name: Runner image
+        id: image
+        shell: bash
+        run: echo "version=${ImageOS:-local}-${ImageVersion:-0}" >> "$GITHUB_OUTPUT"
+      # vcpkg binary packages, so FFmpeg is only compiled when vcpkg.json, the overlay ports or the
+      # compiler change
       - uses: actions/cache/restore@v6
         id: vcpkg-cache
         with:
           # actions/cache rejects paths with '..', so the binary cache lives in runner.temp
           path: ${{ runner.temp }}/vcpkg-bin
-          key: vcpkg-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'tools/vcpkg-ports/**') }}
+          key: vcpkg-${{ matrix.triplet }}-${{ steps.image.outputs.version }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'tools/vcpkg-ports/**') }}
           restore-keys: vcpkg-${{ matrix.triplet }}-
       - name: Binary cache dir
         shell: bash
@@ -91,12 +98,27 @@ jobs:
       - name: Media dependencies (Unix)
         if: runner.os != 'Windows'
         run: TRIPLET=${{ matrix.triplet }} tools/deps.sh
+      # Keep only the packages this build installed (an archive is named by the SHA-256 of the
+      # package's vcpkg_abi_info.txt), so stale ones from an older restore are not saved again.
+      # Nothing is deleted unless at least one archive matches.
+      - name: Prune binary cache
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          keep=$(for f in "$FS_DEPS_ROOT"/installed/*/share/*/vcpkg_abi_info.txt; do sha256sum "$f" | cut -c1-64; done)
+          all=$(find "$RUNNER_TEMP/vcpkg-bin" -name '*.zip')
+          if grep -qFf <(sed 's/$/.zip/' <<<"$keep") <<<"$all"; then
+            while read -r z; do
+              grep -qxF "$(basename "$z" .zip)" <<<"$keep" || rm -f "$z"
+            done <<<"$all"
+          fi
+          echo "kept $(find "$RUNNER_TEMP/vcpkg-bin" -name '*.zip' | wc -l) of $(wc -l <<<"$all") archives"
       # saved right after the deps build, so a later failing step does not throw it away
       - uses: actions/cache/save@v6
         if: steps.vcpkg-cache.outputs.cache-hit != 'true'
         with:
           path: ${{ runner.temp }}/vcpkg-bin
-          key: vcpkg-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'tools/vcpkg-ports/**') }}
+          key: vcpkg-${{ matrix.triplet }}-${{ steps.image.outputs.version }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'tools/vcpkg-ports/**') }}
       - name: Media tests
         shell: bash
         run: cargo test --locked -p fs-media -p fs-bridge
