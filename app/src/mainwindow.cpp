@@ -1350,7 +1350,6 @@ void MainWindow::buildToolbar() {
         });
         m_toolbar->addWidget(more);
     };
-    // shortcut: toolbar buttons are not reorderable by drag; edit toolbar/ids order when needed.
     rebuild();
     addToolBar(areas[std::clamp(QSettings().value("toolbar/alignment", 0).toInt(), 0, 3)], m_toolbar);
 }
@@ -1667,6 +1666,27 @@ bool MainWindow::eventFilter(QObject *o, QEvent *e) {
             return true;
         }
     }
+    // a toolbar button dragged onto another takes its place (Kainote); menu buttons open on press
+    if ((e->type() == QEvent::MouseMove || e->type() == QEvent::MouseButtonRelease) && m_toolbar &&
+        o->parent() == m_toolbar)
+        if (auto *src = qobject_cast<QToolButton *>(o); src && src->defaultAction()) {
+            auto *me = static_cast<QMouseEvent *>(e);
+            auto *dst = qobject_cast<QToolButton *>(QApplication::widgetAt(me->globalPosition().toPoint()));
+            const bool onOther = dst && dst != src && dst->parent() == m_toolbar && dst->defaultAction();
+            if (e->type() == QEvent::MouseMove && (me->buttons() & Qt::LeftButton)) {
+                src->setCursor(onOther ? Qt::DragMoveCursor : Qt::ArrowCursor);
+            } else if (e->type() == QEvent::MouseButtonRelease && me->button() == Qt::LeftButton) {
+                src->unsetCursor();
+                QStringList l = QSettings().value("toolbar/ids", kToolbarDefault).toStringList();
+                const int from = l.indexOf(m_actions.key(src->defaultAction()));
+                const int to = onOther ? l.indexOf(m_actions.key(dst->defaultAction())) : -1;
+                if (from >= 0 && to >= 0) {
+                    l.move(from, to);
+                    QSettings().setValue("toolbar/ids", l);
+                    QTimer::singleShot(0, this, [this] { buildToolbar(); });
+                }
+            }
+        }
     // a click in the split view's right half makes that tab active (the sides swap)
     if (e->type() == QEvent::MouseButtonPress && m_second)
         if (auto *w = qobject_cast<QWidget *>(o); w && m_second->isAncestorOf(w))
