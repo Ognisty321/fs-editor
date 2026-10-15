@@ -911,6 +911,7 @@ void VideoBox::request() {
 void VideoBox::loadScript(bool shownFrameOnly) {
     auto script = m_tab->s().script_for_render(m_tab->hideOriginal(), shownFrameOnly ? time() : -1);
     std::lock_guard g(m_media->m);
+    if (m_media->renderer) (*m_media->renderer)->sync_fonts(m_tab->s()); // decoded only when they changed
     m_media->script = std::move(script);
     m_media->scriptDirty = true;
     m_scriptAt = shownFrameOnly ? m_frame : -1;

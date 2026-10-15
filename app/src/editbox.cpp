@@ -1112,6 +1112,23 @@ std::pair<int, int> EditBox::textSelection(bool original) const {
     return {c.selectionStart(), c.selectionEnd()};
 }
 
+void EditBox::scriptCursor(int64_t &cursor, int64_t &start, int64_t &end) const {
+    const QTextCursor c = m_text->textCursor();
+    const QString t = m_text->toPlainText();
+    auto bytes = [&t](int pos) { return int64_t(t.left(pos).toUtf8().size()) + 1; };
+    std::tie(cursor, start, end) = std::tuple(bytes(c.position()), bytes(c.selectionStart()), bytes(c.selectionEnd()));
+}
+
+void EditBox::setScriptCursor(int64_t cursor, int64_t start, int64_t end) {
+    const QByteArray u = m_text->toPlainText().toUtf8();
+    auto pos = [&u](int64_t b) { return int(QString::fromUtf8(u.left(qsizetype(std::clamp<int64_t>(b - 1, 0, u.size())))).size()); };
+    const int caret = pos(cursor), a = pos(start), b = pos(end);
+    QTextCursor c(m_text->document());
+    c.setPosition(caret == a ? b : a); // the anchor at the selection's other end
+    c.setPosition(caret, QTextCursor::KeepAnchor);
+    m_text->setTextCursor(c);
+}
+
 QString EditBox::selectedText(bool original) const { return (original ? m_original : m_text)->textCursor().selectedText(); }
 
 void EditBox::nextLine() {

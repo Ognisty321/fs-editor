@@ -1248,6 +1248,62 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Eksportuj napisy</translation>
     </message>
     <message>
+        <source>From video (%1)</source>
+        <translation>Z wideo (%1)</translation>
+    </message>
+    <message>
+        <source>15.000 FPS</source>
+        <translation>15,000 kl/s</translation>
+    </message>
+    <message>
+        <source>23.976 FPS (Decimated NTSC)</source>
+        <translation>23,976 kl/s (zdecymowane NTSC)</translation>
+    </message>
+    <message>
+        <source>24.000 FPS (FILM)</source>
+        <translation>24,000 kl/s (FILM)</translation>
+    </message>
+    <message>
+        <source>25.000 FPS (PAL)</source>
+        <translation>25,000 kl/s (PAL)</translation>
+    </message>
+    <message>
+        <source>29.970 FPS (NTSC)</source>
+        <translation>29,970 kl/s (NTSC)</translation>
+    </message>
+    <message>
+        <source>29.970 FPS (NTSC with SMPTE dropframe)</source>
+        <translation>29,970 kl/s (NTSC z pomijaniem klatek SMPTE)</translation>
+    </message>
+    <message>
+        <source>30.000 FPS</source>
+        <translation>30,000 kl/s</translation>
+    </message>
+    <message>
+        <source>50.000 FPS (PAL x2)</source>
+        <translation>50,000 kl/s (PAL x2)</translation>
+    </message>
+    <message>
+        <source>59.940 FPS (NTSC x2)</source>
+        <translation>59,940 kl/s (NTSC x2)</translation>
+    </message>
+    <message>
+        <source>60.000 FPS</source>
+        <translation>60,000 kl/s</translation>
+    </message>
+    <message>
+        <source>119.880 FPS (NTSC x4)</source>
+        <translation>119,880 kl/s (NTSC x4)</translation>
+    </message>
+    <message>
+        <source>120.000 FPS</source>
+        <translation>120,000 kl/s</translation>
+    </message>
+    <message>
+        <source>Please choose the appropriate FPS for the subtitles:</source>
+        <translation>Wybierz liczbę klatek na sekundę napisów:</translation>
+    </message>
+    <message>
         <source>Exported %1</source>
         <translation>Wyeksportowano %1</translation>
     </message>
@@ -1630,8 +1686,140 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Wysokość</translation>
     </message>
     <message>
+        <source>Export to EBU STL format</source>
+        <translation>Eksport do formatu EBU STL</translation>
+    </message>
+    <message>
+        <source>23.976 fps (non-standard, STL24.01)</source>
+        <translation>23,976 kl/s (niestandardowe, STL24.01)</translation>
+    </message>
+    <message>
+        <source>24 fps (non-standard, STL24.01)</source>
+        <translation>24 kl/s (niestandardowe, STL24.01)</translation>
+    </message>
+    <message>
+        <source>25 fps (STL25.01)</source>
+        <translation>25 kl/s (STL25.01)</translation>
+    </message>
+    <message>
+        <source>29.97 fps (non-dropframe, STL30.01)</source>
+        <translation>29,97 kl/s (bez pomijania klatek, STL30.01)</translation>
+    </message>
+    <message>
+        <source>29.97 fps (dropframe, STL30.01)</source>
+        <translation>29,97 kl/s (z pomijaniem klatek, STL30.01)</translation>
+    </message>
+    <message>
+        <source>30 fps (STL30.01)</source>
+        <translation>30 kl/s (STL30.01)</translation>
+    </message>
+    <message>
+        <source>ISO 6937-2 (Latin/Western Europe)</source>
+        <translation>ISO 6937-2 (łaciński, Europa Zachodnia)</translation>
+    </message>
+    <message>
+        <source>ISO 8859-5 (Cyrillic)</source>
+        <translation>ISO 8859-5 (cyrylica)</translation>
+    </message>
+    <message>
+        <source>ISO 8859-6 (Arabic)</source>
+        <translation>ISO 8859-6 (arabski)</translation>
+    </message>
+    <message>
+        <source>ISO 8859-7 (Greek)</source>
+        <translation>ISO 8859-7 (grecki)</translation>
+    </message>
+    <message>
+        <source>ISO 8859-8 (Hebrew)</source>
+        <translation>ISO 8859-8 (hebrajski)</translation>
+    </message>
+    <message>
+        <source>UTF-8 Unicode (non-standard)</source>
+        <translation>UTF-8 Unicode (niestandardowe)</translation>
+    </message>
+    <message>
+        <source>Automatically wrap long lines (ASS)</source>
+        <translation>Automatycznie zawijaj długie linie (ASS)</translation>
+    </message>
+    <message>
+        <source>Automatically wrap long lines (Balanced)</source>
+        <translation>Automatycznie zawijaj długie linie (równo)</translation>
+    </message>
+    <message>
+        <source>Abort if any lines are too long</source>
+        <translation>Przerwij, jeśli jakaś linia jest za długa</translation>
+    </message>
+    <message>
+        <source>Skip lines that are too long</source>
+        <translation>Pomiń za długie linie</translation>
+    </message>
+    <message>
+        <source>Translate alignments</source>
+        <translation>Przenoś wyrównanie</translation>
+    </message>
+    <message>
+        <source>Out-times are inclusive</source>
+        <translation>Czasy końca włącznie</translation>
+    </message>
+    <message>
+        <source>Level-1 teletext</source>
+        <translation>Telegazeta poziomu 1</translation>
+    </message>
+    <message>
+        <source>Level-2 teletext</source>
+        <translation>Telegazeta poziomu 2</translation>
+    </message>
+    <message>
+        <source>Open captions</source>
+        <translation>Napisy otwarte</translation>
+    </message>
+    <message>
+        <source>TV standard:</source>
+        <translation>Standard TV:</translation>
+    </message>
+    <message>
+        <source>Line wrapping:</source>
+        <translation>Zawijanie linii:</translation>
+    </message>
+    <message>
+        <source>Max. line length:</source>
+        <translation>Maks. długość linii:</translation>
+    </message>
+    <message>
+        <source>Time code offset:</source>
+        <translation>Przesunięcie kodu czasowego:</translation>
+    </message>
+    <message>
+        <source>Display standard:</source>
+        <translation>Standard wyświetlania:</translation>
+    </message>
+    <message>
         <source>FPS</source>
         <translation>FPS</translation>
+    </message>
+    <message>
+        <source>Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt)</source>
+        <translation>Napisy (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt)</translation>
+    </message>
+    <message>
+        <source>MPEG-4 Streaming Text (*.ttxt)</source>
+        <translation>Tekst strumieniowy MPEG-4 (*.ttxt)</translation>
+    </message>
+    <message>
+        <source>Adobe Encore (*.encore.txt)</source>
+        <translation>Adobe Encore (*.encore.txt)</translation>
+    </message>
+    <message>
+        <source>TranStation (*.transtation.txt)</source>
+        <translation>TranStation (*.transtation.txt)</translation>
+    </message>
+    <message>
+        <source>EBU subtitling data exchange format, EBU tech 3264 (*.stl)</source>
+        <translation>Format wymiany napisów EBU, EBU tech 3264 (*.stl)</translation>
+    </message>
+    <message>
+        <source>All files (*)</source>
+        <translation>Wszystkie pliki (*)</translation>
     </message>
     <message>
         <source>Duration</source>
@@ -2699,10 +2887,6 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>FS Editor nie został ostatnio poprawnie zamknięty. Otworzyć któreś z automatycznie zapisanych napisów?</translation>
     </message>
     <message>
-        <source>Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp);;All files (*)</source>
-        <translation>Napisy (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp);;Wszystkie pliki (*)</translation>
-    </message>
-    <message>
         <source>Milliseconds</source>
         <translation>Milisekundy</translation>
     </message>
@@ -2713,6 +2897,14 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Cancel</source>
         <translation>Anuluj</translation>
+    </message>
+    <message>
+        <source>Stop script</source>
+        <translation>Zatrzymaj skrypt</translation>
+    </message>
+    <message>
+        <source>Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt);;All files (*)</source>
+        <translation>Napisy (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt);;Wszystkie pliki (*)</translation>
     </message>
 </context>
 <context>

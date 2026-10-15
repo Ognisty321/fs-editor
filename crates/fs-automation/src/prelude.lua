@@ -29,6 +29,11 @@ dofile = nil
 loadfile = nil
 
 local function join(dir, name)
+  -- std::filesystem's dir / name: an absolute name replaces dir, a rooted one keeps its drive
+  if name:match('^%a:[/\\]') or name:match('^[/\\][/\\]') then return name end
+  if name:match('^[/\\]') then
+    return is_windows and (dir:match('^%a:') or '') .. name or name
+  end
   local last = dir:sub(-1)
   if last == '/' or last == '\\' then return dir .. name end
   return dir .. '/' .. name

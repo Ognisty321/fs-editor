@@ -1,7 +1,9 @@
-//! Subtitle file formats: loading and saving ASS/SSA, SRT, MPL2, MicroDVD and
-//! TMP with encoding detection.
+//! Subtitle file formats: loading and saving ASS/SSA, SRT, MPL2, MicroDVD, TMP and TTXT with
+//! encoding detection, and Aegisub's export-only Encore, TranStation and EBU STL.
 
+mod ebu_tables;
 pub mod encoding;
+pub mod export;
 pub mod markup;
 pub mod simple;
 
@@ -22,16 +24,19 @@ pub enum Format {
     Mpl2,
     MicroDvd,
     Tmp,
+    /// MPEG-4 Timed Text (`.ttxt`).
+    Ttxt,
 }
 
 impl Format {
-    pub const ALL: [Format; 6] = [
+    pub const ALL: [Format; 7] = [
         Format::Ass,
         Format::Ssa,
         Format::Srt,
         Format::Mpl2,
         Format::MicroDvd,
         Format::Tmp,
+        Format::Ttxt,
     ];
 
     pub fn name(self) -> &'static str {
@@ -42,6 +47,7 @@ impl Format {
             Format::Mpl2 => "MPL2",
             Format::MicroDvd => "MicroDVD",
             Format::Tmp => "TMP",
+            Format::Ttxt => "TTXT",
         }
     }
 
@@ -52,6 +58,7 @@ impl Format {
             Format::Srt => "srt",
             Format::Mpl2 | Format::Tmp => "txt",
             Format::MicroDvd => "sub",
+            Format::Ttxt => "ttxt",
         }
     }
 
@@ -63,6 +70,7 @@ impl Format {
             "mpl2" | "mpl" => Format::Mpl2,
             "microdvd" | "mdvd" | "sub" => Format::MicroDvd,
             "tmp" | "tmplayer" => Format::Tmp,
+            "ttxt" => Format::Ttxt,
             _ => return None,
         })
     }
@@ -104,6 +112,9 @@ pub fn detect_format(text: &str, ext: Option<&str>) -> Option<Format> {
                 .lines()
                 .any(|l| l.trim().eq_ignore_ascii_case("ScriptType: v4.00"));
         return Some(if ssa { Format::Ssa } else { Format::Ass });
+    }
+    if sample.iter().take(3).any(|l| l.starts_with("<TextStream")) {
+        return Some(Format::Ttxt);
     }
     if sample.iter().any(|l| l.contains("-->")) {
         return Some(Format::Srt);
@@ -226,6 +237,10 @@ pub fn load_bytes(bytes: &[u8], ext: Option<&str>, opts: &LoadOptions) -> Result
         }
         Format::Tmp => (
             from_subs(simple::parse_tmp(&text, opts.tmp_max_duration)),
+            Vec::new(),
+        ),
+        Format::Ttxt => (
+            from_subs(export::parse_ttxt(&text).ok_or(Error::UnknownFormat)?),
             Vec::new(),
         ),
     };
@@ -384,6 +399,8 @@ pub struct SaveOptions {
     pub fps: Framerate,
     /// Write the `{1}{1}fps` header in MicroDVD.
     pub microdvd_fps_header: bool,
+    /// How long the last TTXT line shows (Aegisub's default line duration).
+    pub default_duration: Time,
 }
 
 impl Default for SaveOptions {
@@ -393,6 +410,7 @@ impl Default for SaveOptions {
             bom: true,
             fps: Framerate::from_rational(24000, 1001, true).unwrap(),
             microdvd_fps_header: true,
+            default_duration: Time(3000),
         }
     }
 }
@@ -418,6 +436,7 @@ fn save_text(doc: &Document, format: Format, opts: &SaveOptions) -> String {
             simple::write_microdvd(&to_subs(doc), &opts.fps, opts.microdvd_fps_header)
         }
         Format::Tmp => simple::write_tmp(&to_subs(doc)),
+        Format::Ttxt => export::write_ttxt(doc, opts.default_duration),
     }
 }
 
@@ -471,6 +490,7 @@ fn read_back(doc: &Document, format: Format, opts: &SaveOptions) -> Vec<Sub> {
         Format::Srt => simple::parse_srt(&text),
         Format::Mpl2 => simple::parse_mpl2(&text),
         Format::MicroDvd => simple::parse_microdvd(&text, &opts.fps).0,
+        Format::Ttxt => export::parse_ttxt(&text).unwrap_or_default(),
         _ => simple::parse_tmp(&text, LoadOptions::default().tmp_max_duration),
     }
 }

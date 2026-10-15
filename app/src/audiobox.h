@@ -81,6 +81,7 @@ public:
     qint64 positionMs() const;
     void setVolume(float v);
     qint64 markTime() const { return m_mark; }
+    std::pair<qint64, qint64> selection() const { return {m_selStart, m_selEnd}; }
     void centerOn(qint64 ms);
     void setMark(qint64 ms);
 

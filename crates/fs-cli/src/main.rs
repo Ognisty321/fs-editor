@@ -361,6 +361,7 @@ enum FormatArg {
     Mpl2,
     Microdvd,
     Tmp,
+    Ttxt,
 }
 
 impl From<FormatArg> for Format {
@@ -372,6 +373,7 @@ impl From<FormatArg> for Format {
             FormatArg::Mpl2 => Format::Mpl2,
             FormatArg::Microdvd => Format::MicroDvd,
             FormatArg::Tmp => Format::Tmp,
+            FormatArg::Ttxt => Format::Ttxt,
         }
     }
 }
@@ -819,6 +821,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
                         "ssa" => Format::Ssa,
                         "srt" => Format::Srt,
                         "sub" => Format::MicroDvd,
+                        "ttxt" => Format::Ttxt,
                         _ => bail!(
                             "cannot infer output format from '{}'; pass --to",
                             output.display()

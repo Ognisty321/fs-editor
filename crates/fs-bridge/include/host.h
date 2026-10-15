@@ -22,6 +22,10 @@ public:
     virtual void task(rust::Str text) const = 0;
     virtual void title(rust::Str text) const = 0;
     virtual bool is_cancelled() const = 0;
+    virtual void status_text(rust::Str text) const = 0;
+    // Empty = no text on the clipboard.
+    virtual rust::String clipboard_get() const = 0;
+    virtual bool clipboard_set(rust::Str text) const = 0;
 };
 
 // Progress of a long open (indexing, decoding), called on the opening thread; false cancels.

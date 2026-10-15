@@ -8,7 +8,7 @@ cargo run --release -p fs-cli -- <polecenie> [opcje]
 
 ## Zasady wspólne
 
-* **Formaty wejścia** są wykrywane po treści i rozszerzeniu: ASS, SSA, SRT, MPL2, MicroDVD i TMP.
+* **Formaty wejścia** są wykrywane po treści i rozszerzeniu: ASS, SSA, SRT, MPL2, MicroDVD, TMP i TTXT (MPEG-4 Timed Text).
   * `--format` wymusza format.
   * `--encoding` wymusza kodowanie, np. `windows-1250`.
   * `--input-fps` podaje FPS dla MicroDVD bez nagłówka; domyślnie 23.976.

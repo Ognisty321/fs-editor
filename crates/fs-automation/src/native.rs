@@ -189,7 +189,9 @@ extern "C" fn re_get_match(m: *mut Match, idx: size_t) -> *mut c_int {
     let m = unsafe { &mut *m };
     match m.groups.get(idx).copied().flatten() {
         Some((a, b)) => {
-            m.range = [(a - m.start + 1) as c_int, (b - m.start) as c_int];
+            // signed: a group matched in a lookbehind can start before the search start
+            let rel = |x: usize| (x as i64 - m.start as i64) as c_int;
+            m.range = [rel(a) + 1, rel(b)];
             m.range.as_mut_ptr()
         }
         None => std::ptr::null_mut(),

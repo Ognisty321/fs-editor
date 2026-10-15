@@ -165,8 +165,10 @@ public:
 
     /// Default font family and an optional extra fonts directory.
     void set_fonts(const std::string &default_family, const std::filesystem::path &fonts_dir = {});
-    /// Register a font (e.g. a Matroska attachment).
+    /// Register a font (e.g. a Matroska attachment); seen after refresh_fonts().
     void add_font(const std::string &name, std::span<const uint8_t> data);
+    /// Rebuild the font selection with the fonts added so far.
+    void refresh_fonts();
     /// Replace the script (UTF-8 ASS text).
     void set_script(std::string_view ass);
     bool has_script() const { return track_ != nullptr; }

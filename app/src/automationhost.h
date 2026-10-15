@@ -1,12 +1,17 @@
-// Qt side of Automation 4: aegisub.dialog.display/open/save and the progress window. A macro
-// calls it from its worker thread; every Qt call is taken over to the GUI thread.
+// Qt side of Automation 4: aegisub.dialog.display/open/save, the clipboard, the status bar and the
+// progress window. A script calls it from its worker thread; every Qt call is taken over to the GUI
+// thread.
 #pragma once
 
 #include "bridge.h"
 
 #include <QPointer>
+#include <QString>
 
 #include <atomic>
+#include <functional>
+#include <mutex>
+#include <optional>
 
 class QWidget;
 class QProgressDialog;
@@ -25,16 +30,36 @@ public:
     void task(rust::Str text) const override;
     void title(rust::Str text) const override;
     bool is_cancelled() const override;
+    void status_text(rust::Str text) const override;
+    rust::String clipboard_get() const override;
+    bool clipboard_set(rust::Str text) const override;
 
-    // Around a macro run: begin() clears the cancel flag, showProgress() puts the window up for a
+    // Around a script run: begin() clears the cancel flag, showProgress() puts the window up for a
     // run that takes a while, finish() closes it.
     void begin() const;
     void showProgress() const;
     void finish() const;
 
+    // aegisub.set_status_text, on the GUI thread.
+    std::function<void(const QString &)> onStatus;
+    // The progress window's second Cancel: stop a script that never checks for it.
+    std::function<void()> onStop;
+
 private:
+    // What the script last set, shown by one queued update however often it is set.
+    struct Pending {
+        int value = -1;
+        std::optional<QString> task, title;
+        bool queued = false;
+    };
+    template <class F> void queue(F set) const;
+    void flush() const;
     QProgressDialog *bar() const;
+
     QWidget *m_parent;
     mutable QPointer<QProgressDialog> m_progress;
     mutable std::atomic<bool> m_cancelled{false};
+    mutable bool m_running = false; // GUI thread: between begin() and finish()
+    mutable std::mutex m_mx;
+    mutable Pending m_pending;
 };

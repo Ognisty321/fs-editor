@@ -1,33 +1,37 @@
-//! Automation 4 scripts for the GUI: autoload, the macro list and running a
-//! macro on a session (each script undo point becomes an undo step).
+//! Automation 4 scripts for the GUI: autoload, the macro list, running a
+//! macro on a session (each script undo point becomes an undo step) and
+//! export filters. Scripts run on a worker thread (`run_script_job`).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use cxx::UniquePtr;
 use fs_automation::{
-    Context, Dialog, DialogControl, DialogResult, DialogValue, Env, Host, MacroOutcome, Paths,
-    RunError, Script, VideoFrame,
+    Clipboard, Context, Dialog, DialogControl, DialogResult, DialogValue, EditState, Env, Host,
+    Interrupt, MacroOutcome, Paths, RunError, Script, VideoFrame,
 };
 use fs_core::Document;
 
 use crate::Session;
 use crate::ffi::{
-    AutomationHost, DialogControlData, DialogData, MacroItem, MacroResult, ScriptItem,
+    AutomationHost, DialogControlData, DialogData, ExportSpec, MacroContext, MacroItem,
+    MacroResult, ScriptItem,
 };
 use crate::media::{Renderer, Video};
 
 struct CppHost(UniquePtr<AutomationHost>);
-// SAFETY: a macro calls the host from its worker thread (`run_macro_job`); the C++ host takes
+// SAFETY: a script calls the host from its worker thread (`run_script_job`); the C++ host takes
 // every Qt call over to the GUI thread itself.
 unsafe impl Send for CppHost {}
 unsafe impl Sync for CppHost {}
 
 #[derive(Default)]
 struct GuiHost {
-    cpp: Mutex<Option<CppHost>>,
+    cpp: Mutex<Option<Arc<CppHost>>>,
     log: Mutex<String>,
     frames: Mutex<Frames>,
+    /// The script a job is running, for `stop_script`.
+    running: Mutex<Option<Interrupt>>,
 }
 
 /// Source for `aegisub.get_frame`: the tab's video, opened on first use
@@ -36,17 +40,18 @@ struct GuiHost {
 struct Frames {
     cache_dir: String,
     path: String,
-    script: String,
+    /// The subtitles of the run, given to libass on the first frame asked for with them.
+    doc: Option<Document>,
     video: Option<Video>,
     renderer: Option<Renderer>,
 }
 
 impl Frames {
-    fn set(&mut self, path: &str, script: String) {
+    fn set(&mut self, path: &str, doc: Document) {
         if path != self.path {
             (self.path, self.video, self.renderer) = (path.to_owned(), None, None);
         }
-        self.script = script;
+        self.doc = Some(doc);
     }
 
     fn frame(&mut self, n: i64, with_subtitles: bool) -> Option<VideoFrame> {
@@ -71,7 +76,11 @@ impl Frames {
                 self.renderer = Some(r);
             }
             let r = self.renderer.as_mut()?;
-            r.set_script(&self.script).ok()?;
+            // once per run: the subtitles cannot change while the script runs
+            if let Some(doc) = self.doc.take() {
+                r.add_script_fonts(&doc);
+                r.set_script(&crate::session::render_script(doc)).ok()?;
+            }
             r.blend(v.ms_at_frame(n), w, h, w, h, &mut data).ok()?;
         }
         for px in data.as_chunks_mut::<4>().0 {
@@ -89,8 +98,24 @@ impl Frames {
 
 impl GuiHost {
     fn with<R>(&self, f: impl FnOnce(&AutomationHost) -> R) -> Option<R> {
-        let g = self.cpp.lock().unwrap_or_else(|e| e.into_inner());
-        g.as_ref().and_then(|h| h.0.as_ref()).map(f)
+        // not locked during the call: a dialog waits for the user, and the GUI thread may need
+        // the host meanwhile
+        let h = self.cpp.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        h.as_ref().and_then(|h| h.0.as_ref()).map(f)
+    }
+
+    fn set_running(&self, stop: Option<Interrupt>) {
+        *self.running.lock().unwrap_or_else(|e| e.into_inner()) = stop;
+    }
+}
+
+impl Clipboard for GuiHost {
+    fn get(&self) -> Option<String> {
+        self.with(|h| h.clipboard_get().to_string())
+            .filter(|s| !s.is_empty())
+    }
+    fn set(&self, text: &str) -> bool {
+        self.with(|h| h.clipboard_set(text)).unwrap_or(false)
     }
 }
 
@@ -153,6 +178,9 @@ impl Host for GuiHost {
     fn is_cancelled(&self) -> bool {
         self.with(|h| h.is_cancelled()).unwrap_or(false)
     }
+    fn status_text(&self, text: &str) {
+        self.with(|h| h.status_text(text));
+    }
     fn dialog(&self, dialog: &Dialog) -> DialogResult {
         let data = DialogData {
             title: dialog.title.clone(),
@@ -213,28 +241,81 @@ impl Host for GuiHost {
     }
 }
 
-/// A macro between `start_macro` and `finish_macro`; `run_macro_job` runs it on a worker thread.
-pub struct MacroJob {
-    script: Arc<Script>,
-    index: usize,
+/// A macro (`start_macro` .. `finish_macro`) or export filters (`start_export` ..
+/// `finish_export`); `run_script_job` runs the scripts on a worker thread.
+pub struct ScriptJob {
+    host: Arc<GuiHost>,
     doc: Document,
-    sel: Vec<usize>,
-    active: Option<usize>,
     ctx: Context,
-    out: Option<Result<MacroOutcome, RunError>>,
+    work: Work,
+}
+
+enum Work {
+    Macro {
+        script: Arc<Script>,
+        index: usize,
+        sel: Vec<usize>,
+        active: Option<usize>,
+        out: Option<Result<MacroOutcome, RunError>>,
+    },
+    /// Filters in the order they run.
+    Export {
+        filters: Vec<(Arc<Script>, usize)>,
+        out: Option<Result<Document, RunError>>,
+    },
 }
 
 // the job crosses to the worker thread
 const _: fn() = || {
     fn send<T: Send>() {}
-    send::<MacroJob>();
+    send::<ScriptJob>();
 };
 
-pub fn run_macro_job(job: &mut MacroJob) {
-    let r = job
-        .script
-        .run_macro(job.index, &job.doc, &job.sel, job.active, &job.ctx);
-    job.out = Some(r);
+pub fn run_script_job(job: &mut ScriptJob) {
+    let (host, doc, ctx) = (&job.host, &job.doc, &job.ctx);
+    match &mut job.work {
+        Work::Macro {
+            script,
+            index,
+            sel,
+            active,
+            out,
+        } => {
+            host.set_running(script.interrupter());
+            *out = Some(script.run_macro(*index, doc, sel, *active, ctx));
+        }
+        Work::Export { filters, out } => *out = Some(run_filters(host, filters, doc, ctx)),
+    }
+    host.set_running(None);
+}
+
+/// Aegisub's Export: each chosen filter asks for its settings, then runs on the copy.
+// shortcut: a filter's settings are asked in its own dialog at export time, not inline in the export dialog; inline them if users want to set them up front.
+fn run_filters(
+    host: &GuiHost,
+    filters: &[(Arc<Script>, usize)],
+    doc: &Document,
+    ctx: &Context,
+) -> Result<Document, RunError> {
+    let mut doc = doc.clone();
+    for (script, f) in filters {
+        host.set_running(script.interrupter());
+        let mut settings = Default::default();
+        let config = script.filter_config(*f, &doc, ctx).inspect_err(|e| {
+            if let RunError::Lua(_) = e {
+                host.log(&format!("{e}\n"));
+            }
+        })?;
+        if let Some(d) = config {
+            let r = host.dialog(&d);
+            if r.button.is_none() {
+                return Err(RunError::Cancelled);
+            }
+            settings = r.values;
+        }
+        doc = script.run_filter(*f, &doc, &settings, ctx)?;
+    }
+    Ok(doc)
 }
 
 pub struct Automation {
@@ -269,8 +350,18 @@ impl Automation {
             .cache_dir = dir.to_owned();
     }
 
+    /// The GUI's host; it also serves `aegisub.clipboard`.
     pub fn set_host(&mut self, host: UniquePtr<AutomationHost>) {
-        *self.host.cpp.lock().unwrap_or_else(|e| e.into_inner()) = Some(CppHost(host));
+        *self.host.cpp.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(CppHost(host)));
+        fs_automation::set_clipboard(Some(self.host.clone()));
+    }
+
+    /// Stops the script a job is running, also one that never checks for Cancel (any thread).
+    pub fn stop_script(&self) {
+        let running = self.host.running.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(stop) = running.as_ref() {
+            stop.trigger();
+        }
     }
 
     fn index(&mut self) {
@@ -389,57 +480,56 @@ impl Automation {
             .collect()
     }
 
-    /// Aegisub's Export: the chosen filters run on a copy in priority order, then the copy is saved.
-    // shortcut: a filter's settings are asked in its own dialog at export time, not inline in the export dialog; inline them if users want to set them up front.
-    #[allow(clippy::too_many_arguments)]
-    pub fn export_filtered(
+    /// Export filters `ids` (of `filters()`) to run on a copy, in priority order (GUI thread).
+    pub fn start_export(&self, ids: &[usize], session: &Session) -> Box<ScriptJob> {
+        let filters = (self.filters.iter().enumerate())
+            .filter(|(id, _)| ids.contains(id))
+            .map(|(_, &(s, f))| (self.scripts[s].clone(), f))
+            .collect();
+        Box::new(ScriptJob {
+            host: self.host.clone(),
+            doc: session.ed.doc.clone(),
+            ctx: Self::context(session),
+            work: Work::Export { filters, out: None },
+        })
+    }
+
+    /// Saves what the filters made; false when they were cancelled or failed (the error is in
+    /// the log) (GUI thread).
+    pub fn finish_export(
         &self,
-        ids: &[usize],
+        job: Box<ScriptJob>,
         session: &Session,
         path: &str,
-        fix_styles: bool,
-        fps_from: &str,
-        fps_to: &str,
+        spec: &ExportSpec,
         video: &[i64],
-        encoding: &str,
     ) -> Result<bool, String> {
-        let ctx = Self::context(session);
-        let mut doc = session.ed.doc.clone();
-        for (id, &(s, f)) in self.filters.iter().enumerate() {
-            if !ids.contains(&id) {
-                continue;
-            }
-            let script = &self.scripts[s];
-            let mut settings = Default::default();
-            if let Some(d) = script
-                .filter_config(f, &doc, &ctx)
-                .map_err(|e| e.to_string())?
-            {
-                let r = self.host.dialog(&d);
-                if r.button.is_none() {
-                    return Ok(false);
-                }
-                settings = r.values;
-            }
-            doc = match script.run_filter(f, &doc, &settings, &ctx) {
-                Ok(d) => d,
-                Err(RunError::Cancelled) => return Ok(false),
-                Err(e) => return Err(e.to_string()),
-            };
+        let Work::Export { out, .. } = job.work else {
+            return Err("not an export".into());
+        };
+        match out.unwrap_or(Err(RunError::Cancelled)) {
+            Ok(doc) => session.export_doc(doc, path, spec, video).map(|()| true),
+            Err(RunError::Cancelled | RunError::Lua(_)) => Ok(false),
+            Err(e) => Err(e.to_string()),
         }
-        session.export_doc(doc, path, fix_styles, fps_from, fps_to, video, encoding)?;
-        Ok(true)
     }
 
     fn context(session: &Session) -> Context {
-        let info = |k: &str| {
-            let v = session.info_value(k);
-            (!v.is_empty()).then(|| PathBuf::from(v))
+        // the project's files as the tab keeps them (Aegisub's project_properties); a relative
+        // one is next to the script
+        let file = |k: &str| {
+            let v = session.project_value(k);
+            let p = PathBuf::from(&v);
+            match session.path.as_deref().and_then(Path::parent) {
+                _ if v.is_empty() => None,
+                Some(dir) if p.is_relative() && !v.starts_with('?') => Some(dir.join(p)),
+                _ => Some(p),
+            }
         };
         Context {
             subtitle_file: session.path.clone(),
-            video_file: info("Video File"),
-            audio_file: info("Audio File"),
+            video_file: file("Video File"),
+            audio_file: file("Audio File"),
             video_size: session
                 .video_size
                 .map(|(w, h)| (w, h, w as f64 / h as f64, 0)),
@@ -476,10 +566,19 @@ impl Automation {
         session: &Session,
         rows: &[usize],
         active: i64,
-    ) -> Result<Box<MacroJob>, String> {
+        editor: &MacroContext,
+    ) -> Result<Box<ScriptJob>, String> {
         let &(s, m) = self.macros.get(id).ok_or("no such macro")?;
         let (sel, act) = Self::selection(session, rows, active);
-        let ctx = Self::context(session);
+        let ctx = Context {
+            audio_selection: (editor.has_audio).then_some((editor.audio_start, editor.audio_end)),
+            edit: EditState {
+                cursor: editor.cursor,
+                sel_start: editor.sel_start,
+                sel_end: editor.sel_end,
+            },
+            ..Self::context(session)
+        };
         let video = ctx
             .video_file
             .as_deref()
@@ -489,27 +588,34 @@ impl Automation {
             .frames
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .set(video, session.script_for_render(false, -1));
-        Ok(Box::new(MacroJob {
-            script: self.scripts[s].clone(),
-            index: m,
+            .set(video, session.ed.doc.clone());
+        Ok(Box::new(ScriptJob {
+            host: self.host.clone(),
             doc: session.ed.doc.clone(),
-            sel,
-            active: act,
             ctx,
-            out: None,
+            work: Work::Macro {
+                script: self.scripts[s].clone(),
+                index: m,
+                sel,
+                active: act,
+                out: None,
+            },
         }))
     }
 
-    /// Applies a finished run: each script undo point becomes an undo step (GUI thread).
+    /// Applies a finished run: each script undo point becomes an undo step (GUI thread). A Lua
+    /// error is already in the log.
     pub fn finish_macro(
         &self,
-        job: Box<MacroJob>,
+        job: Box<ScriptJob>,
         session: &mut Session,
     ) -> Result<MacroResult, String> {
-        let out = match job.out.unwrap_or(Err(RunError::Cancelled)) {
+        let Work::Macro { out, .. } = job.work else {
+            return Err("not a macro".into());
+        };
+        let out = match out.unwrap_or(Err(RunError::Cancelled)) {
             Ok(o) => o,
-            Err(RunError::Cancelled) => return Ok(MacroResult::default()),
+            Err(RunError::Cancelled | RunError::Lua(_)) => return Ok(MacroResult::default()),
             Err(e) => return Err(e.to_string()),
         };
         let changed = !out.commits.is_empty();
@@ -522,10 +628,15 @@ impl Automation {
             .active
             .and_then(|a| session.rows_of_events(&[a]).first().copied())
             .map_or(-1, |a| a as i64);
+        let edit = out.edit.unwrap_or_default();
         Ok(MacroResult {
             changed,
             selection: rows,
             active,
+            edit_changed: out.edit.is_some(),
+            cursor: edit.cursor,
+            sel_start: edit.sel_start,
+            sel_end: edit.sel_end,
         })
     }
 
@@ -539,8 +650,10 @@ mod tests {
     use super::*;
 
     fn run(a: &Automation, id: usize, s: &mut Session, rows: &[usize]) -> MacroResult {
-        let mut job = a.start_macro(id, s, rows, 0).unwrap();
-        run_macro_job(&mut job);
+        let mut job = a
+            .start_macro(id, s, rows, 0, &MacroContext::default())
+            .unwrap();
+        run_script_job(&mut job);
         a.finish_macro(job, s).unwrap()
     }
 
@@ -637,12 +750,27 @@ aegisub.register_filter("Early", "", 9, function(subs) local l = subs[#subs]; l.
         r.text = "x".into();
         s.set_row(0, &r, "");
         let out = dir.join("out.ass");
-        assert!(
-            a.export_filtered(&[0, 1], &s, out.to_str().unwrap(), false, "", "", &[], "")
+        let export = |a: &Automation, ids: &[usize]| {
+            let mut job = a.start_export(ids, &s);
+            run_script_job(&mut job);
+            let spec = ExportSpec::default();
+            a.finish_export(job, &s, out.to_str().unwrap(), &spec, &[])
                 .unwrap()
-        );
+        };
+        assert!(export(&a, &[0, 1]));
         assert!(std::fs::read_to_string(&out).unwrap().contains(",x?!"));
         assert_eq!(s.row(0).text, "x");
+        // a failing filter exports nothing and leaves its error in the log
+        std::fs::write(
+            &script,
+            r#"script_name="F"
+aegisub.register_filter("Bad", "", 1, function() error("broken") end)"#,
+        )
+        .unwrap();
+        a.reload_script(0).unwrap();
+        std::fs::remove_file(&out).unwrap();
+        assert!(!export(&a, &[0]));
+        assert!(!out.exists() && a.take_log().contains("broken"));
     }
 
     #[test]

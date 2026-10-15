@@ -517,6 +517,7 @@ dependencies = [
  "chardetng",
  "encoding_rs",
  "fs-core",
+ "roxmltree",
  "thiserror 2.0.21",
 ]
 

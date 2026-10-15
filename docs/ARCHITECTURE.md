@@ -142,6 +142,10 @@ Wszystkie operacje są wywoływalne z CLI, GUI i Lua:
 | MPL2 | ✔ | ✔ | `[ds][ds]tekst`, `/` = kursywa, `|` = nowa linia |
 | MicroDVD | ✔ | ✔ | `{start}{end}`, `{1}{1}fps`, `{y:i}` itd., wymaga FPS |
 | TMP | ✔ | ✔ | `hh:mm:ss:tekst` (czas końca liczony) |
+| MPEG-4 Timed Text (TTXT) | ✔ | ✔ | XML GPAC, jak w Aegisub |
+| Adobe Encore | – | ✔ | eksport, czasy SMPTE przy wybranym FPS |
+| TranStation | – | ✔ | eksport, czasy SMPTE przy wybranym FPS |
+| EBU STL (tech 3264) | – | ✔ | eksport binarny z ustawieniami Aegisub (standard TV, kodowanie, zawijanie, przesunięcie TC) |
 
 Kodowanie: UTF-8/UTF-16 z BOM jest rozpoznawane deterministycznie, w pozostałych przypadkach używany jest `chardetng` z preferencją Windows-1250 dla polskich plików. Zapis domyślnie UTF-8 z BOM, jak w Aegisub, albo w kodowaniu źródłowym.
 
@@ -164,6 +168,7 @@ Kodowanie: UTF-8/UTF-16 z BOM jest rozpoznawane deterministycznie, w pozostałyc
 * Obiekt `subtitles` jako userdata z indeksowaniem 1..n po wszystkich liniach (info, style, eventy, format), `insert`, `append`, `delete`, `deleterange` i `[0]=`. Mapowanie na transakcję undo dokumentu.
 * Pliki include z Aegisub (karaskel, utils, unicode, cleantags, `aegisub.re`/`aegisub.unicode`/`aegisub.util` itd.), redystrybuowane zgodnie z ich licencjami (BSD/ISC), opisane w `THIRD_PARTY.md`.
 * Eksport symboli C wymaganych przez moduły FFI (regex, clipboard) i moduł `lfs`.
+* Makra i filtry eksportu działają w wątku roboczym; okno postępu przenosi dialogi do GUI. Pierwsze „Anuluj” ustawia `is_cancelled` (jak w Aegisub), drugie („Zatrzymaj skrypt”) przerywa skrypt hookiem LuaJIT nawet wtedy, gdy nie sprawdza anulowania. Pętli w całości skompilowanej przez JIT, bez wywołań, hook nie przerwie.
 * MoonScript: dołączony kompilator `moonscript` (Lua), który wymaga `lpeg`.
 * DependencyControl: ścieżki `?user/automation/include`, `?user/automation/autoload`, `lfs`, `ffi`, `json`.
 * Specyfikacja: `docs/research/automation4.md`.

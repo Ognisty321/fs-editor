@@ -85,7 +85,9 @@ private:
     bool saveTab(TabPanel *tab);
     void checkDisk(TabPanel *t); // offers to read a file another program changed again
     void convert(const QString &format);
+    bool ebuSettings(fsb::ExportSpec &spec); // Aegisub's "Export to EBU STL format"; false: cancelled
     void runMacro(size_t id);
+    void runScript(fsb::ScriptJob &job); // on a worker, with the progress window
     void automationManager();
     void correctErrors();
     void updateActions();

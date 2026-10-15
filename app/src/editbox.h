@@ -96,6 +96,9 @@ public:
     void selectText(int from, int length, bool original = false); // UTF-16 positions in the line text
     std::pair<int, int> textSelection(bool original = false) const; // start, end
     QString selectedText(bool original = false) const;
+    // The line text's cursor and selection for aegisub.gui: 1-based UTF-8 byte positions (Scintilla's)
+    void scriptCursor(int64_t &cursor, int64_t &start, int64_t &end) const;
+    void setScriptCursor(int64_t cursor, int64_t start, int64_t end);
     int row() const { return m_row; }
     bool framesMode() const { return m_framesMode; } // the grid shows frames too (Aegisub)
     static std::span<const PanelKey> keys(); // the text fields' own keys (Kainote's edit box hotkeys)

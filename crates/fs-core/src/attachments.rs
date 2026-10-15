@@ -120,6 +120,22 @@ impl Document {
         out
     }
 
+    /// The `[Fonts]` section: a new `Arc` exactly when the embedded fonts may have changed.
+    pub fn fonts_section(&self) -> Option<&Arc<Section>> {
+        self.find_section(SectionKind::Fonts)
+            .map(|i| &self.sections[i])
+    }
+
+    /// Every embedded font, decoded: `(name, data)`.
+    pub fn embedded_fonts(&self) -> Vec<(String, Vec<u8>)> {
+        let Some(lines) = raw(self, true) else {
+            return Vec::new();
+        };
+        (entries(lines, true).into_iter())
+            .map(|(name, r)| (name, decode(lines, r)))
+            .collect()
+    }
+
     pub fn attachment_data(&self, font: bool, name: &str) -> Option<Vec<u8>> {
         let lines = raw(self, font)?;
         let (_, r) = entries(lines, font).into_iter().find(|(n, _)| n == name)?;
@@ -264,6 +280,20 @@ mod tests {
             ]
         );
         assert_eq!(d.attachment_data(true, "A_0.ttf").unwrap(), font);
+        assert_eq!(d.embedded_fonts(), [("A_0.ttf".to_string(), font.clone())]);
+        // the section is shared until the fonts are touched
+        let copy = d.clone();
+        assert!(Arc::ptr_eq(
+            d.fonts_section().unwrap(),
+            copy.fonts_section().unwrap()
+        ));
+        d.attach(true, "B.ttf", b"b");
+        assert!(!Arc::ptr_eq(
+            d.fonts_section().unwrap(),
+            copy.fonts_section().unwrap()
+        ));
+        assert_eq!(d.embedded_fonts().len(), 2);
+        assert!(d.remove_attachment(true, "B_0.ttf"));
         assert_eq!(file_name("A_0.ttf"), "A.ttf");
         assert!(d.remove_attachment(true, "A_0.ttf"));
         assert!(!d.to_ass_string().contains("[Fonts]"));

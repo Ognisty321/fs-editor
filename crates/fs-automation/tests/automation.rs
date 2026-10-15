@@ -2,21 +2,31 @@
 //! the busted specs for aegisub.re/unicode/lfs/argcheck, the Automation 4
 //! test macros, and kara-templater on Aegisub's karaoke test files.
 
-use fs_automation::{Context, Env, Host, Paths, RunError, Script};
+use fs_automation::{Context, Dialog, DialogResult, Env, Host, Paths, RunError, Script};
 use fs_core::Document;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 fn crate_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+/// Logs, answers dialogs with their defaults (keeping the last one asked) and
+/// says Cancel was pressed while `cancelled` is set.
 #[derive(Default)]
-struct LogHost(Mutex<String>);
+struct LogHost(Mutex<String>, AtomicBool, Mutex<Option<Dialog>>);
 
 impl Host for LogHost {
     fn log(&self, text: &str) {
         self.0.lock().unwrap().push_str(text);
+    }
+    fn is_cancelled(&self) -> bool {
+        self.1.load(Ordering::Relaxed)
+    }
+    fn dialog(&self, dialog: &Dialog) -> DialogResult {
+        *self.2.lock().unwrap() = Some(dialog.clone());
+        dialog.accept_defaults()
     }
 }
 
@@ -340,14 +350,14 @@ fn selection_set_and_undo_points() {
     assert_eq!(out.commits[0].0, "Insert+select Stuff");
     let new = &out.commits[0].1;
     assert_eq!(new.event_count(), n + 2);
-    // the copy inserted before the line got the new text; the original
-    // (still the active line) moved down one row
+    // the copy inserted before the line got the new text; the original moved down one row
     assert_eq!(new.event(row).unwrap().text, "A4 was here!");
     assert_eq!(new.event(row + 1).unwrap().text, d.event(row).unwrap().text);
     assert_eq!(new.event_id(row + 1), d.event_id(row));
     assert_eq!(new.event(n + 1).unwrap().text, d.event(row).unwrap().text);
     assert_eq!(out.selection, vec![row - 1, row, row + 1]);
-    assert_eq!(out.active, Some(row + 1));
+    // no active row returned: Aegisub keeps the index that was active, now the copy
+    assert_eq!(out.active, Some(row));
 }
 
 #[test]
@@ -747,4 +757,244 @@ fn finalizers_run_before_close() {
     drop(s);
     let marks = std::fs::read_to_string(f.env.paths.user.join("gc.txt")).unwrap();
     assert_eq!(marks, "gc gc ");
+}
+
+const SMALL: &str = "[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 480\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,one\nDialogue: 0,0:00:02.00,0:00:03.00,Default,,0,0,0,,two\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,three\n";
+
+#[test]
+fn line_fields_extradata_and_insert_like_aegisub() {
+    let f = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    // [3 info lines, 1 style, 3 events]: the events are lines 5 to 7
+    let s = f.script(
+        dir.path(),
+        "fields.lua",
+        r#"
+        aegisub.register_macro('F', '', function(subs, sel, act)
+          assert(#sel == 1 and sel[1] == 6 and act == 6)
+          local l = subs[5]
+          l.text = 0.1 + 0.2
+          l.actor = 'A, B'
+          l.extra = {k = 'v', n = 5}
+          -- fields come through the metatable, as lua_getfield reads them
+          subs[5] = setmetatable({}, {__index = l})
+          local r = subs[5]
+          assert(r.text == '0.3', r.text)
+          assert(r.extra.n == '5' and r.extra.k == 'v')
+          assert(r.raw:find('A; B', 1, true) and r.raw:match('{=0=1}0%.3$'), r.raw)
+          -- inserting after the last line appends: a style lands among the styles
+          local style = subs[4]
+          style.name = 'Added'
+          subs.insert(#subs + 1, style)
+          assert(subs[5].class == 'style' and subs[5].name == 'Added')
+          local w, h = subs.script_resolution()
+          assert(w == 640 and h == 480)
+        end)
+        "#,
+    );
+    let d = Document::parse(SMALL);
+    let out = s.run_macro(0, &d, &[1], Some(1), &Context::default());
+    let out = out.unwrap_or_else(|e| panic!("{e}\n{}", f.log()));
+    let new = &out.commits.last().unwrap().1;
+    assert_eq!(new.event(0).unwrap().text, "{=0=1}0.3");
+    assert_eq!(new.event(0).unwrap().actor, "A, B");
+    let text = new.to_ass_string();
+    assert!(text.contains(",A; B,") && text.contains("Data: 0,") && text.contains("Data: 1,"));
+    assert!(text.contains("Style: Added,"));
+    // nothing returned: the selected event keeps its row although a style went in above it
+    assert_eq!((out.selection, out.active), (vec![1], Some(1)));
+}
+
+#[test]
+fn undo_points_commit_what_changed() {
+    let f = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let s = f.script(
+        dir.path(),
+        "undo.lua",
+        r#"
+        aegisub.register_macro('U', '', function(subs)
+          for i = 5, 7 do
+            local l = subs[i]
+            l.text = l.text .. '!'
+            subs[i] = l
+            aegisub.set_undo_point('step ' .. i)
+          end
+          subs.delete(5)
+        end)
+        aegisub.register_macro('C', '', function(subs)
+          subs.delete(5)
+        end)
+        "#,
+    );
+    let d = Document::parse(SMALL);
+    let out = s
+        .run_macro(0, &d, &[0], Some(0), &Context::default())
+        .unwrap();
+    let names: Vec<&str> = out.commits.iter().map(|c| c.0.as_str()).collect();
+    assert_eq!(names, ["step 5", "step 6", "step 7", "U"]);
+    let texts = |doc: &Document| -> Vec<String> {
+        doc.events().iter().map(|e| e.event.text.clone()).collect()
+    };
+    assert_eq!(texts(&out.commits[0].1), ["one!", "two", "three"]);
+    assert_eq!(texts(&out.commits[2].1), ["one!", "two!", "three!"]);
+    assert_eq!(texts(&out.commits[3].1), ["two!", "three!"]);
+    // a commit shares the lines it did not change with the one before
+    let (a, b) = (out.commits[0].1.events(), out.commits[1].1.events());
+    assert!(Arc::ptr_eq(&a[0], &b[0]) && Arc::ptr_eq(&a[2], &d.events()[2]));
+    assert_eq!(a[0].id, d.events()[0].id);
+
+    // Cancel in the progress window drops the changes of a run that ended normally
+    f.host.1.store(true, Ordering::Relaxed);
+    let r = s.run_macro(1, &d, &[0], Some(0), &Context::default());
+    f.host.1.store(false, Ordering::Relaxed);
+    assert!(matches!(r, Err(RunError::Cancelled)));
+}
+
+#[test]
+fn dialog_values_coerce_like_aegisub() {
+    let f = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let s = f.script(
+        dir.path(),
+        "dlg.lua",
+        r#"
+        aegisub.register_macro('D', '', function()
+          local btn, res = aegisub.dialog.display({
+            {class = 'edit', name = 'e', value = 5},
+            {class = 'dropdown', name = 'd', items = {1, 2, 3}},
+            {class = 'floatedit', name = 'f', step = 0.5, max = 1000, value = 750},
+            {class = 'intedit', name = 'i', value = '12'},
+            setmetatable({}, {__index = {class = 'checkbox', name = 'c', value = true}}),
+          }, {1, 'Cancel'}, {ok = 1, cancel = 'Cancel'})
+          assert(btn == '1', tostring(btn))
+          assert(res.e == '5' and res.d == '' and res.i == 12 and res.c == true and res.f == 750)
+        end)
+        "#,
+    );
+    let d = Document::parse(SMALL);
+    let r = s.run_macro(0, &d, &[0], Some(0), &Context::default());
+    r.unwrap_or_else(|e| panic!("{e}\n{}", f.log()));
+    let dlg = f.host.2.lock().unwrap().clone().unwrap();
+    assert_eq!(dlg.controls[1].items, ["", "1", "2", "3"]);
+    assert_eq!(
+        (dlg.controls[2].min, dlg.controls[2].max),
+        (Some(0.0), Some(1000.0))
+    );
+    assert_eq!(dlg.buttons, ["1", "Cancel"]);
+}
+
+#[test]
+fn deleting_line_by_line_stays_linear() {
+    let f = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    // kara-templater's cleanup: walk the file and delete the fx lines one by one
+    let s = f.script(
+        dir.path(),
+        "cleanup.lua",
+        r#"
+        aegisub.register_macro('X', '', function(subs)
+          local i, n = 1, #subs
+          while i <= n do
+            local l = subs[i]
+            if l.class == 'dialogue' and l.effect == 'fx' then
+              subs.delete(i)
+              n = n - 1
+            else
+              i = i + 1
+            end
+          end
+        end)
+        "#,
+    );
+    let mut text = String::from(
+        "[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n",
+    );
+    for i in 0..40_000 {
+        let fx = if i % 2 == 0 { "fx" } else { "" };
+        text += &format!("Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,{fx},l{i}\n");
+    }
+    let d = Document::parse(&text);
+    let t = std::time::Instant::now();
+    let out = s
+        .run_macro(0, &d, &[0], Some(0), &Context::default())
+        .unwrap();
+    // moving the rest of the file per delete took minutes here
+    assert!(t.elapsed().as_secs() < 30, "{:?}", t.elapsed());
+    let new = &out.commits[0].1;
+    assert_eq!(new.event_count(), 20_000);
+    assert_eq!(new.event(0).unwrap().text, "l1");
+    assert!(Arc::ptr_eq(&new.events()[0], &d.events()[1]));
+}
+
+#[test]
+fn regex_group_before_the_search_start_and_absolute_include() {
+    let f = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let inc = dir.path().join("inc");
+    std::fs::create_dir_all(&inc).unwrap();
+    std::fs::write(inc.join("abs.lua"), "return 42\n").unwrap();
+    let s = f.script(dir.path(), "re.lua", "script_name = 're'\n");
+    // the lookbehind's group lies before where the search starts
+    let got = s
+        .eval("local re = require 'aegisub.re' local m = re.match('abb', '(?<=(.))b', 3) return m[2].str, m[2].first")
+        .unwrap();
+    assert_eq!(got, ["b", "2"]);
+    let abs = inc
+        .join("abs.lua")
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    assert_eq!(s.eval(&format!("return include('{abs}')")).unwrap(), ["42"]);
+}
+
+#[test]
+fn stop_ends_a_script_that_never_checks_cancel() {
+    let f = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let s = f.script(
+        dir.path(),
+        "hang.lua",
+        r#"
+        aegisub.register_macro('Busy', '', function(subs)
+          subs.delete(5)
+          local t = os.clock()
+          -- swallows errors and never asks is_cancelled; ends on its own after 20 s
+          while os.clock() - t < 20 do
+            pcall(function() aegisub.progress.set(50) end)
+          end
+        end)
+        aegisub.register_macro('Pure', '', function()
+          local t, n = os.clock(), 0
+          while os.clock() - t < 20 do n = n + 1 end
+        end)
+        aegisub.register_macro('Quick', '', function(subs) subs.delete(5) end)
+        "#,
+    );
+    let stop = s.interrupter().unwrap();
+    let d = Document::parse(SMALL);
+    for i in [0, 1] {
+        let t = std::time::Instant::now();
+        let r = std::thread::scope(|sc| {
+            sc.spawn(|| {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                stop.trigger();
+            });
+            s.run_macro(i, &d, &[0], Some(0), &Context::default())
+        });
+        assert!(matches!(r, Err(RunError::Cancelled)), "macro {i}");
+        assert!(t.elapsed().as_secs() < 10, "macro {i}: {:?}", t.elapsed());
+    }
+    // the next run is not stopped by the last one's stop
+    let out = s
+        .run_macro(2, &d, &[0], Some(0), &Context::default())
+        .unwrap();
+    assert_eq!(out.commits[0].1.event_count(), 2);
+    // a stop between runs is forgotten when the next one starts
+    stop.trigger();
+    assert!(
+        s.run_macro(2, &d, &[0], Some(0), &Context::default())
+            .is_ok()
+    );
+    drop(s);
+    stop.trigger(); // the state is closed: nothing to stop
 }

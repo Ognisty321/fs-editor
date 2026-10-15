@@ -7,6 +7,8 @@
 
 mod ffi;
 
+use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -311,12 +313,15 @@ impl fs_audio::AudioSource for Audio {
 /// libass renderer for one script.
 pub struct SubtitleRenderer {
     inner: UniquePtr<bridge::SubtitleRenderer>,
+    /// Hashes of the fonts given to libass, which keeps every copy it gets until it is dropped.
+    fonts: HashSet<u64>,
 }
 
 impl SubtitleRenderer {
     pub fn new() -> Result<Self> {
         Ok(Self {
             inner: bridge::new_subtitle_renderer()?,
+            fonts: HashSet::new(),
         })
     }
 
@@ -327,7 +332,24 @@ impl SubtitleRenderer {
     }
 
     pub fn add_font(&mut self, name: &str, data: &[u8]) {
-        bridge::subs_add_font(self.inner.pin_mut(), name, data);
+        self.add_fonts([(name, data)]);
+    }
+
+    /// Register fonts (Matroska attachments, a script's `[Fonts]`); ones already registered are
+    /// skipped, and the font selection is rebuilt once.
+    pub fn add_fonts<'a>(&mut self, fonts: impl IntoIterator<Item = (&'a str, &'a [u8])>) {
+        let mut added = false;
+        for (name, data) in fonts {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            data.hash(&mut h);
+            if self.fonts.insert(h.finish()) {
+                bridge::subs_add_font(self.inner.pin_mut(), name, data);
+                added = true;
+            }
+        }
+        if added {
+            bridge::subs_refresh_fonts(self.inner.pin_mut());
+        }
     }
 
     pub fn set_script(&mut self, ass: &str) -> Result<()> {

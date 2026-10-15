@@ -505,8 +505,9 @@ impl Style {
     /// Textual value of a single field.
     pub fn get_field(&self, f: &StyleField, version: AssVersion) -> String {
         match f {
-            StyleField::Name => self.name.clone(),
-            StyleField::Fontname => self.font.clone(),
+            // a comma would end the field early: Aegisub writes it as ';'
+            StyleField::Name => self.name.replace(',', ";"),
+            StyleField::Fontname => self.font.replace(',', ";"),
             StyleField::Fontsize => fmt_f64(self.size),
             StyleField::PrimaryColour => self.primary.to_style_string(),
             StyleField::SecondaryColour => self.secondary.to_style_string(),
@@ -700,14 +701,15 @@ impl Event {
             EventField::Marked => "Marked=0".into(),
             EventField::Start => self.start.to_ass(),
             EventField::End => self.end.to_ass(),
-            EventField::Style => self.style.clone(),
-            EventField::Name => self.actor.clone(),
+            // Aegisub's GetEntryData: a comma would end the field early, a line break the line
+            EventField::Style => self.style.replace(',', ";"),
+            EventField::Name => self.actor.replace(',', ";"),
             EventField::MarginL => self.margin_l.to_string(),
             EventField::MarginR => self.margin_r.to_string(),
             EventField::MarginV | EventField::MarginT => self.margin_v.to_string(),
             EventField::MarginB => self.margin_b.to_string(),
-            EventField::Effect => self.effect.clone(),
-            EventField::Text => self.text.clone(),
+            EventField::Effect => self.effect.replace(',', ";"),
+            EventField::Text => self.text.replace(['\r', '\n'], ""),
             EventField::Unknown(name) => self
                 .extra
                 .iter()
@@ -792,5 +794,32 @@ mod tests {
         assert_eq!(f, vec!["0", "1", "", ""]);
         assert_eq!(split_key("Dialogue: 0,1"), Some(("Dialogue", 10)));
         assert_eq!(split_key("Title:x"), Some(("Title", 6)));
+    }
+
+    #[test]
+    fn written_fields_cannot_break_the_line() {
+        let ev = Event {
+            style: "A,B".into(),
+            actor: "Ann, Bob".into(),
+            effect: "x,y".into(),
+            text: "one\r\ntwo, three\n".into(),
+            ..Default::default()
+        };
+        let fmt = EventField::default_format(AssVersion::Ass);
+        let line: Vec<String> = fmt.iter().map(|f| ev.get_field(f)).collect();
+        let line = line.join(",");
+        let (f, ok) = split_fields(&line, 10);
+        assert!(ok);
+        assert_eq!(
+            (f[3], f[4], f[8], f[9]),
+            ("A;B", "Ann; Bob", "x;y", "onetwo, three")
+        );
+        let st = Style {
+            name: "a,b".into(),
+            font: "F, G".into(),
+            ..Default::default()
+        };
+        assert_eq!(st.get_field(&StyleField::Name, AssVersion::Ass), "a;b");
+        assert_eq!(st.get_field(&StyleField::Fontname, AssVersion::Ass), "F; G");
     }
 }

@@ -69,10 +69,22 @@
 #include <QVBoxLayout>
 
 namespace {
-const QStringList kSubsExt = {"ass", "ssa", "srt", "sub", "mpl", "tmp", "txt"};
+const QStringList kSubsExt = {"ass", "ssa", "srt", "sub", "mpl", "tmp", "txt", "ttxt"};
 const QStringList kVideoExt = {"mkv", "mp4", "avi", "webm", "mov", "m2ts", "ts", "wmv", "flv", "m4v", "mpg", "mpeg", "ogv"};
 const QStringList kAudioExt = {"wav", "mp3", "flac", "aac", "ac3", "eac3", "dts", "ogg", "opus", "m4a", "mka", "wma"};
-const QString kSubsFilter = QObject::tr("Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp);;All files (*)");
+const QString kSubsFilter = QObject::tr("Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt);;All files (*)");
+// Export also writes Aegisub's write-only formats, which the end of the name picks
+struct ExportType {
+    const char *filter, *suffix; // suffix: what a name chosen with the filter must end with
+};
+const ExportType kExportTypes[] = {
+    {QT_TRANSLATE_NOOP("MainWindow", "Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt)"), ""},
+    {QT_TRANSLATE_NOOP("MainWindow", "MPEG-4 Streaming Text (*.ttxt)"), ".ttxt"},
+    {QT_TRANSLATE_NOOP("MainWindow", "Adobe Encore (*.encore.txt)"), ".encore.txt"},
+    {QT_TRANSLATE_NOOP("MainWindow", "TranStation (*.transtation.txt)"), ".transtation.txt"},
+    {QT_TRANSLATE_NOOP("MainWindow", "EBU subtitling data exchange format, EBU tech 3264 (*.stl)"), ".stl"},
+    {QT_TRANSLATE_NOOP("MainWindow", "All files (*)"), ""},
+};
 
 // Default toolbar content (Kainote TOOLBAR_IDS order, our ids).
 const QStringList kToolbarDefault = {"openSubs", "recentSubs", "openVideo", "recentVideo", "save", "saveAs",
@@ -295,6 +307,8 @@ MainWindow::MainWindow() {
     const QString user = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     m_automation.emplace(fsb::new_automation(fs::Utf8(QCoreApplication::applicationDirPath()), fs::Utf8(user)));
     m_host = new GuiAutomationHost(this);
+    m_host->onStatus = [this](const QString &text) { status(text); };
+    m_host->onStop = [this] { (*m_automation)->stop_script(); };
     (*m_automation)->set_host(std::unique_ptr<fsb::AutomationHost>(m_host));
     (*m_automation)->set_cache_dir(fs::Utf8(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex"));
     for (const auto &e : (*m_automation)->load_autoload()) status(fs::q(e));
@@ -635,22 +649,73 @@ void MainWindow::buildMenus() {
         st.setValue("export/fps", fps->isChecked());
         st.setValue("export/fpsTo", to->currentText());
         st.setValue("export/encoding", enc->currentText());
-        const QString p = QFileDialog::getSaveFileName(this, tr("Export subtitles"), QFileInfo(t->path()).absolutePath(), kSubsFilter);
+        QStringList types;
+        for (const auto &e : kExportTypes) types << tr(e.filter);
+        QString type = st.value("export/type", types[0]).toString();
+        QString p = QFileDialog::getSaveFileName(this, tr("Export subtitles"), QFileInfo(t->path()).absolutePath(),
+                                                 types.join(";;"), &type);
         if (p.isEmpty()) return;
+        st.setValue("export/type", type);
+        // a name typed without the type's double extension still gets it
+        if (const qsizetype k = types.indexOf(type); k >= 0) {
+            const QString suffix = kExportTypes[k].suffix;
+            if (!suffix.isEmpty() && !p.endsWith(suffix, Qt::CaseInsensitive)) {
+                if (suffix.count('.') > 1 && p.endsWith(".txt", Qt::CaseInsensitive)) p.chop(4);
+                p += suffix;
+            }
+        }
         auto value = [](QComboBox *c) {
             return c->currentText() == c->itemText(0) && c->itemData(0).isValid() ? QString("video") : c->currentText();
         };
+        fsb::ExportSpec spec;
+        spec.fix_styles = fix->isChecked();
+        spec.fps_from = fs::rs(value(from));
+        spec.fps_to = fs::rs(fps->isChecked() ? value(to) : QString());
+        spec.encoding = fs::rs(enc->currentText());
+        const QString lower = p.toLower();
+        if (lower.endsWith(".encore.txt") || lower.endsWith(".transtation.txt")) {
+            // Aegisub's AskForFPS: SMPTE times need a constant rate, so the video's only when it has one
+            struct Rate {
+                QString name;
+                const char *fps;
+                bool drop;
+            };
+            std::vector<Rate> rates;
+            const auto vi = t->video()->info();
+            if (video && !vi.vfr) rates.push_back({tr("From video (%1)").arg(vi.fps, 0, 'g', 6), "video", false});
+            rates.insert(rates.end(), {{tr("15.000 FPS"), "15", false},
+                                       {tr("23.976 FPS (Decimated NTSC)"), "24000/1001", false},
+                                       {tr("24.000 FPS (FILM)"), "24", false},
+                                       {tr("25.000 FPS (PAL)"), "25", false},
+                                       {tr("29.970 FPS (NTSC)"), "30000/1001", false},
+                                       {tr("29.970 FPS (NTSC with SMPTE dropframe)"), "30000/1001", true},
+                                       {tr("30.000 FPS"), "30", false},
+                                       {tr("50.000 FPS (PAL x2)"), "50", false},
+                                       {tr("59.940 FPS (NTSC x2)"), "60000/1001", false},
+                                       {tr("60.000 FPS"), "60", false},
+                                       {tr("119.880 FPS (NTSC x4)"), "120000/1001", false},
+                                       {tr("120.000 FPS"), "120", false}});
+            QStringList names;
+            for (const auto &r : rates) names << r.name;
+            bool ok = false;
+            const QString pick = QInputDialog::getItem(this, tr("FPS"), tr("Please choose the appropriate FPS for the subtitles:"),
+                                                       names, 0, false, &ok);
+            if (!ok) return;
+            const auto &r = rates[size_t(std::max<qsizetype>(0, names.indexOf(pick)))];
+            spec.smpte_fps = rust::String(r.fps);
+            spec.smpte_drop = r.drop;
+        }
+        if (lower.endsWith(".stl") && !ebuSettings(spec)) return;
         const auto tc = t->video()->timecodes();
         try {
-            const QString fpsTo = fps->isChecked() ? value(to) : QString();
             bool done = true;
-            if (ids.empty())
-                t->s().export_copy(fs::Utf8(p), fix->isChecked(), fs::Utf8(value(from)), fs::Utf8(fpsTo),
-                                   {tc.data(), tc.size()}, fs::Utf8(enc->currentText()));
-            else
-                done = (*m_automation)->export_filtered(fs::slice(ids), t->s(), fs::Utf8(p), fix->isChecked(),
-                                                        fs::Utf8(value(from)), fs::Utf8(fpsTo), {tc.data(), tc.size()},
-                                                        fs::Utf8(enc->currentText()));
+            if (ids.empty()) {
+                t->s().export_copy(fs::Utf8(p), spec, {tc.data(), tc.size()});
+            } else {
+                auto job = (*m_automation)->start_export(fs::slice(ids), t->s());
+                runScript(*job);
+                done = (*m_automation)->finish_export(std::move(job), t->s(), fs::Utf8(p), spec, {tc.data(), tc.size()});
+            }
             log(fs::q((*m_automation)->take_log()));
             if (done) status(tr("Exported %1").arg(QFileInfo(p).fileName()));
         } catch (const std::exception &e) {
@@ -2367,33 +2432,44 @@ void MainWindow::automationManager() {
     d.exec();
 }
 
+void MainWindow::runScript(fsb::ScriptJob &job) {
+    // Aegisub's BackgroundScriptRunner: the script runs on a worker and m_host brings its dialogs
+    // and progress back here. Input waits for the first 300 ms, then the progress window holds it.
+    m_host->begin();
+    QFutureWatcher<void> watch;
+    QEventLoop loop;
+    connect(&watch, &QFutureWatcher<void>::finished, &loop, &QEventLoop::quit);
+    watch.setFuture(QtConcurrent::run([&job] { fsb::run_script_job(job); }));
+    QTimer::singleShot(300, &loop, &QEventLoop::quit);
+    if (!watch.isFinished()) loop.exec(QEventLoop::ExcludeUserInputEvents);
+    if (!watch.isFinished()) {
+        m_host->showProgress();
+        loop.exec();
+    }
+    // quitting the application ends the loops early: stop the script, the worker holds the job
+    if (!watch.isFinished()) (*m_automation)->stop_script();
+    while (!watch.isFinished()) QCoreApplication::processEvents(QEventLoop::WaitForMoreEvents);
+    m_host->finish();
+}
+
 void MainWindow::runMacro(size_t id) {
     auto *tab = current();
     const auto rows = tab->selection();
+    fsb::MacroContext ctx;
+    if (tab->audio()->hasAudio()) {
+        ctx.has_audio = true;
+        std::tie(ctx.audio_start, ctx.audio_end) = tab->audio()->selection();
+    }
+    tab->edit()->scriptCursor(ctx.cursor, ctx.sel_start, ctx.sel_end);
     fsb::MacroResult r;
     QString err;
     try {
-        auto job = (*m_automation)->start_macro(id, tab->s(), fs::slice(rows), tab->active());
-        // Aegisub's BackgroundScriptRunner: the script runs on a worker and m_host brings its dialogs
-        // and progress back here. Input waits for the first 300 ms, then the progress window holds it.
-        m_host->begin();
-        QFutureWatcher<void> watch;
-        QEventLoop loop;
-        connect(&watch, &QFutureWatcher<void>::finished, &loop, &QEventLoop::quit);
-        watch.setFuture(QtConcurrent::run([&job] { fsb::run_macro_job(*job); }));
-        QTimer::singleShot(300, &loop, &QEventLoop::quit);
-        if (!watch.isFinished()) loop.exec(QEventLoop::ExcludeUserInputEvents);
-        if (!watch.isFinished()) {
-            m_host->showProgress();
-            loop.exec();
-        }
-        // quitting the application ends the loops early, but the worker holds the job until it returns
-        while (!watch.isFinished()) QCoreApplication::processEvents(QEventLoop::WaitForMoreEvents);
+        auto job = (*m_automation)->start_macro(id, tab->s(), fs::slice(rows), tab->active(), ctx);
+        runScript(*job);
         r = (*m_automation)->finish_macro(std::move(job), tab->s());
     } catch (const rust::Error &e) {
         err = QString::fromUtf8(e.what());
     }
-    m_host->finish();
     QString text = fs::q((*m_automation)->take_log());
     if (!err.isEmpty()) text += (text.isEmpty() ? "" : "\n") + err;
     log(text);
@@ -2401,4 +2477,69 @@ void MainWindow::runMacro(size_t id) {
     // a macro may only return a new selection (e.g. Select overlaps)
     const auto sel = fs::vec(r.selection);
     if (!sel.empty()) tab->setSelection(sel, r.active >= 0 ? int(r.active) : int(sel.front()));
+    if (r.edit_changed) tab->edit()->setScriptCursor(r.cursor, r.sel_start, r.sel_end);
+}
+
+bool MainWindow::ebuSettings(fsb::ExportSpec &spec) {
+    QSettings st;
+    st.beginGroup("ebuStl");
+    QDialog d(this);
+    d.setWindowTitle(tr("Export to EBU STL format"));
+    auto *f = new QFormLayout(&d);
+    auto combo = [&](const QStringList &items, const char *key, int def) {
+        auto *c = new QComboBox(&d);
+        c->addItems(items);
+        c->setCurrentIndex(std::clamp(st.value(key, def).toInt(), 0, int(items.size()) - 1));
+        return c;
+    };
+    auto *tv = combo({tr("23.976 fps (non-standard, STL24.01)"), tr("24 fps (non-standard, STL24.01)"),
+                      tr("25 fps (STL25.01)"), tr("29.97 fps (non-dropframe, STL30.01)"),
+                      tr("29.97 fps (dropframe, STL30.01)"), tr("30 fps (STL30.01)")},
+                     "tvStandard", 0);
+    auto *enc = combo({tr("ISO 6937-2 (Latin/Western Europe)"), tr("ISO 8859-5 (Cyrillic)"), tr("ISO 8859-6 (Arabic)"),
+                       tr("ISO 8859-7 (Greek)"), tr("ISO 8859-8 (Hebrew)"), tr("UTF-8 Unicode (non-standard)")},
+                      "textEncoding", 0);
+    auto *wrap = combo({tr("Automatically wrap long lines (ASS)"), tr("Automatically wrap long lines (Balanced)"),
+                        tr("Abort if any lines are too long"), tr("Skip lines that are too long")},
+                       "lineWrapping", 1);
+    auto *len = new QSpinBox(&d);
+    len->setRange(10, 99);
+    len->setValue(st.value("maxLineLength", 42).toInt());
+    auto *align = new QCheckBox(tr("Translate alignments"), &d);
+    align->setChecked(st.value("translateAlignments", true).toBool());
+    auto *offset = new QLineEdit(st.value("timecodeOffset", "00:00:00:00").toString(), &d);
+    offset->setInputMask("99:99:99:99");
+    auto *inclusive = new QCheckBox(tr("Out-times are inclusive"), &d);
+    inclusive->setChecked(st.value("inclusiveEndTimes", true).toBool());
+    auto *display = combo({tr("Open captions"), tr("Level-1 teletext"), tr("Level-2 teletext")}, "displayStandard", 0);
+    f->addRow(tr("TV standard:"), tv);
+    f->addRow(tr("Text encoding:"), enc);
+    f->addRow(tr("Line wrapping:"), wrap);
+    f->addRow(tr("Max. line length:"), len);
+    f->addRow(align);
+    f->addRow(tr("Time code offset:"), offset);
+    f->addRow(inclusive);
+    f->addRow(tr("Display standard:"), display);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+    connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    f->addRow(bb);
+    if (d.exec() != QDialog::Accepted) return false;
+    st.setValue("tvStandard", tv->currentIndex());
+    st.setValue("textEncoding", enc->currentIndex());
+    st.setValue("lineWrapping", wrap->currentIndex());
+    st.setValue("maxLineLength", len->value());
+    st.setValue("translateAlignments", align->isChecked());
+    st.setValue("timecodeOffset", offset->text());
+    st.setValue("inclusiveEndTimes", inclusive->isChecked());
+    st.setValue("displayStandard", display->currentIndex());
+    spec.ebu_tv_standard = std::uint8_t(tv->currentIndex());
+    spec.ebu_text_encoding = std::uint8_t(enc->currentIndex());
+    spec.ebu_line_wrapping = std::uint8_t(wrap->currentIndex());
+    spec.ebu_max_line_length = len->value();
+    spec.ebu_translate_alignments = align->isChecked();
+    spec.ebu_timecode_offset = fs::rs(offset->text());
+    spec.ebu_inclusive_end_times = inclusive->isChecked();
+    spec.ebu_display_standard = std::uint8_t(display->currentIndex());
+    return true;
 }

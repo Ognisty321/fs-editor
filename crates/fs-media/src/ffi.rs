@@ -109,6 +109,7 @@ pub(crate) mod bridge {
         fn new_subtitle_renderer() -> Result<UniquePtr<SubtitleRenderer>>;
         fn subs_set_fonts(r: Pin<&mut SubtitleRenderer>, family: &str, dir: &str);
         fn subs_add_font(r: Pin<&mut SubtitleRenderer>, name: &str, data: &[u8]);
+        fn subs_refresh_fonts(r: Pin<&mut SubtitleRenderer>);
         fn subs_set_script(r: Pin<&mut SubtitleRenderer>, ass: &str) -> Result<()>;
         fn subs_blend(
             r: Pin<&mut SubtitleRenderer>,

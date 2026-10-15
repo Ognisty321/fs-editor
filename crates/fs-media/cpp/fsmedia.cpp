@@ -685,7 +685,9 @@ SubtitleRenderer::SubtitleRenderer() {
     if (!lib_)
         throw MediaError("libass initialisation failed");
     ass_set_message_cb(lib_, ass_log, nullptr);
-    ass_set_extract_fonts(lib_, 1);
+    // off: every ass_read_memory would copy the script's [Fonts] into the library again, never
+    // freed; the embedding code registers them once through add_font instead
+    ass_set_extract_fonts(lib_, 0);
     renderer_ = ass_renderer_init(lib_);
     if (!renderer_)
         throw MediaError("libass renderer initialisation failed");
@@ -711,6 +713,9 @@ void SubtitleRenderer::set_fonts(const std::string &default_family, const std::f
 
 void SubtitleRenderer::add_font(const std::string &name, std::span<const uint8_t> data) {
     ass_add_font(lib_, name.c_str(), reinterpret_cast<const char *>(data.data()), static_cast<int>(data.size()));
+}
+
+void SubtitleRenderer::refresh_fonts() {
     // fonts added after ass_set_fonts are only seen after re-running it
     ass_set_fonts(renderer_, nullptr, default_family_.c_str(), ASS_FONTPROVIDER_AUTODETECT, nullptr, 1);
 }

@@ -1,11 +1,14 @@
 //! Video, subtitle renderer and audio wrappers for the GUI.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use fs_audio::{
     AudioSource, FreqScale, PcmBuffer, Peak, PeakCache, Player, Spectrogram, SpectrumConfig,
     SpectrumView,
 };
+use fs_core::Document;
+use fs_core::ass::Section;
 use fs_core::vfr::{Framerate, TimeType};
 
 use crate::ffi::VideoInfo;
@@ -76,20 +79,37 @@ impl Video {
     }
 }
 
-pub struct Renderer(fs_media::SubtitleRenderer);
+pub struct Renderer(fs_media::SubtitleRenderer, Option<Arc<Section>>);
 
 impl Renderer {
     pub fn new() -> Result<Self, String> {
         let mut r = fs_media::SubtitleRenderer::new().map_err(|e| e.to_string())?;
         r.set_fonts("Arial", None).map_err(|e| e.to_string())?;
-        Ok(Renderer(r))
+        Ok(Renderer(r, None))
     }
 
     /// Register fonts attached to an MKV (silently nothing for other files).
     pub fn load_attached_fonts(&mut self, media_path: &str) {
-        for (name, data) in fs_media::attached_fonts(Path::new(media_path)).unwrap_or_default() {
-            self.0.add_font(&name, &data);
+        let fonts = fs_media::attached_fonts(Path::new(media_path)).unwrap_or_default();
+        (self.0).add_fonts(fonts.iter().map(|(n, d)| (n.as_str(), d.as_slice())));
+    }
+
+    /// Register the subtitles' embedded fonts, which `script_for_render` leaves out; decoded
+    /// again only when the `[Fonts]` section changed.
+    pub fn sync_fonts(&mut self, session: &crate::Session) {
+        self.add_script_fonts(&session.ed.doc);
+    }
+
+    // shortcut: a font taken out of [Fonts] stays registered until the renderer is recreated
+    // (libass can only clear all of them); upgrade if that ever shows on screen
+    pub(crate) fn add_script_fonts(&mut self, doc: &Document) {
+        let section = doc.fonts_section();
+        if section.map(Arc::as_ptr) == self.1.as_ref().map(Arc::as_ptr) {
+            return;
         }
+        self.1 = section.cloned();
+        let fonts = doc.embedded_fonts();
+        (self.0).add_fonts(fonts.iter().map(|(n, d)| (n.as_str(), d.as_slice())));
     }
 
     pub fn set_script(&mut self, ass: &str) -> Result<(), String> {

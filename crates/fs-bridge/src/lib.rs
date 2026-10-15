@@ -9,8 +9,8 @@ mod session;
 mod spell;
 mod visual;
 
-use automation::run_macro_job;
-pub use automation::{Automation, MacroJob};
+use automation::run_script_job;
+pub use automation::{Automation, ScriptJob};
 use fs_core::tags::set_cps_ignore;
 pub use kanji::KanjiTimer;
 use kanji::new_kanji_timer;
@@ -109,6 +109,32 @@ pub mod ffi {
         margin_r: i32,
         margin_v: i32,
         encoding: i32,
+    }
+
+    /// Aegisub's Export: its dialog's options and what the chosen format asks for.
+    #[derive(Debug, Clone, Default)]
+    struct ExportSpec {
+        /// Lines with a style missing from the file get Default.
+        fix_styles: bool,
+        /// "Transform framerate" from/to ("video": the video's timecodes); empty `fps_to` skips it.
+        fps_from: String,
+        fps_to: String,
+        /// Text encoding label (`UTF-8`, `windows-1250`, …).
+        encoding: String,
+        /// Encore and TranStation: the rate of their SMPTE times, "video" or `num/den`.
+        smpte_fps: String,
+        /// SMPTE drop-frame timecodes (29.97).
+        smpte_drop: bool,
+        /// EBU STL settings, numbered as Aegisub's dialog (fs_formats::export::EbuSettings).
+        ebu_tv_standard: u8,
+        ebu_text_encoding: u8,
+        ebu_max_line_length: i32,
+        ebu_line_wrapping: u8,
+        ebu_translate_alignments: bool,
+        /// `hh:mm:ss:ff`.
+        ebu_timecode_offset: String,
+        ebu_inclusive_end_times: bool,
+        ebu_display_standard: u8,
     }
 
     /// Aegisub's "Resample Resolution" settings.
@@ -362,6 +388,24 @@ pub mod ffi {
         changed: bool,
         selection: Vec<usize>,
         active: i64,
+        /// The script moved the edit box cursor (`aegisub.gui`): positions as in `MacroContext`.
+        edit_changed: bool,
+        cursor: i64,
+        sel_start: i64,
+        sel_end: i64,
+    }
+
+    /// The editor around a macro run: `aegisub.get_audio_selection` and `aegisub.gui` read it.
+    #[derive(Debug, Clone, Default)]
+    struct MacroContext {
+        /// Audio is open: its selection in ms.
+        has_audio: bool,
+        audio_start: i64,
+        audio_end: i64,
+        /// Edit box cursor and selection: 1-based UTF-8 byte positions, as Aegisub's Scintilla.
+        cursor: i64,
+        sel_start: i64,
+        sel_end: i64,
     }
 
     /// One `aegisub.dialog.display` control; `kind` of the value:
@@ -433,6 +477,10 @@ pub mod ffi {
         fn task(self: &AutomationHost, text: &str);
         fn title(self: &AutomationHost, text: &str);
         fn is_cancelled(self: &AutomationHost) -> bool;
+        fn status_text(self: &AutomationHost, text: &str);
+        /// Empty when the clipboard holds no text.
+        fn clipboard_get(self: &AutomationHost) -> String;
+        fn clipboard_set(self: &AutomationHost, text: &str) -> bool;
 
         type PanicHandler;
         fn fatal(self: &PanicHandler, message: &str);
@@ -475,15 +523,9 @@ pub mod ffi {
         /// Whether the format a save to `path` writes (its extension's, for a new name) holds
         /// all of the subtitles; Save asks for an ASS name if not.
         fn lossless(self: &Session, path: &str) -> bool;
-        fn export_copy(
-            self: &Session,
-            path: &str,
-            fix_styles: bool,
-            fps_from: &str,
-            fps_to: &str,
-            video: &[i64],
-            encoding: &str,
-        ) -> Result<()>;
+        /// A copy of the subtitles through the export steps, in the format of `path`'s name
+        /// (`.ttxt`, `.encore.txt`, `.transtation.txt`, `.stl` included); the open file stays.
+        fn export_copy(self: &Session, path: &str, spec: &ExportSpec, video: &[i64]) -> Result<()>;
         fn save_translation(self: &Session, path: &str) -> Result<()>;
         fn autosave(self: &Session, path: &str) -> Result<()>;
         fn convert(self: &mut Session, format: &str) -> Result<()>;
@@ -739,6 +781,8 @@ pub mod ffi {
         type Renderer;
         fn new_renderer() -> Result<Box<Renderer>>;
         fn load_attached_fonts(self: &mut Renderer, media_path: &str);
+        /// The subtitles' embedded fonts, registered once (`script_for_render` leaves them out).
+        fn sync_fonts(self: &mut Renderer, session: &Session);
         fn set_script(self: &mut Renderer, ass: &str) -> Result<()>;
         fn blend(
             self: &mut Renderer,
@@ -827,17 +871,16 @@ pub mod ffi {
         fn remove_script(self: &mut Automation, index: usize);
         fn macros(self: &Automation) -> Vec<MacroItem>;
         fn filters(self: &Automation) -> Vec<MacroItem>;
-        /// False when the user cancelled a filter's settings.
-        fn export_filtered(
+        /// Export filters `ids` (of `filters()`) as a job: run it with `run_script_job`.
+        fn start_export(self: &Automation, ids: &[usize], session: &Session) -> Box<ScriptJob>;
+        /// Saves what the filters made; false when they were cancelled or failed (see the log).
+        fn finish_export(
             self: &Automation,
-            ids: &[usize],
+            job: Box<ScriptJob>,
             session: &Session,
             path: &str,
-            fix_styles: bool,
-            fps_from: &str,
-            fps_to: &str,
+            spec: &ExportSpec,
             video: &[i64],
-            encoding: &str,
         ) -> Result<bool>;
         fn macro_enabled(
             self: &Automation,
@@ -846,22 +889,25 @@ pub mod ffi {
             rows: &[usize],
             active: i64,
         ) -> bool;
-        /// A macro run in three steps (Aegisub's BackgroundScriptRunner): prepared and applied on
-        /// the GUI thread, run on a worker while the host brings dialogs and progress back.
-        type MacroJob;
+        /// A script run in three steps (Aegisub's BackgroundScriptRunner): prepared and applied
+        /// on the GUI thread, run on a worker while the host brings dialogs and progress back.
+        type ScriptJob;
         fn start_macro(
             self: &Automation,
             id: usize,
             session: &Session,
             rows: &[usize],
             active: i64,
-        ) -> Result<Box<MacroJob>>;
-        fn run_macro_job(job: &mut MacroJob);
+            editor: &MacroContext,
+        ) -> Result<Box<ScriptJob>>;
+        fn run_script_job(job: &mut ScriptJob);
         fn finish_macro(
             self: &Automation,
-            job: Box<MacroJob>,
+            job: Box<ScriptJob>,
             session: &mut Session,
         ) -> Result<MacroResult>;
+        /// Stops the running job's script at once (the progress window's second Cancel).
+        fn stop_script(self: &Automation);
         fn take_log(self: &Automation) -> String;
     }
 }

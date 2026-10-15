@@ -2,6 +2,10 @@
 //! a flat 1-based vector `[info..., styles..., events...]` over the document.
 //! Untouched lines keep their original entries, so committing writes them
 //! back byte for byte.
+//!
+//! A line is a 24-byte handle to shared data, and the vector is a gap buffer
+//! that follows the script's edits: deleting or inserting where the script
+//! works costs O(1) on any file size, and an undo point copies no lines.
 
 use fs_core::ass::{InfoEntry, Section, SectionBody, SectionKind, StyleEntry};
 use fs_core::model::{EventKind, fmt_f64};
@@ -9,6 +13,7 @@ use fs_core::text::RawLine;
 use fs_core::{Color, Document, Event, EventEntry, Style, Time};
 use mlua::{IntoLuaMulti, Lua, MultiValue, Table, UserData, UserDataMethods, Value};
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
 /// `[Script Info]` keys Aegisub keeps as project properties instead of
@@ -41,39 +46,144 @@ fn hidden_info(key: &str) -> bool {
     HIDDEN_INFO.contains(&k.as_str()) || k.starts_with("automation settings ")
 }
 
+/// A dialogue line as a script sees it: the text without the extradata
+/// prefix, and the extradata ids it carries.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LuaEvent {
     pub event: Event,
-    pub extra: Vec<(String, String)>,
+    pub extra: Vec<u32>,
 }
 
+#[derive(Debug)]
+pub(crate) struct InfoLine {
+    pub key: String,
+    pub value: String,
+    pub base: Option<InfoEntry>,
+}
+
+/// A line of the subtitles vector: the entry it came from (written back as it
+/// was while unchanged) and what the script made of it.
 #[derive(Clone, Debug)]
 pub(crate) enum Line {
-    Info {
-        key: String,
-        value: String,
-        base: Option<InfoEntry>,
-    },
+    Info(Arc<InfoLine>),
     Style {
         base: Option<Arc<StyleEntry>>,
-        style: Option<Style>,
+        style: Option<Arc<Style>>,
     },
     Event {
         base: Option<Arc<EventEntry>>,
-        event: Option<LuaEvent>,
+        event: Option<Arc<LuaEvent>>,
     },
 }
 
 impl Line {
     fn class(&self) -> u8 {
         match self {
-            Line::Info { .. } => 0,
+            Line::Info(_) => 0,
             Line::Style { .. } => 1,
             Line::Event { .. } => 2,
         }
     }
     pub fn is_event(&self) -> bool {
         matches!(self, Line::Event { .. })
+    }
+}
+
+/// The lines as a gap buffer: `front` holds lines `0..front.len()`, `back`
+/// the rest in reverse, so the gap sits where the script last inserted or
+/// deleted. Scripts walk the file and edit as they go (kara-templater deletes
+/// its fx lines one by one), which then never moves the rest of the file.
+#[derive(Default)]
+pub(crate) struct Lines {
+    front: Vec<Line>,
+    back: Vec<Line>,
+}
+
+impl Lines {
+    pub fn len(&self) -> usize {
+        self.front.len() + self.back.len()
+    }
+
+    pub fn get(&self, i: usize) -> Option<&Line> {
+        match i.checked_sub(self.front.len()) {
+            None => self.front.get(i),
+            Some(j) => self.back.len().checked_sub(j + 1).map(|k| &self.back[k]),
+        }
+    }
+
+    fn get_mut(&mut self, i: usize) -> Option<&mut Line> {
+        match i.checked_sub(self.front.len()) {
+            None => self.front.get_mut(i),
+            Some(j) => (self.back.len().checked_sub(j + 1)).map(|k| &mut self.back[k]),
+        }
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Line> {
+        self.front.iter().chain(self.back.iter().rev())
+    }
+
+    fn iter_mut(&mut self) -> impl Iterator<Item = &mut Line> {
+        self.front.iter_mut().chain(self.back.iter_mut().rev())
+    }
+
+    /// Moves the gap to `at` (`0..=len`).
+    fn gap(&mut self, at: usize) {
+        let f = self.front.len();
+        if at < f {
+            self.back.extend(self.front.drain(at..).rev());
+        } else if at > f {
+            let k = self.back.len() - (at - f).min(self.back.len());
+            self.front.extend(self.back.drain(k..).rev());
+        }
+    }
+
+    fn insert(&mut self, at: usize, lines: impl IntoIterator<Item = Line>) {
+        self.gap(at);
+        self.front.extend(lines);
+    }
+
+    /// Removes `n` lines from `at`; returns their classes.
+    fn remove(&mut self, at: usize, n: usize) -> Vec<u8> {
+        self.gap(at);
+        let k = self.back.len() - n.min(self.back.len());
+        self.back.drain(k..).map(|l| l.class()).collect()
+    }
+
+    /// Removes the lines at sorted, distinct indices in one pass.
+    fn remove_sorted(&mut self, ids: &[usize]) -> Vec<u8> {
+        match ids {
+            [] => Vec::new(),
+            [first, ..] if ids[ids.len() - 1] - first + 1 == ids.len() => {
+                self.remove(*first, ids.len())
+            }
+            _ => {
+                let old = std::mem::take(self);
+                let mut gone = ids.iter().copied().peekable();
+                let mut classes = Vec::with_capacity(ids.len());
+                self.front.reserve(old.len() - ids.len());
+                for (k, l) in old.take_all().enumerate() {
+                    if gone.next_if_eq(&k).is_some() {
+                        classes.push(l.class());
+                    } else {
+                        self.front.push(l);
+                    }
+                }
+                classes
+            }
+        }
+    }
+
+    fn take_all(self) -> impl Iterator<Item = Line> {
+        self.front.into_iter().chain(self.back.into_iter().rev())
+    }
+}
+
+impl FromIterator<Line> for Lines {
+    fn from_iter<I: IntoIterator<Item = Line>>(it: I) -> Self {
+        Lines {
+            front: it.into_iter().collect(),
+            back: Vec::new(),
+        }
     }
 }
 
@@ -133,9 +243,9 @@ fn uu_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// `id -> (key, value)` from `[Aegisub Extradata]`.
-fn extradata(doc: &Document) -> HashMap<u32, (String, String)> {
-    let mut map = HashMap::new();
+/// `(id, (key, value))` of `[Aegisub Extradata]`, in file order.
+fn extradata(doc: &Document) -> Vec<(u32, (String, String))> {
+    let mut out = Vec::new();
     for l in doc.raw_section(SectionKind::Extradata).unwrap_or(&[]) {
         let Some(rest) = l.text.strip_prefix("Data:") else {
             continue;
@@ -150,9 +260,45 @@ fn extradata(doc: &Document) -> HashMap<u32, (String, String)> {
             Some(("e", v)) => inline_decode(v),
             _ => inline_decode(val),
         };
-        map.insert(id, (inline_decode(key), value));
+        out.push((id, (inline_decode(key), value)));
     }
-    map
+    out
+}
+
+/// The file's extradata and the ids handed out during the run (Aegisub's
+/// `AssFile::AddExtradata`: an equal key and value reuses its id).
+#[derive(Default)]
+pub(crate) struct Extra {
+    by_id: HashMap<u32, (String, String)>,
+    ids: HashMap<(String, String), u32>,
+    next: u32,
+    /// Ids handed out since the last commit, not in `[Aegisub Extradata]` yet.
+    unwritten: Vec<u32>,
+}
+
+impl Extra {
+    fn of(doc: &Document) -> Extra {
+        let mut x = Extra::default();
+        for (id, kv) in extradata(doc) {
+            x.next = x.next.max(id.saturating_add(1));
+            x.ids.entry(kv.clone()).or_insert(id);
+            x.by_id.insert(id, kv);
+        }
+        x
+    }
+
+    fn id(&mut self, key: String, value: String) -> u32 {
+        let kv = (key, value);
+        if let Some(&id) = self.ids.get(&kv) {
+            return id;
+        }
+        let id = self.next;
+        self.next += 1;
+        self.by_id.insert(id, kv.clone());
+        self.ids.insert(kv, id);
+        self.unwritten.push(id);
+        id
+    }
 }
 
 /// Split `{=1=2}text` into extradata ids and the text.
@@ -168,42 +314,46 @@ fn split_extra_ids(text: &str) -> (Vec<u32>, &str) {
     (Vec::new(), text)
 }
 
-fn lua_event(e: &Event, extra: &HashMap<u32, (String, String)>) -> LuaEvent {
-    let (ids, text) = split_extra_ids(&e.text);
-    let mut ev = e.clone();
-    ev.text = text.to_string();
-    LuaEvent {
-        event: ev,
-        extra: ids.iter().filter_map(|i| extra.get(i).cloned()).collect(),
-    }
+/// A file's line as a script would give it back: only the extradata the file has.
+fn lua_event(e: &Event, extra: &Extra) -> LuaEvent {
+    let (mut ids, text) = split_extra_ids(&e.text);
+    ids.retain(|i| extra.by_id.contains_key(i));
+    ids.sort_unstable();
+    ids.dedup();
+    let mut event = e.clone();
+    event.text = text.to_string();
+    LuaEvent { event, extra: ids }
 }
 
 // ---- subtitles state -----------------------------------------------------------
 
 pub(crate) struct State {
+    /// The document as last committed (the run's input before any undo point).
     pub doc: Document,
-    extra: HashMap<u32, (String, String)>,
-    pub lines: Vec<Line>,
+    extra: Extra,
+    pub lines: Lines,
     can_modify: bool,
     can_set_undo: bool,
-    modified: bool,
+    /// Changed since the last undo point.
+    pub modified: bool,
     pub any_modified: bool,
-    pub info_touched: bool,
-    pub undo_points: Vec<(String, Vec<Line>, bool)>,
+    info_touched: bool,
+    /// Aegisub reads it from the file as it was when the run started.
+    resolution: (i32, i32),
+    pub undo_points: Vec<(String, Document)>,
 }
 
 impl State {
     pub fn new(doc: &Document, can_modify: bool, can_set_undo: bool) -> State {
-        let extra = extradata(doc);
-        let mut lines = Vec::new();
+        let mut lines = Vec::with_capacity(doc.events().len() + 64);
         if let Some(info) = doc.info_section() {
             for e in &info.entries {
                 if !hidden_info(&e.key) {
-                    lines.push(Line::Info {
+                    lines.push(Line::Info(Arc::new(InfoLine {
                         key: e.key.clone(),
                         value: e.value.clone(),
                         base: Some(e.clone()),
-                    });
+                    })));
                 }
             }
         }
@@ -219,13 +369,17 @@ impl State {
         }));
         State {
             doc: doc.clone(),
-            extra,
-            lines,
+            extra: Extra::of(doc),
+            lines: Lines {
+                front: lines,
+                back: Vec::new(),
+            },
             can_modify,
             can_set_undo,
             modified: false,
             any_modified: false,
             info_touched: false,
+            resolution: doc.play_res(),
             undo_points: Vec::new(),
         }
     }
@@ -237,37 +391,52 @@ impl State {
             .unwrap_or(self.lines.len())
     }
 
-    fn touch(&mut self, line: &Line) {
+    fn touch(&mut self, class: u8) {
         self.modified = true;
         self.any_modified = true;
-        if line.class() == 0 {
+        if class == 0 {
             self.info_touched = true;
         }
     }
 
-    /// Build the document for a lines vector.
-    pub fn build(&self, lines: &[Line], info_touched: bool) -> Document {
+    /// The document of the lines as they are now; the lines then stand for
+    /// its entries, so the next commit only builds what changed after this.
+    pub fn commit(&mut self) -> Document {
+        let doc = self.build();
+        let mut entries = doc.events().iter();
+        for l in self.lines.iter_mut() {
+            if let Line::Event { base, event } = l {
+                let entry = entries.next().expect("an entry per event line");
+                if event.is_some() {
+                    (*base, *event) = (Some(entry.clone()), None);
+                }
+            }
+        }
+        self.doc = doc.clone();
+        self.modified = false;
+        doc
+    }
+
+    fn build(&mut self) -> Document {
         let mut doc = self.doc.clone();
         let le = doc.default_ending;
-        let mut extra = self.extra.clone();
-        let mut new_data: Vec<String> = Vec::new();
 
-        if info_touched {
+        if self.info_touched {
             let mut entries: Vec<InfoEntry> = Vec::new();
-            for l in lines {
-                if let Line::Info { key, value, base } = l {
-                    entries.push(match base {
-                        Some(b) if &b.key == key && &b.value == value => b.clone(),
+            for l in self.lines.iter() {
+                if let Line::Info(i) = l {
+                    entries.push(match &i.base {
+                        Some(b) if b.key == i.key && b.value == i.value => b.clone(),
                         Some(b) => InfoEntry {
-                            key: key.clone(),
-                            value: value.clone(),
+                            key: i.key.clone(),
+                            value: i.value.clone(),
                             orig: None,
                             ..b.clone()
                         },
                         None => InfoEntry {
                             leading: Vec::new(),
-                            key: key.clone(),
-                            value: value.clone(),
+                            key: i.key.clone(),
+                            value: i.value.clone(),
                             orig: None,
                             ending: le,
                         },
@@ -300,21 +469,20 @@ impl State {
             }
         }
 
-        let styles: Vec<Arc<StyleEntry>> = lines
-            .iter()
+        let styles: Vec<Arc<StyleEntry>> = (self.lines.iter())
             .filter_map(|l| match l {
                 Line::Style { base, style } => Some(match (base, style) {
                     (Some(b), None) => b.clone(),
-                    (Some(b), Some(s)) if &b.style == s => b.clone(),
+                    (Some(b), Some(s)) if b.style == **s => b.clone(),
                     (Some(b), Some(s)) => Arc::new(StyleEntry {
                         leading: b.leading.clone(),
-                        style: s.clone(),
+                        style: (**s).clone(),
                         orig: None,
                         ending: b.ending,
                     }),
                     (None, s) => Arc::new(StyleEntry {
                         leading: Vec::new(),
-                        style: s.clone().unwrap_or_default(),
+                        style: s.as_deref().cloned().unwrap_or_default(),
                         orig: None,
                         ending: le,
                     }),
@@ -326,8 +494,8 @@ impl State {
             doc.ensure_styles().entries = styles;
         }
 
-        let mut events: Vec<Arc<EventEntry>> = Vec::new();
-        for l in lines {
+        let mut events: Vec<Arc<EventEntry>> = Vec::with_capacity(self.lines.len());
+        for l in self.lines.iter() {
             let Line::Event { base, event } = l else {
                 continue;
             };
@@ -336,35 +504,21 @@ impl State {
                 continue;
             };
             if let Some(b) = base
-                && lua_event(&b.event, &self.extra) == *le_ev
+                && lua_event(&b.event, &self.extra) == **le_ev
             {
                 events.push(b.clone());
                 continue;
             }
             let mut ev = le_ev.event.clone();
             if !le_ev.extra.is_empty() {
-                let mut ids: Vec<u32> = le_ev
-                    .extra
-                    .iter()
-                    .map(|kv| match extra.iter().find(|(_, v)| *v == kv) {
-                        Some((id, _)) => *id,
-                        None => {
-                            let id = extra.keys().max().map_or(0, |m| m + 1);
-                            extra.insert(id, kv.clone());
-                            new_data.push(format!(
-                                "Data: {},{},e{}",
-                                id,
-                                inline_encode(&kv.0),
-                                inline_encode(&kv.1)
-                            ));
-                            id
-                        }
-                    })
-                    .collect();
-                ids.sort_unstable();
-                ids.dedup();
-                let prefix: String = ids.iter().map(|i| format!("={i}")).collect();
-                ev.text = format!("{{{prefix}}}{}", ev.text);
+                let mut text = String::with_capacity(ev.text.len() + 8);
+                text.push('{');
+                for id in &le_ev.extra {
+                    let _ = write!(text, "={id}");
+                }
+                text.push('}');
+                text.push_str(&ev.text);
+                ev.text = text;
             }
             events.push(match base {
                 Some(b) => Arc::new(EventEntry {
@@ -381,7 +535,8 @@ impl State {
             doc.ensure_events().entries = events;
         }
 
-        if !new_data.is_empty() {
+        let unwritten = std::mem::take(&mut self.extra.unwritten);
+        if !unwritten.is_empty() {
             let i = match doc
                 .sections
                 .iter()
@@ -403,9 +558,12 @@ impl State {
                     .iter()
                     .rposition(|r| !r.text.trim().is_empty())
                     .map_or(0, |p| p + 1);
-                for (k, d) in new_data.into_iter().enumerate() {
-                    l.insert(at + k, RawLine::new(d, le));
-                }
+                let data = unwritten.iter().map(|id| {
+                    let (k, v) = &self.extra.by_id[id];
+                    let text = format!("Data: {id},{},e{}", inline_encode(k), inline_encode(v));
+                    RawLine::new(text, le)
+                });
+                l.splice(at..at, data);
             }
         }
         doc
@@ -456,24 +614,19 @@ fn field_err(f: &str, class: &str, ty: &str) -> String {
     format!("Invalid or missing field '{f}' in '{class}' class subtitle line (expected {ty})")
 }
 
+// The fields are read as Aegisub's lua_getfield does (a line table may take them from its
+// metatable) and coerced like lua_tostring / lua_tonumber: 0.1 + 0.2 is "0.3", "12" is 12.
+
 fn get_str(t: &Table, f: &str, class: &str) -> Res<String> {
-    match t.raw_get::<Value>(f).map_err(|e| e.to_string())? {
-        Value::String(s) => Ok(s.to_string_lossy()),
-        Value::Integer(i) => Ok(i.to_string()),
-        Value::Number(n) => Ok(fmt_f64(n)),
+    match t.get::<Option<mlua::LuaString>>(f) {
+        Ok(Some(s)) => Ok(s.to_string_lossy()),
         _ => Err(field_err(f, class, "string")),
     }
 }
 
 fn get_num(t: &Table, f: &str, class: &str) -> Res<f64> {
-    match t.raw_get::<Value>(f).map_err(|e| e.to_string())? {
-        Value::Integer(i) => Ok(i as f64),
-        Value::Number(n) => Ok(n),
-        Value::String(s) => s
-            .to_str()
-            .ok()
-            .and_then(|s| s.trim().parse().ok())
-            .ok_or_else(|| field_err(f, class, "number")),
+    match t.get::<Option<f64>>(f) {
+        Ok(Some(n)) => Ok(n),
         _ => Err(field_err(f, class, "number")),
     }
 }
@@ -483,17 +636,26 @@ fn get_int(t: &Table, f: &str, class: &str) -> Res<i64> {
 }
 
 fn get_bool(t: &Table, f: &str, class: &str) -> Res<bool> {
-    match t.raw_get::<Value>(f).map_err(|e| e.to_string())? {
-        Value::Boolean(b) => Ok(b),
+    match t.get::<Value>(f) {
+        Ok(Value::Boolean(b)) => Ok(b),
         _ => Err(field_err(f, class, "boolean")),
     }
 }
 
+/// Aegisub's `append_unsafe_str`: a comma would end the field early.
+fn push_field(out: &mut String, v: &str) {
+    out.extend(v.chars().map(|c| if c == ',' { ';' } else { c }));
+    out.push(',');
+}
+
 fn style_raw(s: &Style) -> String {
-    format!(
-        "Style: {},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
-        s.name,
-        s.font,
+    let mut out = String::with_capacity(128);
+    out.push_str("Style: ");
+    push_field(&mut out, &s.name);
+    push_field(&mut out, &s.font);
+    let _ = write!(
+        out,
+        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
         fmt_f64(s.size),
         s.primary.to_style_string(),
         s.secondary.to_style_string(),
@@ -515,28 +677,38 @@ fn style_raw(s: &Style) -> String {
         s.margin_r,
         s.margin_v,
         s.encoding
-    )
+    );
+    out
 }
 
-fn event_raw(e: &Event) -> String {
-    format!(
-        "{}: {},{},{},{},{},{},{},{},{},{}",
+/// Aegisub's `AssDialogue::GetEntryData`, with the line's extradata ids.
+fn event_raw(e: &Event, text: &str, ids: &[u32]) -> String {
+    let mut s = String::with_capacity(64 + e.style.len() + e.actor.len() + text.len());
+    let _ = write!(
+        s,
+        "{}: {},{},{},",
         e.kind.key(),
         e.layer,
         e.start.clamp_ass().to_ass(),
-        e.end.clamp_ass().to_ass(),
-        e.style,
-        e.actor,
-        e.margin_l,
-        e.margin_r,
-        e.margin_v,
-        e.effect,
-        e.text
-    )
+        e.end.clamp_ass().to_ass()
+    );
+    push_field(&mut s, &e.style);
+    push_field(&mut s, &e.actor);
+    let _ = write!(s, "{},{},{},", e.margin_l, e.margin_r, e.margin_v);
+    push_field(&mut s, &e.effect);
+    if !ids.is_empty() {
+        s.push('{');
+        for id in ids {
+            let _ = write!(s, "={id}");
+        }
+        s.push('}');
+    }
+    s.extend(text.chars().filter(|c| !matches!(c, '\r' | '\n')));
+    s
 }
 
 pub(crate) fn style_table(lua: &Lua, s: &Style) -> mlua::Result<Table> {
-    let t = lua.create_table()?;
+    let t = lua.create_table_with_capacity(0, 28)?;
     t.set("class", "style")?;
     t.set("section", "[V4+ Styles]")?;
     t.set("raw", style_raw(s))?;
@@ -568,9 +740,10 @@ pub(crate) fn style_table(lua: &Lua, s: &Style) -> mlua::Result<Table> {
     Ok(t)
 }
 
-fn event_table(lua: &Lua, e: &LuaEvent) -> mlua::Result<Table> {
-    let ev = &e.event;
-    let t = lua.create_table()?;
+/// The table of a dialogue line, built from the event in place: reading
+/// `subs[i]` of an untouched line copies nothing but the Lua strings.
+fn event_table(lua: &Lua, ev: &Event, text: &str, ids: &[u32], x: &Extra) -> mlua::Result<Table> {
+    let t = lua.create_table_with_capacity(0, 17)?;
     t.set("class", "dialogue")?;
     t.set("section", "[Events]")?;
     t.set("comment", ev.is_comment())?;
@@ -584,41 +757,40 @@ fn event_table(lua: &Lua, e: &LuaEvent) -> mlua::Result<Table> {
     t.set("margin_t", ev.margin_v)?;
     t.set("margin_b", ev.margin_v)?;
     t.set("effect", ev.effect.as_str())?;
-    t.set("text", ev.text.as_str())?;
-    let x = lua.create_table()?;
-    for (k, v) in &e.extra {
-        x.set(k.as_str(), v.as_str())?;
+    t.set("text", text)?;
+    let extra = lua.create_table()?;
+    for (k, v) in ids.iter().filter_map(|i| x.by_id.get(i)) {
+        extra.set(k.as_str(), v.as_str())?;
     }
-    t.set("extra", x)?;
-    let mut raw_ev = ev.clone();
-    if !e.extra.is_empty() {
-        // ids are assigned on commit; show the shape Aegisub uses
-        raw_ev.text = format!("{{={}}}{}", e.extra.len(), ev.text);
-    }
-    t.set("raw", event_raw(&raw_ev).replace(['\r', '\n'], ""))?;
+    t.set("extra", extra)?;
+    t.set("raw", event_raw(ev, text, ids))?;
     Ok(t)
 }
 
 fn line_table(lua: &Lua, st: &State, l: &Line) -> mlua::Result<Table> {
     match l {
-        Line::Info { key, value, .. } => {
-            let t = lua.create_table()?;
+        Line::Info(i) => {
+            let t = lua.create_table_with_capacity(0, 5)?;
             t.set("class", "info")?;
             t.set("section", "[Script Info]")?;
-            t.set("key", key.as_str())?;
-            t.set("value", value.as_str())?;
-            t.set("raw", format!("{key}: {value}"))?;
+            t.set("key", i.key.as_str())?;
+            t.set("value", i.value.as_str())?;
+            t.set("raw", format!("{}: {}", i.key, i.value))?;
             Ok(t)
         }
         Line::Style { base, style } => {
             let s = style
-                .as_ref()
+                .as_deref()
                 .unwrap_or_else(|| &base.as_ref().unwrap().style);
             style_table(lua, s)
         }
         Line::Event { base, event } => match event {
-            Some(e) => event_table(lua, e),
-            None => event_table(lua, &lua_event(&base.as_ref().unwrap().event, &st.extra)),
+            Some(e) => event_table(lua, &e.event, &e.event.text, &e.extra, &st.extra),
+            None => {
+                let ev = &base.as_ref().unwrap().event;
+                let (ids, text) = split_extra_ids(&ev.text);
+                event_table(lua, ev, text, &ids, &st.extra)
+            }
         },
     }
 }
@@ -661,7 +833,7 @@ pub(crate) fn table_style(t: &Table, base: Option<&Style>) -> Res<Style> {
     Ok(s)
 }
 
-fn table_event(t: &Table, base: Option<&Event>) -> Res<LuaEvent> {
+fn table_event(t: &Table, base: Option<&Event>, x: &mut Extra) -> Res<LuaEvent> {
     let c = "dialogue";
     let mut e = base.cloned().unwrap_or_default();
     e.kind = if get_bool(t, "comment", c)? {
@@ -683,35 +855,41 @@ fn table_event(t: &Table, base: Option<&Event>) -> Res<LuaEvent> {
     e.margin_v = mv;
     e.effect = get_str(t, "effect", c)?;
     e.text = get_str(t, "text", c)?;
-    let mut extra = Vec::new();
-    match t.raw_get::<Value>("extra").map_err(|e| e.to_string())? {
+    let mut ids = Vec::new();
+    match t.get::<Value>("extra").map_err(|e| e.to_string())? {
         Value::Nil => {}
-        Value::Table(x) => {
-            for pair in x.pairs::<Value, Value>() {
+        Value::Table(xt) => {
+            for pair in xt.pairs::<Value, Value>() {
                 let (k, v) = pair.map_err(|e| e.to_string())?;
                 let Value::String(k) = k else { continue };
                 let v = match v {
                     Value::String(s) => s.to_string_lossy(),
-                    Value::Integer(i) => i.to_string(),
-                    Value::Number(n) => fmt_f64(n),
+                    // read again as a string: Lua's own number formatting
+                    Value::Integer(_) | Value::Number(_) => (xt.get::<mlua::LuaString>(k.clone()))
+                        .map_err(|e| e.to_string())?
+                        .to_string_lossy(),
                     _ => "<not a string>".into(),
                 };
-                extra.push((k.to_string_lossy(), v));
+                ids.push(x.id(k.to_string_lossy(), v));
             }
-            extra.sort();
+            ids.sort_unstable();
+            ids.dedup();
         }
         _ => return Err("dialogue extradata must be a table".into()),
     }
-    Ok(LuaEvent { event: e, extra })
+    Ok(LuaEvent {
+        event: e,
+        extra: ids,
+    })
 }
 
 /// Convert a Lua value to a line; `base` is the line it replaces (if any).
-fn value_line(v: &Value, base: Option<&Line>) -> Res<Line> {
+fn value_line(v: &Value, base: Option<&Line>, x: &mut Extra) -> Res<Line> {
     let Value::Table(t) = v else {
         return Err("Can't convert a non-table value to AssEntry".into());
     };
-    let class = match t.raw_get::<Value>("class").map_err(|e| e.to_string())? {
-        Value::String(s) => s.to_string_lossy().to_lowercase(),
+    let class = match t.get::<Option<mlua::LuaString>>("class") {
+        Ok(Some(s)) => s.to_string_lossy().to_lowercase(),
         _ => return Err("Table lacks 'class' field, can't convert to AssEntry".into()),
     };
     match class.as_str() {
@@ -719,21 +897,21 @@ fn value_line(v: &Value, base: Option<&Line>) -> Res<Line> {
             let key = get_str(t, "key", "info")?;
             let value = get_str(t, "value", "info")?;
             let base = match base {
-                Some(Line::Info { base, .. }) => base.clone(),
+                Some(Line::Info(i)) => i.base.clone(),
                 _ => None,
             };
-            Ok(Line::Info { key, value, base })
+            Ok(Line::Info(Arc::new(InfoLine { key, value, base })))
         }
         "style" => {
             let (b, cur) = match base {
                 Some(Line::Style { base, style }) => (
                     base.clone(),
-                    style.clone().or(base.as_ref().map(|b| b.style.clone())),
+                    style.as_deref().or(base.as_ref().map(|b| &b.style)),
                 ),
                 _ => (None, None),
             };
             Ok(Line::Style {
-                style: Some(table_style(t, cur.as_ref())?),
+                style: Some(Arc::new(table_style(t, cur)?)),
                 base: b,
             })
         }
@@ -743,13 +921,13 @@ fn value_line(v: &Value, base: Option<&Line>) -> Res<Line> {
                     base.clone(),
                     event
                         .as_ref()
-                        .map(|e| e.event.clone())
-                        .or(base.as_ref().map(|b| b.event.clone())),
+                        .map(|e| &e.event)
+                        .or(base.as_ref().map(|b| &b.event)),
                 ),
                 _ => (None, None),
             };
             Ok(Line::Event {
-                event: Some(table_event(t, cur.as_ref())?),
+                event: Some(Arc::new(table_event(t, cur, x)?)),
                 base: b,
             })
         }
@@ -853,17 +1031,20 @@ fn fail(lua: &Lua, msg: impl AsRef<str>) -> Ret {
     (false, msg.as_ref()).into_lua_multi(lua)
 }
 
-fn to_index(v: &Value) -> Option<i64> {
+/// `lua_tointeger` of a number or a numeric string, as Aegisub's `check_int`.
+pub(crate) fn to_index(v: &Value) -> Option<i64> {
     match v {
         Value::Integer(i) => Some(*i),
         Value::Number(n) => Some(n.trunc() as i64),
-        Value::String(s) => s
-            .to_str()
-            .ok()?
-            .trim()
-            .parse::<f64>()
-            .ok()
-            .map(|n| n.trunc() as i64),
+        Value::String(s) => {
+            let s = s.to_str().ok()?;
+            let s = s.trim();
+            let n = match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+                Some(h) => i64::from_str_radix(h, 16).ok()? as f64,
+                None => s.parse::<f64>().ok()?,
+            };
+            Some(n.trunc() as i64)
+        }
         _ => None,
     }
 }
@@ -895,17 +1076,15 @@ impl Handle {
         }
     }
 
+    /// Aegisub's `ObjectAppend`: after the last line of the same class.
     fn append_lines(st: &mut State, vals: &[Value]) -> Res<()> {
         for v in vals {
-            let line = value_line(v, None)?;
+            let line = value_line(v, None, &mut st.extra)?;
             let class = line.class();
-            let at = st
-                .lines
-                .iter()
-                .rposition(|l| l.class() == class)
-                .map_or(st.lines.len(), |p| p + 1);
-            st.touch(&line);
-            st.lines.insert(at, line);
+            let from_end = st.lines.iter().rev().position(|l| l.class() == class);
+            let at = from_end.map_or(st.lines.len(), |p| st.lines.len() - p);
+            st.touch(class);
+            st.lines.insert(at, [line]);
         }
         Ok(())
     }
@@ -914,13 +1093,16 @@ impl Handle {
         if at < 1 || at as usize > st.lines.len() + 1 {
             return Err("bad argument #1 to 'insert' (Out of range line index)".into());
         }
-        let at = at as usize - 1;
+        if at as usize == st.lines.len() + 1 {
+            // Aegisub: inserting after the last line appends, each line to its own section
+            return Self::append_lines(st, vals);
+        }
         let lines = vals
             .iter()
-            .map(|v| value_line(v, None))
+            .map(|v| value_line(v, None, &mut st.extra))
             .collect::<Res<Vec<_>>>()?;
-        lines.iter().for_each(|l| st.touch(l));
-        st.lines.splice(at..at, lines);
+        lines.iter().for_each(|l| st.touch(l.class()));
+        st.lines.insert(at as usize - 1, lines);
         Ok(())
     }
 
@@ -935,16 +1117,9 @@ impl Handle {
         }
         ids.sort_unstable();
         ids.dedup();
-        // one pass: removing line by line moved the rest of the file for every id
-        let mut gone = ids.into_iter().map(|i| i as usize - 1).peekable();
-        let old = std::mem::take(&mut st.lines);
-        st.lines.reserve(old.len());
-        for (k, l) in old.into_iter().enumerate() {
-            if gone.next_if_eq(&k).is_some() {
-                st.touch(&l);
-            } else {
-                st.lines.push(l);
-            }
+        let ids: Vec<usize> = ids.into_iter().map(|i| i as usize - 1).collect();
+        for c in st.lines.remove_sorted(&ids) {
+            st.touch(c);
         }
         Ok(())
     }
@@ -962,13 +1137,14 @@ impl UserData for Handle {
                 return fail(lua, "Subtitles object is no longer valid");
             };
             let i = to_index(&i).unwrap_or(0);
-            if i < 1 || i as usize > st.lines.len() {
+            let line = usize::try_from(i - 1).ok().and_then(|k| st.lines.get(k));
+            let Some(line) = line else {
                 return fail(
                     lua,
                     format!("Requested out-of-range line from subtitle file: {i}"),
                 );
-            }
-            ok(lua, line_table(lua, st, &st.lines[i as usize - 1])?)
+            };
+            ok(lua, line_table(lua, st, line)?)
         });
         m.add_method("set", |lua, h, (i, v): (Value, Value)| {
             let i = to_index(&i).unwrap_or(0);
@@ -982,15 +1158,14 @@ impl UserData for Handle {
                 if v.is_nil() {
                     return Handle::delete_lines(st, vec![i]);
                 }
-                if i as usize > st.lines.len() {
-                    return Err(format!("Out of range line index {i}"));
-                }
                 let idx = i as usize - 1;
-                let line = value_line(&v, Some(&st.lines[idx]))?;
-                let old = st.lines[idx].clone();
-                st.touch(&old);
-                st.touch(&line);
-                st.lines[idx] = line;
+                let Some(old) = st.lines.get(idx).cloned() else {
+                    return Err(format!("Out of range line index {i}"));
+                };
+                let line = value_line(&v, Some(&old), &mut st.extra)?;
+                st.touch(old.class());
+                st.touch(line.class());
+                *st.lines.get_mut(idx).expect("checked above") = line;
                 Ok(())
             })?;
             Handle::reply(lua, r)
@@ -1029,9 +1204,8 @@ impl UserData for Handle {
                 let a = a.max(1) as usize;
                 let b = (b as usize).min(st.lines.len());
                 if a <= b {
-                    let removed: Vec<Line> = st.lines.drain(a - 1..b).collect();
-                    for l in &removed {
-                        st.touch(l);
+                    for c in st.lines.remove(a - 1, b - a + 1) {
+                        st.touch(c);
                     }
                 }
                 Ok(())
@@ -1051,31 +1225,15 @@ impl UserData for Handle {
             Handle::reply(lua, r)
         });
         m.add_method("script_resolution", |lua, h, ()| {
-            let r = h.with(lua, false, |st| {
-                let get = |k: &str| {
-                    st.lines.iter().find_map(|l| match l {
-                        Line::Info { key, value, .. } if key.eq_ignore_ascii_case(k) => {
-                            value.trim().parse::<i64>().ok()
-                        }
-                        _ => None,
-                    })
-                };
-                let (mut x, mut y) = (get("PlayResX").unwrap_or(0), get("PlayResY").unwrap_or(0));
-                if x == 0 && y == 0 {
-                    (x, y) = (384, 288);
-                } else if x == 0 {
-                    x = if y == 1024 { 1280 } else { y * 4 / 3 };
-                } else if y == 0 {
-                    y = if x == 1280 { 1024 } else { x * 3 / 4 };
-                }
-                Ok((x, y))
-            })?;
+            let r = h.with(lua, false, |st| Ok(st.resolution))?;
             Handle::reply(lua, r)
         });
         m.add_method("parse_karaoke", |lua, h, line: Value| {
-            let r = h.with(lua, false, |_| match value_line(&line, None)? {
-                Line::Event { event: Some(e), .. } => Ok(e.event),
-                _ => Err("bad argument #1 to 'parse_karaoke_data' (Subtitle line must be a dialogue line)".into()),
+            let r = h.with(lua, false, |_| {
+                match value_line(&line, None, &mut Extra::default())? {
+                    Line::Event { event: Some(e), .. } => Ok(e),
+                    _ => Err("bad argument #1 to 'parse_karaoke_data' (Subtitle line must be a dialogue line)".into()),
+                }
             })?;
             let e = match r {
                 Ok(e) => e,
@@ -1083,7 +1241,7 @@ impl UserData for Handle {
             };
             let out = lua.create_table()?;
             let syl = |start: i64, dur: i64, tag: &str, text: &str, stripped: &str| -> mlua::Result<Table> {
-                let t = lua.create_table()?;
+                let t = lua.create_table_with_capacity(0, 6)?;
                 t.set("duration", dur)?;
                 t.set("start_time", start)?;
                 t.set("end_time", start + dur)?;
@@ -1093,18 +1251,16 @@ impl UserData for Handle {
                 Ok(t)
             };
             out.raw_set(0, syl(0, 0, "", "", "")?)?;
-            for (i, s) in karaoke(&e).iter().enumerate() {
+            for (i, s) in karaoke(&e.event).iter().enumerate() {
                 out.raw_set(i + 1, syl(s.start, s.duration, &s.tag, &s.text, &s.stripped)?)?;
             }
             ok(lua, out)
         });
         m.add_method("set_undo_point", |lua, h, desc: Value| {
-            let desc = match desc {
-                Value::String(s) => s.to_string_lossy(),
-                Value::Integer(i) => i.to_string(),
-                Value::Number(n) => fmt_f64(n),
-                _ => String::new(),
-            };
+            let desc = lua
+                .coerce_string(desc)?
+                .map(|s| s.to_string_lossy())
+                .unwrap_or_default();
             let mut g = h.0.lock().unwrap_or_else(|e| e.into_inner());
             let Some(st) = g.as_mut() else {
                 return fail(lua, "Subtitles object is no longer valid");
@@ -1116,9 +1272,9 @@ impl UserData for Handle {
                 );
             }
             if st.modified {
-                let snap = (desc, st.lines.clone(), st.info_touched);
-                st.undo_points.push(snap);
-                st.modified = false;
+                // committed now, so the point costs what changed since the last one
+                let doc = st.commit();
+                st.undo_points.push((desc, doc));
             }
             ok(lua, ())
         });
@@ -1161,5 +1317,48 @@ mod tests {
                 ("\\k", 300, 300, "oke"),
             ]
         );
+    }
+
+    fn info(k: &str) -> Line {
+        Line::Info(Arc::new(InfoLine {
+            key: k.into(),
+            value: String::new(),
+            base: None,
+        }))
+    }
+
+    fn keys(l: &Lines) -> String {
+        l.iter()
+            .map(|l| match l {
+                Line::Info(i) => i.key.as_str(),
+                _ => "?",
+            })
+            .collect()
+    }
+
+    #[test]
+    fn gap_buffer_keeps_the_order() {
+        assert!(std::mem::size_of::<Line>() <= 24);
+        let mut l: Lines = "abcdef".chars().map(|c| info(&c.to_string())).collect();
+        l.insert(2, [info("X"), info("Y")]);
+        assert_eq!(keys(&l), "abXYcdef");
+        assert_eq!(l.remove(1, 2), [0, 0]);
+        assert_eq!(keys(&l), "aYcdef");
+        l.insert(6, [info("Z")]);
+        l.insert(0, [info("0")]);
+        assert_eq!(keys(&l), "0aYcdefZ");
+        assert_eq!(l.remove_sorted(&[0, 3, 7]).len(), 3);
+        assert_eq!(keys(&l), "aYdef");
+        assert_eq!(l.remove_sorted(&[1, 2]).len(), 2);
+        assert_eq!(keys(&l), "aef");
+        let got: String = (0..l.len())
+            .map(|i| match l.get(i).unwrap() {
+                Line::Info(x) => x.key.clone(),
+                _ => String::new(),
+            })
+            .collect();
+        assert_eq!(got, "aef");
+        assert!(l.get(3).is_none());
+        assert_eq!(l.take_all().count(), 3);
     }
 }

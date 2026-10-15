@@ -19,8 +19,8 @@ use fs_core::{Color, Document, Event, EventEntry, EventId, Time};
 use fs_formats::{Format, LoadOptions, SaveOptions, TextImport};
 
 use crate::ffi::{
-    ColumnInfo, ComparePair, FileInfo, FilterSpec, FindHit, FindMatch, FindSpec, PostSpec,
-    ResampleSpec, Row, RowSpan, ShiftSpec, StyleData, Syllable, Visual,
+    ColumnInfo, ComparePair, ExportSpec, FileInfo, FilterSpec, FindHit, FindMatch, FindSpec,
+    PostSpec, ResampleSpec, Row, RowSpan, ShiftSpec, StyleData, Syllable, Visual,
 };
 
 pub struct Session {
@@ -224,6 +224,13 @@ fn column_key(ev: &Event) -> (bool, bool, bool, bool, &str, &str, &str) {
         tlmode::split_actor(&ev.actor).1,
         tlmode::strip_doubtful(&ev.effect),
     )
+}
+
+/// The text libass gets: without the uuencoded attachments, whose fonts the renderer
+/// registers once (`Renderer::sync_fonts`) instead of decoding them on every edit.
+pub(crate) fn render_script(mut doc: Document) -> String {
+    (doc.sections).retain(|s| !matches!(s.kind, SectionKind::Fonts | SectionKind::Graphics));
+    doc.to_ass_string()
 }
 
 /// `Dialogue: …` line of an event in the default v4+ field order.
@@ -1222,60 +1229,39 @@ impl Session {
         });
     }
 
-    /// Aegisub's Export: a copy through the Fix Styles / Transform Framerate
-    /// filters (empty `fps_to` skips it), in the path's format and `encoding`.
-    /// The open file, its path and saved state stay as they are.
-    #[allow(clippy::too_many_arguments)]
-    pub fn export_copy(
-        &self,
-        path: &str,
-        fix_styles: bool,
-        fps_from: &str,
-        fps_to: &str,
-        video: &[i64],
-        encoding: &str,
-    ) -> Result<(), String> {
-        self.export_doc(
-            self.ed.doc.clone(),
-            path,
-            fix_styles,
-            fps_from,
-            fps_to,
-            video,
-            encoding,
-        )
+    /// Aegisub's Export: a copy through the Fix Styles / Transform Framerate steps, in the
+    /// format `path`'s name says and `spec.encoding`. The open file, its path and saved state
+    /// stay as they are.
+    pub fn export_copy(&self, path: &str, spec: &ExportSpec, video: &[i64]) -> Result<(), String> {
+        self.export_doc(self.ed.doc.clone(), path, spec, video)
     }
 
     /// `export_copy` of an already transformed document (automation export filters).
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn export_doc(
         &self,
         mut doc: Document,
         path: &str,
-        fix_styles: bool,
-        fps_from: &str,
-        fps_to: &str,
+        spec: &ExportSpec,
         video: &[i64],
-        encoding: &str,
     ) -> Result<(), String> {
-        if fix_styles {
+        let rate = |s: &str| {
+            if s == "video" {
+                Framerate::from_timecodes(video.to_vec())
+            } else {
+                Framerate::parse(s)
+            }
+            .map_err(|e| format!("{s}: {e}"))
+        };
+        if spec.fix_styles {
             ops::fix_styles(&mut doc);
         }
-        if !fps_to.is_empty() {
-            let rate = |s: &str| {
-                if s == "video" {
-                    Framerate::from_timecodes(video.to_vec())
-                } else {
-                    Framerate::parse(s)
-                }
-                .map_err(|e| format!("{s}: {e}"))
-            };
-            ops::change_fps(&mut doc, &rate(fps_from)?, &rate(fps_to)?);
+        if !spec.fps_to.is_empty() {
+            ops::change_fps(&mut doc, &rate(&spec.fps_from)?, &rate(&spec.fps_to)?);
         }
         let p = Path::new(path);
         let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
         let opts = SaveOptions {
-            encoding: Encoding::for_label(encoding.as_bytes()).unwrap_or(self.encoding),
+            encoding: Encoding::for_label(spec.encoding.as_bytes()).unwrap_or(self.encoding),
             bom: self.bom,
             fps: self
                 .framerate
@@ -1283,6 +1269,54 @@ impl Session {
                 .unwrap_or_else(|| Framerate::from_rational(24000, 1001, false).unwrap()),
             ..Default::default()
         };
+        let name = (p.file_name().and_then(|n| n.to_str()))
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let write = |bytes: Vec<u8>| std::fs::write(p, bytes).map_err(|e| format!("{path}: {e}"));
+        // the rate of Encore's and TranStation's SMPTE times, drop-frame as asked
+        let smpte = || {
+            if spec.smpte_fps == "video" {
+                return rate("video");
+            }
+            let fps = &spec.smpte_fps;
+            match fps.split_once('/') {
+                Some((n, d)) => n.trim().parse().ok().zip(d.trim().parse().ok()),
+                None => fps.trim().parse().ok().map(|n| (n, 1)),
+            }
+            .ok_or_else(|| format!("{fps}: invalid frame rate"))
+            .and_then(|(n, d)| {
+                Framerate::from_rational(n, d, spec.smpte_drop).map_err(|e| e.to_string())
+            })
+        };
+        // Aegisub's write-only formats, picked by the end of the name as there
+        if name.ends_with(".encore.txt") {
+            let text = fs_formats::export::write_encore(&doc, &smpte()?);
+            return write(fs_formats::encoding::encode(
+                &text,
+                encoding_rs::UTF_8,
+                true,
+            ));
+        }
+        if name.ends_with(".transtation.txt") {
+            let text = fs_formats::export::write_transtation(&doc, &smpte()?);
+            return write(fs_formats::encoding::encode(&text, opts.encoding, opts.bom));
+        }
+        if ext.eq_ignore_ascii_case("stl") {
+            let offset: Vec<u8> = (spec.ebu_timecode_offset.split(':'))
+                .map(|v| v.trim().parse().unwrap_or(0))
+                .collect();
+            let settings = fs_formats::export::EbuSettings {
+                tv_standard: spec.ebu_tv_standard,
+                text_encoding: spec.ebu_text_encoding,
+                max_line_length: spec.ebu_max_line_length.max(1) as usize,
+                line_wrapping: spec.ebu_line_wrapping,
+                translate_alignments: spec.ebu_translate_alignments,
+                timecode_offset: std::array::from_fn(|k| offset.get(k).copied().unwrap_or(0)),
+                inclusive_end_times: spec.ebu_inclusive_end_times,
+                display_standard: spec.ebu_display_standard,
+            };
+            return write(fs_formats::export::write_ebu_stl(&doc, &settings)?);
+        }
         if ext.eq_ignore_ascii_case("txt") {
             // Aegisub's plain text export; TMP and MPL2 come from converting the subtitles
             let text = fs_formats::write_plain_text(&doc);
@@ -2303,10 +2337,8 @@ impl Session {
     pub fn script_for_render(&self, hide_original: bool, at_ms: i64) -> String {
         let mut doc = if self.tl && hide_original {
             tlmode::translation_only(&self.ed.doc)
-        } else if at_ms >= 0 {
-            self.ed.doc.clone() // sections are shared, only the kept lines are copied
         } else {
-            return self.ed.doc.to_ass_string();
+            self.ed.doc.clone() // sections are shared, only the kept lines are copied
         };
         if at_ms >= 0 {
             // libass reads centiseconds: keep lines within 10 ms of the frame time
@@ -2316,7 +2348,7 @@ impl Session {
                 !e.is_comment() && e.start <= t + slack && e.end + slack > t
             });
         }
-        doc.to_ass_string()
+        render_script(doc)
     }
 
     // ---- translation mode -------------------------------------------------
@@ -3452,6 +3484,18 @@ mod tests {
         // the end of a line (centisecond-rounded) still counts within 10 ms
         assert!(s.script_for_render(false, 1995).contains(",,one"));
         assert_eq!(s.script_for_render(false, -1), s.ed.doc.to_ass_string());
+        // embedded fonts go to libass once, not in every script it parses
+        let mut s = session(ASS);
+        s.ed.doc.attach(true, "F.ttf", &[7; 300]);
+        s.ed.doc.attach(false, "p.png", b"png");
+        for at in [-1, 3500] {
+            let text = s.script_for_render(false, at);
+            assert!(
+                !text.contains("[Fonts]")
+                    && !text.contains("[Graphics]")
+                    && text.contains("[Events]")
+            );
+        }
     }
 
     #[test]
@@ -3523,8 +3567,14 @@ mod tests {
         let s = session(ASS);
         let path = s.file_info().path;
         let out = std::env::temp_dir().join(format!("fsb-export-{}.srt", std::process::id()));
-        s.export_copy(out.to_str().unwrap(), true, "23.976", "25", &[], "UTF-8")
-            .unwrap();
+        let spec = ExportSpec {
+            fix_styles: true,
+            fps_from: "23.976".into(),
+            fps_to: "25".into(),
+            encoding: "UTF-8".into(),
+            ..Default::default()
+        };
+        s.export_copy(out.to_str().unwrap(), &spec, &[]).unwrap();
         let srt = std::fs::read_to_string(&out).unwrap();
         // 1 s at 23.976 fps is 0.959 s at 25 fps
         assert!(srt.contains("00:00:00,95"), "{srt}");

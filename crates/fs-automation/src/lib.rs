@@ -23,8 +23,9 @@ use mlua::{
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use subs::{Handle, Line, State};
+use subs::{Handle, State};
 
 const PRELUDE: &str = include_str!("prelude.lua");
 
@@ -333,6 +334,8 @@ struct Shared {
     doc: Option<Document>,
     edit: EditState,
     edit_changed: bool,
+    /// The running macro or filter: the title of its dialogs.
+    feature_name: String,
 }
 
 struct Runtime {
@@ -342,6 +345,79 @@ struct Runtime {
     api: RegistryKey,
     macros: RegistryKey,
     filters: RegistryKey,
+    stop: Interrupt,
+}
+
+/// Stops the running feature of a script from another thread: the progress
+/// window's "Stop script" for a script that never checks `is_cancelled`
+/// (Aegisub can only wait for those). The script gets an error at its next
+/// interpreted instruction and the run ends as cancelled. A loop the JIT has
+/// compiled whole (no calls out of it) does not reach the interpreter again.
+#[derive(Clone)]
+pub struct Interrupt(Arc<Stopper>);
+
+struct Stopper {
+    stopped: AtomicBool,
+    /// The state's `lua_State` address; 0 once the state is closed. Every
+    /// `lua_sethook` happens under this lock, so none races another or the close.
+    state: Mutex<usize>,
+}
+
+unsafe extern "C-unwind" fn stop_hook(l: *mut mlua::ffi::lua_State, _: *mut mlua::ffi::lua_Debug) {
+    // SAFETY: called by the VM on the running thread, where raising an error is allowed
+    unsafe { mlua::ffi::luaL_error(l, c"Script stopped by the user".as_ptr()) };
+}
+
+impl Interrupt {
+    fn new(lua: &Lua) -> mlua::Result<Interrupt> {
+        let mut addr = 0;
+        // SAFETY: only reads the state pointer
+        unsafe { lua.exec_raw::<()>((), |l| addr = l as usize)? };
+        Ok(Interrupt(Arc::new(Stopper {
+            stopped: AtomicBool::new(false),
+            state: Mutex::new(addr),
+        })))
+    }
+
+    /// Make the running feature fail at its next Lua instruction.
+    pub fn trigger(&self) {
+        self.hook(true);
+    }
+
+    fn stopped(&self) -> bool {
+        self.0.stopped.load(Ordering::SeqCst)
+    }
+
+    /// Set (`on`) or clear the stop hook; clearing also forgets a stop.
+    fn hook(&self, on: bool) {
+        let state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
+        if *state == 0 {
+            return;
+        }
+        self.0.stopped.store(on, Ordering::SeqCst);
+        let l = *state as *mut mlua::ffi::lua_State;
+        use mlua::ffi::{LUA_MASKCALL, LUA_MASKCOUNT, LUA_MASKRET, lua_sethook};
+        // SAFETY: the state is open while the lock is held (Runtime::drop zeroes it first).
+        // LuaJIT's hook is global and lua_sethook may be called while another thread runs
+        // the state: luajit.c's Ctrl+C handler stops scripts the same way.
+        unsafe {
+            match on {
+                true => lua_sethook(
+                    l,
+                    Some(stop_hook),
+                    LUA_MASKCALL | LUA_MASKRET | LUA_MASKCOUNT,
+                    1,
+                ),
+                false => lua_sethook(l, None, 0, 0),
+            }
+        };
+    }
+
+    /// The state closes: later triggers do nothing.
+    fn close(&self) {
+        self.hook(false);
+        *self.0.state.lock().unwrap_or_else(|e| e.into_inner()) = 0;
+    }
 }
 
 /// mlua can't serve Rust callbacks from inside `lua_close` (its handle is
@@ -362,6 +438,7 @@ fn detach_rust(lua: &Lua, fs: &Table) {
 
 impl Drop for Runtime {
     fn drop(&mut self) {
+        self.stop.close();
         detach_rust(&self.lua, &self.fs);
     }
 }
@@ -402,13 +479,29 @@ fn canonical(p: &Path) -> PathBuf {
     }
 }
 
-fn lua_str(v: &Value) -> Option<String> {
+/// `lua_tostring`: a string, or a number as Lua prints it (`%.14g`); nothing for other values.
+fn lua_str(lua: &Lua, v: &Value) -> Option<String> {
     match v {
         Value::String(s) => Some(s.to_string_lossy()),
-        Value::Integer(i) => Some(i.to_string()),
-        Value::Number(n) => Some(fs_core::model::fmt_f64(*n)),
+        Value::Integer(_) | Value::Number(_) => {
+            (lua.coerce_string(v.clone()).ok().flatten()).map(|s| s.to_string_lossy())
+        }
         _ => None,
     }
+}
+
+/// An error value as text, through `tostring` so error objects with `__tostring` read well.
+fn error_text(lua: &Lua, v: &Value) -> String {
+    lua_str(lua, v)
+        .or_else(|| {
+            let tostring = lua.globals().get::<Function>("tostring").ok()?;
+            tostring.call::<String>(v.clone()).ok()
+        })
+        .unwrap_or_else(|| format!("{v:?}"))
+}
+
+fn truthy(v: &Value) -> bool {
+    !matches!(v, Value::Nil | Value::Boolean(false))
 }
 
 fn ret(lua: &Lua, v: impl mlua::IntoLuaMulti) -> mlua::Result<MultiValue> {
@@ -464,30 +557,29 @@ impl UserData for Frame {
     }
 }
 
-fn dialog_from_lua(controls: &Value, buttons: &Value, ids: &Value) -> Result<Dialog, String> {
+fn dialog_from_lua(
+    lua: &Lua,
+    controls: &Value,
+    buttons: &Value,
+    ids: &Value,
+) -> Result<Dialog, String> {
     let Value::Table(ct) = controls else {
         return Err("Cannot create config dialog from something non-table".into());
     };
+    // Aegisub's get_field: read through the metatable; a value of the wrong type keeps the
+    // default, and strings and numbers stand in for each other as in Lua
+    let coerce_str = |v: Value| (lua.coerce_string(v).ok().flatten()).map(|s| s.to_string_lossy());
     let mut d = Dialog::default();
     for pair in ct.pairs::<Value, Value>() {
         let (_, v) = pair.map_err(|e| e.to_string())?;
         let Value::Table(t) = v else {
             return Err("bad control table entry".into());
         };
-        let get = |k: &str| t.raw_get::<Value>(k).unwrap_or(Value::Nil);
-        let string = |k: &str| match get(k) {
-            Value::String(s) => Some(s.to_string_lossy()),
-            _ => None,
-        };
-        let number = |k: &str| match get(k) {
-            Value::Integer(i) => Some(i as f64),
-            Value::Number(n) => Some(n),
-            _ => None,
-        };
+        let get = |k: &str| t.get::<Value>(k).unwrap_or(Value::Nil);
+        let string = |k: &str| coerce_str(get(k));
+        let number = |k: &str| lua.coerce_number(get(k)).ok().flatten();
         let int = |k: &str, def: i32| number(k).map_or(def, |n| n.trunc() as i32);
-        let Some(class) = string("class").map(|c| c.to_lowercase()) else {
-            return Err("bad control table entry".into());
-        };
+        let class = string("class").unwrap_or_default().to_lowercase();
         let range = |min: Option<f64>, max: Option<f64>| match (min, max) {
             (Some(a), Some(b)) if a >= b => (None, None),
             r => r,
@@ -523,22 +615,26 @@ fn dialog_from_lua(controls: &Value, buttons: &Value, ids: &Value) -> Result<Dia
             "floatedit" => {
                 (c.min, c.max) = range(number("min"), number("max"));
                 c.step = number("step").unwrap_or(0.0);
-                if c.step != 0.0 && c.min.is_none() {
-                    (c.min, c.max) = (Some(0.0), Some(100.0));
+                if c.step != 0.0 {
+                    // each end on its own, as Aegisub: a given max stays with the default min
+                    c.min = c.min.or(Some(0.0));
+                    c.max = c.max.or(Some(100.0));
                 }
                 c.value = Some(DialogValue::Float(number("value").unwrap_or(0.0)));
             }
             "dropdown" => {
                 if let Value::Table(items) = get("items") {
-                    c.items = items
-                        .sequence_values::<Value>()
-                        .filter_map(|v| match v {
-                            Ok(Value::String(s)) => Some(s.to_string_lossy()),
-                            _ => None,
-                        })
-                        .collect();
+                    for pair in items.pairs::<Value, Value>() {
+                        let (_, v) = pair.map_err(|e| e.to_string())?;
+                        c.items.extend(coerce_str(v));
+                    }
                 }
-                c.value = Some(DialogValue::Text(string("value").unwrap_or_default()));
+                let value = string("value").unwrap_or_default();
+                // Aegisub: an empty value that is no item is offered as the first one
+                if value.is_empty() && !c.items.contains(&value) {
+                    c.items.insert(0, value.clone());
+                }
+                c.value = Some(DialogValue::Text(value));
             }
             "checkbox" => {
                 c.value = Some(DialogValue::Bool(matches!(
@@ -559,16 +655,17 @@ fn dialog_from_lua(controls: &Value, buttons: &Value, ids: &Value) -> Result<Dia
         d.controls.push(c);
     }
     if let Value::Table(b) = buttons {
-        for v in b.sequence_values::<Value>() {
-            match v.map_err(|e| e.to_string())? {
-                Value::String(s) => d.buttons.push(s.to_string_lossy()),
-                _ => return Err("Invalid button label".into()),
-            }
+        for pair in b.pairs::<Value, Value>() {
+            let (_, v) = pair.map_err(|e| e.to_string())?;
+            d.buttons.push(coerce_str(v).ok_or("Invalid button label")?);
         }
     }
     if let Value::Table(ids) = ids {
-        for pair in ids.pairs::<String, String>() {
+        for pair in ids.pairs::<Value, Value>() {
             let (id, label) = pair.map_err(|e| e.to_string())?;
+            let (Some(id), Some(label)) = (coerce_str(id), coerce_str(label)) else {
+                return Err("Invalid button id".into());
+            };
             if !d.buttons.contains(&label) {
                 return Err(format!("Invalid button for id {id}"));
             }
@@ -664,7 +761,7 @@ fn fs_table(lua: &Lua) -> mlua::Result<Table> {
                 Value::String(c) if c.to_string_lossy().eq_ignore_ascii_case("style") => {}
                 _ => return fail(lua, "Not a style entry"),
             }
-            let Some(text) = lua_str(&text) else {
+            let Some(text) = lua_str(lua, &text) else {
                 return fail(lua, "bad argument #2 to 'text_extents' (string expected)");
             };
             match subs::table_style(t, None) {
@@ -876,15 +973,15 @@ fn fs_table(lua: &Lua) -> mlua::Result<Table> {
     fs.set(
         "dialog_display",
         lua.create_function(|lua, (c, b, ids): (Value, Value, Value)| {
-            let mut d = match dialog_from_lua(&c, &b, &ids) {
+            let mut d = match dialog_from_lua(lua, &c, &b, &ids) {
                 Ok(d) => d,
                 Err(e) => return fail(lua, e),
             };
-            let host = shared(lua)?.env.host.clone();
-            d.title = lua
-                .globals()
-                .get::<Option<String>>("__fs_feature_name")?
-                .unwrap_or_default();
+            let (host, title) = {
+                let s = shared(lua)?;
+                (s.env.host.clone(), s.feature_name.clone())
+            };
+            d.title = title;
             let r = host.dialog(&d);
             let button = match r.button {
                 Some(l) => Value::String(lua.create_string(&l)?),
@@ -948,9 +1045,7 @@ fn call(
     }
     match out.get(1) {
         None | Some(Value::Nil) => Err(RunError::Cancelled),
-        Some(v) => Err(RunError::Lua(
-            lua_str(v).unwrap_or_else(|| format!("{v:?}")),
-        )),
+        Some(v) => Err(RunError::Lua(error_text(lua, v))),
     }
 }
 
@@ -994,6 +1089,7 @@ impl Script {
             doc: None,
             edit: EditState::default(),
             edit_changed: false,
+            feature_name: String::new(),
         });
         let init_clipboard = native::install(&lua).map_err(e)?;
         let script_dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
@@ -1039,7 +1135,7 @@ impl Script {
         let g = lua.globals();
         if g.get::<Value>("version")
             .ok()
-            .and_then(|v| lua_str(&v))
+            .and_then(|v| lua_str(&lua, &v))
             .as_deref()
             == Some("3")
         {
@@ -1048,7 +1144,7 @@ impl Script {
         let global = |k: &str| {
             g.get::<Value>(k)
                 .ok()
-                .and_then(|v| lua_str(&v))
+                .and_then(|v| lua_str(&lua, &v))
                 .unwrap_or_default()
         };
         if !global("script_name").is_empty() {
@@ -1087,6 +1183,7 @@ impl Script {
             api: lua.create_registry_value(api).map_err(e)?,
             macros: lua.create_registry_value(macros).map_err(e)?,
             filters: lua.create_registry_value(filters).map_err(e)?,
+            stop: Interrupt::new(&lua).map_err(e)?,
             fs,
             lua,
         };
@@ -1096,6 +1193,11 @@ impl Script {
 
     pub fn is_loaded(&self) -> bool {
         self.rt.is_some()
+    }
+
+    /// Stops this script's running feature from another thread.
+    pub fn interrupter(&self) -> Option<Interrupt> {
+        self.rt.as_ref().map(|rt| rt.stop.clone())
     }
 
     /// Command id Aegisub uses for hotkeys: `automation/lua/<stem>/<name>`.
@@ -1131,24 +1233,32 @@ impl Script {
         progress: bool,
         dialog: bool,
     ) -> mlua::Result<()> {
+        rt.stop.hook(false); // a stop that came after the last run ended
         {
             let mut s = shared(&rt.lua)?;
             s.ctx = Some(ctx.clone());
             s.doc = Some(doc.clone());
             s.edit = ctx.edit;
             s.edit_changed = false;
+            s.feature_name = name.to_string();
         }
-        rt.lua.globals().set("__fs_feature_name", name)?;
         api.get::<Function>("begin_run")?
             .call::<()>((progress, dialog))
     }
 
-    fn end(&self, rt: &Runtime, api: &Table) {
+    /// Cleanup after a feature ran; `Cancelled` when it was stopped.
+    fn end(&self, rt: &Runtime, api: &Table) -> Result<(), RunError> {
+        let stopped = rt.stop.stopped();
+        rt.stop.hook(false);
         let _ = api
             .get::<Function>("end_run")
             .and_then(|f| f.call::<()>(()));
         if let Ok(mut s) = shared(&rt.lua) {
             s.doc = None;
+        }
+        match stopped {
+            true => Err(RunError::Cancelled),
+            false => Ok(()),
         }
     }
 
@@ -1175,6 +1285,32 @@ impl Script {
         ))
     }
 
+    /// `validate` or `is_active` of a macro on a read-only subtitles object:
+    /// `None` when the macro has no such function.
+    fn read_only_call(
+        &self,
+        i: usize,
+        field: &str,
+        doc: &Document,
+        selection: &[usize],
+        active: Option<usize>,
+        ctx: &Context,
+    ) -> Result<Option<(&Lua, Vec<Value>)>, RunError> {
+        let (rt, api, f) = self.feature(|r| &r.macros, i, field)?;
+        let Some(f) = f else { return Ok(None) };
+        self.begin(rt, &api, ctx, doc, &self.macros[i].name, false, false)?;
+        let r = (|| -> Result<Vec<Value>, RunError> {
+            let st = State::new(doc, false, false);
+            let (sel, act) = Self::selection_args(&rt.lua, &st, selection, active)?;
+            let (h, subs) = Self::subs(rt, &api, st)?;
+            let r = call(&rt.lua, &api, &f, (subs, sel, act));
+            h.0.lock().unwrap_or_else(|e| e.into_inner()).take();
+            r
+        })();
+        self.end(rt, &api)?;
+        Ok(Some((&rt.lua, r?)))
+    }
+
     /// Run `validate`: `(enabled, replacement help text)`. Errors are logged
     /// and disable the macro.
     pub fn validate_macro(
@@ -1185,29 +1321,20 @@ impl Script {
         active: Option<usize>,
         ctx: &Context,
     ) -> (bool, Option<String>) {
-        let r = (|| -> Result<(bool, Option<String>), RunError> {
-            let (rt, api, f) = self.feature(|r| &r.macros, i, "validate")?;
-            let Some(f) = f else { return Ok((true, None)) };
-            self.begin(rt, &api, ctx, doc, &self.macros[i].name, false, false)?;
-            let st = State::new(doc, false, false);
-            let (sel, act) = Self::selection_args(&rt.lua, &st, selection, active)?;
-            let (h, subs) = Self::subs(rt, &api, st)?;
-            let r = call(&rt.lua, &api, &f, (subs, sel, act));
-            h.0.lock().unwrap_or_else(|e| e.into_inner()).take();
-            self.end(rt, &api);
-            let v = r?;
-            let ok = v
-                .first()
-                .is_some_and(|v| !matches!(v, Value::Nil | Value::Boolean(false)));
-            let help = v.get(1).and_then(lua_str).filter(|s| !s.is_empty());
-            Ok((ok, help))
-        })();
-        r.unwrap_or_else(|e| {
-            if !matches!(e, RunError::Cancelled) {
-                self.log(&format!("{e}\n"));
+        match self.read_only_call(i, "validate", doc, selection, active, ctx) {
+            Ok(Some((lua, v))) => {
+                let help = v.get(1).and_then(|h| lua_str(lua, h));
+                (
+                    v.first().is_some_and(truthy),
+                    help.filter(|s| !s.is_empty()),
+                )
             }
-            (false, None)
-        })
+            Ok(None) => (true, None),
+            Err(e) => {
+                self.log_failure("Runtime error in Lua macro validation function", e);
+                (false, None)
+            }
+        }
     }
 
     /// Run `is_active` (checked state of a toggle macro).
@@ -1219,26 +1346,22 @@ impl Script {
         active: Option<usize>,
         ctx: &Context,
     ) -> bool {
-        let r = (|| -> Result<bool, RunError> {
-            let (rt, api, f) = self.feature(|r| &r.macros, i, "is_active")?;
-            let Some(f) = f else { return Ok(false) };
-            self.begin(rt, &api, ctx, doc, &self.macros[i].name, false, false)?;
-            let st = State::new(doc, false, false);
-            let (sel, act) = Self::selection_args(&rt.lua, &st, selection, active)?;
-            let (h, subs) = Self::subs(rt, &api, st)?;
-            let r = call(&rt.lua, &api, &f, (subs, sel, act));
-            h.0.lock().unwrap_or_else(|e| e.into_inner()).take();
-            self.end(rt, &api);
-            Ok(r?
-                .first()
-                .is_some_and(|v| !matches!(v, Value::Nil | Value::Boolean(false))))
-        })();
-        r.unwrap_or_else(|e| {
-            if !matches!(e, RunError::Cancelled) {
-                self.log(&format!("{e}\n"));
+        match self.read_only_call(i, "is_active", doc, selection, active, ctx) {
+            Ok(Some((_, v))) => v.first().is_some_and(truthy),
+            Ok(None) => false,
+            Err(e) => {
+                self.log_failure("Runtime error in Lua macro is_active function", e);
+                false
             }
-            false
-        })
+        }
+    }
+
+    fn log_failure(&self, what: &str, e: RunError) {
+        match e {
+            RunError::Cancelled => {}
+            RunError::Lua(m) => self.log(&format!("{what}:\n{m}\n")),
+            e => self.log(&format!("{e}\n")),
+        }
     }
 
     fn log(&self, msg: &str) {
@@ -1251,8 +1374,9 @@ impl Script {
         }
     }
 
-    /// Run a macro on `doc` with the selected event rows. Errors leave the
-    /// document untouched (the caller just drops the outcome).
+    /// Run a macro on `doc` with the selected event rows. Errors, and Cancel in
+    /// the progress window, leave the document untouched (the caller just
+    /// drops the outcome).
     pub fn run_macro(
         &self,
         i: usize,
@@ -1265,21 +1389,35 @@ impl Script {
         let f = f.ok_or(RunError::NotLoaded)?;
         let name = self.macros[i].name.clone();
         self.begin(rt, &api, ctx, doc, &name, true, true)?;
-        let st = State::new(doc, true, true);
-        let (sel, act) = Self::selection_args(&rt.lua, &st, selection, active)?;
-        let orig_sel: Vec<i64> = sel
-            .clone()
-            .sequence_values::<i64>()
-            .collect::<mlua::Result<_>>()?;
-        let orig_active_id = active.and_then(|a| doc.event_id(a));
-        let (h, subs) = Self::subs(rt, &api, st)?;
-        let r = call(&rt.lua, &api, &f, (subs, sel, act.unwrap_or(0)));
-        let st = h.0.lock().unwrap_or_else(|e| e.into_inner()).take();
-        let (edit, edit_changed) = {
-            let s = shared(&rt.lua)?;
-            (s.edit, s.edit_changed)
-        };
-        self.end(rt, &api);
+        let run = (|| -> Result<_, RunError> {
+            let st = State::new(doc, true, true);
+            let base = st.first_event_index() as i64 + 1;
+            let (sel, act) = Self::selection_args(&rt.lua, &st, selection, active)?;
+            let orig_sel: Vec<i64> = sel
+                .clone()
+                .sequence_values::<i64>()
+                .collect::<mlua::Result<_>>()?;
+            let (h, subs) = Self::subs(rt, &api, st)?;
+            let r = call(&rt.lua, &api, &f, (subs, sel, act.unwrap_or(0)));
+            let st = h.0.lock().unwrap_or_else(|e| e.into_inner()).take();
+            let (edit, edit_changed, host) = {
+                let s = shared(&rt.lua)?;
+                (s.edit, s.edit_changed, s.env.host.clone())
+            };
+            Ok((
+                r,
+                st,
+                base,
+                orig_sel,
+                act,
+                edit_changed.then_some(edit),
+                host,
+            ))
+        })();
+        let ended = self.end(rt, &api);
+        let _ = rt.lua.gc_collect(); // Aegisub collects after every run
+        ended?;
+        let (r, st, base, orig_sel, orig_active, edit, host) = run?;
         let out = match r {
             Ok(v) => v,
             Err(e) => {
@@ -1289,28 +1427,26 @@ impl Script {
                 return Err(e);
             }
         };
-        let st = st.expect("subtitles state");
-
-        let mut commits = Vec::new();
-        for (desc, lines, info) in &st.undo_points {
-            commits.push((desc.clone(), st.build(lines, *info)));
+        // Aegisub: Cancel in the progress window throws the run's changes away, also when the
+        // script then returned normally
+        if host.is_cancelled() {
+            return Err(RunError::Cancelled);
         }
-        let last_modified = match st.undo_points.last() {
-            Some((_, lines, _)) => !same_lines(lines, &st.lines),
-            None => st.any_modified,
-        };
-        if last_modified {
-            commits.push((name, st.build(&st.lines, st.info_touched)));
+        let mut st = st.expect("subtitles state");
+        let mut commits = std::mem::take(&mut st.undo_points);
+        if st.modified {
+            commits.push((name, st.commit()));
         }
 
-        // Map absolute indices of the final vector to event rows.
+        // Map indices of the final vector to event rows.
         let lines = &st.lines;
+        let n = lines.len() as i64;
         // the events before each line, counted once (a whole selection maps in one pass)
         let events_before: Vec<usize> = lines
             .iter()
-            .scan(0, |n, l| {
-                let before = *n;
-                *n += usize::from(l.is_event());
+            .scan(0, |k, l| {
+                let before = *k;
+                *k += usize::from(l.is_event());
                 Some(before)
             })
             .collect();
@@ -1319,37 +1455,32 @@ impl Script {
             lines.get(i)?.is_event().then(|| events_before[i])
         };
         let final_doc = commits.last().map(|c| &c.1).unwrap_or(doc);
+        let orig_active_id = active.and_then(|a| doc.event_id(a));
         let cur_active = orig_active_id.and_then(|id| final_doc.index_of_id(id));
         let mut selection = Vec::new();
-        let mut new_active = cur_active;
+        let new_active;
         if let Some(Value::Table(t)) = out.first() {
-            let active_idx = match out.get(1) {
-                Some(Value::Integer(i)) => Some(*i),
-                Some(Value::Number(n)) => Some(n.trunc() as i64),
-                _ => None,
-            }
-            .filter(|&a| {
-                let ok = row_of(a).is_some();
-                if !ok {
+            // Aegisub's LuaCommand: no active row returned, or one out of range, means the
+            // index that was active before the run
+            let mut active_idx = orig_active.unwrap_or(0);
+            if let Some(a) = out.get(1).and_then(subs::to_index) {
+                if (1..=n).contains(&a) {
+                    active_idx = a;
+                } else {
                     self.log(&format!(
-                        "Active row {a} is out of bounds (must be 1-{})\n",
-                        lines.len()
+                        "Active row {a} is out of bounds (must be 1-{n})\n"
                     ));
                 }
-                ok
-            });
-            let mut first = None;
+            }
+            let mut active_row = None;
             for pair in t.pairs::<Value, Value>() {
                 let (_, v) = pair?;
-                let idx = match v {
-                    Value::Integer(i) => i,
-                    Value::Number(n) => n.trunc() as i64,
-                    _ => continue,
+                let Some(idx) = subs::to_index(&v) else {
+                    continue;
                 };
-                if idx < 1 || idx as usize > lines.len() {
+                if !(1..=n).contains(&idx) {
                     self.log(&format!(
-                        "Selected row {idx} is out of bounds (must be 1-{})\n",
-                        lines.len()
+                        "Selected row {idx} is out of bounds (must be 1-{n})\n"
                     ));
                     break;
                 }
@@ -1357,35 +1488,43 @@ impl Script {
                     self.log(&format!("Selected row {idx} is not a dialogue line\n"));
                     break;
                 };
-                first.get_or_insert(row);
                 selection.push(row);
+                if active_row.is_none() || active_idx == idx {
+                    active_row = Some(row);
+                }
             }
-            if let Some(a) = active_idx
-                .and_then(row_of)
-                .filter(|r| selection.contains(r))
+            let mut active = cur_active;
+            if active_row.is_some()
+                && (active_idx > 0 || !active.is_some_and(|a| selection.contains(&a)))
             {
-                new_active = Some(a);
-            } else if !cur_active.is_some_and(|c| selection.contains(&c)) && first.is_some() {
-                new_active = first;
+                active = active_row;
             }
             if selection.is_empty() {
-                selection.extend(new_active);
+                selection.extend(active);
             }
+            new_active = active;
         } else {
+            // Aegisub: the selected rows keep their places among the events, counted from where
+            // the events began before the run (a style added above them does not shift them)
+            let n_events = lines.iter().filter(|l| l.is_event()).count();
+            let mut active = None;
             for idx in orig_sel {
-                if idx as usize > lines.len() {
+                let row = (idx - base).max(0) as usize;
+                if row >= n_events {
                     break;
                 }
-                if let Some(r) = row_of(idx) {
-                    selection.push(r);
+                selection.push(row);
+                if Some(idx) == orig_active {
+                    active = Some(row);
                 }
             }
-            if selection.is_empty() && lines.iter().any(Line::is_event) {
+            if selection.is_empty() && n_events > 0 {
                 selection.push(0);
             }
-            if !new_active.is_some_and(|a| selection.contains(&a)) {
-                new_active = selection.first().copied();
+            if !active.is_some_and(|a| selection.contains(&a)) {
+                active = selection.first().copied();
             }
+            new_active = active;
         }
         selection.sort_unstable();
         selection.dedup();
@@ -1393,7 +1532,7 @@ impl Script {
             commits,
             selection,
             active: new_active,
-            edit: edit_changed.then_some(edit),
+            edit,
         })
     }
 
@@ -1407,13 +1546,15 @@ impl Script {
         let (rt, api, f) = self.feature(|r| &r.filters, i, "config")?;
         let Some(f) = f else { return Ok(None) };
         self.begin(rt, &api, ctx, doc, &self.filters[i].name, false, false)?;
-        let (h, subs) = Self::subs(rt, &api, State::new(doc, false, false))?;
-        let r = call(&rt.lua, &api, &f, (subs, rt.lua.create_table()?));
-        h.0.lock().unwrap_or_else(|e| e.into_inner()).take();
-        self.end(rt, &api);
-        let v = r?;
-        let controls = v.into_iter().next().unwrap_or(Value::Nil);
-        dialog_from_lua(&controls, &Value::Nil, &Value::Nil)
+        let r = (|| -> Result<Vec<Value>, RunError> {
+            let (h, subs) = Self::subs(rt, &api, State::new(doc, false, false))?;
+            let r = call(&rt.lua, &api, &f, (subs, rt.lua.create_table()?));
+            h.0.lock().unwrap_or_else(|e| e.into_inner()).take();
+            r
+        })();
+        self.end(rt, &api)?;
+        let controls = r?.into_iter().next().unwrap_or(Value::Nil);
+        dialog_from_lua(&rt.lua, &controls, &Value::Nil, &Value::Nil)
             .map(|mut d| {
                 d.title = self.filters[i].name.clone();
                 Some(d)
@@ -1421,7 +1562,8 @@ impl Script {
             .map_err(RunError::Lua)
     }
 
-    /// Run an export filter on (a copy of) the document.
+    /// Run an export filter on (a copy of) the document. Cancel in the
+    /// progress window stops the export.
     pub fn run_filter(
         &self,
         i: usize,
@@ -1432,17 +1574,26 @@ impl Script {
         let (rt, api, f) = self.feature(|r| &r.filters, i, "process")?;
         let f = f.ok_or(RunError::NotLoaded)?;
         self.begin(rt, &api, ctx, doc, &self.filters[i].name, true, false)?;
-        let (h, subs) = Self::subs(rt, &api, State::new(doc, true, false))?;
-        let r = call(&rt.lua, &api, &f, (subs, dialog_values(&rt.lua, settings)?));
-        let st = h.0.lock().unwrap_or_else(|e| e.into_inner()).take();
-        self.end(rt, &api);
+        let run = (|| -> Result<_, RunError> {
+            let (h, subs) = Self::subs(rt, &api, State::new(doc, true, false))?;
+            let r = call(&rt.lua, &api, &f, (subs, dialog_values(&rt.lua, settings)?));
+            let st = h.0.lock().unwrap_or_else(|e| e.into_inner()).take();
+            Ok((r, st, shared(&rt.lua)?.env.host.clone()))
+        })();
+        let ended = self.end(rt, &api);
+        let _ = rt.lua.gc_collect();
+        ended?;
+        let (r, st, host) = run?;
         if let Err(RunError::Lua(m)) = &r {
             self.log(&format!("\n\nLua reported a runtime error:\n{m}\n"));
         }
         r?;
-        let st = st.expect("subtitles state");
+        if host.is_cancelled() {
+            return Err(RunError::Cancelled);
+        }
+        let mut st = st.expect("subtitles state");
         Ok(if st.any_modified {
-            st.build(&st.lines, st.info_touched)
+            st.commit()
         } else {
             doc.clone()
         })
@@ -1455,44 +1606,9 @@ impl Script {
         let f = rt.lua.load(code).set_name("=eval").into_function()?;
         Ok(call(&rt.lua, &api, &f, ())?
             .iter()
-            .map(|v| lua_str(v).unwrap_or_else(|| format!("{v:?}")))
+            .map(|v| error_text(&rt.lua, v))
             .collect())
     }
-}
-
-fn same_lines(a: &[Line], b: &[Line]) -> bool {
-    a.len() == b.len()
-        && a.iter().zip(b).all(|(x, y)| match (x, y) {
-            (
-                Line::Info {
-                    key: k1, value: v1, ..
-                },
-                Line::Info {
-                    key: k2, value: v2, ..
-                },
-            ) => k1 == k2 && v1 == v2,
-            (
-                Line::Style {
-                    base: b1,
-                    style: s1,
-                },
-                Line::Style {
-                    base: b2,
-                    style: s2,
-                },
-            ) => s1 == s2 && b1.as_ref().map(Arc::as_ptr) == b2.as_ref().map(Arc::as_ptr),
-            (
-                Line::Event {
-                    base: b1,
-                    event: e1,
-                },
-                Line::Event {
-                    base: b2,
-                    event: e2,
-                },
-            ) => e1 == e2 && b1.as_ref().map(Arc::as_ptr) == b2.as_ref().map(Arc::as_ptr),
-            _ => false,
-        })
 }
 
 /// Scripts in the autoload directories (`.lua` and `.moon`, not recursive),
