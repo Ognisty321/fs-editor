@@ -8,6 +8,7 @@ pub mod simple;
 use std::path::Path;
 
 use encoding_rs::{Encoding, UTF_8};
+use fs_core::model::AssVersion;
 use fs_core::vfr::Framerate;
 use fs_core::{Document, Event, EventKind, Time};
 
@@ -394,8 +395,14 @@ pub fn save_bytes(doc: &Document, format: Format, opts: &SaveOptions) -> Vec<u8>
 
 fn save_text(doc: &Document, format: Format, opts: &SaveOptions) -> String {
     match format {
-        Format::Ass => doc.to_ass_string(),
-        Format::Ssa => to_ssa(doc).to_ass_string(),
+        // an SSA script saved as ASS becomes one, and the other way (Aegisub)
+        Format::Ass if doc.version() == AssVersion::Ssa => {
+            convert(doc, AssVersion::Ass).to_ass_string()
+        }
+        Format::Ssa if doc.version() != AssVersion::Ssa => {
+            convert(doc, AssVersion::Ssa).to_ass_string()
+        }
+        Format::Ass | Format::Ssa => doc.to_ass_string(),
         Format::Srt => simple::write_srt(&to_subs(doc)),
         Format::Mpl2 => simple::write_mpl2(&to_subs(doc)),
         Format::MicroDvd => {
@@ -478,10 +485,10 @@ pub fn save_file(
     Ok((enc, bom))
 }
 
-/// Convert an ASS document to SSA v4 (styles section header, Format lines
-/// and legacy alignment are handled by the writer from the version).
-pub fn to_ssa(doc: &Document) -> Document {
-    use fs_core::model::{AssVersion, EventField, StyleField};
+/// `doc` in the sections of `version`: SSA's `[V4 Styles]` and Format lines or ASS's (legacy
+/// alignment is the writer's, from the version), the attachments as they are.
+pub fn convert(doc: &Document, version: AssVersion) -> Document {
+    use fs_core::model::{EventField, StyleField};
     let mut out = Document::empty();
     out.default_ending = doc.default_ending;
     out.bom = doc.bom;
@@ -492,12 +499,12 @@ pub fn to_ssa(doc: &Document) -> Document {
     {
         out.set_info(&e.key, &e.value);
     }
-    out.set_info("ScriptType", "v4.00");
-    // creating the styles section uses the document version → SSA
+    out.set_info("ScriptType", version.script_type());
+    // creating the styles section uses the document version
     {
         let st = out.ensure_styles();
-        st.version = AssVersion::Ssa;
-        st.format.as_mut().unwrap().fields = StyleField::default_format(AssVersion::Ssa);
+        st.version = version;
+        st.format.as_mut().unwrap().fields = StyleField::default_format(version);
     }
     let le = out.default_ending;
     if let Some(sec) = out
@@ -505,16 +512,17 @@ pub fn to_ssa(doc: &Document) -> Document {
         .iter_mut()
         .find(|s| s.kind == fs_core::SectionKind::Styles)
     {
-        std::sync::Arc::make_mut(sec).header = fs_core::text::RawLine::new("[V4 Styles]", le);
+        std::sync::Arc::make_mut(sec).header =
+            fs_core::text::RawLine::new(version.styles_header(), le);
     }
     for s in doc.styles() {
         out.add_style(s.clone());
     }
-    out.ensure_events().format.as_mut().unwrap().fields =
-        EventField::default_format(AssVersion::Ssa);
+    out.ensure_events().format.as_mut().unwrap().fields = EventField::default_format(version);
     for e in doc.events() {
         out.push_event(e.event.clone());
     }
+    out.copy_attachments(doc);
     out
 }
 
@@ -752,5 +760,40 @@ mod tests {
         assert_eq!(back.format, Format::Ssa);
         assert_eq!(back.doc.style("Default"), doc.style("Default"));
         assert_eq!(back.doc.event(0), doc.event(0));
+    }
+
+    #[test]
+    fn ssa_and_ass_keep_attachments_and_upgrade() {
+        let mut doc = Document::new();
+        doc.attach(true, "a.ttf", b"font bytes");
+        doc.attach(false, "b.png", b"png");
+        let opts = SaveOptions {
+            bom: false,
+            ..Default::default()
+        };
+        let save = |d: &Document, f| String::from_utf8(save_bytes(d, f, &opts)).unwrap();
+        let ssa = save(&doc, Format::Ssa);
+        let ssa_doc = load_bytes(ssa.as_bytes(), None, &LoadOptions::default())
+            .unwrap()
+            .doc;
+        assert_eq!(ssa_doc.attachments(), doc.attachments());
+        assert_eq!(
+            ssa_doc.attachment_data(true, "a_0.ttf").unwrap(),
+            b"font bytes"
+        );
+        // as it is when it stays SSA
+        assert_eq!(save(&ssa_doc, Format::Ssa), ssa);
+        // and ASS again when saved as ASS
+        let ass = save(&ssa_doc, Format::Ass);
+        assert!(ass.contains("[V4+ Styles]") && ass.contains("ScriptType: v4.00+"));
+        let back = load_bytes(ass.as_bytes(), None, &LoadOptions::default()).unwrap();
+        assert_eq!(back.format, Format::Ass);
+        assert_eq!(back.doc.style("Default"), doc.style("Default"));
+        assert_eq!(back.doc.event(0), doc.event(0));
+        assert_eq!(back.doc.attachments(), doc.attachments());
+        assert!(
+            !ass.contains("\n\n\n") && !ass.contains("\r\n\r\n\r\n"),
+            "{ass}"
+        );
     }
 }

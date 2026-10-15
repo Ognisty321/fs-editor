@@ -4,7 +4,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::ass::{Document, Section, SectionBody, SectionKind};
+use crate::ass::{Document, Section, SectionBody, SectionKind, fix_last_ending};
 use crate::text::RawLine;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,6 +165,31 @@ impl Document {
             lines.splice(at..at, new);
         }
         name
+    }
+
+    /// `other`'s attached fonts and graphics as they are, for those this has none of (a
+    /// conversion between SSA and ASS keeps them).
+    pub fn copy_attachments(&mut self, other: &Document) {
+        for font in [true, false] {
+            let (Some(i), None) = (
+                other.find_section(kind(font)),
+                self.find_section(kind(font)),
+            ) else {
+                continue;
+            };
+            let mut sec = (*other.sections[i]).clone();
+            if let SectionBody::Raw(lines) = &mut sec.body {
+                // the spacing is the new place's
+                while lines.last().is_some_and(|l| l.text.trim().is_empty()) {
+                    lines.pop();
+                }
+                fix_last_ending(lines, self.default_ending);
+            }
+            let pos = self
+                .find_section(SectionKind::Events)
+                .unwrap_or(self.sections.len());
+            self.insert_section_with_spacing(pos, sec);
+        }
     }
 
     pub fn remove_attachment(&mut self, font: bool, name: &str) -> bool {

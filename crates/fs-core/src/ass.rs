@@ -887,7 +887,7 @@ fn section_trailing_mut(body: &mut SectionBody) -> Option<&mut Vec<RawLine>> {
     }
 }
 
-fn fix_last_ending(lines: &mut [RawLine], le: LineEnding) {
+pub(crate) fn fix_last_ending(lines: &mut [RawLine], le: LineEnding) {
     if let Some(l) = lines.last_mut()
         && l.ending == LineEnding::None
     {
