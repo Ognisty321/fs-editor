@@ -501,7 +501,7 @@ void SubsTextEdit::keyPressEvent(QKeyEvent *e) {
     if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter ||
         (ctrl && (e->key() == Qt::Key_D || e->key() == Qt::Key_R || e->key() == Qt::Key_B ||
                   e->key() == Qt::Key_I || e->key() == Qt::Key_Comma || e->key() == Qt::Key_Period)) ||
-        ((mods & Qt::AltModifier) && e->key() == Qt::Key_Down)) {
+        ((mods & Qt::AltModifier) && (e->key() == Qt::Key_Down || (e->key() >= Qt::Key_1 && e->key() <= Qt::Key_4)))) {
         emit keyCommand(e->key(), mods);
         return;
     }
@@ -1140,6 +1140,12 @@ void EditBox::onKey(int key, Qt::KeyboardModifiers mods) {
         } else if (!(mods & Qt::ControlModifier)) {
             nextLine();
         }
+        break;
+    case Qt::Key_1:
+    case Qt::Key_2:
+    case Qt::Key_3:
+    case Qt::Key_4: // Alt: Aegisub's edit/color/primary, secondary, outline, shadow
+        setColorTag(key - Qt::Key_0);
         break;
     case Qt::Key_D:
         if (tl) {
