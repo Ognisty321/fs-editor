@@ -496,6 +496,8 @@ void SubsTextEdit::keyPressEvent(QKeyEvent *e) {
     }
     const auto mods = e->modifiers();
     const bool ctrl = mods & Qt::ControlModifier;
+    // Aegisub's hard space
+    if (ctrl && (mods & Qt::ShiftModifier) && e->key() == Qt::Key_Space) return insertPlainText("\\h");
     if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter ||
         (ctrl && (e->key() == Qt::Key_D || e->key() == Qt::Key_R || e->key() == Qt::Key_B ||
                   e->key() == Qt::Key_I || e->key() == Qt::Key_Comma || e->key() == Qt::Key_Period)) ||
@@ -687,6 +689,17 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     m_text = new SubsTextEdit(this);
     v->addWidget(m_text, 2);
     connect(m_text, &QPlainTextEdit::textChanged, this, [this] { commit("text"); });
+    for (auto *e : {m_text, m_original})
+        connect(e->document(), &QTextDocument::contentsChange, this, [this](int pos, int removed, int added) {
+            if (m_loading || removed == added) return; // a format, from the highlighter
+            const int kind = !removed ? 1 : !added ? 2 : 3;
+            // typing on where the last edit ended, Delete or Backspace next to it, is the same step
+            const bool on = kind == m_editKind && kind != 3 &&
+                            (kind == 1 ? pos == m_editPos : pos == m_editPos || pos + removed == m_editPos);
+            if (!on) ++m_undoStep;
+            m_editKind = kind;
+            m_editPos = kind == 1 ? pos + added : pos;
+        });
     m_textInfo = new QLabel(this);
     m_textInfo->setTextFormat(Qt::PlainText);
     v->addWidget(m_textInfo);
@@ -762,7 +775,13 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
 
     connect(m_comment, &QCheckBox::clicked, this, [this] { commit("comment"); });
     for (auto *s : {m_layer, m_ml, m_mr, m_mv})
-        connect(s, &QSpinBox::valueChanged, this, [this, s] { commit(s == m_layer ? "layer" : "margins"); });
+        connect(s, &QSpinBox::valueChanged, this, [this, s] {
+            commit(s == m_layer ? "layer" : s == m_ml ? "margin_l" : s == m_mr ? "margin_r" : "margin_v");
+        });
+    // Enter in any field goes to the next line, as in the text (Aegisub, Kainote)
+    for (QWidget *w : std::initializer_list<QWidget *>{m_layer, m_ml, m_mr, m_mv, m_start, m_end, m_duration, m_style,
+                                                       m_actor->lineEdit(), m_effect->lineEdit()})
+        w->installEventFilter(this);
     connect(m_start, &TimeEdit::edited, this, [this] { commit("start"); });
     connect(m_end, &TimeEdit::edited, this, [this] { commit("end"); });
     connect(m_duration, &TimeEdit::edited, this, [this] { commit("duration"); });
@@ -773,6 +792,17 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
         m_tab->main()->editStyle(m_style->currentText());
     });
     m_tlBox->setVisible(false);
+}
+
+bool EditBox::eventFilter(QObject *o, QEvent *e) {
+    if (e->type() == QEvent::KeyPress) {
+        const auto *k = static_cast<QKeyEvent *>(e);
+        if ((k->key() == Qt::Key_Return || k->key() == Qt::Key_Enter) && !(k->modifiers() & ~Qt::KeypadModifier)) {
+            nextLine();
+            return true;
+        }
+    }
+    return QWidget::eventFilter(o, e);
 }
 
 void EditBox::wrapFields() {
@@ -910,6 +940,7 @@ void EditBox::reload() {
         if (m_row < 0) return;
     }
     m_loading = true;
+    m_initialTimes.clear();
     const fsb::Row r = s.row(size_t(m_row));
     const auto info = s.file_info();
     const QString fmt = fs::q(info.format);
@@ -968,30 +999,74 @@ void EditBox::commit(const char *field) {
         if (!m_framesMode) return t->ms();
         return t->frame() < 0 ? qint64(-1) : end ? v->timeAtEnd(t->frame()) : v->timeAtStart(t->frame());
     };
+    const bool timeField = f == "start" || f == "end" || f == "duration";
+    if (!timeField) m_initialTimes.clear();
+    // Aegisub's CommitTimes: the typed time against the line's times from before the typing, so an
+    // end pushed by a start typed past it comes back with the next digit
+    const qint64 start = ms(m_start, false), end = ms(m_end, true);
+    auto retime = [&](size_t row, std::int64_t &rs, std::int64_t &re) {
+        if (!timeField) return;
+        auto &[s0, e0] = m_initialTimes.try_emplace(row, rs, re).first->second;
+        if (f == "start" && start >= 0) {
+            s0 = rs = start;
+            re = std::max(s0, e0);
+        } else if (f == "end" && end >= 0) {
+            e0 = re = end;
+            rs = std::min(s0, e0);
+        } else if (f == "duration") {
+            // frames: the count from the first frame through the last (Aegisub)
+            const qint64 e = !m_framesMode              ? (m_duration->ms() < 0 ? -1 : rs + m_duration->ms())
+                             : m_duration->frame() < 0 ? -1
+                                                       : v->timeAtEnd(v->frameAtStart(rs) + m_duration->frame() - 1);
+            if (e >= rs) e0 = re = e;
+        }
+    };
     r.text = fs::rs(m_text->text().replace('\n', "\\N"));
     r.original = fs::rs(m_original->text().replace('\n', "\\N"));
     r.doubtful = m_doubtful->isChecked();
     r.comment = m_comment->isChecked();
     r.layer = m_layer->value();
-    if (f == "start" && ms(m_start, false) >= 0) {
-        r.start = ms(m_start, false);
-        r.end = std::max(r.start, r.end);
-    } else if (f == "end" && ms(m_end, true) >= 0) {
-        r.end = std::max<std::int64_t>(r.start, ms(m_end, true));
-    } else if (f == "duration") {
-        // frames: the count from the first frame through the last (Aegisub)
-        const qint64 d = !m_framesMode            ? m_duration->ms()
-                         : m_duration->frame() < 0 ? -1
-                                                   : v->timeAtEnd(v->frameAtStart(r.start) + m_duration->frame() - 1) - r.start;
-        if (d >= 0) r.end = r.start + d;
-    }
+    retime(size_t(m_row), r.start, r.end);
     r.style = fs::rs(m_style->currentText());
     r.actor = fs::rs(m_actor->currentText());
     r.effect = fs::rs(m_effect->currentText());
     r.margin_l = m_ml->value();
     r.margin_r = m_mr->value();
     r.margin_v = m_mv->value();
-    s.set_row(size_t(m_row), r, fs::Utf8(QString("edit:%1:%2").arg(m_row).arg(f)));
+    if (m_lastEdit.isValid() && m_lastEdit.elapsed() > 30000) ++m_undoStep;
+    m_lastEdit.start();
+    const fs::Utf8 key(QString("edit:%1:%2:%3").arg(m_row).arg(f).arg(m_undoStep));
+    s.set_row(size_t(m_row), r, key);
+    // Aegisub's SetSelectedRows: the change goes to every selected line, in the same undo step
+    const auto sel = m_tab->selection();
+    const bool tl = s.file_info().tl_mode;
+    if (sel.size() > 1 && f != "original" && f != "doubtful" && !(tl && f == "text")) {
+        std::vector<size_t> rows;
+        rust::Vec<rust::String> values;
+        for (size_t row : sel) {
+            if (row == size_t(m_row) || row >= s.row_count()) continue;
+            rows.push_back(row);
+            if (timeField) {
+                fsb::Row o = s.row(row);
+                retime(row, o.start, o.end);
+                values.push_back(fs::rs(QString("%1,%2").arg(o.start).arg(o.end)));
+            } else {
+                const QString value = f == "comment" ? QString::number(int(r.comment))
+                                      : f == "layer" ? QString::number(r.layer)
+                                      : f == "margin_l" ? QString::number(r.margin_l)
+                                      : f == "margin_r" ? QString::number(r.margin_r)
+                                      : f == "margin_v" ? QString::number(r.margin_v)
+                                                        : fs::q(f == "text"    ? r.text
+                                                                : f == "style" ? r.style
+                                                                : f == "actor" ? r.actor
+                                                                               : r.effect);
+                values.push_back(fs::rs(value));
+            }
+        }
+        if (!rows.empty())
+            s.set_rows_values(fs::slice(rows), fs::Utf8(timeField ? QString("times") : f), {values.data(), values.size()},
+                              key);
+    }
     m_tab->changed(TabPanel::FromEditBox);
     m_loading = true;
     const fsb::Row now = s.row(size_t(m_row));
@@ -1050,7 +1125,18 @@ void EditBox::onKey(int key, Qt::KeyboardModifiers mods) {
     case Qt::Key_Return:
     case Qt::Key_Enter:
         if (mods & Qt::ShiftModifier) {
-            splitAtCursor(-1);
+            // a line break in place of the selection, the spaces around it dropped (Kainote, Aegisub)
+            auto *e = qobject_cast<SubsTextEdit *>(sender());
+            if (!e) e = m_text;
+            const QString t = e->text();
+            auto c = e->textCursor();
+            int a = c.selectionStart(), b = c.selectionEnd();
+            if (a > 0 && t[a - 1] == ' ') --a;
+            if (b < t.size() && t[b] == ' ') ++b;
+            c.setPosition(a);
+            c.setPosition(b, QTextCursor::KeepAnchor);
+            c.insertText("\\N");
+            e->setTextCursor(c);
         } else if (!(mods & Qt::ControlModifier)) {
             nextLine();
         }

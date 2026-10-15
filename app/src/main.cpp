@@ -23,6 +23,7 @@
 
 #include <atomic>
 #include <csignal>
+#include <numeric>
 #include <cstdio>
 
 #ifdef _WIN32
@@ -168,6 +169,13 @@ int main(int argc, char **argv) {
                 SubsTextEdit *text = nullptr;
                 for (auto *te : w.findChildren<SubsTextEdit *>())
                     if (te->isVisible()) text = te;
+                // FSED_SMOKE_SELECT=n selects n lines from the row on
+                if (const int n = qEnvironmentVariableIntValue("FSED_SMOKE_SELECT"); n > 1) {
+                    const int row = qEnvironmentVariableIntValue("FSED_SMOKE_ROW");
+                    std::vector<size_t> rows(static_cast<size_t>(n));
+                    std::iota(rows.begin(), rows.end(), size_t(row));
+                    w.current()->setSelection(rows, row);
+                }
                 if (text && qEnvironmentVariableIsSet("FSED_SMOKE_TYPE")) {
                     text->setFocus();
                     text->moveCursor(QTextCursor::End);

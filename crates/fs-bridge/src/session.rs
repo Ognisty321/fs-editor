@@ -858,21 +858,35 @@ impl Session {
     }
 
     pub fn set_rows_field(&mut self, rows: &[usize], field: &str, value: &str) {
-        let evs = if field == "style" || field == "effect" {
-            self.main_events(rows)
-        } else {
-            self.all_events(rows)
-        };
-        let (field, value) = (field.to_string(), value.to_string());
-        self.edit(&format!("Set {field}"), move |d| {
-            for e in evs {
-                let ev = d.event_mut(e).unwrap();
+        self.set_rows_values(rows, field, &vec![value.to_string(); rows.len()], "");
+    }
+
+    /// `field` of each of `rows` set to its value in `values` (the edit box's change to every
+    /// selected line, Aegisub's SetSelectedRows); edits with the same non-empty `amend` make one
+    /// undo step.
+    pub fn set_rows_values(&mut self, rows: &[usize], field: &str, values: &[String], amend: &str) {
+        let main = matches!(field, "style" | "effect" | "text");
+        let mut evs = Vec::with_capacity(rows.len());
+        for (k, r) in rows.iter().enumerate().take(values.len()) {
+            let Some(r) = self.tl_row(*r) else { continue };
+            if main {
+                evs.push((r.main(), k));
+            } else {
+                evs.push((r.original, k));
+                evs.extend(r.translation.map(|t| (t, k)));
+            }
+        }
+        let (field, values) = (field.to_string(), values.to_vec());
+        self.edit_amend(amend, &format!("Set {field}"), move |d| {
+            for (e, k) in evs {
+                let (ev, value) = (d.event_mut(e).unwrap(), &values[k]);
                 let num = || value.trim().parse::<i32>().unwrap_or(0);
                 match field.as_str() {
+                    "text" => ev.text = value.clone(),
                     "style" => ev.style = value.clone(),
                     "actor" => {
                         let (p, _) = tlmode::split_actor(&ev.actor);
-                        ev.actor = tlmode::join_actor(&p, &value);
+                        ev.actor = tlmode::join_actor(&p, value);
                     }
                     "effect" => ev.effect = value.clone(),
                     "layer" => ev.layer = num(),
@@ -898,7 +912,7 @@ impl Session {
                     "markers" => {
                         let (_, a) = tlmode::split_actor(&ev.actor);
                         let a = a.to_string();
-                        let p: Vec<&str> = tlmode::split_actor(&value).0;
+                        let p: Vec<&str> = tlmode::split_actor(value).0;
                         ev.actor = tlmode::join_actor(&p, &a);
                     }
                     _ => {}
@@ -2752,6 +2766,26 @@ mod tests {
     }
 
     const ASS: &str = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,one\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,two\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,three\n";
+
+    #[test]
+    fn edit_box_changes_reach_the_selection_in_one_step() {
+        let mut s = session(ASS);
+        let mut r = s.row(0);
+        for t in ["a", "ab"] {
+            r.text = t.into();
+            s.set_row(0, &r, "edit:0:text:0");
+            let v = [t.to_string(), t.to_string()];
+            s.set_rows_values(&[1, 2], "text", &v, "edit:0:text:0");
+        }
+        s.set_rows_values(&[1, 2], "times", &["0,500".into(), "7000,8000".into()], "k");
+        let row = |s: &Session, i| (s.row(i).text.to_string(), s.row(i).start, s.row(i).end);
+        assert_eq!(row(&s, 1), ("ab".into(), 0, 500));
+        assert_eq!(row(&s, 2), ("ab".into(), 7000, 8000));
+        s.undo();
+        s.undo();
+        assert_eq!(row(&s, 0), ("one".into(), 1000, 2000));
+        assert_eq!(row(&s, 2), ("three".into(), 5000, 6000));
+    }
 
     #[test]
     fn filter_matches_the_row_fields() {

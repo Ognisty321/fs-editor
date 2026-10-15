@@ -5,9 +5,12 @@
 
 #include "bridge.h"
 
+#include <QElapsedTimer>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QWidget>
+
+#include <unordered_map>
 
 class TabPanel;
 class QCheckBox;
@@ -93,6 +96,7 @@ public:
 
 protected:
     void resizeEvent(QResizeEvent *) override;
+    bool eventFilter(QObject *o, QEvent *e) override;
 
 private:
     void commit(const char *field);
@@ -111,6 +115,12 @@ private:
     TabPanel *m_tab;
     int m_row = -1;
     QString m_initial; // the text when the line became active (Aegisub's edit/revert)
+    // the times of each selected line before the time fields changed them (Aegisub's initial_times)
+    std::unordered_map<size_t, std::pair<qint64, qint64>> m_initialTimes;
+    // a new undo step for typing after a cursor jump, a switch between typing and deleting or a
+    // 30 s pause (Scintilla's and Aegisub's)
+    int m_undoStep = 0, m_editKind = 0, m_editPos = -1;
+    QElapsedTimer m_lastEdit;
     bool m_loading = false;
     bool m_framesMode = false;
 

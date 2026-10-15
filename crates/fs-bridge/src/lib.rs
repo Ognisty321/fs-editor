@@ -500,6 +500,14 @@ pub mod ffi {
         fn row(self: &Session, i: usize) -> Row;
         fn set_row(self: &mut Session, i: usize, row: &Row, amend: &str);
         fn set_rows_field(self: &mut Session, rows: &[usize], field: &str, value: &str);
+        /// `field` of each row set to its value; the same non-empty `amend` makes one undo step.
+        fn set_rows_values(
+            self: &mut Session,
+            rows: &[usize],
+            field: &str,
+            values: &[String],
+            amend: &str,
+        );
         /// New texts for rows, as one undo step.
         fn set_texts(self: &mut Session, rows: &[usize], texts: &[String], description: &str);
         fn insert_row(self: &mut Session, at: usize, start: i64, end: i64) -> usize;
