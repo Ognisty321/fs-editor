@@ -111,6 +111,23 @@ endif()
 # shortcut: on macOS the vcpkg dylibs are not copied into the bundle yet; add with the macOS package job.
 qt_generate_deploy_app_script(TARGET fsed OUTPUT_SCRIPT FS_DEPLOY_SCRIPT NO_UNSUPPORTED_PLATFORM_ERROR)
 install(SCRIPT ${FS_DEPLOY_SCRIPT})
+if(NOT WIN32 AND NOT APPLE)
+    # Unpackers that skip zip symlinks leave 20-byte text stubs ("libQt6Widgets.so.6: file too short"):
+    # each library goes in once as a real file under its versioned link name (the soname), dev links dropped.
+    # shortcut: assumes one versioned link per library; the CI package check catches a soname this misses.
+    install(CODE [[
+        file(GLOB fs_libs LIST_DIRECTORIES false "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/lib/*.so*")
+        foreach(link IN LISTS fs_libs)
+            if(IS_SYMLINK "${link}")
+                file(REAL_PATH "${link}" real)
+                file(REMOVE "${link}")
+                if(NOT link MATCHES "\\.so$" AND EXISTS "${real}")
+                    file(RENAME "${real}" "${link}")
+                endif()
+            endif()
+        endforeach()
+    ]])
+endif()
 
 set(CPACK_PACKAGE_NAME "FS-Editor")
 set(CPACK_PACKAGE_VENDOR "FS Editor contributors")
