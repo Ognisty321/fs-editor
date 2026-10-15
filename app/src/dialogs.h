@@ -15,6 +15,7 @@ class QLineEdit;
 class QComboBox;
 class QCheckBox;
 class QRadioButton;
+class QButtonGroup;
 class QListWidget;
 class QSpinBox;
 class QDoubleSpinBox;
@@ -73,8 +74,9 @@ private:
     void apply();
     MainWindow *m_main;
     QLineEdit *m_find;
-    QRadioButton *m_with, *m_without, *m_add, *m_deselect, *m_dialogue, *m_comments;
-    QCheckBox *m_case, *m_regex;
+    QRadioButton *m_with, *m_without;
+    QCheckBox *m_case, *m_regex, *m_dialogue, *m_comments;
+    QButtonGroup *m_mode; // 0 set, 1 add, 2 subtract, 3 intersect (Aegisub)
     QComboBox *m_field, *m_action;
 };
 

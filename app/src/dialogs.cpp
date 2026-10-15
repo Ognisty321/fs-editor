@@ -424,8 +424,9 @@ SelectLinesDialog::SelectLinesDialog(MainWindow *main) : QDialog(main), m_main(m
     auto *row = new QHBoxLayout;
     m_with = new QRadioButton(tr("With"), this);
     m_without = new QRadioButton(tr("Without"), this);
-    m_with->setChecked(true);
-    m_find = new QLineEdit(this);
+    QSettings st; // the last search, as Aegisub and Kainote keep it
+    (st.value("select/with", true).toBool() ? m_with : m_without)->setChecked(true);
+    m_find = new QLineEdit(st.value("select/text").toString(), this);
     row->addWidget(m_with);
     row->addWidget(m_without);
     row->addWidget(m_find, 1);
@@ -433,27 +434,30 @@ SelectLinesDialog::SelectLinesDialog(MainWindow *main) : QDialog(main), m_main(m
     auto *f = new QFormLayout;
     m_field = new QComboBox(this);
     m_field->addItems({tr("Text"), tr("Styles"), tr("Actor"), tr("Effect")});
+    m_field->setCurrentIndex(st.value("select/field", 0).toInt());
     f->addRow(tr("Field"), m_field);
     m_case = new QCheckBox(tr("Match case"), this);
     m_regex = new QCheckBox(tr("Regular expressions"), this);
+    m_case->setChecked(st.value("select/case", false).toBool());
+    m_regex->setChecked(st.value("select/regex", false).toBool());
     f->addRow(m_case, m_regex);
-    m_dialogue = new QRadioButton(tr("Dialogue"), this);
-    m_comments = new QRadioButton(tr("Comments"), this);
-    m_dialogue->setChecked(true);
-    auto *types = new QButtonGroup(this);
-    types->addButton(m_dialogue);
-    types->addButton(m_comments);
+    m_dialogue = new QCheckBox(tr("Dialogue"), this);
+    m_comments = new QCheckBox(tr("Comments"), this);
+    m_dialogue->setChecked(st.value("select/dialogue", true).toBool());
+    m_comments->setChecked(st.value("select/comments", false).toBool());
     f->addRow(m_dialogue, m_comments);
-    m_add = new QRadioButton(tr("Add to selection"), this);
-    m_deselect = new QRadioButton(tr("Deselect"), this);
-    auto *modes = new QButtonGroup(this);
-    modes->addButton(m_add);
-    modes->addButton(m_deselect);
-    m_add->setChecked(true);
-    f->addRow(m_add, m_deselect);
+    m_mode = new QButtonGroup(this);
+    const char *modes[] = {QT_TR_NOOP("Set selection"), QT_TR_NOOP("Add to selection"), QT_TR_NOOP("Deselect"),
+                           QT_TR_NOOP("Intersect with selection")};
+    QRadioButton *mode[4];
+    for (int k = 0; k < 4; ++k) m_mode->addButton(mode[k] = new QRadioButton(tr(modes[k]), this), k);
+    if (auto *b = m_mode->button(st.value("select/mode", 0).toInt())) b->setChecked(true);
+    f->addRow(mode[0], mode[1]);
+    f->addRow(mode[2], mode[3]);
     m_action = new QComboBox(this);
     m_action->addItems({tr("Do nothing"), tr("Copy"), tr("Cut"), tr("Move to beginning"), tr("Move to end"),
                         tr("Set as comment"), tr("Delete")});
+    m_action->setCurrentIndex(st.value("select/action", 0).toInt());
     f->addRow(tr("Action"), m_action);
     v->addLayout(f);
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Apply | QDialogButtonBox::Cancel, this);
@@ -475,39 +479,48 @@ void SelectLinesDialog::apply() {
     spec.match_case = m_case->isChecked();
     spec.field = uint8_t(m_field->currentIndex());
     spec.include_comments = true;
-    std::set<size_t> hits;
+    QSettings st;
+    st.setValue("select/text", m_find->text());
+    st.setValue("select/with", m_with->isChecked());
+    st.setValue("select/field", m_field->currentIndex());
+    st.setValue("select/case", m_case->isChecked());
+    st.setValue("select/regex", m_regex->isChecked());
+    st.setValue("select/dialogue", m_dialogue->isChecked());
+    st.setValue("select/comments", m_comments->isChecked());
+    st.setValue("select/mode", m_mode->checkedId());
+    st.setValue("select/action", m_action->currentIndex());
+    rust::Vec<size_t> found;
     try {
-        const size_t n = s.row_count();
-        size_t from = n ? n - 1 : 0;
-        for (size_t k = 0; k < n; ++k) {
-            const auto r = s.find(spec, from);
-            if (r < 0 || hits.contains(size_t(r))) break;
-            hits.insert(size_t(r));
-            from = size_t(r);
-        }
+        found = s.find_all(spec);
     } catch (const rust::Error &e) {
         m_main->error(QString::fromUtf8(e.what()));
         return;
     }
-    std::vector<size_t> rows;
-    for (size_t i = 0; i < s.row_count(); ++i) {
-        const bool match = hits.contains(i) == m_with->isChecked();
-        const bool type = s.row(i).comment == m_comments->isChecked();
-        if (match && type) rows.push_back(i);
-    }
-    std::set<size_t> sel;
-    if (m_add->isChecked()) {
-        auto cur = tab->selection();
-        sel.insert(cur.begin(), cur.end());
-        sel.insert(rows.begin(), rows.end());
+    // Aegisub's matching: lines of the checked kinds, with or without the text
+    const auto spans = s.row_spans();
+    std::vector<bool> hit(spans.size());
+    for (size_t r : found) hit[r] = true;
+    std::vector<bool> match(spans.size());
+    for (size_t i = 0; i < spans.size(); ++i)
+        match[i] = (spans[i].comment ? m_comments : m_dialogue)->isChecked() && hit[i] == m_with->isChecked();
+    const auto cur = tab->selection();
+    std::vector<size_t> v;
+    if (m_mode->checkedId() == 0 || m_mode->checkedId() == 1) {
+        for (size_t i = 0; i < spans.size(); ++i)
+            if (match[i]) v.push_back(i);
+        if (m_mode->checkedId() == 1) {
+            std::vector<size_t> both;
+            std::ranges::set_union(cur, v, std::back_inserter(both));
+            v = std::move(both);
+        }
     } else {
-        auto cur = tab->selection();
-        sel.insert(cur.begin(), cur.end());
-        for (size_t r : rows) sel.erase(r);
+        const bool keep = m_mode->checkedId() == 3; // intersect keeps the matches, subtract the rest
+        for (size_t r : cur)
+            if (r < match.size() && match[r] == keep) v.push_back(r);
     }
-    std::vector<size_t> v(sel.begin(), sel.end());
-    if (v.empty()) return;
-    tab->setSelection(v, int(v.front()));
+    if (v.empty()) return m_main->status(tr("Selected %1 lines").arg(0));
+    const int active = tab->active();
+    tab->setSelection(v, active >= 0 && std::ranges::binary_search(v, size_t(active)) ? active : int(v.front()));
     switch (m_action->currentIndex()) {
     case 1: tab->grid()->copy(); break;
     case 2: tab->grid()->cut(); break;
@@ -1823,9 +1836,10 @@ void SpellCheckDialog::replace(bool all) {
     if (!m_tab || m_word->text().isEmpty()) return;
     auto &s = m_tab->s();
     const QString word = m_word->text(), with = m_with->text();
-    auto fix = [&](size_t i, const QString &amend, int only) {
-        fsb::Row r = s.row(i);
-        QString text = fs::q(r.text);
+    std::vector<size_t> rows;
+    QStringList texts;
+    auto fix = [&](size_t i, int only) {
+        QString text = fs::q(s.row(i).text);
         const auto bad = spell::get()->misspelled(fs::Utf8(text));
         bool changed = false;
         for (size_t k = bad.size(); k >= 2; k -= 2) { // from the end: earlier offsets stay valid
@@ -1835,16 +1849,21 @@ void SpellCheckDialog::replace(bool all) {
             changed = true;
         }
         if (!changed) return;
-        r.text = fs::rs(text);
-        s.set_row(i, r, fs::Utf8(amend));
+        rows.push_back(i);
+        texts << text;
     };
     if (all) {
-        static int id = 0;
-        const QString amend = QString("spell-all-%1").arg(++id);
-        for (size_t i = 0; i < s.row_count(); ++i) fix(i, amend, -1);
+        // only the lines with the word go through the checker, and all of them change in one edit
+        fsb::FindSpec f{};
+        f.pattern = fs::rs(word);
+        f.match_case = true;
+        f.include_comments = true;
+        for (size_t i : s.find_all(f)) fix(i, -1);
     } else {
-        fix(size_t(m_row), "", m_start);
+        fix(size_t(m_row), m_start);
     }
+    const auto t = fs::rvec(texts);
+    s.set_texts(fs::slice(rows), {t.data(), t.size()}, "Spell check");
     m_tab->changed();
     m_pos = m_start + int(with.size());
     if (all) m_ignored << word; // nothing left to find, unless the replacement is itself unknown

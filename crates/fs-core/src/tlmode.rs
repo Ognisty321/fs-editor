@@ -11,7 +11,7 @@
 //! The functions here present that as one logical row per pair.
 
 use crate::ass::Document;
-use crate::model::Style;
+use crate::model::{Event, Style};
 
 pub const DEFAULT_TL_STYLE: &str = "TLmode";
 pub const DOUBTFUL_MARK: &str = "\u{0C}D";
@@ -146,6 +146,44 @@ pub fn set_translation(doc: &mut Document, row: TlRow, text: &str) -> TlRow {
     }
 }
 
+/// [`set_translation`] for many rows (ascending, distinct) in one pass: the new
+/// original events go in together instead of moving the rest of the file each.
+/// Returns the rows as they are afterwards.
+pub fn set_translations(doc: &mut Document, rows: &[TlRow], texts: &[&str]) -> Vec<TlRow> {
+    debug_assert!(rows.windows(2).all(|w| w[0].original < w[1].original));
+    let style = tl_style(doc).unwrap_or_else(|| DEFAULT_TL_STYLE.into());
+    let new_originals: Vec<(usize, Event)> = rows
+        .iter()
+        .filter(|r| r.translation.is_none())
+        .map(|r| {
+            let mut orig = doc.event(r.original).unwrap().clone();
+            orig.style = style.clone();
+            orig.effect = strip_doubtful(&orig.effect).to_string();
+            (r.original, orig)
+        })
+        .collect();
+    doc.insert_events(new_originals);
+    // each inserted original moves the events after it down by one
+    let mut moved = 0;
+    let mut out = Vec::with_capacity(rows.len());
+    for (r, text) in rows.iter().zip(texts) {
+        let original = r.original + moved;
+        let t = match r.translation {
+            Some(t) => t + moved,
+            None => {
+                moved += 1;
+                original + 1
+            }
+        };
+        doc.event_mut(t).unwrap().text = text.to_string();
+        out.push(TlRow {
+            original,
+            translation: Some(t),
+        });
+    }
+    out
+}
+
 /// Text of the original for a row.
 pub fn original_text(doc: &Document, row: TlRow) -> &str {
     &doc.event(row.original).unwrap().text
@@ -215,15 +253,13 @@ pub fn translation_only(doc: &Document) -> Document {
 /// Paste a list of translated lines into consecutive rows starting at
 /// `first_row` (Kainote "Paste translation text"). Returns rows filled.
 pub fn paste_translation(doc: &mut Document, first_row: usize, lines: &[&str]) -> usize {
-    let mut filled = 0;
-    for (r, l) in (first_row..).zip(lines) {
-        // inserting a translation shifts event indices, so re-pair each time
-        let Some(&row) = rows(doc).get(r) else { break };
-        set_translation(doc, row, l);
+    let rs = rows(doc);
+    let n = lines.len().min(rs.len().saturating_sub(first_row));
+    if n > 0 {
+        set_translations(doc, &rs[first_row..first_row + n], &lines[..n]);
         doc.set_info("TLMode Showtl", "Yes");
-        filled += 1;
     }
-    filled
+    n
 }
 
 /// Kainote's translation matching window: line the pasted translation up with
@@ -350,14 +386,16 @@ fn move_translations(doc: &mut Document, from: usize, delta: isize) {
     if len < n {
         remove_rows(doc, len, n - len);
     }
-    // backwards, so creating a translation event does not move rows still to do
-    for r in (from..len.min(n)).rev() {
-        let (text, doubtful) = new(r);
-        if (&text, doubtful) == (&old[r].0, old[r].1) {
-            continue;
-        }
-        let row = set_translation(doc, rs[r], &text);
-        set_doubtful(doc, row, doubtful);
+    let todo: Vec<usize> = (from..len.min(n)).filter(|&r| new(r) != old[r]).collect();
+    let values: Vec<(String, bool)> = todo.iter().map(|&r| new(r)).collect();
+    let texts: Vec<&str> = values.iter().map(|v| v.0.as_str()).collect();
+    let now = set_translations(
+        doc,
+        &todo.iter().map(|&r| rs[r]).collect::<Vec<_>>(),
+        &texts,
+    );
+    for (row, (_, doubtful)) in now.into_iter().zip(&values) {
+        set_doubtful(doc, row, *doubtful);
     }
     let style = tl_style(doc).unwrap_or_else(|| DEFAULT_TL_STYLE.into());
     for r in n..len {
@@ -468,6 +506,13 @@ mod tests {
         assert_eq!(translation_text(&d, rs[0]), "Cześć");
         assert_eq!(translation_text(&d, rs[1]), "Świecie");
         assert_eq!(d.event(rs[1].main()).unwrap().start, Time(1000));
+        // an untranslated row before a translated one; lines past the end are left over
+        let mut d = doc();
+        enable(&mut d);
+        assert_eq!(paste_translation(&mut d, 1, &["b"]), 1);
+        assert_eq!(paste_translation(&mut d, 0, &["x", "y", "z"]), 2);
+        assert_eq!(view(&d), pairs(&[("Hello", "x"), ("World", "y")]));
+        assert_eq!(d.event_count(), 4);
     }
 
     fn view(d: &Document) -> Vec<(String, String)> {

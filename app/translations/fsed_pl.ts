@@ -2385,6 +2385,14 @@ Filtry eksportu: %8</translation>
         <translation>Odznacz</translation>
     </message>
     <message>
+        <source>Set selection</source>
+        <translation>Zaznacz</translation>
+    </message>
+    <message>
+        <source>Intersect with selection</source>
+        <translation>Część wspólna z zaznaczeniem</translation>
+    </message>
+    <message>
         <source>Do nothing</source>
         <translation>Nie rób nic</translation>
     </message>

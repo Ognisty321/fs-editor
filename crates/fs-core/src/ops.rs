@@ -1006,21 +1006,12 @@ pub fn post_process(doc: &mut Document, rows: &Rows, pp: &PostProcess<'_>) {
     }
     // keyframe snapping
     if let Some((kfs, fr)) = pp.keyframes {
-        let kf_times: Vec<i64> = kfs
+        let mut kf_times: Vec<i64> = kfs
             .iter()
             .map(|&f| fr.time_at_frame(f, TimeType::Start))
             .collect();
-        let snap = |t: Time, before: Time, after: Time| -> Time {
-            let mut best: Option<i64> = None;
-            for &k in &kf_times {
-                let d = k - t.ms();
-                let ok = (d <= 0 && -d <= before.ms()) || (d >= 0 && d <= after.ms());
-                if ok && best.is_none_or(|b| (b - t.ms()).abs() > d.abs()) {
-                    best = Some(k);
-                }
-            }
-            best.map(Time).unwrap_or(t)
-        };
+        kf_times.sort_unstable();
+        let snap = |t: Time, before: Time, after: Time| snap_to(&kf_times, t, before, after);
         for &i in &idx {
             let ev = doc.event(i).unwrap().clone();
             let s = snap(ev.start, pp.kf_before_start, pp.kf_after_start);
@@ -1034,6 +1025,22 @@ pub fn post_process(doc: &mut Document, rows: &Rows, pp: &PostProcess<'_>) {
         }
     }
     let _ = orig;
+}
+
+/// The keyframe nearest `t` within `before`/`after` of it (the earlier one on a tie), else `t`.
+/// `kfs` sorted: only the neighbours on each side can be nearest.
+fn snap_to(kfs: &[i64], t: Time, before: Time, after: Time) -> Time {
+    let p = kfs.partition_point(|&k| k < t.ms());
+    let below = p
+        .checked_sub(1)
+        .map(|i| kfs[i])
+        .filter(|&k| t.ms() - k <= before.ms());
+    let above = kfs.get(p).copied().filter(|&k| k - t.ms() <= after.ms());
+    Time(match (below, above) {
+        (Some(b), Some(a)) if a - t.ms() < t.ms() - b => a,
+        (Some(b), _) => b,
+        (None, a) => a.unwrap_or(t.ms()),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1690,6 +1697,32 @@ mod tests {
         // a ends 2050, b starts 2100 → meet in the middle
         assert_eq!(d.event(0).unwrap().end, Time(2075));
         assert_eq!(d.event(1).unwrap().start, Time(2075));
+    }
+
+    #[test]
+    fn snap_to_matches_a_scan_of_every_keyframe() {
+        let kfs = [100, 300, 500, 520, 900];
+        let scan = |t: i64, before: i64, after: i64| {
+            let mut best: Option<i64> = None;
+            for &k in &kfs {
+                let d = k - t;
+                let ok = (d <= 0 && -d <= before) || (d >= 0 && d <= after);
+                if ok && best.is_none_or(|b| (b - t).abs() > d.abs()) {
+                    best = Some(k);
+                }
+            }
+            best.unwrap_or(t)
+        };
+        for t in (0..1000).step_by(10) {
+            for (before, after) in [(0, 0), (100, 100), (50, 200), (250, 10)] {
+                let got = snap_to(&kfs, Time(t), Time(before), Time(after)).ms();
+                assert_eq!(
+                    got,
+                    scan(t, before, after),
+                    "t {t} before {before} after {after}"
+                );
+            }
+        }
     }
 
     #[test]
