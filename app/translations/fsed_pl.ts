@@ -3235,6 +3235,30 @@ do czasu audio</translation>
         <translation>Bez nazwy</translation>
     </message>
     <message>
+        <source>Text import options</source>
+        <translation>Opcje importu tekstu</translation>
+    </message>
+    <message>
+        <source>Include blank lines</source>
+        <translation>Uwzględnij puste linie</translation>
+    </message>
+    <message>
+        <source>Text before it names the line&apos;s actor; empty reads no actors</source>
+        <translation>Tekst przed nim to aktor linii; pusty nie odczytuje aktorów</translation>
+    </message>
+    <message>
+        <source>Lines starting with it become comments; empty makes none</source>
+        <translation>Linie zaczynające się od niego stają się komentarzami; pusty nie tworzy żadnych</translation>
+    </message>
+    <message>
+        <source>Actor separator:</source>
+        <translation>Separator aktora:</translation>
+    </message>
+    <message>
+        <source>Comment starter:</source>
+        <translation>Początek komentarza:</translation>
+    </message>
+    <message>
         <source>Resolution mismatch</source>
         <translation>Niezgodna rozdzielczość</translation>
     </message>

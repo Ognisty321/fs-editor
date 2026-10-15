@@ -437,8 +437,16 @@ pub mod ffi {
         ) -> Result<String>;
         fn new_session() -> Box<Session>;
         fn open(self: &mut Session, path: &str) -> Result<()>;
-        /// `encoding`: an encoding label (Aegisub's "Open with charset").
-        fn open_as(self: &mut Session, path: &str, encoding: &str) -> Result<()>;
+        /// `encoding`: an encoding label (Aegisub's "Open with charset"); the rest are
+        /// Aegisub's plain text import options.
+        fn open_as(
+            self: &mut Session,
+            path: &str,
+            encoding: &str,
+            actor_separator: &str,
+            comment_starter: &str,
+            include_blank: bool,
+        ) -> Result<()>;
         fn open_embedded(self: &mut Session, video: &str, index: i32) -> Result<()>;
         fn save(self: &mut Session, path: &str) -> Result<()>;
         fn export_copy(
@@ -623,6 +631,8 @@ pub mod ffi {
         fn open_video(path: &str, cache_dir: &str, progress: &Progress) -> Result<Box<Video>>;
         /// Empty when the file cannot be read or has no text subtitles.
         fn subtitle_tracks(path: &str) -> Vec<SubTrack>;
+        /// A .txt file of no subtitle format: plain text for Aegisub's text import.
+        fn is_plain_text(path: &str) -> bool;
         /// By start time; empty when the file cannot be read or has none.
         fn chapters(path: &str) -> Vec<Chapter>;
         fn info(self: &Video) -> VideoInfo;
@@ -837,6 +847,15 @@ fn chapters(path: &str) -> Vec<ffi::Chapter> {
         .into_iter()
         .map(|(start, title)| ffi::Chapter { start, title })
         .collect()
+}
+
+fn is_plain_text(path: &str) -> bool {
+    path.to_ascii_lowercase().ends_with(".txt")
+        && std::fs::read(path).is_ok_and(|b| {
+            let (text, _) = fs_formats::encoding::decode(&b, None);
+            !text.starts_with("# timecode")
+                && fs_formats::detect_format(&text, Some("txt")).is_none()
+        })
 }
 
 fn subtitle_tracks(path: &str) -> Vec<ffi::SubTrack> {

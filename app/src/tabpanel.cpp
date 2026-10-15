@@ -13,7 +13,9 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QRadioButton>
 #include <QSettings>
 #include <QScrollBar>
@@ -115,9 +117,48 @@ QString TabPanel::title() const {
     return (p.isEmpty() ? tr("Untitled") : QFileInfo(p).fileName()) + (modified() ? "*" : "");
 }
 
+namespace {
+struct TextImport {
+    QString separator, comment;
+    bool blank;
+};
+TextImport textImport() {
+    const QSettings st;
+    return {st.value("textImport/actorSeparator", ":").toString(), st.value("textImport/commentStarter", "#").toString(),
+            st.value("textImport/includeBlank", false).toBool()};
+}
+} // namespace
+
+bool TabPanel::askTextImport(QWidget *parent) {
+    const TextImport t = textImport();
+    QDialog d(parent);
+    d.setWindowTitle(tr("Text import options"));
+    auto *form = new QFormLayout(&d);
+    auto *sep = new QLineEdit(t.separator, &d);
+    auto *rem = new QLineEdit(t.comment, &d);
+    auto *blank = new QCheckBox(tr("Include blank lines"), &d);
+    blank->setChecked(t.blank);
+    sep->setToolTip(tr("Text before it names the line's actor; empty reads no actors"));
+    rem->setToolTip(tr("Lines starting with it become comments; empty makes none"));
+    form->addRow(tr("Actor separator:"), sep);
+    form->addRow(tr("Comment starter:"), rem);
+    form->addRow(blank);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+    form->addRow(bb);
+    connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    if (d.exec() != QDialog::Accepted) return false;
+    QSettings st;
+    st.setValue("textImport/actorSeparator", sep->text());
+    st.setValue("textImport/commentStarter", rem->text());
+    st.setValue("textImport/includeBlank", blank->isChecked());
+    return true;
+}
+
 bool TabPanel::openSubs(const QString &path, const QString &encoding) {
     try {
-        s().open_as(fs::Utf8(path), fs::Utf8(encoding));
+        const TextImport t = textImport();
+        s().open_as(fs::Utf8(path), fs::Utf8(encoding), fs::Utf8(t.separator), fs::Utf8(t.comment), t.blank);
     } catch (const rust::Error &e) {
         m_main->error(QString::fromUtf8(e.what()));
         return false;

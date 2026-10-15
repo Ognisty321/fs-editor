@@ -443,6 +443,8 @@ void MainWindow::openFile(const QString &path, const QString &encoding) {
     } else if (ext == "txt" && isKeyframesFile(path)) {
         current()->openKeyframes(path);
     } else {
+        // plain text, as Aegisub imports it, asks how its actors and comments are marked
+        if (ext == "txt" && fsb::is_plain_text(fs::Utf8(path)) && !TabPanel::askTextImport(this)) return;
         // reuse an empty, untouched tab, otherwise open a new one
         TabPanel *tab = current();
         if (!untouched(tab)) tab = newTab();

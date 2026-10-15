@@ -35,6 +35,8 @@ public:
 
     // file
     bool openSubs(const QString &path, const QString &encoding = {}); // empty: detect
+    // Aegisub's "Text import options" for a plain text file about to open; false: cancelled.
+    static bool askTextImport(QWidget *parent);
     // Subtitle stream `index` of a video, as an unsaved script.
     bool openEmbedded(const QString &video, int index);
     bool save(const QString &path = {});

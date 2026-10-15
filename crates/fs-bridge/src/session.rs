@@ -16,7 +16,7 @@ use fs_core::tags::{self, Line, Tag};
 use fs_core::tlmode::{self, TlRow};
 use fs_core::vfr::Framerate;
 use fs_core::{Color, Document, Event, EventEntry, EventId, Time};
-use fs_formats::{Format, LoadOptions, SaveOptions};
+use fs_formats::{Format, LoadOptions, SaveOptions, TextImport};
 
 use crate::ffi::{
     ColumnInfo, ComparePair, FileInfo, FilterSpec, FindSpec, PostSpec, ResampleSpec, Row, RowSpan,
@@ -294,22 +294,39 @@ impl Session {
     // ---- file -------------------------------------------------------------
 
     pub fn open(&mut self, path: &str) -> Result<(), String> {
-        self.open_as(path, "")
+        self.open_with(path, &LoadOptions::default())
     }
 
-    /// Open with a forced encoding; an empty or unknown label detects it.
-    pub fn open_as(&mut self, path: &str, encoding: &str) -> Result<(), String> {
+    /// Open with a forced encoding (an empty or unknown label detects it); plain text is read
+    /// with Aegisub's text import options.
+    pub fn open_as(
+        &mut self,
+        path: &str,
+        encoding: &str,
+        actor_separator: &str,
+        comment_starter: &str,
+        include_blank: bool,
+    ) -> Result<(), String> {
         let opts = LoadOptions {
             encoding: Encoding::for_label(encoding.as_bytes()),
+            text: TextImport {
+                actor_separator: actor_separator.into(),
+                comment_starter: comment_starter.into(),
+                include_blank,
+            },
             ..LoadOptions::default()
         };
-        let l = match fs_formats::load_file(Path::new(path), &opts) {
+        self.open_with(path, &opts)
+    }
+
+    fn open_with(&mut self, path: &str, opts: &LoadOptions) -> Result<(), String> {
+        let l = match fs_formats::load_file(Path::new(path), opts) {
             // plain text as Aegisub imports it: a new script, so saving never overwrites the text
             Err(fs_formats::Error::UnknownFormat)
                 if path.to_ascii_lowercase().ends_with(".txt") =>
             {
                 let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
-                let l = fs_formats::load_plain_text(&bytes, &opts)
+                let l = fs_formats::load_plain_text(&bytes, opts)
                     .map_err(|e| format!("{path}: {e}"))?;
                 self.load(l, None);
                 return Ok(());
@@ -2540,7 +2557,8 @@ mod tests {
             encoding_rs::WINDOWS_1251.encode("1\n00:00:01,000 --> 00:00:02,000\nПривет\n");
         std::fs::write(&p, &bytes).unwrap();
         let mut s = Session::default();
-        s.open_as(p.to_str().unwrap(), "windows-1251").unwrap();
+        s.open_as(p.to_str().unwrap(), "windows-1251", ":", "#", false)
+            .unwrap();
         assert_eq!(s.row(0).text, "Привет");
         std::fs::remove_file(p).ok();
     }

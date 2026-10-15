@@ -153,6 +153,8 @@ pub struct LoadOptions {
     pub fps: Framerate,
     /// Maximum line duration for TMP (which has no end times).
     pub tmp_max_duration: Time,
+    /// How plain text is read (Aegisub's "Text import options").
+    pub text: TextImport,
 }
 
 impl Default for LoadOptions {
@@ -162,6 +164,27 @@ impl Default for LoadOptions {
             format: None,
             fps: Framerate::from_rational(24000, 1001, true).unwrap(),
             tmp_max_duration: Time(5000),
+            text: TextImport::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TextImport {
+    /// Text up to it names the actor; empty reads no actors.
+    pub actor_separator: String,
+    /// A line starting with it is a comment; empty makes none.
+    pub comment_starter: String,
+    /// Empty lines become empty comments instead of being left out.
+    pub include_blank: bool,
+}
+
+impl Default for TextImport {
+    fn default() -> Self {
+        TextImport {
+            actor_separator: ":".into(),
+            comment_starter: "#".into(),
+            include_blank: false,
         }
     }
 }
@@ -218,24 +241,31 @@ pub fn load_bytes(bytes: &[u8], ext: Option<&str>, opts: &LoadOptions) -> Result
 }
 
 /// Aegisub's plain text import: an event per line, timed 0; "Actor: text" names the actor (kept
-/// for the indented lines after it), a line starting with "#" or left empty is a comment.
-// shortcut: Aegisub's default separators (":" and "#") without its import dialog; add the dialog if people use others.
+/// for the indented lines after it), a line starting with the comment starter or left empty is a
+/// comment. The separators come from `opts.text`.
 pub fn load_plain_text(bytes: &[u8], opts: &LoadOptions) -> Result<Loaded, Error> {
     let (text, dec) = encoding::decode(bytes, opts.encoding);
     if text.starts_with("# timecode") {
         return Err(Error::UnknownFormat); // a timecodes file, not subtitles
     }
+    let TextImport {
+        actor_separator: sep,
+        comment_starter: rem,
+        include_blank,
+    } = &opts.text;
     let mut doc = Document::new();
     doc.remove_event(0);
     let mut actor = "";
-    for line in text.lines().filter(|l| !l.is_empty()) {
-        let (mut value, comment) = match line.strip_prefix('#') {
-            Some(v) => (v, true),
-            None => (line, false),
+    for line in text.lines().filter(|l| *include_blank || !l.is_empty()) {
+        let (mut value, comment) = match line.strip_prefix(rem.as_str()) {
+            Some(v) if !rem.is_empty() => (v, true),
+            _ => (line, false),
         };
+        // Aegisub drops one byte of a longer separator; the whole one goes here
         if !comment
+            && !sep.is_empty()
             && !value.starts_with([' ', '\t'])
-            && let Some((a, rest)) = value.split_once(':')
+            && let Some((a, rest)) = value.split_once(sep.as_str())
         {
             actor = a.trim();
             value = rest;
@@ -447,6 +477,47 @@ mod tests {
             ]
         );
         assert!(load_plain_text(b"# timecode format v2\n0\n", &LoadOptions::default()).is_err());
+        // other separators, blank lines kept as empty comments
+        let opts = LoadOptions {
+            text: TextImport {
+                actor_separator: " - ".into(),
+                comment_starter: "//".into(),
+                include_blank: true,
+            },
+            ..LoadOptions::default()
+        };
+        let o = load_plain_text("Ann - Hi: you\n\n//note\n#not\n".as_bytes(), &opts).unwrap();
+        let rows: Vec<_> = (0..o.doc.event_count())
+            .map(|i| o.doc.event(i).unwrap())
+            .map(|e| {
+                (
+                    e.kind == EventKind::Comment,
+                    e.actor.as_str(),
+                    e.text.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (false, "Ann", "Hi: you"),
+                (true, "", ""),
+                (true, "", "note"),
+                (false, "Ann", "#not"),
+            ]
+        );
+        // no separators: neither actors nor comments
+        let none = LoadOptions {
+            text: TextImport {
+                actor_separator: String::new(),
+                comment_starter: String::new(),
+                include_blank: false,
+            },
+            ..LoadOptions::default()
+        };
+        let n = load_plain_text(b"A: b\n# c\n", &none).unwrap();
+        assert_eq!(n.doc.event(0).unwrap().text, "A: b");
+        assert_eq!(n.doc.event(1).unwrap().kind, EventKind::Dialogue);
         // and back, as Aegisub writes it (an actor column on every line, empty lines left out)
         assert_eq!(
             write_plain_text(d),
