@@ -446,6 +446,11 @@ void TabPanel::closeAudio() {
     applyLayout();
 }
 
+void TabPanel::closeVideo() {
+    m_video->close();
+    s().set_project_value("Video File", "");
+}
+
 void TabPanel::openKeyframes(const QString &path) {
     try {
         const auto kf = fsb::load_keyframes(fs::Utf8(path));
@@ -477,6 +482,7 @@ void TabPanel::openTimecodes(const QString &path) {
     }
     m_timecodesPath = path;
     s().set_project_value("Timecodes File", fs::Utf8(path));
+    if (!path.isEmpty()) m_main->addRecent("timecodes", path);
     if (!m_video->hasVideo()) return;
     m_video->setTimecodes(std::move(tc));
     updateVideoContext();

@@ -76,6 +76,8 @@ public:
     void openAudio(const QString &path);
     void openBlankAudio(qint64 ms);
     void closeAudio();
+    void closeVideo();
+    QString keyframesPath() const { return m_keyframesPath; } // empty: the video's own
     void openKeyframes(const QString &path);
     const std::vector<std::int64_t> &keyframes() const { return m_keyframes; }
     void setKeyframes(std::vector<std::int64_t> kf);

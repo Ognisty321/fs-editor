@@ -1128,6 +1128,10 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Otwórz folder audio</translation>
     </message>
     <message>
+        <source>Open keyframes folder</source>
+        <translation>Otwórz folder klatek kluczowych</translation>
+    </message>
+    <message>
         <source>Show one tab</source>
         <translation>Wyświetl jedną zakładkę</translation>
     </message>
@@ -1556,6 +1560,14 @@ Backspace: rozłącz ostatnią grupę</translation>
     <message>
         <source>Video (%1);;All files (*)</source>
         <translation>Wideo (%1);;Wszystkie pliki (*)</translation>
+    </message>
+    <message>
+        <source>Close video</source>
+        <translation>Zamknij wideo</translation>
+    </message>
+    <message>
+        <source>Play the current line</source>
+        <translation>Odtwórz aktywną linijkę</translation>
     </message>
     <message>
         <source>Open keyframes</source>
@@ -2086,6 +2098,10 @@ Tłumaczenie: wklejony tekst, który przejmuje timing oryginału.</translation>
     <message>
         <source>Recently opened keyframes</source>
         <translation>Ostatnio otwarte klatki kluczowe</translation>
+    </message>
+    <message>
+        <source>Recently opened timecodes</source>
+        <translation>Ostatnio otwarte timecodes</translation>
     </message>
     <message>
         <source>(empty)</source>

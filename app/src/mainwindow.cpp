@@ -90,7 +90,9 @@ const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"saveAs", {"file-export", kBlue}}, {"exportAs", {"file-arrow-right", kBlue}}, {"saveTranslation", {"language", kBlue}}, {"removeSubs", {"file-x", kRed}},
     {"saveWithVideoName", {"file-symlink", kBlue}}, {"removeTemp", {"trash", kRed}}, {"openAutosave", {"restore", kAmber}}, {"showLog", {"terminal-2", {}}},
     {"loadSession", {"restore", {}}}, {"fontCollector", {"typography", kPurple}}, {"settings", {"settings", {}}},
-    {"automationManager", {"list-check", kAmber}},
+    {"automationManager", {"list-check", kAmber}}, {"loadScript", {"script", kAmber}},
+    {"reloadScripts", {"refresh", kGreen}}, {"runLastScript", {"player-play-filled", kGreen}},
+    {"closeVideo", {"x", kRed}}, {"playVideoLine", {"player-track-next", kGreen}},
     {"exit", {"logout", kRed}}, {"undo", {"arrow-back-up", {}}}, {"undoToSave", {"arrow-back-up-double", {}}},
     {"redo", {"arrow-forward-up", {}}}, {"history", {"history", {}}}, {"findReplace", {"replace", kOrange}},
     {"find", {"search", kOrange}}, {"findNext", {"search", kOrange}}, {"correctErrors", {"replace", kGreen}},
@@ -223,6 +225,8 @@ MainWindow::MainWindow() {
         m.addAction(tr("Open subtitles folder"), this, [=] { openDir(t->path()); })->setEnabled(!t->path().isEmpty());
         m.addAction(tr("Open video folder"), this, [=] { openDir(t->video()->path()); })->setEnabled(!t->video()->path().isEmpty());
         m.addAction(tr("Open audio folder"), this, [=] { openDir(t->audio()->path()); })->setEnabled(!t->audio()->path().isEmpty());
+        m.addAction(tr("Open keyframes folder"), this, [=] { openDir(t->keyframesPath()); })
+            ->setEnabled(!t->keyframesPath().isEmpty());
         m.addSeparator();
         const int at = m_tabs->tabBar()->tabAt(pos);
         TabPanel *other = at >= 0 && panel(at) != t ? panel(at) : panel((m_tabs->currentIndex() + 1) % m_tabs->count());
@@ -877,6 +881,9 @@ void MainWindow::buildMenus() {
         if (!f.isEmpty()) tab()->openVideo(f);
     });
     video->addMenu(recentMenu("video"));
+    // Aegisub's video/close: the file stays where it is (Remove video recycles it)
+    add("closeVideo", tr("Close video"), {}, video, [=] { tab()->closeVideo(); });
+    add("playVideoLine", tr("Play the current line"), {}, video, [=] { tab()->playLine(tab()->active()); });
     add("openKeyframes", tr("Open keyframes"), {}, video, [=, this] {
         const QString f = QFileDialog::getOpenFileName(this, tr("Open keyframes"), QFileInfo(tab()->path()).absolutePath(),
                                                        tr("Keyframes (*.txt *.log);;All files (*)"));
@@ -905,6 +912,7 @@ void MainWindow::buildMenus() {
                                                        tr("Timecodes (*.txt);;All files (*)"));
         if (!f.isEmpty()) tab()->openTimecodes(f);
     });
+    video->addMenu(recentMenu("timecodes"));
     add("saveTimecodes", tr("Save timecodes..."), {}, video, [=, this] {
         const auto tc = tab()->video()->timecodes();
         if (tc.size() < 2) return;
@@ -1387,6 +1395,26 @@ void MainWindow::buildMenus() {
     // Automation
     m_automationMenu = menu(tr("Au&tomation"));
     add("automationManager", tr("Automation manager..."), {}, nullptr, [this] { automationManager(); });
+    add("loadScript", tr("Load script"), {}, nullptr, [this] {
+        const QString f = QFileDialog::getOpenFileName(this, tr("Load script"), {},
+                                                       tr("Automation scripts (*.lua *.moon);;All files (*)"));
+        if (f.isEmpty()) return;
+        const size_t before = (*m_automation)->macros().size();
+        try {
+            (*m_automation)->load_script(fs::Utf8(f));
+            if ((*m_automation)->macros().size() > before) m_lastMacro = qint64(before);
+        } catch (const rust::Error &e) {
+            log(QString::fromUtf8(e.what()));
+        }
+        buildAutomationMenu();
+    });
+    add("reloadScripts", tr("Reload all scripts"), {}, nullptr, [this] {
+        for (const auto &e : (*m_automation)->reload()) log(fs::q(e));
+        buildAutomationMenu();
+    });
+    add("runLastScript", tr("Run the last loaded script"), {}, nullptr, [this] {
+        if (m_lastMacro >= 0 && size_t(m_lastMacro) < (*m_automation)->macros().size()) runMacro(size_t(m_lastMacro));
+    });
     connect(m_automationMenu, &QMenu::aboutToShow, this, [this] {
         auto *tab = current();
         const auto rows = tab->selection();
@@ -1414,7 +1442,8 @@ QMenu *MainWindow::recentMenu(const QString &kind) {
     static const QMap<QString, QString> titles = {{"subs", tr("Recently opened subtitles")},
                                                   {"video", tr("Recently opened videos")},
                                                   {"audio", tr("Recently opened audio")},
-                                                  {"keyframes", tr("Recently opened keyframes")}};
+                                                  {"keyframes", tr("Recently opened keyframes")},
+                                                  {"timecodes", tr("Recently opened timecodes")}};
     auto *m = new QMenu(titles.value(kind, kind), this);
     m_recent.insert(kind, m);
     connect(m, &QMenu::aboutToShow, this, [this, m, kind] {
@@ -1424,6 +1453,7 @@ QMenu *MainWindow::recentMenu(const QString &kind) {
                 if (kind == "subs") openFile(f);
                 else if (kind == "video") current()->openVideo(f);
                 else if (kind == "audio") current()->openAudio(f);
+                else if (kind == "timecodes") current()->openTimecodes(f);
                 else current()->openKeyframes(f);
             })->setToolTip(f);
         }
@@ -1433,7 +1463,7 @@ QMenu *MainWindow::recentMenu(const QString &kind) {
     auto *a = new QAction(m->title(), this);
     a->setMenu(m);
     a->setIcon(kind == "subs" ? icon("file-time", kAmber) : kind == "video" ? icon("clock-play", kBlue) : icon("history", kTeal));
-    m_actions.insert("recent" + QString(kind == "subs" ? "Subs" : kind == "video" ? "Video" : kind == "audio" ? "Audio" : "Keyframes"), a);
+    m_actions.insert("recent" + kind.left(1).toUpper() + kind.mid(1), a);
     return m;
 }
 
@@ -1730,6 +1760,7 @@ void MainWindow::updateActions() {
     action("saveTranslation")->setEnabled(fi.tl_mode);
     action("translationMatching")->setEnabled(fi.tl_mode);
     action("subsFromVideo")->setEnabled(!tab->video()->path().isEmpty());
+    action("closeVideo")->setEnabled(tab->video()->hasVideo());
     const char *views[] = {"viewAll", "viewVideoSubs", "viewAudioSubs", "viewOnlyVideo", "viewOnlySubs"};
     action(views[std::clamp(tab->viewMode() - 1, 0, 4)])->setChecked(true);
     action("editor")->setChecked(!tab->playerMode());
@@ -1998,27 +2029,8 @@ void MainWindow::buildAutomationMenu() {
             ++it;
         }
     }
-    m->addAction(icon("script", kAmber), tr("Load script"), this, [this] {
-        const QString f = QFileDialog::getOpenFileName(this, tr("Load script"), {},
-                                                       tr("Automation scripts (*.lua *.moon);;All files (*)"));
-        if (f.isEmpty()) return;
-        const size_t before = (*m_automation)->macros().size();
-        try {
-            (*m_automation)->load_script(fs::Utf8(f));
-            if ((*m_automation)->macros().size() > before) m_lastMacro = qint64(before);
-        } catch (const rust::Error &e) {
-            log(QString::fromUtf8(e.what()));
-        }
-        buildAutomationMenu();
-    });
-    m->addAction(icon("refresh", kGreen), tr("Reload all scripts"), this, [this] {
-        for (const auto &e : (*m_automation)->reload()) log(fs::q(e));
-        buildAutomationMenu();
-    });
-    m->addAction(m_actions.value("automationManager"));
-    m->addAction(icon("player-play-filled", kGreen), tr("Run the last loaded script"), this, [this] {
-        if (m_lastMacro >= 0 && size_t(m_lastMacro) < (*m_automation)->macros().size()) runMacro(size_t(m_lastMacro));
-    });
+    for (const char *id : {"loadScript", "reloadScripts", "automationManager", "runLastScript"})
+        m->addAction(m_actions.value(id));
     m->addSeparator();
     QMap<QString, QMenu *> submenus;
     for (const auto &mi : (*m_automation)->macros()) {

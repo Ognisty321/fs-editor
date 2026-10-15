@@ -409,6 +409,7 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
                            "copyFrameSubsOnly"})
         m.addAction(mw->action(id));
     m.addSeparator();
+    m.addAction(mw->action("closeVideo"));
     m.addAction(tr("Remove video"), this, [this, mw] {
         const QString p = m_box->path();
         if (p.isEmpty() || !mw->confirm(tr("Move %1 to the recycle bin?").arg(QFileInfo(p).fileName()))) return;
