@@ -112,7 +112,7 @@ const QColor kHandle(255, 255, 255), kLine(240, 200, 60), kAccent(230, 70, 70), 
 
 QString n2(double v) {
     const double r = std::round(v * 100) / 100;
-    return r == std::floor(r) ? QString::number(qint64(r)) : QString::number(r, 'f', 2);
+    return QString::number(r == 0 ? 0.0 : r, 'g', 12); // 12.5, not 12.50; 0, not -0
 }
 
 void handle(QPainter &p, QPointF c, bool round = false, QColor col = kHandle) {
@@ -654,7 +654,10 @@ void VisualTools::paint(QPainter &p) {
             p.drawLine(QPointF(-60, k * 20), QPointF(60, k * 20));
         }
         p.restore();
+        const QPointF org = w({m_v.org_x, m_v.org_y});
+        line(p, org, pos, QColor(255, 255, 255, 100), Qt::DotLine);
         handle(p, pos, true);
+        handle(p, org, false, kAccent);
         break;
     }
     case RClip:
@@ -774,8 +777,11 @@ bool VisualTools::press(QMouseEvent *e) {
         m_tagStart = m_tagMode->currentIndex() == 1 ? m_tagValue->value() : 0;
         break;
     case RotZ:
-        if (near(w({m_v.org_x, m_v.org_y}), m_pressW, 9)) m_drag = 2;
-        else if (m_twoPoints) m_drag = 4;
+    case RotXY:
+        if (near(w({m_v.org_x, m_v.org_y}), m_pressW, 9)) {
+            m_drag = 2;
+            grabLines();
+        } else if (m_tool == RotZ && m_twoPoints) m_drag = 4;
         break;
     case RClip:
         if (m_v.clip == 1) {
@@ -938,32 +944,40 @@ bool VisualTools::move(QMouseEvent *e) {
         apply(QString("\\fscx%1\\fscy%2").arg(n2(sx), n2(sy)), true);
         break;
     }
-    case RotZ: {
+    case RotZ:
+    case RotXY: {
         if (m_drag == 2) {
-            const QPointF o = QPointF(m_start.org_x, m_start.org_y) + delta;
-            apply(QString("\\org(%1,%2)").arg(n2(o.x()), n2(o.y())));
+            // every selected line's origin by as much (Aegisub)
+            QStringList tags;
+            for (const auto &v : m_starts) tags << QString("\\org(%1,%2)").arg(n2(v.org_x + delta.x()), n2(v.org_y + delta.y()));
+            const auto t = fs::rvec(tags);
+            tab->s().set_each_tags(fs::slice(m_rows), {t.data(), t.size()}, fs::Utf8(m_amend));
+            tab->changed(TabPanel::FromVideo);
+            break;
+        }
+        // Ctrl snaps to 30 degrees (Aegisub)
+        const auto angle = [e](double a) {
+            if (e->modifiers() & Qt::ControlModifier) a = std::round(a / 30) * 30;
+            return std::fmod(std::fmod(a, 360) + 360, 360);
+        };
+        if (m_tool == RotXY) {
+            double frx = m_start.frx, fry = m_start.fry;
+            if (m_button != Qt::RightButton) fry = angle(m_start.fry + dw.x() * 0.5);
+            if (m_button != Qt::LeftButton) frx = angle(m_start.frx - dw.y() * 0.5);
+            apply(QString("\\frx%1\\fry%2").arg(n2(frx), n2(fry)), true);
             break;
         }
         if (m_drag == 4) {
             const QPointF d = now - m_pressS;
             if (QLineF(m_pressW, e->position()).length() < 4) break;
-            const double frz = std::fmod(qRadiansToDegrees(std::atan2(-d.y(), d.x())) + 360, 360);
-            apply(QString("\\frz%1").arg(n2(frz)), true);
+            apply(QString("\\frz%1").arg(n2(angle(qRadiansToDegrees(std::atan2(-d.y(), d.x()))))), true);
             m_box->view()->updateOverlay();
             break;
         }
         const QPointF c = w({m_start.org_x, m_start.org_y});
         const double a0 = std::atan2(-(m_pressW.y() - c.y()), m_pressW.x() - c.x());
         const double a1 = std::atan2(-(e->position().y() - c.y()), e->position().x() - c.x());
-        double frz = std::fmod(m_start.frz + qRadiansToDegrees(a1 - a0) + 720, 360);
-        apply(QString("\\frz%1").arg(n2(frz)), true);
-        break;
-    }
-    case RotXY: {
-        double frx = m_start.frx, fry = m_start.fry;
-        if (m_button != Qt::RightButton) fry = m_start.fry + dw.x() * 0.5;
-        if (m_button != Qt::LeftButton) frx = m_start.frx - dw.y() * 0.5;
-        apply(QString("\\frx%1\\fry%2").arg(n2(frx), n2(fry)), true);
+        apply(QString("\\frz%1").arg(n2(angle(m_start.frz + qRadiansToDegrees(a1 - a0)))), true);
         break;
     }
     case RClip: {
