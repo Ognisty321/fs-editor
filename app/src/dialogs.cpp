@@ -1147,9 +1147,7 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         if (f.exists()) st.remove("styles/catalog/" + n);
     }
     st.remove("styles/catalogs");
-    QStringList cats;
-    for (const QFileInfo &fi : dir.entryInfoList({"*.sty"}, QDir::Files, QDir::Name | QDir::IgnoreCase))
-        cats << fi.completeBaseName();
+    QStringList cats = styleCatalogs();
     if (cats.isEmpty()) cats << "Default";
     m_catalog->addItems(cats);
     auto *newCat = new QPushButton(tr("New"), this);
@@ -1519,11 +1517,20 @@ void StyleManager::pasteStyles(bool storage) {
     reload();
 }
 
-void StyleManager::loadCatalog() {
-    m_stored.clear();
-    QFile f(catalogFile(m_catalog->currentText()));
-    if (!f.open(QIODevice::ReadOnly)) return; // a catalog with nothing saved yet
-    for (const auto &s : fsb::parse_style_lines(fs::Utf8(QString::fromUtf8(f.readAll())))) m_stored.push_back(s);
+void StyleManager::loadCatalog() { m_stored = catalogStyles(m_catalog->currentText()); }
+
+QStringList styleCatalogs() {
+    QStringList cats;
+    for (const QFileInfo &fi : QFileInfo(catalogFile("x")).dir().entryInfoList({"*.sty"}, QDir::Files, QDir::Name | QDir::IgnoreCase))
+        cats << fi.completeBaseName();
+    return cats;
+}
+
+std::vector<fsb::StyleData> catalogStyles(const QString &name) {
+    QFile f(catalogFile(name));
+    if (!f.open(QIODevice::ReadOnly)) return {}; // a catalog with nothing saved yet
+    const auto parsed = fsb::parse_style_lines(fs::Utf8(QString::fromUtf8(f.readAll())));
+    return {parsed.begin(), parsed.end()};
 }
 
 void StyleManager::saveCatalog() {
@@ -2204,10 +2211,17 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     language->addItem("Polski", "pl");
     language->setCurrentIndex(std::max(0, language->findData(st.value("main/language", ""))));
     editor->addRow(tr("Language (after restart)"), language);
+    auto *newCatalog = new QComboBox(this);
+    newCatalog->addItem(tr("None"), "");
+    for (const QString &c : styleCatalogs()) newCatalog->addItem(c, c);
+    newCatalog->setCurrentIndex(std::max(0, newCatalog->findData(st.value("styles/newFileCatalog", "Default"))));
+    newCatalog->setToolTip(tr("A new file starts with the styles of this catalog of the style manager"));
+    subs->addRow(tr("Style catalog of new files"), newCatalog);
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(bb, &QDialogButtonBox::accepted, this,
-            [this, boxes, spins, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language] {
+            [this, boxes, spins, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, newCatalog] {
         QSettings st;
+        st.setValue("styles/newFileCatalog", newCatalog->currentData());
         st.setValue("main/language", language->currentData());
         st.setValue("spell/dir", QDir::fromNativeSeparators(dictDir->text()));
         st.setValue("spell/lang", dictLang->currentText());

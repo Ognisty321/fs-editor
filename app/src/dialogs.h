@@ -188,6 +188,9 @@ public:
 
 // Autosave folder; files are "<name>.<yyyy-MM-dd-HH-mm-ss>.AUTOSAVE.ass" (Aegisub naming).
 QString autosaveDir();
+// Style catalogs (Aegisub's .sty files): their names, and the styles of one (none when it is missing)
+QStringList styleCatalogs();
+std::vector<fsb::StyleData> catalogStyles(const QString &name);
 
 // Aegisub's "Open autosave file": files on the left, their versions (newest first) on the right.
 class AutosaveDialog : public QDialog {

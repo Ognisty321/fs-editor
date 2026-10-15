@@ -171,6 +171,19 @@ fn rename_reset_tags(text: &str, old: &str, new: &str) -> Option<String> {
     changed.then_some(out)
 }
 
+/// Styles of the same name take the new values, the others join the script.
+fn put_styles(d: &mut Document, styles: &[StyleData]) {
+    for st in styles {
+        if let Some(s) = d.style_index(&st.name).and_then(|i| d.style_mut(i)) {
+            apply_style_data(s, st);
+        } else {
+            let mut s = Style::default();
+            apply_style_data(&mut s, st);
+            d.add_style(s);
+        }
+    }
+}
+
 fn apply_style_data(s: &mut Style, d: &StyleData) {
     let color = |v: &str, old: Color| Color::parse_style(v).unwrap_or(old);
     s.name = d.name.clone();
@@ -2217,17 +2230,15 @@ impl Session {
     }
 
     pub fn add_styles(&mut self, styles: &[StyleData]) {
-        self.edit("Add styles", |d| {
-            for st in styles {
-                if let Some(s) = d.style_index(&st.name).and_then(|i| d.style_mut(i)) {
-                    apply_style_data(s, st);
-                } else {
-                    let mut s = Style::default();
-                    apply_style_data(&mut s, st);
-                    d.add_style(s);
-                }
-            }
-        });
+        self.edit("Add styles", |d| put_styles(d, styles));
+    }
+
+    /// Aegisub's default style catalog of new files: a new script starts with its styles
+    /// (replacing ones of the same name) and still counts as unchanged.
+    pub fn start_with_styles(&mut self, styles: &[StyleData]) {
+        put_styles(&mut self.ed.doc, styles);
+        self.snapshot_loaded();
+        self.refresh();
     }
 
     /// The script libass renders: in TL mode with "hide original" only the
@@ -3265,6 +3276,29 @@ mod tests {
         assert!(s.undo());
         let texts: Vec<String> = (0..s.row_count()).map(|i| s.row(i).text).collect();
         assert_eq!(texts, ["one", "two", "three"]);
+    }
+
+    #[test]
+    fn new_script_starts_with_catalog_styles() {
+        let mut s = Session::default();
+        let cat = parse_style_lines(
+            "Style: Default,Verdana,50,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\
+             Style: Signs,Arial,40,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,8,10,10,10,1",
+        );
+        s.start_with_styles(&cat);
+        let names: Vec<_> = s
+            .styles()
+            .into_iter()
+            .map(|st| (st.name, st.font))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("Default".to_string(), "Verdana".to_string()),
+                ("Signs".to_string(), "Arial".to_string())
+            ]
+        );
+        assert!(!s.file_info().modified && !s.can_undo());
     }
 
     #[test]

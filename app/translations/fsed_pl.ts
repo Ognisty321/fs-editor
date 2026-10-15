@@ -2907,6 +2907,14 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <source>Language (after restart)</source>
         <translation>Język (po ponownym uruchomieniu)</translation>
     </message>
+    <message>
+        <source>A new file starts with the styles of this catalog of the style manager</source>
+        <translation>Nowy plik dostaje style tego katalogu z menedżera stylów</translation>
+    </message>
+    <message>
+        <source>Style catalog of new files</source>
+        <translation>Katalog stylów nowych plików</translation>
+    </message>
 </context>
 <context>
     <name>ShiftPanel</name>

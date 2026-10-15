@@ -401,6 +401,10 @@ TabPanel *MainWindow::newTab() {
     slot->setLayout(new QVBoxLayout);
     slot->layout()->setContentsMargins(0, 0, 0, 0);
     auto *tab = new TabPanel(this);
+    // shortcut: only new files take a catalog; Aegisub has one for each imported format too, add
+    // them if SRT/TXT conversions should start styled
+    if (const auto cat = catalogStyles(QSettings().value("styles/newFileCatalog", "Default").toString()); !cat.empty())
+        tab->s().start_with_styles({cat.data(), cat.size()});
     slot->layout()->addWidget(tab);
     slot->setProperty("panel", QVariant::fromValue<QObject *>(tab));
     const int i = m_tabs->addTab(slot, tab->title());
