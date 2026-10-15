@@ -1096,8 +1096,10 @@ impl Session {
 
     /// Sort by 0 start, 1 end, 2 style, 3 actor, 4 effect, 5 layer, 6 text.
     pub fn sort_rows(&mut self, key: u8, selected_only: bool, rows: &[usize]) {
-        let doc = &self.ed.doc;
-        let main = |g: &Vec<Arc<EventEntry>>| g.last().unwrap().event.clone();
+        // compared in place: a copy of both events per comparison was most of a sort's time
+        fn main(g: &[Arc<EventEntry>]) -> &Event {
+            &g.last().unwrap().event
+        }
         let cmp = |a: &Event, b: &Event| match key {
             1 => a.end.cmp(&b.end),
             2 => a.style.cmp(&b.style),
@@ -1107,19 +1109,18 @@ impl Session {
             6 => a.text.cmp(&b.text),
             _ => a.start.cmp(&b.start),
         };
-        let _ = doc;
         let mut groups = self.groups();
         if selected_only {
             let mut sel: Vec<usize> = rows.iter().copied().filter(|&r| r < groups.len()).collect();
             sel.sort_unstable();
             sel.dedup();
             let mut items: Vec<_> = sel.iter().map(|&r| groups[r].clone()).collect();
-            items.sort_by(|a, b| cmp(&main(a), &main(b)));
+            items.sort_by(|a, b| cmp(main(a), main(b)));
             for (r, g) in sel.into_iter().zip(items) {
                 groups[r] = g;
             }
         } else {
-            groups.sort_by(|a, b| cmp(&main(a), &main(b)));
+            groups.sort_by(|a, b| cmp(main(a), main(b)));
         }
         self.set_groups("Sort lines", groups);
     }
