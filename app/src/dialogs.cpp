@@ -177,7 +177,7 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
         }
         m_main->status(tr("Replaced %1 lines").arg(n));
     });
-    connect(m_tabs, &QTabWidget::currentChanged, this, [=](int i) {
+    connect(m_tabs, &QTabWidget::currentChanged, this, [=, this](int i) {
         for (QWidget *w : std::initializer_list<QWidget *>{replLabel, m_replace, replNext, replAll, replOpen})
             w->setVisible(i == 1);
         adjustSize();
