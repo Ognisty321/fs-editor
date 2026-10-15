@@ -260,11 +260,13 @@ MainWindow::MainWindow() {
     buildMenus();
     buildToolbar();
 
-    // Autosave (Aegisub): modified tabs are copied to autosaveDir() every N seconds; the oldest
-    // copies beyond 100 are removed at startup, and so are those of the files as opened.
+    // Autosave (Aegisub): modified tabs are copied to autosaveDir() every N seconds; at startup the
+    // newest 1000 copies within 100 MB stay (Aegisub's CleanCache), and so do those of the files as opened.
     for (const char *kind : {"*.AUTOSAVE.ass", "*.ORIGINAL.*"}) {
-        auto old = QDir(autosaveDir()).entryInfoList({kind}, QDir::Files, QDir::Time);
-        for (qsizetype i = 100; i < old.size(); ++i) QFile::remove(old[i].absoluteFilePath());
+        qint64 bytes = 0;
+        const auto old = QDir(autosaveDir()).entryInfoList({kind}, QDir::Files, QDir::Time);
+        for (qsizetype i = 0; i < old.size(); ++i)
+            if ((bytes += old[i].size()) > (100 << 20) || i >= 1000) QFile::remove(old[i].absoluteFilePath());
     }
     // a Windows logoff or shutdown may end the app without closeEvent: the work goes to autosaves
     connect(qApp, &QGuiApplication::commitDataRequest, this, [this] { autosaveTabs(); });
