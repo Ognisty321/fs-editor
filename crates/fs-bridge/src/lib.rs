@@ -453,8 +453,10 @@ pub mod ffi {
         fn autosave(self: &Session, path: &str) -> Result<()>;
         fn convert(self: &mut Session, format: &str) -> Result<()>;
         fn file_info(self: &Session) -> FileInfo;
-        fn set_info_value(self: &mut Session, key: &str, value: &str);
+        /// Edits with the same non-empty `amend` make one undo step.
+        fn set_info_value(self: &mut Session, key: &str, value: &str, amend: &str);
         fn set_project_value(self: &mut Session, key: &str, value: &str);
+        fn set_info_quietly(self: &mut Session, key: &str, value: &str);
         fn project_value(self: &Session, key: &str) -> String;
         fn info_value(self: &Session, key: &str) -> String;
         fn generation(self: &Session) -> u64;

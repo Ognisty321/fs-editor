@@ -7,8 +7,14 @@
 #include "shiftpanel.h"
 #include "videobox.h"
 
+#include <QButtonGroup>
+#include <QCheckBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFileInfo>
+#include <QLabel>
+#include <QRadioButton>
 #include <QSettings>
 #include <QScrollBar>
 #include <QSplitter>
@@ -61,6 +67,7 @@ TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fs
         updateVideoContext();
         if (m_keyframesPath.isEmpty()) setKeyframes(m_video->keyframes());
         if (!m_timecodesPath.isEmpty()) openTimecodes(m_timecodesPath);
+        if (m_video->hasVideo()) matchResolution();
         if (!m_video->path().isEmpty()) {
             s().set_project_value("Video File", fs::Utf8(m_video->path()));
             if (QSettings().value("video/openAudio", true).toBool() && !m_audio->hasAudio())
@@ -273,6 +280,81 @@ void TabPanel::openVideo(const QString &path, qint64 frame, double ar) {
     }
     m_video->open(path, frame, ar);
     m_main->addRecent("video", path);
+}
+
+// Aegisub's update_play_res: a script without a resolution takes the video's; another one may be
+// resampled to it (asked by default, as Kainote does)
+void TabPanel::matchResolution() {
+    auto &ss = s();
+    const auto fi = ss.file_info();
+    if (const QString f = fs::q(fi.format); f != "ASS" && f != "SSA") return;
+    const auto info = m_video->info();
+    const double par = info.sar_num > 0 && info.sar_den > 0 ? double(info.sar_num) / info.sar_den : 1.0;
+    const int vx = qRound(info.width * std::max(1.0, par)), vy = qRound(info.height * std::max(1.0, 1 / par));
+    if (vx <= 0 || vy <= 0 || (fi.play_res_x == vx && fi.play_res_y == vy)) return;
+    const bool unset = fs::q(ss.info_value("PlayResX")).toInt() <= 0 && fs::q(ss.info_value("PlayResY")).toInt() <= 0;
+    // the starting document, nothing written yet
+    const bool fresh = fi.path.empty() && ss.row_count() <= 1 && (ss.row_count() == 0 || ss.row(0).text.empty());
+    if (fresh) { // watching a video in a new tab does not ask to save it
+        ss.set_info_quietly("PlayResX", fs::Utf8(QString::number(vx)));
+        ss.set_info_quietly("PlayResY", fs::Utf8(QString::number(vy)));
+        changed();
+        return;
+    }
+    if (unset) {
+        static int edits = 0;
+        const QString amend = QString("video-resolution-%1").arg(++edits); // one undo step
+        ss.set_info_value("PlayResX", fs::Utf8(QString::number(vx)), fs::Utf8(amend));
+        ss.set_info_value("PlayResY", fs::Utf8(QString::number(vy)), fs::Utf8(amend));
+        changed();
+        return;
+    }
+    const int sx = fi.play_res_x, sy = fi.play_res_y;
+    // a dummy video only fills in a missing resolution; exact multiples are kept for subpixel precision
+    if (m_video->path().isEmpty() || (sx % vx == 0 && sy % vy == 0)) return;
+    QSettings st;
+    if (!st.value("video/askResolution", true).toBool()) return;
+    const bool arChanged = std::abs(double(sx) / sy - double(vx) / vy) / (double(vx) / vy) > .01;
+    QDialog d(this);
+    d.setWindowTitle(tr("Resolution mismatch"));
+    auto *v = new QVBoxLayout(&d);
+    v->addWidget(new QLabel(tr("The resolution of the loaded video and the resolution specified for the subtitles "
+                               "don't match.\n\nVideo resolution: %1 × %2\nScript resolution: %3 × %4\n\n"
+                               "Change subtitles resolution to match video?")
+                                .arg(vx).arg(vy).arg(sx).arg(sy), &d));
+    QStringList choices{tr("Leave resolution as it is")};
+    if (arChanged)
+        choices << tr("Resample script (stretch to new aspect ratio)") << tr("Resample script (add borders)")
+                << tr("Resample script (remove borders)");
+    else
+        choices << tr("Resample script");
+    auto *group = new QButtonGroup(&d);
+    for (int i = 0; i < choices.size(); ++i) {
+        auto *r = new QRadioButton(choices[i], &d);
+        group->addButton(r, i);
+        v->addWidget(r);
+    }
+    group->button(std::clamp(st.value("video/resolutionChoice", 0).toInt(), 0, int(choices.size()) - 1))->setChecked(true);
+    auto *dontAsk = new QCheckBox(tr("Don't ask again (can be turned back on in the settings)"), &d);
+    v->addWidget(dontAsk);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+    connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    v->addWidget(bb);
+    const bool ok = d.exec() == QDialog::Accepted;
+    if (dontAsk->isChecked()) st.setValue("video/askResolution", false);
+    if (!ok) return;
+    const int choice = group->checkedId();
+    st.setValue("video/resolutionChoice", choice);
+    if (choice <= 0) return;
+    fsb::ResampleSpec r{};
+    r.from_x = sx;
+    r.from_y = sy;
+    r.to_x = vx;
+    r.to_y = vy;
+    r.ar_mode = uint8_t(choice - 1); // stretch, add borders, remove borders
+    ss.resample(r);
+    changed();
 }
 
 void TabPanel::openDummyVideo(int w, int h, double fps, qint64 ms) { m_video->openDummy(w, h, fps, ms); }

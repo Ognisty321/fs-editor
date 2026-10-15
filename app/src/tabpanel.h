@@ -104,6 +104,7 @@ protected:
 
 private:
     void applyLayout();
+    void matchResolution();
 
     MainWindow *m_main;
     rust::Box<fsb::Session> m_session;

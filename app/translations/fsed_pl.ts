@@ -2480,6 +2480,10 @@ Filtry eksportu: %8</translation>
         <translation>Ignoruj interpunkcję w znakach na sekundę</translation>
     </message>
     <message>
+        <source>Ask to resample the subtitles to a video of another resolution</source>
+        <translation>Pytaj o przeskalowanie napisów do wideo o innej rozdzielczości</translation>
+    </message>
+    <message>
         <source>None</source>
         <translation>Brak</translation>
     </message>
@@ -3193,6 +3197,48 @@ do czasu audio</translation>
     <message>
         <source>Untitled</source>
         <translation>Bez nazwy</translation>
+    </message>
+    <message>
+        <source>Resolution mismatch</source>
+        <translation>Niezgodna rozdzielczość</translation>
+    </message>
+    <message>
+        <source>The resolution of the loaded video and the resolution specified for the subtitles don&apos;t match.
+
+Video resolution: %1 × %2
+Script resolution: %3 × %4
+
+Change subtitles resolution to match video?</source>
+        <translation>Rozdzielczości wczytanego wideo i napisów się różnią.
+
+Rozdzielczość wideo: %1 × %2
+Rozdzielczość napisów: %3 × %4
+
+Dopasować rozdzielczość napisów do wideo?</translation>
+    </message>
+    <message>
+        <source>Leave resolution as it is</source>
+        <translation>Zostaw rozdzielczość bez zmian</translation>
+    </message>
+    <message>
+        <source>Resample script (stretch to new aspect ratio)</source>
+        <translation>Przeskaluj napisy (rozciągnij do nowych proporcji)</translation>
+    </message>
+    <message>
+        <source>Resample script (add borders)</source>
+        <translation>Przeskaluj napisy (dodaj pasy)</translation>
+    </message>
+    <message>
+        <source>Resample script (remove borders)</source>
+        <translation>Przeskaluj napisy (usuń pasy)</translation>
+    </message>
+    <message>
+        <source>Resample script</source>
+        <translation>Przeskaluj napisy</translation>
+    </message>
+    <message>
+        <source>Don&apos;t ask again (can be turned back on in the settings)</source>
+        <translation>Nie pytaj więcej (można to włączyć w ustawieniach)</translation>
     </message>
 </context>
 <context>

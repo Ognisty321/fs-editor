@@ -1084,7 +1084,7 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     connect(m_catalog, &QComboBox::currentTextChanged, this, [this] {
         loadCatalog();
         reload();
-        m_main->current()->s().set_info_value("Last Style Storage", fs::Utf8(m_catalog->currentText()));
+        m_main->current()->s().set_info_value("Last Style Storage", fs::Utf8(m_catalog->currentText()), "");
     });
     const QString last = fs::q(m_main->current()->s().info_value("Last Style Storage"));
     if (!last.isEmpty() && cats.contains(last)) m_catalog->setCurrentText(last);
@@ -1262,8 +1262,10 @@ PropertiesDialog::PropertiesDialog(TabPanel *tab) : QDialog(tab), m_tab(tab) {
 
 void PropertiesDialog::accept() {
     auto &s = m_tab->s();
+    static int edits = 0;
+    const QString amend = QString("properties-%1").arg(++edits); // one undo step
     auto set = [&](const QString &k, const QString &v) {
-        if (fs::q(s.info_value(fs::Utf8(k))) != v) s.set_info_value(fs::Utf8(k), fs::Utf8(v));
+        if (fs::q(s.info_value(fs::Utf8(k))) != v) s.set_info_value(fs::Utf8(k), fs::Utf8(v), fs::Utf8(amend));
     };
     for (auto &[k, e] : m_fields) set(k, e->text());
     const auto fi = s.file_info();
@@ -1533,6 +1535,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"subs/cpsIgnorePunctuation", QT_TR_NOOP("Ignore punctuation in characters per second"), true, subs},
         {"video/openAudio", QT_TR_NOOP("Open audio together with video"), true, video},
         {"video/openWithSubs", QT_TR_NOOP("Open video and audio named in the subtitles"), true, video},
+        {"video/askResolution", QT_TR_NOOP("Ask to resample the subtitles to a video of another resolution"), true,
+         video},
         {"audio/snapKeyframes", QT_TR_NOOP("Snap audio boundaries to keyframes"), false, audio},
         {"audio/snapLines", QT_TR_NOOP("Snap audio boundaries to other lines"), false, audio},
         {"audio/inactiveComments", QT_TR_NOOP("Show inactive comments in the audio"), false, audio},

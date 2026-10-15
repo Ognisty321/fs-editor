@@ -444,12 +444,19 @@ impl Session {
         }
     }
 
-    pub fn set_info_value(&mut self, key: &str, value: &str) {
+    /// For the untouched starting document: like a project value, neither an undo step nor a
+    /// reason to ask "save changes?".
+    pub fn set_info_quietly(&mut self, key: &str, value: &str) {
+        self.ed.doc.set_info(key, value);
+        self.refresh();
+    }
+
+    pub fn set_info_value(&mut self, key: &str, value: &str, amend: &str) {
         if self.info_value(key) == value {
             return;
         }
         let (k, v) = (key.to_string(), value.to_string());
-        self.edit(&format!("Set {key}"), move |d| {
+        self.edit_amend(amend, &format!("Set {key}"), move |d| {
             if v.is_empty() {
                 d.remove_info(&k);
             } else {
@@ -2252,6 +2259,19 @@ mod tests {
     }
 
     #[test]
+    fn script_info_edits() {
+        let mut s = session(ASS);
+        s.set_info_value("PlayResX", "1280", "res");
+        s.set_info_value("PlayResY", "720", "res");
+        s.undo(); // one step for both
+        assert_eq!(s.ed.doc.play_res(), (1920, 1080));
+        assert!(!s.ed.is_modified());
+        s.set_info_quietly("PlayResX", "640");
+        assert_eq!(s.info_value("PlayResX"), "640");
+        assert!(!s.ed.is_modified());
+    }
+
+    #[test]
     fn shifted_drawings_follow_the_screen_step() {
         let mut s = session(ASS);
         let text = r"{\pos(0,0)\fscx200\frz90\p1}m 0 0 l 10 0 10 10";
@@ -2540,7 +2560,7 @@ mod tests {
         assert!(!s.file_info().modified && !s.can_undo());
         s.set_project_value("Video File", "");
         assert_eq!(s.info_value("Video File"), "");
-        s.set_info_value("Title", "x");
+        s.set_info_value("Title", "x", "");
         assert!(s.file_info().modified && s.can_undo());
     }
 
