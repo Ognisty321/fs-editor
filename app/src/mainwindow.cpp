@@ -603,6 +603,7 @@ void MainWindow::buildMenus() {
         for (auto *t : tabs()) { // the limits colour the grid and the edit box
             t->grid()->viewport()->update();
             t->edit()->reload();
+            t->audio()->docChanged(); // inactive lines
         }
     });
     add("hotkeys", tr("Hotkeys..."), {}, file, [this] { editHotkeys(); });

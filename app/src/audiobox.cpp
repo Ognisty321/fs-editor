@@ -160,15 +160,12 @@ void AudioView::paintOverlay(QPainter &p) {
         if (t < l || t > r) continue;
         p.drawLine(b.xOf(t), RulerH, b.xOf(t), h);
     }
-    // previous and next lines' boundaries
-    auto &s = b.m_tab->s();
-    const int act = b.m_tab->active();
+    // inactive lines: shaded, with dotted boundaries
     p.setPen(QPen(kInactive, 1, Qt::DotLine));
-    for (int d : {-1, 1}) {
-        const int row = act + d;
-        if (row < 0 || size_t(row) >= s.row_count()) continue;
-        const auto rr = s.row(size_t(row));
-        for (qint64 t : {rr.start, rr.end})
+    for (const auto &[start, end] : b.inactiveLines()) {
+        if (end < l || start > r) continue;
+        p.fillRect(QRect(QPoint(b.xOf(start), RulerH), QPoint(b.xOf(end), h)), QColor(0x80, 0x80, 0x90, 48));
+        for (qint64 t : {start, end})
             if (t >= l && t <= r) p.drawLine(b.xOf(t), RulerH, b.xOf(t), h);
     }
     // karaoke
@@ -611,17 +608,41 @@ qint64 AudioBox::snap(qint64 ms, bool toggle) const {
     };
     if (kf && m_tab->video()->hasVideo())
         for (qint64 f : m_tab->keyframes()) consider(m_tab->video()->timeAt(f));
-    if (lines) {
-        auto &s = m_tab->s();
-        for (int d : {-1, 1}) {
-            const int row = m_tab->active() + d;
-            if (row < 0 || size_t(row) >= s.row_count()) continue;
-            const auto r = s.row(size_t(row));
-            consider(r.start);
-            consider(r.end);
+    if (lines)
+        for (const auto &[start, end] : inactiveLines()) {
+            consider(start);
+            consider(end);
         }
-    }
     return bestD <= range ? best : ms;
+}
+
+// Aegisub's inactive lines: none (0), the previous (1), the previous and next (2) or all the other
+// lines (3), comments only when asked. Cached: the overlay repaints with every play cursor step.
+const std::vector<std::pair<qint64, qint64>> &AudioBox::inactiveLines() const {
+    QSettings st;
+    const int mode = std::clamp(st.value("audio/inactiveLines", 3).toInt(), 0, 3);
+    const bool comments = st.value("audio/inactiveComments", false).toBool();
+    auto &s = m_tab->s();
+    const int act = m_tab->active();
+    const std::tuple key{s.generation(), act, mode | (comments ? 4 : 0)};
+    if (key == m_inactiveKey) return m_inactive;
+    m_inactiveKey = key;
+    m_inactive.clear();
+    const auto spans = s.row_spans();
+    const int n = int(spans.size());
+    const auto shown = [&](int i) { return i != act && (comments || !spans[size_t(i)].comment); };
+    const auto add = [&](int i) { m_inactive.emplace_back(spans[size_t(i)].start, spans[size_t(i)].end); };
+    if (mode == 3)
+        for (int i = 0; i < n; ++i)
+            if (shown(i)) add(i);
+    if ((mode == 1 || mode == 2) && act >= 0 && act < n) {
+        int prev = act - 1, next = act + 1;
+        while (prev >= 0 && !shown(prev)) --prev;
+        while (next < n && !shown(next)) ++next;
+        if (prev >= 0) add(prev);
+        if (mode == 2 && next < n) add(next);
+    }
+    return m_inactive;
 }
 
 void AudioBox::setLeft(qint64 ms) {

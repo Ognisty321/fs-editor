@@ -2316,12 +2316,36 @@ Filtry eksportu: %8</translation>
         <translation>Przyciągaj granice audio do innych linijek</translation>
     </message>
     <message>
+        <source>Show inactive comments in the audio</source>
+        <translation>Pokazuj nieaktywne komentarze w audio</translation>
+    </message>
+    <message>
         <source>Mouse wheel zooms the audio (Shift scrolls)</source>
         <translation>Kółko myszy powiększa audio (Shift przewija)</translation>
     </message>
     <message>
         <source>Load the last session at startup</source>
         <translation>Wczytuj ostatnią sesję przy starcie</translation>
+    </message>
+    <message>
+        <source>None</source>
+        <translation>Brak</translation>
+    </message>
+    <message>
+        <source>Previous line</source>
+        <translation>Poprzednia linijka</translation>
+    </message>
+    <message>
+        <source>Previous and next line</source>
+        <translation>Poprzednia i następna linijka</translation>
+    </message>
+    <message>
+        <source>All lines</source>
+        <translation>Wszystkie linijki</translation>
+    </message>
+    <message>
+        <source>Inactive lines in the audio</source>
+        <translation>Nieaktywne linijki w audio</translation>
     </message>
     <message>
         <source>Audio lead-in</source>

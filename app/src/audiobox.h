@@ -91,6 +91,7 @@ private:
     int xOf(qint64 ms) const { return int((ms - m_left) / m_msPerPx); }
     qint64 msAt(int x) const { return m_left + qint64(x * m_msPerPx); }
     qint64 snap(qint64 ms, bool toggle) const;
+    const std::vector<std::pair<qint64, qint64>> &inactiveLines() const;
     void setLeft(qint64 ms);
     void zoom(double factor, int aroundX);
     void ensureVisible(qint64 a, qint64 b);
@@ -123,6 +124,8 @@ private:
     int m_dragId = 0;
     std::vector<fsb::Syllable> m_syl;
     int m_activeSyl = 0;
+    mutable std::vector<std::pair<qint64, qint64>> m_inactive;
+    mutable std::tuple<quint64, int, int> m_inactiveKey{~quint64(0), -1, -1};
 
     AudioView *m_view;
     QScrollBar *m_scroll;

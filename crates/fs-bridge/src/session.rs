@@ -19,8 +19,8 @@ use fs_core::{Color, Document, Event, EventEntry, EventId, Time};
 use fs_formats::{Format, LoadOptions, SaveOptions};
 
 use crate::ffi::{
-    ColumnInfo, FileInfo, FilterSpec, FindSpec, PostSpec, Row, ShiftSpec, StyleData, Syllable,
-    Visual,
+    ColumnInfo, FileInfo, FilterSpec, FindSpec, PostSpec, Row, RowSpan, ShiftSpec, StyleData,
+    Syllable, Visual,
 };
 
 pub struct Session {
@@ -545,6 +545,21 @@ impl Session {
         ci.styles = styles.into_iter().map(String::from).collect();
         (ci.actors, ci.effects) = (owned(actors), owned(effects));
         ci
+    }
+
+    pub fn row_spans(&self) -> Vec<RowSpan> {
+        let events = self.ed.doc.events();
+        self.rows
+            .iter()
+            .map(|r| {
+                let ev = &events[r.main()].event;
+                RowSpan {
+                    start: ev.start.ms(),
+                    end: ev.end.ms(),
+                    comment: ev.is_comment(),
+                }
+            })
+            .collect()
     }
 
     pub fn row(&self, i: usize) -> Row {

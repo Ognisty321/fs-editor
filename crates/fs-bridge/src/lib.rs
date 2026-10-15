@@ -206,6 +206,14 @@ pub mod ffi {
         fry: f64,
     }
 
+    /// A row's times without its text: cheap to fetch for every row.
+    #[derive(Debug, Clone, Default)]
+    struct RowSpan {
+        start: i64,
+        end: i64,
+        comment: bool,
+    }
+
     #[derive(Debug, Clone, Default)]
     struct Syllable {
         start: i64,
@@ -393,6 +401,7 @@ pub mod ffi {
         fn generation(self: &Session) -> u64;
 
         fn row_count(self: &Session) -> usize;
+        fn row_spans(self: &Session) -> Vec<RowSpan>;
         fn column_info(self: &mut Session) -> ColumnInfo;
         /// Kainote "compare by times": rows timed like a line of `other` whose text differs.
         fn compare_rows(self: &Session, other: &Session) -> Vec<usize>;

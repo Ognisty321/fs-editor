@@ -1208,6 +1208,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"video/openWithSubs", QT_TR_NOOP("Open video and audio named in the subtitles"), true},
         {"audio/snapKeyframes", QT_TR_NOOP("Snap audio boundaries to keyframes"), false},
         {"audio/snapLines", QT_TR_NOOP("Snap audio boundaries to other lines"), false},
+        {"audio/inactiveComments", QT_TR_NOOP("Show inactive comments in the audio"), false},
         {"audio/wheelZooms", QT_TR_NOOP("Mouse wheel zooms the audio (Shift scrolls)"), false},
         {"main/askSession", QT_TR_NOOP("Load the last session at startup"), true},
     };
@@ -1218,6 +1219,10 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         f->addRow(b);
         boxes.emplace_back(c.key, b);
     }
+    auto *inactive = new QComboBox(this);
+    inactive->addItems({tr("None"), tr("Previous line"), tr("Previous and next line"), tr("All lines")});
+    inactive->setCurrentIndex(std::clamp(st.value("audio/inactiveLines", 3).toInt(), 0, 3));
+    f->addRow(tr("Inactive lines in the audio"), inactive);
     auto *leadIn = new QSpinBox(this), *leadOut = new QSpinBox(this);
     for (auto *s : {leadIn, leadOut}) {
         s->setRange(0, 5000);
@@ -1277,13 +1282,14 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     f->addRow(tr("Language (after restart)"), language);
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(bb, &QDialogButtonBox::accepted, this,
-            [this, boxes, spins, leadIn, leadOut, autosave, dictDir, dictLang, language] {
+            [this, boxes, spins, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language] {
         QSettings st;
         st.setValue("main/language", language->currentData());
         st.setValue("spell/dir", QDir::fromNativeSeparators(dictDir->text()));
         st.setValue("spell/lang", dictLang->currentText());
         spell::reload();
         for (auto &[k, b] : boxes) st.setValue(k, b->isChecked());
+        st.setValue("audio/inactiveLines", inactive->currentIndex());
         st.setValue("audio/leadIn", leadIn->value());
         st.setValue("audio/leadOut", leadOut->value());
         st.setValue("main/autosaveSeconds", autosave->value());
