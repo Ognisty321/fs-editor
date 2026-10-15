@@ -2513,6 +2513,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Nie zawiera</translation>
     </message>
     <message>
+        <source>Choose styles</source>
+        <translation>Wybierz style</translation>
+    </message>
+    <message>
         <source>Text</source>
         <translation>Tekst</translation>
     </message>
@@ -2527,6 +2531,14 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Effect</source>
         <translation>Efekt</translation>
+    </message>
+    <message>
+        <source>Start time</source>
+        <translation>Czas początkowy</translation>
+    </message>
+    <message>
+        <source>End time</source>
+        <translation>Czas końcowy</translation>
     </message>
     <message>
         <source>Field</source>
@@ -2599,6 +2611,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Action</source>
         <translation>Akcja</translation>
+    </message>
+    <message>
+        <source>Select on all tabs</source>
+        <translation>Zaznacz na wszystkich zakładkach</translation>
     </message>
     <message>
         <source>Selected %1 lines</source>

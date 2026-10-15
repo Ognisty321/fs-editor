@@ -78,9 +78,11 @@ class SelectLinesDialog : public QDialog {
 public:
     explicit SelectLinesDialog(MainWindow *main);
 private:
-    void apply();
+    void apply(const QList<TabPanel *> &tabs);
+    size_t applyTo(TabPanel *tab); // the lines selected
+    void chooseStyles();           // Kainote's "+": the styles picked, as a regex for the Styles field
     MainWindow *m_main;
-    QLineEdit *m_find;
+    QComboBox *m_find;
     QRadioButton *m_with, *m_without;
     QCheckBox *m_case, *m_regex, *m_exact, *m_dialogue, *m_comments;
     QButtonGroup *m_mode; // 0 set, 1 add, 2 subtract, 3 intersect (Aegisub)
