@@ -2302,6 +2302,15 @@ fn fix_overlaps(d: &mut Document, evs: &[usize]) {
 /// What [`collect_fonts`] looks for: the script's faces and the characters drawn with each.
 pub struct FontUses(BTreeMap<fs_core::fonts::FontUse, BTreeSet<char>>);
 
+impl FontUses {
+    /// Another script's faces too (Kainote collects all open tabs at once).
+    pub fn add(&mut self, other: &FontUses) {
+        for (face, chars) in &other.0 {
+            self.0.entry(face.clone()).or_default().extend(chars);
+        }
+    }
+}
+
 /// The system's fonts, scanned once: a scan takes seconds and they rarely change while editing.
 fn system_fonts() -> fontdb::Database {
     static DB: OnceLock<fontdb::Database> = OnceLock::new();

@@ -586,6 +586,10 @@
         <translation>Czcionki dołączone do wideo</translation>
     </message>
     <message>
+        <source>All open tabs</source>
+        <translation>Wszystkie otwarte zakładki</translation>
+    </message>
+    <message>
         <source>Copy fonts to</source>
         <translation>Kopiuj czcionki do</translation>
     </message>

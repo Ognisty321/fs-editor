@@ -427,6 +427,8 @@ pub mod ffi {
 
         type Session;
         type FontUses;
+        /// Another script's faces too (all open tabs).
+        fn add(self: &mut FontUses, other: &FontUses);
         /// Font collector report (one line per face). Fonts attached to `media` are searched
         /// too; a non-empty `dest` receives a copy of every found file. Safe off the GUI thread.
         fn collect_fonts(

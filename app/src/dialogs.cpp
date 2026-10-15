@@ -1533,6 +1533,9 @@ FontCollectorDialog::FontCollectorDialog(TabPanel *tab) : QDialog(tab) {
     attached->setEnabled(!media.isEmpty());
     attached->setChecked(!media.isEmpty());
     f->addRow(QString(), attached);
+    auto *allTabs = new QCheckBox(tr("All open tabs"), this); // Kainote
+    allTabs->setChecked(st.value("fonts/allTabs").toBool());
+    f->addRow(QString(), allTabs);
     auto *dest = new QLineEdit(st.value("fonts/destDir").toString(), this);
     f->addRow(tr("Copy fonts to"), folderRow(dest));
     auto *report = new QPlainTextEdit(this);
@@ -1552,7 +1555,11 @@ FontCollectorDialog::FontCollectorDialog(TabPanel *tab) : QDialog(tab) {
         QSettings s;
         s.setValue("fonts/extraDir", extra->text());
         s.setValue("fonts/destDir", dest->text());
+        s.setValue("fonts/allTabs", allTabs->isChecked());
         auto uses = std::make_shared<rust::Box<fsb::FontUses>>(tab->s().font_uses());
+        if (allTabs->isChecked())
+            for (auto *t : tab->main()->tabs())
+                if (t != tab) (*uses)->add(*t->s().font_uses());
         // attaching and packing collect the files into a folder of their own first, like a copy
         auto tmp = mode >= Attach ? std::make_shared<QTemporaryDir>() : nullptr;
         if (tmp && !tmp->isValid()) return report->setPlainText(tmp->errorString());
