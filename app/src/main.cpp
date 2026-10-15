@@ -199,7 +199,7 @@ int main(int argc, char **argv) {
             for (const QString &text : texts.split(';')) {
                 QWidget *top = smokeDialog(w);
                 for (auto *b : (top ? top : &w)->findChildren<QAbstractButton *>())
-                    if (b->text() == text && b->isVisible()) {
+                    if ((b->text() == text || (b->text().isEmpty() && b->toolTip() == text)) && b->isVisible()) {
                         b->click();
                         break;
                     }

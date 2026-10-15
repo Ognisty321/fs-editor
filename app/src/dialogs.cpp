@@ -333,13 +333,14 @@ void SelectLinesDialog::apply() {
 
 // ---- style editor -------------------------------------------------------------
 
-namespace {
 QColor assColor(const QString &s) {
     QString h = s;
     h.remove("&H", Qt::CaseInsensitive).remove('&');
     const uint v = h.toUInt(nullptr, 16);
     return QColor(int(v & 0xff), int(v >> 8 & 0xff), int(v >> 16 & 0xff), 255 - int(v >> 24 & 0xff));
 }
+
+namespace {
 QString assColorString(const QColor &c) {
     return QString::asprintf("&H%02X%02X%02X%02X", 255 - c.alpha(), c.blue(), c.green(), c.red());
 }

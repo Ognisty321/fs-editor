@@ -18,6 +18,7 @@ class QRadioButton;
 class QToolButton;
 class QHBoxLayout;
 class QCompleter;
+class QRegularExpression;
 
 // Start/End/Duration field: h:mm:ss.cc in overwrite mode, or a frame number.
 // Hunspell spell checking shared by every text box (settings spell/enabled, spell/dir, spell/lang).
@@ -52,7 +53,9 @@ public:
     QString text() const { return toPlainText(); }
     void setText(const QString &t);
     void insertTag(const QString &tag);
-    void toggleTag(const QString &name);
+    void toggleTag(const QString &name, bool styleOn);
+    // Capture 1 of the last `re` among the tags in effect at `pos` (Aegisub's), empty if none
+    QString tagValue(const QRegularExpression &re, int pos) const;
 signals:
     void keyCommand(int key, Qt::KeyboardModifiers mods);
     void splitRequested(qint64 atMs); // -1 estimate, -2 keep both times, else at that time
@@ -62,6 +65,7 @@ protected:
     void keyPressEvent(QKeyEvent *) override;
     void contextMenuEvent(QContextMenuEvent *) override;
 private:
+    std::pair<int, int> blockAt(int pos) const;
     QCompleter *m_completer;
 };
 
@@ -86,6 +90,8 @@ private:
     void nextLine();
     void splitAtCursor(qint64 atMs);
     void setColorTag(int which);
+    void toggleTag(const QString &name);
+    fsb::StyleData lineStyle() const;
     void configureTagButton(int index);
     void wrapFields();
 

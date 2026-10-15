@@ -249,6 +249,41 @@ void SubsTextEdit::setText(const QString &t) {
     setTextCursor(c);
 }
 
+namespace {
+// Matches of `re` outside \t(...): Aegisub reads and edits a block's own tags, not animated ones.
+QList<QRegularExpressionMatch> topLevel(const QString &text, const QRegularExpression &re) {
+    QList<QRegularExpressionMatch> out;
+    int depth = 0, at = 0;
+    for (auto it = re.globalMatch(text); it.hasNext();) {
+        const auto m = it.next();
+        for (; at < m.capturedStart(); ++at)
+            depth = text[at] == '{' ? 0 : text[at] == '(' ? depth + 1 : text[at] == ')' ? depth - 1 : depth;
+        if (depth <= 0) out << m;
+    }
+    return out;
+}
+} // namespace
+
+// The override block Aegisub edits at `pos`: the one containing or touching it, else {-1, -1}.
+std::pair<int, int> SubsTextEdit::blockAt(int pos) const {
+    const QString t = toPlainText();
+    const int open = pos > 0 ? int(t.lastIndexOf('{', pos - 1)) : -1;
+    if (open > (pos > 0 ? int(t.lastIndexOf('}', pos - 1)) : -1)) {
+        const int close = int(t.indexOf('}', pos));
+        return close >= 0 ? std::pair{open, close} : std::pair{-1, -1};
+    }
+    if (pos > 0 && t[pos - 1] == '}' && open >= 0) return {open, pos - 1};
+    if (pos < t.size() && t[pos] == '{')
+        if (const int close = int(t.indexOf('}', pos)); close >= 0) return {pos, close};
+    return {-1, -1};
+}
+
+QString SubsTextEdit::tagValue(const QRegularExpression &re, int pos) const {
+    const auto [open, close] = blockAt(pos);
+    const auto ms = topLevel(toPlainText().left(open >= 0 ? close + 1 : pos), re);
+    return ms.isEmpty() ? QString() : ms.last().captured(1);
+}
+
 // Insert `\tag` into the override block at the cursor, or a new `{\tag}`;
 // an existing tag of the same name in that block is replaced.
 void SubsTextEdit::insertTag(const QString &tag) {
@@ -256,13 +291,16 @@ void SubsTextEdit::insertTag(const QString &tag) {
     const QString name = nameRe.match(tag).captured(1);
     QString t = toPlainText();
     int pos = textCursor().position();
-    const int open = int(t.lastIndexOf('{', pos - 1)), close = int(t.indexOf('}', pos));
-    const bool inside = open >= 0 && close >= 0 && t.lastIndexOf('}', pos - 1) < open;
-    if (inside) {
+    if (const auto [open, close] = blockAt(pos); open >= 0) {
         QString blk = t.mid(open + 1, close - open - 1);
-        const QRegularExpression same("\\\\" + QRegularExpression::escape(name) + "(?![a-zA-Z])[^\\\\]*");
-        if (blk.contains(same)) blk.replace(same, tag);
-        else blk += tag;
+        // \c is \1c; a font name runs into its tag name
+        const QString re = name == "1c" ? QString("1?c(?![a-zA-Z])")
+                           : name == "fn" ? QString("fn")
+                                          : QRegularExpression::escape(name) + "(?![a-zA-Z])";
+        const auto ms = topLevel(blk, QRegularExpression("\\\\" + re + "[^\\\\}]*"));
+        for (auto i = ms.size(); i-- > 0;)
+            blk.replace(ms[i].capturedStart(), ms[i].capturedLength(), i ? QString() : tag);
+        if (ms.isEmpty()) blk += tag;
         t.replace(open + 1, close - open - 1, blk);
         pos = open + 1 + int(blk.size()) + 1;
     } else {
@@ -275,19 +313,17 @@ void SubsTextEdit::insertTag(const QString &tag) {
     setTextCursor(c);
 }
 
-// \b, \i, \u, \s: wrap the selection, or flip the state at the cursor.
-void SubsTextEdit::toggleTag(const QString &name) {
+// \b, \i, \u, \s: flip the state in effect (the style's unless a tag sets it) at the cursor,
+// or around the selection.
+void SubsTextEdit::toggleTag(const QString &name, bool styleOn) {
     auto c = textCursor();
+    const QString v = tagValue(QRegularExpression("\\\\" + name + "(\\d+)(?![0-9a-zA-Z])"), c.selectionStart());
+    const bool on = v.isEmpty() ? styleOn : v != "0";
     if (c.hasSelection()) {
-        const QString sel = c.selectedText();
-        c.insertText("{\\" + name + "1}" + sel + "{\\" + name + "0}");
+        c.insertText(QString("{\\%1%2}%3{\\%1%4}").arg(name, on ? "0" : "1", c.selectedText(), on ? "1" : "0"));
         return;
     }
-    const QString before = toPlainText().left(c.position());
-    const QRegularExpression re("\\\\" + name + "([01])(?![0-9a-zA-Z])");
-    QString state = "0";
-    for (auto it = re.globalMatch(before); it.hasNext();) state = it.next().captured(1);
-    insertTag("\\" + name + (state == "1" ? "0" : "1"));
+    insertTag("\\" + name + (on ? "0" : "1"));
 }
 
 void SubsTextEdit::keyPressEvent(QKeyEvent *e) {
@@ -340,9 +376,33 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
         return b;
     };
     connect(tool("F", tr("Font selection")), &QToolButton::clicked, this, [this] {
+        // Aegisub: start from the font in effect at the cursor and set only what changed
+        const auto st = lineStyle();
+        const int pos = m_text->textCursor().position();
+        const auto value = [&](const QString &n) {
+            return m_text->tagValue(QRegularExpression("\\\\" + n + (n == "fn" ? "([^\\\\}]+)" : "([\\d.]+)")), pos);
+        };
+        QFont start(value("fn").isEmpty() ? fs::q(st.font) : value("fn"));
+        if (const double size = value("fs").isEmpty() ? st.size : value("fs").toDouble(); size > 0)
+            start.setPointSizeF(size);
+        const bool styleFlags[] = {st.bold, st.italic, st.underline, st.strikeout};
+        bool was[4];
+        for (int k = 0; k < 4; ++k) {
+            const QString v = value(QString(QLatin1Char("bius"[k])) + "(?=\\d)");
+            was[k] = v.isEmpty() ? styleFlags[k] : v.toDouble() != 0;
+        }
+        start.setBold(was[0]);
+        start.setItalic(was[1]);
+        start.setUnderline(was[2]);
+        start.setStrikeOut(was[3]);
         bool ok;
-        const QFont f = QFontDialog::getFont(&ok, QFont(fs::q(m_tab->s().row(size_t(m_row)).style)), this);
-        if (ok) m_text->insertTag("\\fn" + f.family() + "\\fs" + QString::number(f.pointSize()));
+        const QFont f = QFontDialog::getFont(&ok, start, this);
+        if (!ok) return;
+        if (f.family() != start.family()) m_text->insertTag("\\fn" + f.family());
+        if (f.pointSizeF() != start.pointSizeF()) m_text->insertTag("\\fs" + QString::number(f.pointSizeF()));
+        const bool now[] = {f.bold(), f.italic(), f.underline(), f.strikeOut()};
+        for (int k = 0; k < 4; ++k)
+            if (now[k] != was[k]) m_text->insertTag(QString("\\%1%2").arg(QLatin1Char("bius"[k])).arg(int(now[k])));
     });
     const char *toggles[][2] = {{"b", QT_TR_NOOP("Bold")}, {"i", QT_TR_NOOP("Italic")}, {"u", QT_TR_NOOP("Underline")},
                                 {"s", QT_TR_NOOP("Strikethrough")}};
@@ -354,7 +414,7 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
         f.setUnderline(t[0][0] == 'u');
         f.setStrikeOut(t[0][0] == 's');
         b->setFont(f);
-        connect(b, &QToolButton::clicked, this, [this, n = QString(t[0])] { m_text->toggleTag(n); });
+        connect(b, &QToolButton::clicked, this, [this, n = QString(t[0])] { toggleTag(n); });
     }
     const char *colors[] = {QT_TR_NOOP("Primary color"), QT_TR_NOOP("Secondary color for karaoke"),
                             QT_TR_NOOP("Border color"), QT_TR_NOOP("Shadow color")};
@@ -617,11 +677,37 @@ void EditBox::configureTagButton(int index) {
     rebuildTagButtons();
 }
 
+fsb::StyleData EditBox::lineStyle() const {
+    for (const auto &st : m_tab->s().styles())
+        if (fs::q(st.name) == m_style->currentText()) return st;
+    return {};
+}
+
+void EditBox::toggleTag(const QString &name) {
+    const auto st = lineStyle();
+    m_text->toggleTag(name,
+                      name == "b" ? st.bold : name == "i" ? st.italic : name == "u" ? st.underline : st.strikeout);
+}
+
 void EditBox::setColorTag(int which) {
-    const QColor c = QColorDialog::getColor(Qt::white, this, tr("Color"), QColorDialog::ShowAlphaChannel);
+    // Aegisub: the dialog starts from the colour in effect at the cursor, the style's unless a tag sets it
+    const auto st = lineStyle();
+    const rust::String *colors[] = {&st.primary, &st.secondary, &st.outline_color, &st.back};
+    QColor start = st.name.empty() ? QColor(Qt::white) : assColor(fs::q(*colors[which - 1]));
+    const int pos = m_text->textCursor().position();
+    const QString color =
+        which == 1 ? QString(R"(\\1?c&H([0-9A-Fa-f]+))") : QString(R"(\\%1c&H([0-9A-Fa-f]+))").arg(which);
+    if (const QString c = m_text->tagValue(QRegularExpression(color), pos); !c.isEmpty()) {
+        const QColor o = assColor(c);
+        start.setRgb(o.red(), o.green(), o.blue(), start.alpha());
+    }
+    const QRegularExpression alpha(QString(R"(\\(?:%1a|alpha)&H([0-9A-Fa-f]+))").arg(which));
+    if (const QString a = m_text->tagValue(alpha, pos); !a.isEmpty())
+        start.setAlpha(255 - int(a.toUInt(nullptr, 16) & 0xff));
+    const QColor c = QColorDialog::getColor(start, this, tr("Color"), QColorDialog::ShowAlphaChannel);
     if (!c.isValid()) return;
     m_text->insertTag(QString::asprintf("\\%dc&H%02X%02X%02X&", which, c.blue(), c.green(), c.red()));
-    if (c.alpha() != 255) m_text->insertTag(QString::asprintf("\\%da&H%02X&", which, 255 - c.alpha()));
+    if (c.alpha() != start.alpha()) m_text->insertTag(QString::asprintf("\\%da&H%02X&", which, 255 - c.alpha()));
 }
 
 void EditBox::load(int row) {
@@ -809,8 +895,8 @@ void EditBox::onKey(int key, Qt::KeyboardModifiers mods) {
             else m_tab->main()->status(tr("No untranslated lines found"));
         }
         break;
-    case Qt::Key_B: m_text->toggleTag("b"); break;
-    case Qt::Key_I: m_text->toggleTag("i"); break;
+    case Qt::Key_B: toggleTag("b"); break;
+    case Qt::Key_I: toggleTag("i"); break;
     case Qt::Key_Comma:
     case Qt::Key_Period: {
         const fsb::Row r = s.row(size_t(m_row));
