@@ -48,19 +48,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       FS_DEPS_ROOT: ${{ github.workspace }}/../deps
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../vcpkg-bin
     steps:
       - uses: actions/checkout@v7
       # vcpkg binary packages, so FFmpeg is only compiled when vcpkg.json or the overlay ports change
       - uses: actions/cache/restore@v6
         id: vcpkg-cache
         with:
-          path: ${{ github.workspace }}/../vcpkg-bin
+          # actions/cache rejects paths with '..', so the binary cache lives in runner.temp
+          path: ${{ runner.temp }}/vcpkg-bin
           key: vcpkg-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'tools/vcpkg-ports/**') }}
           restore-keys: vcpkg-${{ matrix.triplet }}-
       - name: Binary cache dir
         shell: bash
-        run: mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+        run: |
+          mkdir -p "$RUNNER_TEMP/vcpkg-bin"
+          echo "VCPKG_DEFAULT_BINARY_CACHE=$RUNNER_TEMP/vcpkg-bin" >> "$GITHUB_ENV"
       - name: System packages
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev ninja-build nasm libgl1-mesa-dev libxkbcommon-dev autoconf-archive bison flex gperf zip
@@ -75,7 +77,11 @@ jobs:
       - name: vcpkg
         shell: bash
         run: |
-          git clone https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
+          # pinned to the baseline: the scripts of a newer checkout change every package ABI hash, missing the cache
+          baseline=$(sed -n 's/.*"baseline": *"\([0-9a-f]*\)".*/\1/p' vcpkg-configuration.json)
+          git init -q "$RUNNER_TEMP/vcpkg"
+          git -C "$RUNNER_TEMP/vcpkg" fetch -q --depth 1 https://github.com/microsoft/vcpkg "$baseline"
+          git -C "$RUNNER_TEMP/vcpkg" checkout -q FETCH_HEAD
           "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics || "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.bat"
           echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
       - name: Media dependencies (Windows)
@@ -89,7 +95,7 @@ jobs:
       - uses: actions/cache/save@v6
         if: steps.vcpkg-cache.outputs.cache-hit != 'true'
         with:
-          path: ${{ github.workspace }}/../vcpkg-bin
+          path: ${{ runner.temp }}/vcpkg-bin
           key: vcpkg-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'tools/vcpkg-ports/**') }}
       - name: Media tests
         shell: bash
