@@ -243,6 +243,12 @@ impl Audio {
         self.player.as_ref().is_some_and(Player::is_playing)
     }
 
+    pub fn set_end_ms(&self, end_ms: i64) {
+        if let Some(p) = &self.player {
+            p.set_end_ms(end_ms);
+        }
+    }
+
     pub fn position_ms(&self) -> i64 {
         self.player.as_ref().map_or(-1, Player::position_ms)
     }

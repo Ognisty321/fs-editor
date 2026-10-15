@@ -764,6 +764,8 @@ pub mod ffi {
         fn play(self: &mut Audio, start_ms: i64, end_ms: i64) -> Result<()>;
         fn stop(self: &Audio);
         fn playing(self: &Audio) -> bool;
+        /// Where the range playing stops (a marker dragged while it plays).
+        fn set_end_ms(self: &Audio, end_ms: i64);
         fn position_ms(self: &Audio) -> i64;
         fn set_volume(self: &Audio, v: f32);
 

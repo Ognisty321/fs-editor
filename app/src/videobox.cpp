@@ -713,7 +713,7 @@ void VideoBox::seekFrame(qint64 n) {
     if (m_playing) {
         m_playStartMs = time();
         m_clock.restart();
-        if (m_tab->audio()->hasAudio()) m_tab->audio()->play(time(), m_playEnd >= 0 ? m_playEnd : m_info.duration_ms);
+        if (m_tab->audio()->hasAudio()) m_tab->audio()->play(time(), m_playEnd >= 0 ? m_playEnd : m_info.duration_ms, true);
     }
     request();
     m_seek->setValue(int(n));
@@ -769,7 +769,7 @@ void VideoBox::play() {
     m_playing = true;
     m_playStartMs = time();
     m_clock.restart();
-    if (m_tab->audio()->hasAudio()) m_tab->audio()->play(time(), m_playEnd >= 0 ? m_playEnd : m_info.duration_ms);
+    if (m_tab->audio()->hasAudio()) m_tab->audio()->play(time(), m_playEnd >= 0 ? m_playEnd : m_info.duration_ms, true);
     m_timer->start();
 }
 

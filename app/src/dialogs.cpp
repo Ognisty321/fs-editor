@@ -1796,6 +1796,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"audio/snapLines", QT_TR_NOOP("Snap audio boundaries to other lines"), false, audio},
         {"audio/inactiveComments", QT_TR_NOOP("Show inactive comments in the audio"), false, audio},
         {"audio/wheelZooms", QT_TR_NOOP("Mouse wheel zooms the audio (Shift scrolls)"), false, audio},
+        {"audio/autoFocus", QT_TR_NOOP("Focus the audio when the mouse is over it"), true, audio},
     };
     std::vector<std::pair<QString, QCheckBox *>> boxes;
     for (const auto &c : checks) {

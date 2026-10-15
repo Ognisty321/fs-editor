@@ -162,6 +162,10 @@ impl Player {
         self.shared.end.store(end.min(self.pcm.len()), SeqCst);
     }
 
+    pub fn set_end_ms(&self, end_ms: i64) {
+        self.set_end(self.pcm.ms_to_sample(end_ms));
+    }
+
     pub fn end(&self) -> i64 {
         self.shared.end.load(SeqCst)
     }

@@ -2636,6 +2636,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Pytaj o przeskalowanie napisów do wideo o innej rozdzielczości</translation>
     </message>
     <message>
+        <source>Focus the audio when the mouse is over it</source>
+        <translation>Aktywuj audio po najechaniu myszą</translation>
+    </message>
+    <message>
         <source>None</source>
         <translation>Brak</translation>
     </message>

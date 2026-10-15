@@ -20,6 +20,7 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <map>
 #include <thread>
 
 namespace {
@@ -186,10 +187,6 @@ void AudioView::paintOverlay(QPainter &p) {
                 p.drawRect(x0, RulerH, x1 - x0, h - RulerH - 1);
             }
         }
-        if (m_hoverX >= 0) {
-            p.setPen(QPen(kStart, 1));
-            p.drawLine(m_hoverX, RulerH, m_hoverX, RulerH + KaraH);
-        }
     }
     // active line
     p.setPen(QPen(kStart, 2));
@@ -203,6 +200,17 @@ void AudioView::paintOverlay(QPainter &p) {
     if (b.m_mark >= 0) {
         p.setPen(QPen(kMark, 1));
         p.drawLine(b.xOf(b.m_mark), 0, b.xOf(b.m_mark), h);
+    }
+    // the time under the mouse while nothing plays (Aegisub's and Kainote's track cursor)
+    if (m_hoverX >= 0 && !b.playing()) {
+        p.setPen(QPen(QColor(255, 255, 255, 150), 1));
+        p.drawLine(m_hoverX, RulerH, m_hoverX, h);
+        const QString at = fs::fmtTime(b.msAt(m_hoverX));
+        const int tw = p.fontMetrics().horizontalAdvance(at) + 6, ty = RulerH + (b.m_karaoke ? KaraH : 0) + 2;
+        const int tx = m_hoverX + tw + 4 > w ? m_hoverX - tw - 2 : m_hoverX + 2;
+        p.fillRect(tx, ty, tw, 15, QColor(0, 0, 0, 160));
+        p.setPen(QColor(230, 230, 230));
+        p.drawText(QRect(tx, ty, tw, 15), Qt::AlignCenter, at);
     }
     // play cursor or video position
     const qint64 cur = b.playing() ? b.positionMs() : video->hasVideo() ? video->time() : -1;
@@ -221,6 +229,7 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
     m_button = e->button();
     m_pressX = x;
     m_pressLeft = b.m_left;
+    m_hoverX = -1;
     b.m_dragId++;
     if (y < RulerH) {
         if (e->button() == Qt::RightButton) {
@@ -231,7 +240,26 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
         }
         return;
     }
-    if (e->button() == Qt::MiddleButton || (e->button() == Qt::LeftButton && (e->modifiers() & Qt::ControlModifier))) {
+    const bool ctrl = e->modifiers() & Qt::ControlModifier;
+    const int nearMarker = std::abs(b.xOf(b.m_selStart) - x) < 6 ? 1 : std::abs(b.xOf(b.m_selEnd) - x) < 6 ? 2 : 0;
+    if (e->button() == Qt::LeftButton && ctrl && nearMarker) {
+        // the other lines starting or ending on the marker move with it (Aegisub's Ctrl+drag), so a
+        // boundary two lines share stays shared
+        // shortcut: they move on the commit, not while dragging; draw them along if that confuses
+        const qint64 at = nearMarker == 1 ? b.m_selStart : b.m_selEnd;
+        b.m_linkStarts.clear();
+        b.m_linkEnds.clear();
+        b.m_linkMarker = nearMarker;
+        const auto spans = b.m_tab->s().row_spans();
+        for (size_t i = 0; i < spans.size(); ++i) {
+            if (int(i) == b.m_tab->active()) continue;
+            if (spans[i].start == at) b.m_linkStarts.push_back(i);
+            if (spans[i].end == at) b.m_linkEnds.push_back(i);
+        }
+        m_drag = nearMarker;
+        return;
+    }
+    if (e->button() == Qt::MiddleButton || (e->button() == Qt::LeftButton && ctrl)) {
         if (b.m_karaoke && e->button() == Qt::MiddleButton) {
             for (size_t k = 1; k < b.m_syl.size(); ++k)
                 if (std::abs(b.xOf(b.m_syl[k].start) - x) < 5) {
@@ -278,8 +306,11 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
         }
         for (size_t k = 0; k < b.m_syl.size(); ++k)
             if (t >= b.m_syl[k].start && t < b.m_syl[k].end) b.m_activeSyl = int(k);
-        // a click only picks the syllable (Aegisub, Kainote); the line's own markers still drag
+        // a click only picks the syllable (Aegisub, Kainote), a right click plays it too; the
+        // line's own markers still drag
         if (std::abs(b.xOf(b.m_selStart) - x) >= 6 && std::abs(b.xOf(b.m_selEnd) - x) >= 6) {
+            if (e->button() == Qt::RightButton && size_t(b.m_activeSyl) < b.m_syl.size())
+                b.play(b.m_syl[size_t(b.m_activeSyl)].start, b.m_syl[size_t(b.m_activeSyl)].end);
             overlayChanged();
             return;
         }
@@ -303,15 +334,17 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
 void AudioView::mouseMoveEvent(QMouseEvent *e) {
     auto &b = *m_box;
     const int x = int(e->position().x());
-    const qint64 t = b.msAt(x);
     if (!m_drag) {
-        const bool kara = b.m_karaoke && e->position().y() >= RulerH && e->position().y() < RulerH + KaraH;
-        m_hoverX = kara ? x : -1;
+        m_hoverX = e->position().y() >= RulerH ? x : -1;
         const bool edge = std::abs(b.xOf(b.m_selStart) - x) < 6 || std::abs(b.xOf(b.m_selEnd) - x) < 6;
         setCursor(edge ? Qt::SizeHorCursor : Qt::ArrowCursor);
-        if (b.m_karaoke) overlayChanged();
+        overlayChanged();
         return;
     }
+    // a marker dragged past the edges scrolls the view along (Aegisub)
+    // shortcut: only while the mouse moves; a timer if holding it still out there should scroll too
+    if (m_drag != 3 && (x < 0 || x >= width())) b.setLeft(b.m_left + qint64((x < 0 ? x : x - width() + 1) * b.m_msPerPx));
+    const qint64 t = b.msAt(x);
     const bool snapToggle = e->modifiers() & Qt::ShiftModifier;
     if (m_drag == 3) {
         b.setLeft(m_pressLeft - qint64((x - m_pressX) * b.m_msPerPx));
@@ -343,6 +376,11 @@ void AudioView::mouseReleaseEvent(QMouseEvent *) {
 void AudioView::leaveEvent(QEvent *) {
     m_hoverX = -1;
     overlayChanged();
+}
+
+// the audio keys work as soon as the mouse is over it (Kainote's default, Aegisub's option)
+void AudioView::enterEvent(QEnterEvent *) {
+    if (window()->isActiveWindow() && QSettings().value("audio/autoFocus", true).toBool()) setFocus();
 }
 
 void AudioView::wheelEvent(QWheelEvent *e) {
@@ -483,7 +521,7 @@ QWidget *AudioBox::buttonRow() {
         else playSelection();
     })->setIcon(icon("player-play", green));
     btn("▶", tr("Play the current line"), [this] { playSelection(); })->setIcon(icon("player-play-filled", green));
-    btn("■", tr("Stop playback"), [this] { stop(); })->setIcon(icon("player-stop-filled", teal));
+    btn("■", tr("Stop playback"), [this] { m_tab->video()->pause(), stop(); })->setIcon(icon("player-stop-filled", teal));
     btn("|◀", tr("Play before the mark"), [this] { if (m_mark >= 0) play(std::max<qint64>(0, m_mark - 1000), m_mark); }, true)->setIcon(icon("arrow-bar-left", teal));
     btn("▶|", tr("Play after the mark"), [this] { if (m_mark >= 0) play(m_mark, m_mark + 1000); })->setIcon(icon("arrow-bar-right", teal));
     btn("◁s", tr("Play 500 ms before the start time"), [this] { play(std::max<qint64>(0, m_selStart - 500), m_selStart); }, true);
@@ -576,8 +614,9 @@ void AudioBox::close() {
     emit opened();
 }
 
-void AudioBox::play(qint64 from, qint64 to) {
+void AudioBox::play(qint64 from, qint64 to, bool withVideo) {
     if (!m_audio || to <= from) return;
+    if (!withVideo) m_tab->video()->pause(); // or the video would follow this range as its clock
     try {
         (*m_audio)->play(from, to);
     } catch (const rust::Error &e) {
@@ -623,7 +662,10 @@ qint64 AudioBox::snap(qint64 ms, bool toggle) const {
     };
     if (kf && m_tab->video()->hasVideo()) {
         for (qint64 f : m_tab->keyframes()) consider(m_tab->video()->timeAtStart(f)); // Aegisub's markers
-        consider(m_tab->video()->time()); // and the video's position
+        // and the start and end of the frame shown (Aegisub)
+        const qint64 f = m_tab->video()->frame();
+        consider(m_tab->video()->timeAtStart(f));
+        consider(m_tab->video()->timeAtEnd(f));
     }
     if (lines)
         for (const auto &[start, end] : inactiveLines()) {
@@ -704,8 +746,14 @@ void AudioBox::ensureVisible(qint64 a, qint64 b) {
 }
 
 void AudioBox::setSelection(qint64 start, qint64 end, bool fromDrag) {
+    const qint64 oldEnd = m_selEnd;
     m_selStart = std::max<qint64>(0, start);
     m_selEnd = std::max(m_selStart, end);
+    // the selection playing stops where its end was dragged to (Aegisub, Kainote)
+    if (m_selEnd != oldEnd && m_playEnd == oldEnd && playing()) {
+        m_playEnd = m_selEnd;
+        (*m_audio)->set_end_ms(m_selEnd);
+    }
     m_selModified = true;
     if (!fromDrag && m_autoCommit) commit();
     m_view->overlayChanged();
@@ -726,8 +774,26 @@ void AudioBox::commit() {
             r.end = m_selEnd;
             m_tab->s().set_row(size_t(row), r, amend);
         }
+        if (m_linkMarker) {
+            // the lines a Ctrl+drag took along, in the same step; one dragged past its other end turns
+            const qint64 at = m_linkMarker == 1 ? m_selStart : m_selEnd;
+            std::map<size_t, std::pair<qint64, qint64>> times;
+            const auto spans = m_tab->s().row_spans();
+            for (size_t i : m_linkStarts)
+                if (i < spans.size()) times[i] = {at, spans[i].end};
+            for (size_t i : m_linkEnds)
+                if (i < spans.size()) times.try_emplace(i, spans[i].start, at).first->second.second = at;
+            std::vector<size_t> rows;
+            std::vector<rust::String> values;
+            for (auto [i, t] : times) {
+                rows.push_back(i);
+                values.push_back(fs::rs(QString("%1,%2").arg(std::min(t.first, t.second)).arg(std::max(t.first, t.second))));
+            }
+            m_tab->s().set_rows_values(fs::slice(rows), "times", {values.data(), values.size()}, amend);
+        }
         m_tab->changed(TabPanel::FromAudio);
     }
+    m_linkMarker = 0;
     m_selModified = false;
     m_view->overlayChanged();
 }
@@ -735,16 +801,17 @@ void AudioBox::commit() {
 // Aegisub's audio/commit: apply, then with "next line on commit" go on as grid/line/next/create
 // does - past the last line a new one follows - and a line not timed yet (end 0) is proposed
 // from where this one ended, for the default 5 s.
-void AudioBox::commitAndNext() {
+void AudioBox::commitAndNext(bool resetNext) {
     commit();
-    if (!m_nextOnCommit) return;
+    ++m_dragId; // what follows is a step of its own: Aegisub never merges commits
+    if (!m_nextOnCommit && !resetNext) return;
     const qint64 end = m_selEnd;
     const auto vis = m_tab->grid()->visibleRows();
     const auto it = std::upper_bound(vis.begin(), vis.end(), size_t(std::max(0, m_tab->active())));
     if (it != vis.end()) m_tab->setActive(int(*it));
     else m_tab->grid()->insertRow(true, 0); // starts where this line ends
-    if (const int row = m_tab->active(); row >= 0 && m_tab->s().row(size_t(row)).end == 0)
-        setSelection(end, end + 5000, true);
+    if (const int row = m_tab->active(); row >= 0 && (resetNext || m_tab->s().row(size_t(row)).end == 0))
+        setSelection(end, end + QSettings().value("subs/defaultDuration", 3000).toLongLong(), true);
     playSelection();
 }
 
@@ -763,6 +830,7 @@ bool AudioBox::followLine() {
 void AudioBox::lineChanged() {
     ++m_dragId; // a new line never merges into the last one's undo step
     m_selModified = false;
+    m_linkMarker = 0;
     if (followLine() && m_autoScroll && m_audio) ensureVisible(m_selStart, m_selEnd);
     m_activeSyl = 0;
     karaokeChanged();
@@ -835,23 +903,29 @@ QString AudioBox::autoSplitText(const QString &text, qint64 duration) const {
     return out;
 }
 
-void AudioBox::stepLine(int dir) {
+bool AudioBox::stepLine(int dir, bool playIt) {
     if (m_selModified && m_autoCommit) commit();
     const auto vis = m_tab->grid()->visibleRows();
     const int act = m_tab->active();
     auto it = std::find(vis.begin(), vis.end(), size_t(std::max(0, act)));
-    if (it == vis.end()) return;
-    if (dir < 0 && it == vis.begin()) return;
+    if (it == vis.end()) return false;
+    if (dir < 0 && it == vis.begin()) return false;
     auto next = dir < 0 ? it - 1 : it + 1;
-    if (next == vis.end()) return;
+    if (next == vis.end()) return false;
     m_tab->setActive(int(*next));
-    playSelection();
+    if (playIt) playSelection();
+    return true;
 }
 
 void AudioBox::stepSyllable(int dir) {
-    if (m_syl.empty()) return stepLine(dir);
-    const int n = m_activeSyl + dir;
-    if (n < 0 || n >= int(m_syl.size())) return stepLine(dir);
+    if (m_syl.empty()) return void(stepLine(dir));
+    int n = m_activeSyl + dir;
+    if (n < 0 || n >= int(m_syl.size())) {
+        if (!stepLine(dir, false)) return;
+        if (m_syl.empty()) return playSelection();
+        // back from the first syllable: the last one of the line before (Aegisub)
+        n = dir < 0 ? int(m_syl.size()) - 1 : 0;
+    }
     m_activeSyl = n;
     play(m_syl[n].start, m_syl[n].end);
     m_view->overlayChanged();
@@ -896,10 +970,10 @@ void AudioBox::keyPressEvent(QKeyEvent *e) {
     switch (e->key()) {
     case Qt::Key_Return:
     case Qt::Key_Enter:
-    case Qt::Key_G: commitAndNext(); break;
-    case Qt::Key_Left: m_karaoke ? stepSyllable(-1) : stepLine(-1); break;
+    case Qt::Key_G: commitAndNext(e->modifiers() & Qt::ShiftModifier); break;
+    case Qt::Key_Left: m_karaoke ? stepSyllable(-1) : void(stepLine(-1)); break;
     case Qt::Key_Z: stepLine(-1); break;
-    case Qt::Key_Right: m_karaoke ? stepSyllable(1) : stepLine(1); break;
+    case Qt::Key_Right: m_karaoke ? stepSyllable(1) : void(stepLine(1)); break;
     case Qt::Key_X: stepLine(1); break;
     case Qt::Key_Down:
     case Qt::Key_S:
@@ -908,7 +982,10 @@ void AudioBox::keyPressEvent(QKeyEvent *e) {
         break;
     case Qt::Key_Up:
     case Qt::Key_R: playSelection(); break;
-    case Qt::Key_H: stop(); break;
+    case Qt::Key_H:
+        m_tab->video()->pause();
+        stop();
+        break;
     case Qt::Key_B: ensureVisible(m_selStart, m_selEnd); break;
     case Qt::Key_A: setLeft(m_left - span / 4); break;
     case Qt::Key_F: setLeft(m_left + span / 4); break;

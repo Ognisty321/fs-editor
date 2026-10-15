@@ -36,6 +36,7 @@ protected:
     void wheelEvent(QWheelEvent *) override;
     void keyPressEvent(QKeyEvent *) override;
     void leaveEvent(QEvent *) override;
+    void enterEvent(QEnterEvent *) override;
 
 private:
     void paintOverlay(QPainter &p);
@@ -68,7 +69,7 @@ public:
     void close();
     QString path() const { return m_path; }
 
-    void play(qint64 from, qint64 to);
+    void play(qint64 from, qint64 to, bool withVideo = false); // without: the video stops (Aegisub)
     void stop();
     bool playing() const;
     qint64 positionMs() const;
@@ -80,7 +81,9 @@ public:
     void lineChanged();   // active row changed
     void docChanged();    // document edited elsewhere
     void commit();        // writes the markers (auto-commit too)
-    void commitAndNext(); // the commit command: then the next line, when asked
+    // the commit command: then the next line, when asked; resetNext (Shift+G) always goes on, the
+    // next line timed from this one's end for the default duration (Aegisub's audio/commit/default)
+    void commitAndNext(bool resetNext = false);
 
 signals:
     void opened();
@@ -103,7 +106,7 @@ private:
     void loaded();
     void tick();
     void playSelection();
-    void stepLine(int dir);
+    bool stepLine(int dir, bool playIt = true); // false at the first or last line
     void stepSyllable(int dir);
     void modifyStart(int steps);
     void modifyLength(int steps, bool shiftFollowing);
@@ -127,6 +130,9 @@ private:
     qint64 m_mark = -1;
     qint64 m_playEnd = -1;
     int m_dragId = 0;
+    // other lines' starts and ends on the marker a Ctrl+drag took along (Aegisub), and which marker
+    std::vector<size_t> m_linkStarts, m_linkEnds;
+    int m_linkMarker = 0;
     std::vector<fsb::Syllable> m_syl;
     int m_activeSyl = 0;
     QString m_autoText; // the automatic split shown, not written until edited or committed
