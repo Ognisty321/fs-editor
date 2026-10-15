@@ -380,7 +380,6 @@ void VisualTools::reload() {
 QPointF VisualTools::alignShift(const Drawing &d) const {
     const QRectF b = d.bounds();
     const int an = m_v.align;
-    // shortcut: rotation and \org are ignored for drawings; fine for upright shapes.
     return {b.width() * (an % 3 == 1 ? 0 : an % 3 == 2 ? 0.5 : 1), b.height() * (an >= 7 ? 0 : an >= 4 ? 0.5 : 1)};
 }
 
@@ -443,7 +442,29 @@ void VisualTools::writeVector() {
 
 QPointF VisualTools::vecW(QPointF pt) const {
     if (m_tool == VClip) return w(pt / std::pow(2.0, std::max(1, m_v.clip_scale) - 1));
-    return w(m_drawOrigin + QPointF(pt.x() * m_drawScale.x(), pt.y() * m_drawScale.y()));
+    return w(drawToScript(pt));
+}
+
+namespace {
+// p turned by deg around o the way libass applies \frz (counterclockwise on screen)
+QPointF turn(QPointF p, QPointF o, double deg) {
+    if (deg == 0) return p;
+    const double a = qDegreesToRadians(deg), c = std::cos(a), s = std::sin(a);
+    const QPointF d = p - o;
+    return o + QPointF(d.x() * c + d.y() * s, -d.x() * s + d.y() * c);
+}
+} // namespace
+
+// libass aligns the unturned drawing at \pos, then turns it around \org
+// shortcut: \frx, \fry and \fax/\fay are ignored for drawings; add the 3D transform if people edit tilted shapes.
+QPointF VisualTools::drawToScript(QPointF pt) const {
+    const QPointF s = m_drawOrigin + QPointF(pt.x() * m_drawScale.x(), pt.y() * m_drawScale.y());
+    return turn(s, {m_v.org_x, m_v.org_y}, m_v.frz);
+}
+
+QPointF VisualTools::scriptToDraw(QPointF s) const {
+    const QPointF d = turn(s, {m_v.org_x, m_v.org_y}, -m_v.frz) - m_drawOrigin;
+    return {d.x() / m_drawScale.x(), d.y() / m_drawScale.y()};
 }
 
 int VisualTools::hitHandle(QPointF wp) const {
@@ -563,10 +584,7 @@ void VisualTools::paint(QPainter &p) {
         break;
     case VClip:
     case Draw: {
-        auto map = [this](QPointF pt) {
-            if (m_tool == VClip) return w(pt / std::pow(2.0, std::max(1, m_v.clip_scale) - 1));
-            return w(m_drawOrigin + QPointF(pt.x() * m_drawScale.x(), pt.y() * m_drawScale.y()));
-        };
+        auto map = [this](QPointF pt) { return vecW(pt); };
         QPainterPath path;
         QPointF last;
         bool started = false; // libass starts a contour at its first segment, not at the m point
@@ -689,8 +707,7 @@ bool VisualTools::press(QMouseEvent *e) {
                 m_drawScale = QPointF(m_v.fscx / 100, m_v.fscy / 100);
                 m_drawOrigin = QPointF(m_v.x, m_v.y);
             }
-            pt = QPointF((m_pressS.x() - m_drawOrigin.x()) / m_drawScale.x(),
-                         (m_pressS.y() - m_drawOrigin.y()) / m_drawScale.y());
+            pt = scriptToDraw(m_pressS);
         }
         if (m_vecMode == VecDelete) {
             m_drag = 0;
@@ -893,7 +910,7 @@ bool VisualTools::move(QMouseEvent *e) {
         if (m_vecHandle.first < 0 && m_drag != 5 && m_drag != 6) break;
         QPointF pt = now;
         if (m_tool == VClip) pt *= std::pow(2.0, std::max(1, m_v.clip_scale) - 1);
-        else pt = QPointF((now.x() - m_drawOrigin.x()) / m_drawScale.x(), (now.y() - m_drawOrigin.y()) / m_drawScale.y());
+        else pt = scriptToDraw(now);
         if (m_drag == 5) {
             // the picked shape fitted into the dragged rectangle
             QPointF d = pt - m_shapeA;

@@ -68,6 +68,9 @@ private:
     QPointF alignShift(const Drawing &d) const;
     int hitHandle(QPointF widgetPos) const;
     QPointF vecW(QPointF pt) const; // vector point -> widget
+    // drawing point (offset from \pos, unscaled) <-> script coordinates, turned by \frz around \org
+    QPointF drawToScript(QPointF pt) const;
+    QPointF scriptToDraw(QPointF s) const;
     // the l/b command whose segment passes near the point (t: where on it), or -1
     int hitSegment(QPointF widgetPos, double &t) const;
 
