@@ -936,6 +936,18 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Zapisz jako...</translation>
     </message>
     <message>
+        <source>Load subtitles from video...</source>
+        <translation>Wczytaj napisy z wideo...</translation>
+    </message>
+    <message>
+        <source>The video contains no subtitles</source>
+        <translation>Wideo nie zawiera napisów</translation>
+    </message>
+    <message>
+        <source>Subtitles to load:</source>
+        <translation>Napisy do wczytania:</translation>
+    </message>
+    <message>
         <source>Save translation</source>
         <translation>Zapisz tłumaczenie</translation>
     </message>

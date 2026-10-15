@@ -719,6 +719,8 @@ void Grid::contextMenu(const QPoint &global) {
         m.addAction(mw->action("translationMatching"));
     }
     m.addSeparator();
+    m.addAction(mw->action("subsFromVideo"));
+    m.addSeparator();
     m.addAction(mw->action("deleteText"));
     m.addAction(mw->action("deleteLines"));
     m.exec(global);
