@@ -2190,12 +2190,52 @@ Filtry eksportu: %8</translation>
         <translation>Zmień rozdzielczość napisów</translation>
     </message>
     <message>
+        <source>YCbCr matrix:</source>
+        <translation>Macierz YCbCr:</translation>
+    </message>
+    <message>
+        <source>From script</source>
+        <translation>Z napisów</translation>
+    </message>
+    <message>
+        <source>From video</source>
+        <translation>Z wideo</translation>
+    </message>
+    <message>
         <source>Source resolution</source>
         <translation>Rozdzielczość źródłowa</translation>
     </message>
     <message>
-        <source>Target resolution</source>
+        <source>Destination resolution</source>
         <translation>Rozdzielczość docelowa</translation>
+    </message>
+    <message>
+        <source>Aspect ratio handling</source>
+        <translation>Zmiana proporcji obrazu</translation>
+    </message>
+    <message>
+        <source>Stretch</source>
+        <translation>Rozciągnij</translation>
+    </message>
+    <message>
+        <source>Add borders</source>
+        <translation>Dodaj pasy</translation>
+    </message>
+    <message>
+        <source>Remove borders</source>
+        <translation>Usuń pasy</translation>
+    </message>
+    <message>
+        <source>Manual</source>
+        <translation>Ręcznie</translation>
+    </message>
+    <message>
+        <source>Margin offset</source>
+        <translation>Przesunięcie marginesów</translation>
+    </message>
+    <message>
+        <source>Symmetrical</source>
+        <translation>Symetrycznie</translation>
     </message>
 </context>
 <context>

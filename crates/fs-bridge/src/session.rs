@@ -19,8 +19,8 @@ use fs_core::{Color, Document, Event, EventEntry, EventId, Time};
 use fs_formats::{Format, LoadOptions, SaveOptions};
 
 use crate::ffi::{
-    ColumnInfo, FileInfo, FilterSpec, FindSpec, PostSpec, Row, RowSpan, ShiftSpec, StyleData,
-    Syllable, Visual,
+    ColumnInfo, FileInfo, FilterSpec, FindSpec, PostSpec, ResampleSpec, Row, RowSpan, ShiftSpec,
+    StyleData, Syllable, Visual,
 };
 
 pub struct Session {
@@ -1380,20 +1380,21 @@ impl Session {
         Ok(out)
     }
 
-    pub fn resample(&mut self, x: i32, y: i32) {
-        let from = self.ed.doc.play_res();
-        self.edit("Resample resolution", |d| {
-            ops::resample(
-                d,
-                &ops::Resample {
-                    from,
-                    to: (x, y),
-                    stretch: false,
-                    margin: (0, 0, 0, 0),
-                },
-            );
-            d.set_info("PlayResX", &x.to_string());
-        });
+    pub fn resample(&mut self, spec: &ResampleSpec) {
+        let matrices = !spec.from_matrix.is_empty() && !spec.to_matrix.is_empty();
+        let r = ops::Resample {
+            from: (spec.from_x, spec.from_y),
+            to: (spec.to_x, spec.to_y),
+            margin: [spec.margin_l, spec.margin_r, spec.margin_t, spec.margin_b],
+            ar_mode: match spec.ar_mode {
+                1 => ops::ArMode::AddBorder,
+                2 => ops::ArMode::RemoveBorder,
+                3 => ops::ArMode::Manual,
+                _ => ops::ArMode::Stretch,
+            },
+            matrix: matrices.then(|| (spec.from_matrix.clone(), spec.to_matrix.clone())),
+        };
+        self.edit("Resample resolution", |d| ops::resample(d, &r));
     }
 
     /// Selected events as `Dialogue:` lines (clipboard).

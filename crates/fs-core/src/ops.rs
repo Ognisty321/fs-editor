@@ -8,6 +8,7 @@ use std::cmp::Ordering;
 use regex::{Regex, RegexBuilder};
 
 use crate::ass::Document;
+use crate::color::{Color, MatrixConversion};
 use crate::model::{Event, EventKind};
 use crate::tags::{self, Block, DrawCmd, Line, Tag};
 use crate::time::Time;
@@ -1018,61 +1019,127 @@ pub fn strip_comments(doc: &mut Document, rows: &Rows) {
 // Resampling
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy)]
+/// What [`resample`] does when the aspect ratio changes (Aegisub's `ResampleARMode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArMode {
+    /// Scale X and Y apart; glyphs widen through `\fscx`.
+    #[default]
+    Stretch,
+    /// Keep proportions, adding borders to the source.
+    AddBorder,
+    /// Keep proportions, cutting the source.
+    RemoveBorder,
+    /// Add `margin` to the source and stretch what remains.
+    Manual,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct Resample {
     pub from: (i32, i32),
     pub to: (i32, i32),
-    /// When the aspect ratio changes: stretch (scale X and Y independently),
-    /// or keep proportions (scale by Y and add horizontal offset).
-    pub stretch: bool,
-    /// Extra margin added on each side of the destination (letterbox).
-    pub margin: (i32, i32, i32, i32),
+    /// Added to the source on the left, right, top and bottom (negative cuts);
+    /// read in `Manual` mode, the border modes compute their own.
+    pub margin: [i32; 4],
+    pub ar_mode: ArMode,
+    /// Convert colours between these "YCbCr Matrix" values (`TV.601` to
+    /// `TV.709`, ...) and write the second to the header.
+    pub matrix: Option<(String, String)>,
 }
 
-/// Change the script resolution, scaling styles, margins, positions, clips,
-/// drawings and size-related tags, like Aegisub's "Resample Resolution".
+/// Change the script resolution like Aegisub's "Resample Resolution": styles,
+/// margins, positions, clips, drawings, size tags and, if asked, colours.
 pub fn resample(doc: &mut Document, r: &Resample) {
-    let (fw, fh) = (r.from.0.max(1) as f64, r.from.1.max(1) as f64);
-    let (ml, mr, mt, mb) = r.margin;
-    let (tw, th) = (
-        (r.to.0 - ml - mr).max(1) as f64,
-        (r.to.1 - mt - mb).max(1) as f64,
-    );
-    let ry = th / fh;
-    let rx = if r.stretch { tw / fw } else { ry };
-    let ox = if r.stretch {
-        ml as f64
-    } else {
-        ml as f64 + (tw - fw * rx) / 2.0
-    };
-    let oy = mt as f64;
-    // horizontal stretch relative to vertical, applied to \fscx
-    let ar = rx / ry;
-    let px = |x: f64| x * rx + ox;
-    let py = |y: f64| y * ry + oy;
+    let (mut sx, mut sy) = (r.from.0.max(1), r.from.1.max(1));
+    let (dx, dy) = (r.to.0.max(1), r.to.1.max(1));
+    let new_ar = dx as f64 / dy as f64;
+    // close enough is left alone: 848x480 <-> 1280x720 is .006
+    let differs = |old_ar: f64| (old_ar - new_ar).abs() / new_ar > 0.01;
+    let mut margin = [0; 4];
+    let mut ar = 1.0; // the horizontal stretch, applied through \fscx
+    let old_ar = sx as f64 / sy as f64;
+    if differs(old_ar) {
+        match r.ar_mode {
+            ArMode::Stretch => ar = new_ar / old_ar,
+            ArMode::AddBorder | ArMode::RemoveBorder => {
+                if (new_ar > old_ar) == (r.ar_mode == ArMode::AddBorder) {
+                    let m = ((sy as f64 * new_ar - sx as f64) / 2.0) as i32;
+                    margin[..2].fill(m);
+                } else {
+                    let m = ((sx as f64 / new_ar - sy as f64) / 2.0) as i32;
+                    margin[2..].fill(m);
+                }
+            }
+            ArMode::Manual => {
+                margin = r.margin;
+                let with_margins = (sx + margin[0] + margin[1]) as f64
+                    / (sy + margin[2] + margin[3]).max(1) as f64;
+                if differs(with_margins) {
+                    ar = new_ar / with_margins;
+                }
+            }
+        }
+    }
+    sx = (sx + margin[0] + margin[1]).max(1);
+    sy = (sy + margin[2] + margin[3]).max(1);
+    let (rx, ry) = (dx as f64 / sx as f64, dy as f64 / sy as f64);
+    let (ml, mt) = (margin[0] as f64, margin[2] as f64);
+    let px = |x: f64| (x + ml) * rx;
+    let py = |y: f64| (y + mt) * ry;
+    // margins 0..4 are left, right, top (= vertical) and bottom
+    let scale_margin =
+        |m: i32, k: usize| ((m + margin[k]) as f64 * if k < 2 { rx } else { ry }).round() as i32;
+    let conv = r
+        .matrix
+        .as_ref()
+        .and_then(|(a, b)| MatrixConversion::new(a, b));
 
-    // styles
-    let n = doc.style_count();
-    for i in 0..n {
+    for i in 0..doc.style_count() {
         let st = doc.style_mut(i).unwrap();
         st.size *= ry;
         st.outline *= ry;
         st.shadow *= ry;
-        st.spacing *= rx;
+        st.spacing *= ry; // \fscx, so the stretch, applies to it when rendering
         st.scale_x *= ar;
-        st.margin_l = (st.margin_l as f64 * rx).round() as i32 + ml;
-        st.margin_r = (st.margin_r as f64 * rx).round() as i32 + mr;
-        st.margin_v = (st.margin_v as f64 * ry).round() as i32 + mt;
-        st.margin_b = (st.margin_b as f64 * ry).round() as i32 + mb;
+        st.margin_l = scale_margin(st.margin_l, 0);
+        st.margin_r = scale_margin(st.margin_r, 1);
+        st.margin_v = scale_margin(st.margin_v, 2);
+        st.margin_b = scale_margin(st.margin_b, 3);
+        if let Some(c) = conv {
+            for col in [
+                &mut st.primary,
+                &mut st.secondary,
+                &mut st.outline_color,
+                &mut st.back,
+            ] {
+                *col = c.convert(*col);
+            }
+        }
     }
 
-    // events
     for i in 0..doc.event_count() {
         let ev = doc.event(i).unwrap();
+        // karaoke templates are code, not lines
+        if ev.is_comment() && (ev.effect.starts_with("template") || ev.effect.starts_with("code")) {
+            continue;
+        }
         let mut line = Line::parse(&ev.text);
         let scale_tag = |t: &mut Tag| {
             let num = |t: &Tag, k: usize| t.arg_f64(k).unwrap_or(0.0);
             let s = |v: f64| crate::model::fmt_f64((v * 1000.0).round() / 1000.0);
+            let int = |v: f64| (v.round() as i64).to_string();
+            let factor = match t.name.as_str() {
+                // \blur too, unlike Aegisub: libass measures it in script pixels
+                "fs" | "bord" | "shad" | "ybord" | "yshad" | "fsp" | "pbo" | "blur" => Some(ry),
+                "xbord" | "xshad" => Some(rx),
+                "fscx" if ar != 1.0 => Some(ar),
+                _ => None,
+            };
+            if let Some(f) = factor {
+                if let Some(v) = t.arg_f64(0) {
+                    t.set_args(vec![s(v * f)]);
+                }
+                return;
+            }
             match t.name.as_str() {
                 "pos" | "org" if t.args.len() >= 2 => {
                     let a = vec![s(px(num(t, 0))), s(py(num(t, 1)))];
@@ -1090,10 +1157,10 @@ pub fn resample(doc: &mut Document, r: &Resample) {
                 }
                 "clip" | "iclip" if t.args.len() == 4 => {
                     let a = vec![
-                        s(px(num(t, 0))),
-                        s(py(num(t, 1))),
-                        s(px(num(t, 2))),
-                        s(py(num(t, 3))),
+                        int(px(num(t, 0))),
+                        int(py(num(t, 1))),
+                        int(px(num(t, 2))),
+                        int(py(num(t, 3))),
                     ];
                     t.set_args(a);
                 }
@@ -1110,29 +1177,11 @@ pub fn resample(doc: &mut Document, r: &Resample) {
                     *a.last_mut().unwrap() = tags::write_drawing(&cmds);
                     t.set_args(a);
                 }
-                "fs" | "bord" | "shad" | "be" | "blur" if !t.args.is_empty() => {
-                    if let Some(v) = t.arg_f64(0) {
-                        let f = if matches!(t.name.as_str(), "be") {
-                            1.0
-                        } else {
-                            ry
-                        };
-                        t.set_args(vec![s(v * f)]);
-                    }
-                }
-                "xbord" | "xshad" | "fsp" => {
-                    if let Some(v) = t.arg_f64(0) {
-                        t.set_args(vec![s(v * rx)]);
-                    }
-                }
-                "ybord" | "yshad" => {
-                    if let Some(v) = t.arg_f64(0) {
-                        t.set_args(vec![s(v * ry)]);
-                    }
-                }
-                "fscx" if ar != 1.0 => {
-                    if let Some(v) = t.arg_f64(0) {
-                        t.set_args(vec![s(v * ar)]);
+                "c" | "1c" | "2c" | "3c" | "4c" => {
+                    if let (Some(c), Some(v)) =
+                        (conv, t.args.first().and_then(|a| Color::parse_tag(a)))
+                    {
+                        t.set_args(vec![c.convert(v).to_tag_string()]);
                     }
                 }
                 _ => {}
@@ -1162,10 +1211,10 @@ pub fn resample(doc: &mut Document, r: &Resample) {
                     }
                 }
                 Block::Drawing { commands, .. } => {
-                    // drawings are positioned via \pos; scale their coordinates
+                    // placed by \pos; X divides out the stretch \fscx already gives it
                     let mut cmds = tags::parse_drawing(commands);
                     if !cmds.is_empty() {
-                        tags::transform_drawing(&mut cmds, |x, y| (x * rx, y * ry));
+                        tags::transform_drawing(&mut cmds, |x, y| (x * rx / ar, y * ry));
                         *commands = tags::write_drawing(&cmds);
                         changed = true;
                     }
@@ -1178,21 +1227,22 @@ pub fn resample(doc: &mut Document, r: &Resample) {
         if let Some(t) = new_text {
             ev.text = t;
         }
-        if ev.margin_l != 0 {
-            ev.margin_l = (ev.margin_l as f64 * rx).round() as i32;
-        }
-        if ev.margin_r != 0 {
-            ev.margin_r = (ev.margin_r as f64 * rx).round() as i32;
-        }
-        if ev.margin_v != 0 {
-            ev.margin_v = (ev.margin_v as f64 * ry).round() as i32;
-        }
-        if ev.margin_b != 0 {
-            ev.margin_b = (ev.margin_b as f64 * ry).round() as i32;
+        for (m, k) in [
+            (&mut ev.margin_l, 0),
+            (&mut ev.margin_r, 1),
+            (&mut ev.margin_v, 2),
+            (&mut ev.margin_b, 3),
+        ] {
+            if *m != 0 {
+                *m = scale_margin(*m, k);
+            }
         }
     }
-    doc.set_info("PlayResX", &r.to.0.to_string());
-    doc.set_info("PlayResY", &r.to.1.to_string());
+    doc.set_info("PlayResX", &dx.to_string());
+    doc.set_info("PlayResY", &dy.to_string());
+    if let Some((_, to)) = &r.matrix {
+        doc.set_info("YCbCr Matrix", to);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1603,8 +1653,7 @@ mod tests {
             &Resample {
                 from: (640, 360),
                 to: (1280, 720),
-                stretch: false,
-                margin: (0, 0, 0, 0),
+                ..Resample::default()
             },
         );
         assert_eq!(
@@ -1615,6 +1664,58 @@ mod tests {
         assert_eq!(st.size, 40.0);
         assert_eq!(st.margin_l, 20);
         assert_eq!(d.play_res(), (1280, 720));
+    }
+
+    #[test]
+    fn resample_aspect_modes() {
+        let line = r"{\pos(0,0)\fsp2\p1}m 0 0 l 10 10";
+        let run = |ar_mode, matrix: Option<(&str, &str)>| {
+            let mut d = doc(&[
+                ("0:00:00.00", "0:00:01.00", "Default", line),
+                ("0:00:00.00", "0:00:01.00", "Default", r"{\c&H0000FF&}x"),
+            ]);
+            d.event_mut(0).unwrap().margin_l = 10;
+            let mut tpl = d.event(0).unwrap().clone();
+            tpl.kind = EventKind::Comment;
+            tpl.effect = "template line".into();
+            d.push_event(tpl);
+            resample(
+                &mut d,
+                &Resample {
+                    from: (640, 480),
+                    to: (1280, 720),
+                    ar_mode,
+                    matrix: matrix.map(|(a, b)| (a.to_string(), b.to_string())),
+                    ..Resample::default()
+                },
+            );
+            d
+        };
+        // stretch: X doubles, Y x1.5, glyphs widen by 4/3 through \fscx
+        let d = run(ArMode::Stretch, None);
+        let e = d.event(0).unwrap();
+        assert_eq!(e.text, r"{\pos(0,0)\fsp3\p1}m 0 0 l 15 15");
+        assert_eq!(e.margin_l, 20);
+        let st = d.style("Default").unwrap();
+        assert!((st.scale_x - 400.0 / 3.0).abs() < 1e-9 && st.spacing == 0.0);
+        assert_eq!(d.event(2).unwrap().text, line, "templates stay");
+        // add borders: 106 px each side of the 4:3 source, uniform scale
+        let d = run(ArMode::AddBorder, None);
+        assert_eq!(
+            d.event(0).unwrap().text,
+            r"{\pos(159.249,0)\fsp3\p1}m 0 0 l 15.0235 15"
+        );
+        assert_eq!(d.style("Default").unwrap().margin_l, 174);
+        // remove borders: cut 60 px off the top and the bottom instead
+        let d = run(ArMode::RemoveBorder, None);
+        assert_eq!(
+            d.event(0).unwrap().text,
+            r"{\pos(0,-120)\fsp4\p1}m 0 0 l 20 20"
+        );
+        // colours move between matrices
+        let d = run(ArMode::Stretch, Some(("TV.601", "TV.709")));
+        assert_eq!(d.event(1).unwrap().text, r"{\c&H0019FF&}x");
+        assert_eq!(d.info("YCbCr Matrix"), Some("TV.709"));
     }
 
     #[test]

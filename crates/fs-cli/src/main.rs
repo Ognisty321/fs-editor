@@ -173,7 +173,7 @@ enum Cmd {
         /// Source resolution (default: PlayResX/Y of the script).
         #[arg(long)]
         from: Option<String>,
-        /// Stretch when the aspect ratio changes (default: keep proportions).
+        /// Stretch when the aspect ratio changes (default: keep proportions, adding borders).
         #[arg(long)]
         stretch: bool,
         #[command(flatten)]
@@ -969,8 +969,12 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 &ops::Resample {
                     from,
                     to,
-                    stretch,
-                    margin: (0, 0, 0, 0),
+                    ar_mode: if stretch {
+                        ops::ArMode::Stretch
+                    } else {
+                        ops::ArMode::AddBorder
+                    },
+                    ..ops::Resample::default()
                 },
             );
             eprintln!("resampled {}x{} → {}x{}", from.0, from.1, to.0, to.1);

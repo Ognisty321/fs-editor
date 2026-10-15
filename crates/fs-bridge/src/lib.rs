@@ -108,6 +108,25 @@ pub mod ffi {
         encoding: i32,
     }
 
+    /// Aegisub's "Resample Resolution" settings.
+    #[derive(Debug, Clone, Default)]
+    struct ResampleSpec {
+        from_x: i32,
+        from_y: i32,
+        to_x: i32,
+        to_y: i32,
+        /// Added to the source in the manual aspect ratio mode.
+        margin_l: i32,
+        margin_r: i32,
+        margin_t: i32,
+        margin_b: i32,
+        /// 0 stretch, 1 add borders, 2 remove borders, 3 manual.
+        ar_mode: u8,
+        /// "YCbCr Matrix" values to convert colours between; empty = keep them.
+        from_matrix: String,
+        to_matrix: String,
+    }
+
     /// The Shift Times panel's settings.
     #[derive(Debug, Clone, Default)]
     struct ShiftSpec {
@@ -447,7 +466,7 @@ pub mod ffi {
         fn replace_rules(self: &mut Session, specs: &[FindSpec]) -> Result<usize>;
         fn overlapping(self: &Session, row: usize) -> Vec<usize>;
         fn rows_at(self: &Session, ms: i64) -> Vec<usize>;
-        fn resample(self: &mut Session, x: i32, y: i32);
+        fn resample(self: &mut Session, spec: &ResampleSpec);
         fn collect_fonts(
             self: &Session,
             dirs: Vec<String>,

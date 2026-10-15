@@ -163,6 +163,104 @@ fn parse_prefix_int(s: &str, radix: u32) -> Option<u64> {
     })
 }
 
+/// Aegisub's `ycbcr_converter::rgb_to_rgb`: a colour goes to YCbCr with one
+/// "YCbCr Matrix" (`TV.601`, `PC.709`, ...) and back with another, so a script
+/// made for one video colour space looks the same on another.
+#[derive(Debug, Clone, Copy)]
+pub struct MatrixConversion {
+    to_ycbcr: [f64; 9],
+    from_ycbcr: [f64; 9],
+    shift: [f64; 3],
+}
+
+impl MatrixConversion {
+    /// None when either header is not an explicit matrix, or they are equal.
+    pub fn new(from: &str, to: &str) -> Option<Self> {
+        fn parse(h: &str) -> Option<([f64; 3], bool)> {
+            let (range, m) = h.split_once('.')?;
+            let full = match range {
+                "TV" => false,
+                "PC" => true,
+                _ => return None,
+            };
+            let k = match m {
+                "601" => [0.299, 0.587, 0.114],
+                "709" => [0.2126, 0.7152, 0.0722],
+                "FCC" => [0.3, 0.59, 0.11],
+                "240M" => [0.212, 0.701, 0.087],
+                _ => return None,
+            };
+            Some((k, full))
+        }
+        let ([kr, kg, kb], full) = parse(from)?;
+        let ([dr, dg, db], dfull) = parse(to)?;
+        if from == to {
+            return None;
+        }
+        let mut to_ycbcr = [
+            kr,
+            kg,
+            kb,
+            -kr / (1.0 - kb),
+            -kg / (1.0 - kb),
+            1.0,
+            1.0,
+            -kg / (1.0 - kr),
+            -kb / (1.0 - kr),
+        ];
+        let (rows, shift_to) = if full {
+            ([1.0, 0.5, 0.5], [0.0, 128.0, 128.0])
+        } else {
+            (
+                [219.0 / 255.0, 112.0 / 255.0, 112.0 / 255.0],
+                [16.0, 128.0, 128.0],
+            )
+        };
+        let mut from_ycbcr = [
+            1.0,
+            0.0,
+            1.0 - dr,
+            1.0,
+            -(1.0 - db) * db / dg,
+            -(1.0 - dr) * dr / dg,
+            1.0,
+            1.0 - db,
+            0.0,
+        ];
+        let (cols, shift_from) = if dfull {
+            ([1.0, 2.0, 2.0], [0.0, -128.0, -128.0])
+        } else {
+            (
+                [255.0 / 219.0, 255.0 / 112.0, 255.0 / 112.0],
+                [-16.0, -128.0, -128.0],
+            )
+        };
+        for (i, v) in to_ycbcr.iter_mut().enumerate() {
+            *v *= rows[i / 3];
+        }
+        for (i, v) in from_ycbcr.iter_mut().enumerate() {
+            *v *= cols[i % 3];
+        }
+        let shift = [0, 1, 2].map(|i| shift_to[i] + shift_from[i]);
+        Some(MatrixConversion {
+            to_ycbcr,
+            from_ycbcr,
+            shift,
+        })
+    }
+
+    /// Alpha is kept.
+    pub fn convert(&self, c: Color) -> Color {
+        let prod = |m: &[f64; 9], v: [f64; 3]| {
+            [0, 1, 2].map(|r| m[r * 3] * v[0] + m[r * 3 + 1] * v[1] + m[r * 3 + 2] * v[2])
+        };
+        let y = prod(&self.to_ycbcr, [c.r, c.g, c.b].map(f64::from));
+        let [r, g, b] = prod(&self.from_ycbcr, [0, 1, 2].map(|i| y[i] + self.shift[i]))
+            .map(|v| (v + 0.5).clamp(0.0, 255.0) as u8);
+        Color { r, g, b, a: c.a }
+    }
+}
+
 impl fmt::Display for Color {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.to_style_string())
@@ -172,6 +270,24 @@ impl fmt::Display for Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn matrix_conversion() {
+        assert!(MatrixConversion::new("TV.601", "TV.601").is_none());
+        assert!(MatrixConversion::new("None", "TV.709").is_none());
+        let c = MatrixConversion::new("TV.601", "TV.709").unwrap();
+        assert_eq!(
+            c.convert(Color::rgba(255, 0, 0, 7)),
+            Color::rgba(255, 25, 0, 7)
+        );
+        assert_eq!(c.convert(Color::rgb(0, 128, 255)), Color::rgb(0, 123, 255));
+        assert_eq!(c.convert(Color::rgb(77, 77, 77)), Color::rgb(77, 77, 77));
+        let range = MatrixConversion::new("TV.601", "PC.601").unwrap();
+        assert_eq!(
+            range.convert(Color::rgb(255, 0, 0)),
+            Color::rgb(239, 15, 15)
+        );
+    }
 
     #[test]
     fn style_colours() {
