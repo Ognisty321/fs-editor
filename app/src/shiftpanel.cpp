@@ -281,7 +281,9 @@ void ShiftPanel::shift() {
     if (byVideo || byAudio) {
         const int marker = m_tab->grid()->syncMarker() >= 0 ? m_tab->grid()->syncMarker() : m_tab->active();
         const fsb::Row r = s.row(size_t(marker));
-        const qint64 target = byVideo ? m_tab->videoTime() : m_tab->audio()->markTime();
+        const qint64 target = !byVideo ? m_tab->audio()->markTime()
+                              : m_byEnd->isChecked() ? m_tab->videoEndTime()
+                                                     : m_tab->videoStartTime();
         if (target < 0) return;
         amount = target - (m_byEnd->isChecked() ? r.end : r.start);
         spec.frames = false;

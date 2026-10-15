@@ -804,12 +804,10 @@ void MainWindow::buildMenus() {
     });
     video->addSeparator();
     add("startFromVideo", tr("Insert start time from video"), QKeySequence("Ctrl+Left"), video, [this] {
-        withRow([](TabPanel *t, fsb::Row &r) { r.start = t->videoTime(); });
+        withRow([](TabPanel *t, fsb::Row &r) { r.start = t->videoStartTime(); });
     });
     add("endFromVideo", tr("Insert end time from video"), QKeySequence("Ctrl+Right"), video, [this] {
-        withRow([](TabPanel *t, fsb::Row &r) {
-            r.end = t->video()->hasVideo() ? t->video()->nextFrameTime() : t->videoTime();
-        });
+        withRow([](TabPanel *t, fsb::Row &r) { r.end = t->videoEndTime(); });
     });
     // Kainote's snap: the active line's start (end) to the nearest keyframe or start/end of the line
     // before or after it, within 5 s and never past the line's other end
@@ -1077,7 +1075,7 @@ void MainWindow::buildMenus() {
             next = *it;
         } else prev = kf.back();
         t->s().set_rows_field(fs::slice(t->selection()), "times",
-                              fs::Utf8(QString("%1,%2").arg(v->timeAt(prev)).arg(v->timeAt(next))));
+                              fs::Utf8(QString("%1,%2").arg(v->timeAtStart(prev)).arg(v->timeAtEnd(next - 1))));
         t->changed();
     });
     // Aegisub time/frame/current: shift the selection so the active line starts at the video frame
@@ -1085,7 +1083,7 @@ void MainWindow::buildMenus() {
         auto *t = tab();
         if (t->active() < 0 || !t->video()->hasVideo()) return;
         fsb::ShiftSpec spec;
-        spec.amount = t->video()->time() - t->s().row(size_t(t->active())).start;
+        spec.amount = t->videoStartTime() - t->s().row(size_t(t->active())).start;
         spec.lines = 1;
         for (size_t r : t->selection()) spec.selected.push_back(r);
         spec.active = size_t(t->active());

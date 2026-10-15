@@ -156,7 +156,7 @@ void AudioView::paintOverlay(QPainter &p) {
     auto *video = b.m_tab->video();
     p.setPen(QPen(kKeyframe, 1, Qt::DashLine));
     for (qint64 kf : b.m_tab->keyframes()) {
-        const qint64 t = video->hasVideo() ? video->timeAt(kf) : -1;
+        const qint64 t = video->hasVideo() ? video->timeAtStart(kf) : -1; // where snapping puts a line
         if (t < l || t > r) continue;
         p.drawLine(b.xOf(t), RulerH, b.xOf(t), h);
     }
@@ -607,7 +607,7 @@ qint64 AudioBox::snap(qint64 ms, bool toggle) const {
         }
     };
     if (kf && m_tab->video()->hasVideo())
-        for (qint64 f : m_tab->keyframes()) consider(m_tab->video()->timeAt(f));
+        for (qint64 f : m_tab->keyframes()) consider(m_tab->video()->timeAtStart(f)); // Aegisub's markers
     if (lines)
         for (const auto &[start, end] : inactiveLines()) {
             consider(start);

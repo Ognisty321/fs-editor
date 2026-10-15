@@ -131,7 +131,6 @@ public:
     }
     qint64 time() const { return timeAt(m_frame); }
     qint64 frame() const { return m_frame; }
-    qint64 nextFrameTime() const { return timeAt(m_frame + 1); }
     void seekMs(qint64 ms);
     void seekFrame(qint64 n);
     void play();

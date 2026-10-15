@@ -521,11 +521,11 @@ void Grid::insertRow(bool after, int timeMode) {
     const fsb::Row r = empty ? fsb::Row{} : s.row(size_t(act));
     qint64 start, end;
     if (timeMode == 1) {
-        start = m_tab->videoTime();
+        start = m_tab->videoStartTime();
         end = start + 5000;
     } else if (timeMode == 2) {
-        start = m_tab->videoTime();
-        end = m_tab->video()->nextFrameTime();
+        start = m_tab->videoStartTime();
+        end = m_tab->videoEndTime();
     } else if (after) {
         start = r.end;
         end = start + 5000;

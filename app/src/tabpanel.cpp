@@ -342,6 +342,14 @@ qint64 TabPanel::videoTime() const {
     return m_audio->hasAudio() ? std::max<qint64>(0, m_audio->markTime()) : 0;
 }
 
+qint64 TabPanel::videoStartTime() const {
+    return m_video->hasVideo() ? m_video->timeAtStart(m_video->frame()) : videoTime();
+}
+
+qint64 TabPanel::videoEndTime() const {
+    return m_video->hasVideo() ? m_video->timeAtEnd(m_video->frame()) : videoTime();
+}
+
 void TabPanel::seekVideo(qint64 ms) {
     if (m_video->hasVideo()) m_video->seekMs(ms);
 }

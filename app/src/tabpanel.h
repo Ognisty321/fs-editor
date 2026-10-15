@@ -71,6 +71,10 @@ public:
     void closeKeyframes(); // back to the video's own
     void openTimecodes(const QString &path); // empty: the video's own; applied when a video opens
     qint64 videoTime() const;
+    // where a line starting (ending) on the video frame goes: Aegisub's TimeAtFrame START (END), safe
+    // from rounding to centiseconds; videoTime() without video
+    qint64 videoStartTime() const;
+    qint64 videoEndTime() const;
     void seekVideo(qint64 ms);
     void playLine(int row);
 
