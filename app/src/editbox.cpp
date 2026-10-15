@@ -1060,9 +1060,14 @@ void EditBox::onKey(int key, Qt::KeyboardModifiers mods) {
     case Qt::Key_I: toggleTag("i"); break;
     case Qt::Key_Comma:
     case Qt::Key_Period: {
+        // Kainote: the video time's distance from the line's start (end), only within the line
         const fsb::Row r = s.row(size_t(m_row));
-        const qint64 base = key == Qt::Key_Comma ? r.start : r.end;
-        m_text->insertPlainText(QString::number(m_tab->videoTime() - base));
+        const qint64 t = m_tab->videoTime();
+        if (!m_tab->video()->hasVideo() || t < r.start || t > r.end) {
+            QApplication::beep();
+            break;
+        }
+        m_text->insertPlainText(QString::number(key == Qt::Key_Comma ? t - r.start : r.end - t));
         break;
     }
     case Qt::Key_Down:
