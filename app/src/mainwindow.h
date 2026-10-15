@@ -71,6 +71,7 @@ private:
     int pickEmbeddedTrack(const rust::Vec<fsb::SubTrack> &tracks, const QString &question); // -1: cancelled
     bool saveAs(TabPanel *tab);
     bool saveTab(TabPanel *tab);
+    void checkDisk(TabPanel *t); // offers to read a file another program changed again
     void convert(const QString &format);
     void runMacro(size_t id);
     void automationManager();
@@ -94,4 +95,5 @@ private:
     std::optional<rust::Box<fsb::Automation>> m_automation;
     GuiAutomationHost *m_host = nullptr; // owned by m_automation
     qint64 m_lastMacro = -1; // first macro of the last script loaded by hand
+    bool m_checkingDisk = false;
 };

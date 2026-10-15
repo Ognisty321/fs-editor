@@ -81,6 +81,8 @@ pub enum Error {
     UnknownFormat,
     #[error("the file contains no subtitles")]
     Empty,
+    #[error("the file is read-only: save it under another name or clear its read-only attribute")]
+    ReadOnly,
 }
 
 /// Detect the format from content (and the file extension as a tiebreaker).
@@ -504,13 +506,33 @@ pub fn save_file(
         (UTF_8, true)
     };
     let bytes = encoding::encode(&text, enc, bom);
+    // Kainote's: a read-only file says so, not with an OS error
+    if std::fs::metadata(path).is_ok_and(|m| m.permissions().readonly()) {
+        return Err(Error::ReadOnly);
+    }
     // write atomically: temp file + rename
     let tmp = path.with_extension(format!(
         "{}.fs-tmp",
         path.extension().and_then(|e| e.to_str()).unwrap_or("")
     ));
-    std::fs::write(&tmp, &bytes)?;
-    std::fs::rename(&tmp, path)?;
+    let written = std::fs::write(&tmp, &bytes).and_then(|()| {
+        // a player or a virus scanner holding the file a moment fails the rename: Aegisub tries 10 times
+        let mut tries = 1;
+        loop {
+            match std::fs::rename(&tmp, path) {
+                Err(e) if tries < 10 && e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                r => return r,
+            }
+        }
+    });
+    if written.is_err() {
+        // no leftover next to the user's file
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written?;
     Ok((enc, bom))
 }
 
@@ -711,6 +733,24 @@ mod tests {
         assert!(lossless(&d, Format::Srt, &opts) && d.attachments().is_empty());
         let texts: Vec<_> = d.events().iter().map(|e| e.event.text.as_str()).collect();
         assert_eq!(texts, [r"{\i1}a", "c"]);
+    }
+
+    #[test]
+    fn a_read_only_file_is_left_alone() {
+        let p = std::env::temp_dir().join(format!("fsf-ro-{}.srt", std::process::id()));
+        std::fs::write(&p, "1\n00:00:01,000 --> 00:00:02,000\na\n").unwrap();
+        let mut perm = std::fs::metadata(&p).unwrap().permissions();
+        perm.set_readonly(true);
+        std::fs::set_permissions(&p, perm.clone()).unwrap();
+        let doc = load_file(&p, &LoadOptions::default()).unwrap().doc;
+        let r = save_file(&doc, &p, Format::Srt, &SaveOptions::default());
+        assert!(matches!(r, Err(Error::ReadOnly)));
+        #[allow(clippy::permissions_set_readonly_false)]
+        perm.set_readonly(false);
+        std::fs::set_permissions(&p, perm).unwrap();
+        assert!(save_file(&doc, &p, Format::Srt, &SaveOptions::default()).is_ok());
+        assert!(!p.with_extension("srt.fs-tmp").exists());
+        std::fs::remove_file(p).ok();
     }
 
     #[test]

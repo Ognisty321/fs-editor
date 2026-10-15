@@ -226,6 +226,11 @@ impl Editor {
     pub fn mark_saved(&mut self) {
         self.saved_generation = self.generation;
     }
+
+    /// Modified until saved, whatever is undone (a recovered copy).
+    pub fn mark_unsaved(&mut self) {
+        self.saved_generation = u64::MAX;
+    }
 }
 
 #[cfg(test)]

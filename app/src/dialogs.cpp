@@ -1877,7 +1877,11 @@ AutosaveDialog::AutosaveDialog(QWidget *parent) : QDialog(parent) {
 
     const QString suffix = ".AUTOSAVE.ass";
     QMap<QString, QList<std::pair<QDateTime, QString>>> byName;
-    for (const QFileInfo &fi : QDir(autosaveDir()).entryInfoList({"*" + suffix}, QDir::Files)) {
+    for (const QFileInfo &fi : QDir(autosaveDir()).entryInfoList({"*" + suffix, "*.ORIGINAL.*"}, QDir::Files)) {
+        if (!fi.fileName().endsWith(suffix)) { // the file as it was opened (Aegisub)
+            byName[fi.fileName().section(".ORIGINAL.", 0, 0)].append({fi.lastModified(), fi.absoluteFilePath()});
+            continue;
+        }
         const QString stem = fi.fileName().chopped(suffix.size());
         const QDateTime date = QDateTime::fromString(stem.section('.', -1), "yyyy-MM-dd-HH-mm-ss");
         const QString name = date.isValid() ? stem.section('.', 0, -2) : stem;
@@ -1894,7 +1898,8 @@ AutosaveDialog::AutosaveDialog(QWidget *parent) : QDialog(parent) {
         QStringList paths, labels;
         for (const auto &[d, p] : groups[i]) {
             paths << p;
-            labels << QLocale().toString(d, QLocale::LongFormat);
+            labels << QLocale().toString(d, QLocale::LongFormat) +
+                          (p.endsWith(suffix) ? QString() : "  " + tr("(the file as opened)"));
         }
         it->setData(Qt::UserRole, paths);
         it->setData(Qt::UserRole + 1, labels);

@@ -4,6 +4,8 @@
 
 #include "bridge.h"
 
+#include <QDateTime>
+#include <QFileInfo>
 #include <QWidget>
 #include <set>
 
@@ -46,6 +48,9 @@ public:
     QString path() const;
     QString title() const;
     bool modified() const;
+    // the file's time as read or saved: another program's change shows as a different one
+    QDateTime diskTime() const { return m_diskTime; }
+    void noteDisk() { m_diskTime = QFileInfo(path()).lastModified(); }
 
     // selection; rows are logical grid rows
     int active() const { return m_active; }
@@ -123,4 +128,5 @@ private:
     bool m_hideOriginal = false;
     std::vector<std::int64_t> m_keyframes;
     QString m_keyframesPath, m_timecodesPath; // loaded from files, kept over the video's own
+    QDateTime m_diskTime;
 };

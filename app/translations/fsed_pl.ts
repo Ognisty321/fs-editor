@@ -212,6 +212,10 @@
         <source>Open</source>
         <translation>Otwórz</translation>
     </message>
+    <message>
+        <source>(the file as opened)</source>
+        <translation>(plik w chwili otwarcia)</translation>
+    </message>
 </context>
 <context>
     <name>EditBox</name>
@@ -1044,6 +1048,10 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Wideo zawiera napisy. Wczytać je?</translation>
     </message>
     <message>
+        <source>%1 is open already</source>
+        <translation>%1 jest już otwarty</translation>
+    </message>
+    <message>
         <source>&amp;File</source>
         <translation>&amp;Plik</translation>
     </message>
@@ -1824,6 +1832,18 @@ Tłumaczenie: wklejony tekst, który przejmuje timing oryginału.</translation>
         <translation>(pusto)</translation>
     </message>
     <message>
+        <source>File changed</source>
+        <translation>Plik zmieniony</translation>
+    </message>
+    <message>
+        <source>%1 was changed by another program. Read it again, losing the changes made here?</source>
+        <translation>%1 został zmieniony przez inny program. Wczytać go ponownie, tracąc zmiany wprowadzone tutaj?</translation>
+    </message>
+    <message>
+        <source>%1 was changed by another program. Read it again?</source>
+        <translation>%1 został zmieniony przez inny program. Wczytać go ponownie?</translation>
+    </message>
+    <message>
         <source>Untitled</source>
         <translation>Bez nazwy</translation>
     </message>
@@ -2325,6 +2345,10 @@ Filtry eksportu: %8</translation>
     <message>
         <source>FS Editor has crashed. Unsaved subtitles were written to %1 and can be opened with File &gt; Open autosave file.</source>
         <translation>FS Editor uległ awarii. Niezapisane napisy zapisano w %1; można je otworzyć przez Plik &gt; Otwórz autozapis.</translation>
+    </message>
+    <message>
+        <source>FS Editor was not closed properly last time. Open one of the autosaved subtitles?</source>
+        <translation>FS Editor nie został ostatnio poprawnie zamknięty. Otworzyć któreś z automatycznie zapisanych napisów?</translation>
     </message>
     <message>
         <source>Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp);;All files (*)</source>

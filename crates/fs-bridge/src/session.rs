@@ -514,6 +514,14 @@ impl Session {
         Ok(())
     }
 
+    /// Forget the file the subtitles came from (a recovered autosave): Save asks for a name, and
+    /// they count as modified until then.
+    pub fn detach(&mut self) {
+        self.path = None;
+        self.ed.mark_unsaved();
+        self.generation += 1;
+    }
+
     /// Whether the format was converted since the file was read or saved.
     pub fn converted(&self) -> bool {
         self.format != self.disk_format

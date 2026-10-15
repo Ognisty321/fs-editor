@@ -12,6 +12,8 @@
 #include <QDropEvent>
 #include <QLibraryInfo>
 #include <QListWidget>
+#include <QLockFile>
+#include <QMessageBox>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QSettings>
@@ -149,9 +151,20 @@ int main(int argc, char **argv) {
     MainWindow w;
     g_main = &w;
     w.show();
+    // a run that did not close (power loss, a killed process, a crash) leaves its lock behind, and
+    // the next start offers the autosaves (Kainote's session restore); a second instance has none
+    QDir().mkpath(autosaveDir());
+    QLockFile running(autosaveDir() + "/running.lock");
+    const bool left = QFileInfo::exists(running.fileName());
+    const bool crashed = running.tryLock(0) && left && !smoke &&
+                         !QDir(autosaveDir()).entryList({"*.AUTOSAVE.ass"}, QDir::Files).isEmpty();
     const QStringList files = app.arguments().mid(1);
     // from the event loop: opening may ask a question (subtitles inside a video)
-    QTimer::singleShot(0, &w, [&w, files] {
+    QTimer::singleShot(0, &w, [&w, files, crashed] {
+        if (crashed && QMessageBox::question(&w, "FS Editor",
+                                             QObject::tr("FS Editor was not closed properly last time. Open one "
+                                                         "of the autosaved subtitles?")) == QMessageBox::Yes)
+            w.action("openAutosave")->trigger();
         for (const QString &f : files) w.openFile(f);
         if (files.isEmpty() && QSettings().value("main/askSession", true).toBool()) w.action("loadSession")->trigger();
     });

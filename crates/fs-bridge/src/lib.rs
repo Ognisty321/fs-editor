@@ -476,6 +476,8 @@ pub mod ffi {
         fn convert(self: &mut Session, format: &str) -> Result<()>;
         /// Whether the format was converted since the file was read or saved: Save asks for a name.
         fn converted(self: &Session) -> bool;
+        /// Forget the file (a recovered autosave): Save asks for a name, modified until then.
+        fn detach(self: &mut Session);
         fn file_info(self: &Session) -> FileInfo;
         /// Edits with the same non-empty `amend` make one undo step.
         fn set_info_value(self: &mut Session, key: &str, value: &str, amend: &str);

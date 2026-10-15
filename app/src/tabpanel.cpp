@@ -1,6 +1,7 @@
 #include "tabpanel.h"
 
 #include "audiobox.h"
+#include "dialogs.h"
 #include "editbox.h"
 #include "grid.h"
 #include "mainwindow.h"
@@ -163,6 +164,14 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
         m_main->error(QString::fromUtf8(e.what()));
         return false;
     }
+    noteDisk();
+    // Aegisub's backup of the file as opened, kept in the autosave folder (File > Open autosave)
+    if (const QFileInfo fi(path); fi.absolutePath() != QFileInfo(autosaveDir()).absoluteFilePath()) {
+        const QString copy = autosaveDir() + "/" + fi.completeBaseName() + ".ORIGINAL." + fi.suffix();
+        QDir().mkpath(autosaveDir());
+        QFile::remove(copy);
+        QFile::copy(path, copy);
+    }
     m_sel.clear();
     m_active = 0;
     m_edit->load(-1); // a new file: forget the revert text of the old one
@@ -223,6 +232,7 @@ bool TabPanel::save(const QString &target) {
         m_main->error(QString::fromUtf8(e.what()));
         return false;
     }
+    noteDisk();
     changed();
     emit titleChanged();
     return true;

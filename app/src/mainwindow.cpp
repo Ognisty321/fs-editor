@@ -191,6 +191,7 @@ MainWindow::MainWindow() {
         followActive();
         updateActions();
         updateStatus();
+        checkDisk(current());
     });
     m_tabs->tabBar()->installEventFilter(this);
     m_tabs->tabBar()->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -260,11 +261,17 @@ MainWindow::MainWindow() {
     buildToolbar();
 
     // Autosave (Aegisub): modified tabs are copied to autosaveDir() every N seconds; the oldest
-    // copies beyond 100 are removed at startup.
-    {
-        auto old = QDir(autosaveDir()).entryInfoList({"*.AUTOSAVE.ass"}, QDir::Files, QDir::Time);
+    // copies beyond 100 are removed at startup, and so are those of the files as opened.
+    for (const char *kind : {"*.AUTOSAVE.ass", "*.ORIGINAL.*"}) {
+        auto old = QDir(autosaveDir()).entryInfoList({kind}, QDir::Files, QDir::Time);
         for (qsizetype i = 100; i < old.size(); ++i) QFile::remove(old[i].absoluteFilePath());
     }
+    // a Windows logoff or shutdown may end the app without closeEvent: the work goes to autosaves
+    connect(qApp, &QGuiApplication::commitDataRequest, this, [this] { autosaveTabs(); });
+    // Kainote's: a file another program changed is offered again when the app or its tab comes back
+    connect(qApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState s) {
+        if (s == Qt::ApplicationActive) checkDisk(current());
+    });
     auto *autosave = new QTimer(this);
     connect(autosave, &QTimer::timeout, this, [this, autosave] {
         const int secs = QSettings().value("main/autosaveSeconds", 60).toInt();
@@ -418,7 +425,7 @@ TabPanel *MainWindow::newTab() {
 
 // An untitled tab holding only the empty starting line can take a file (it keeps its video/audio).
 static bool untouched(TabPanel *tab) {
-    return tab && tab->path().isEmpty() &&
+    return tab && tab->path().isEmpty() && !tab->modified() &&
            (tab->s().row_count() == 0 || (tab->s().row_count() == 1 && tab->s().row(0).text.empty()));
 }
 
@@ -451,6 +458,14 @@ void MainWindow::openFile(const QString &path, const QString &encoding) {
     } else {
         // plain text, as Aegisub imports it, asks how its actors and comments are marked
         if (ext == "txt" && fsb::is_plain_text(fs::Utf8(path)) && !TabPanel::askTextImport(this)) return;
+        // a file open already: its tab, read again if unchanged there (two tabs would save over each other)
+        for (auto *t : tabs())
+            if (!t->path().isEmpty() && QFileInfo(t->path()) == QFileInfo(path)) {
+                showPanel(t);
+                if (t->modified()) status(tr("%1 is open already").arg(QFileInfo(path).fileName()));
+                else t->openSubs(path, encoding);
+                return updateActions();
+            }
         // reuse an empty, untouched tab, otherwise open a new one
         TabPanel *tab = current();
         if (!untouched(tab)) tab = newTab();
@@ -635,7 +650,15 @@ void MainWindow::buildMenus() {
     connect(videoName, &QAction::toggled, this, [](bool on) { QSettings().setValue("main/saveWithVideoName", on); });
     add("openAutosave", tr("Open autosave"), {}, file, [this] {
         AutosaveDialog d(this);
-        if (d.exec() == QDialog::Accepted && !d.chosen().isEmpty()) openFile(d.chosen());
+        if (d.exec() != QDialog::Accepted || d.chosen().isEmpty()) return;
+        // as an unsaved script: Save asks where, not into the autosave folder that gets cleaned
+        // shortcut: the name it had is not kept, a record of it beside the autosave if missed
+        TabPanel *tab = untouched(current()) ? current() : newTab();
+        if (tab->openSubs(d.chosen())) {
+            tab->s().detach();
+            tab->changed();
+            updateActions();
+        }
     });
     add("removeTemp", tr("Remove temporary files"), {}, file, [this] {
         const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex";
@@ -1303,6 +1326,22 @@ QMenu *MainWindow::recentMenu(const QString &kind) {
     a->setIcon(kind == "subs" ? icon("file-time", kAmber) : kind == "video" ? icon("clock-play", kBlue) : icon("history", kTeal));
     m_actions.insert("recent" + QString(kind == "subs" ? "Subs" : kind == "video" ? "Video" : kind == "audio" ? "Audio" : "Keyframes"), a);
     return m;
+}
+
+void MainWindow::checkDisk(TabPanel *t) {
+    if (!t || t->path().isEmpty() || m_checkingDisk) return;
+    const QFileInfo fi(t->path());
+    if (!fi.exists() || fi.lastModified() == t->diskTime()) return;
+    t->noteDisk(); // asked once for each change
+    m_checkingDisk = true;
+    const auto r = QMessageBox::question(
+        this, tr("File changed"),
+        (t->modified() ? tr("%1 was changed by another program. Read it again, losing the changes made here?")
+                       : tr("%1 was changed by another program. Read it again?"))
+            .arg(fi.fileName()));
+    m_checkingDisk = false;
+    if (r == QMessageBox::Yes) t->openSubs(t->path());
+    updateActions();
 }
 
 bool MainWindow::autosaveTabs() {
