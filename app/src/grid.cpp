@@ -136,6 +136,12 @@ void Grid::applyFilter() {
         m_vis.resize(m_tab->s().row_count());
         std::iota(m_vis.begin(), m_vis.end(), size_t(0));
     }
+    m_folded = fs::vec(m_tab->s().tree_hidden());
+    if (!m_folded.empty()) {
+        std::vector<size_t> shown;
+        std::ranges::set_difference(m_vis, m_folded, std::back_inserter(shown));
+        m_vis = std::move(shown);
+    }
     updateScroll();
     viewport()->update();
 }
@@ -332,10 +338,22 @@ void Grid::paintEvent(QPaintEvent *) {
         if (cmp != m_compare.end()) p.fillRect(0, y, w, rh, T.compare);
         // a gap in the visible rows marks a filtered block, "+" to expand; "-" folds it again
         const char *fold = !filterOn ? nullptr : gapBefore(vi) ? "+" : expandedStart(i) ? "-" : nullptr;
+        const QString marks = fs::q(r.markers);
         x = 0;
         for (size_t k = 0; k < m_cols.size(); ++k) {
             const int c = m_cols[k];
             const QRect cr(x, y, m_widths[k], rh);
+            if (c != Num && marks.contains("[tree_description]")) {
+                // Kainote: a tree's description fills the row behind the arrow that folds it
+                const QRect rest = QRect(x, y, w - x, rh).adjusted(Pad, 0, -Pad, 0);
+                const bool closed = std::ranges::binary_search(m_folded, i + 1);
+                p.fillRect(QRect(x, y, w - x, rh), T.comment);
+                p.setPen(T.text);
+                p.drawText(rest, Qt::AlignVCenter | Qt::AlignLeft,
+                           p.fontMetrics().elidedText(QString(closed ? "▶  " : "▼  ") + fs::q(r.text), Qt::ElideRight,
+                                                      rest.width()));
+                break;
+            }
             if (c == Num) {
                 QColor lc = r.doubtful ? T.labelDoubtful
                           : r.state == 1 ? T.labelModified
@@ -373,6 +391,11 @@ void Grid::paintEvent(QPaintEvent *) {
         }
         p.setPen(T.lines);
         p.drawLine(0, y + rh - 1, w, y + rh - 1);
+        if (marks.contains("[tree_opened]") && !m_widths.empty()) { // an open tree's lines, framed
+            p.setPen(T.text);
+            p.drawLine(m_widths[0], y, m_widths[0], y + rh - 1);
+            p.drawLine(w - 1, y, w - 1, y + rh - 1);
+        }
         if (m_linked.contains(i)) p.fillRect(0, y + 1, 3, rh - 2, T.active);
         if (m_tab->isSelected(i)) p.fillRect(0, y, w, rh, T.selection);
         if (int(i) == m_tab->active()) {
@@ -415,6 +438,8 @@ void Grid::mousePressEvent(QMouseEvent *e) {
     const int col = colAt(int(e->position().x()));
     if (vi < 0) return;
     const size_t row = m_vis[vi];
+    if (e->button() == Qt::LeftButton && e->modifiers() == Qt::NoModifier && isTreeHead(row))
+        return toggleTree(row); // Kainote: a click on the description opens or closes the tree
     if (e->button() == Qt::LeftButton) {
         if (col == Num && e->position().x() < 10 && filterOn && (gapBefore(vi) || expandedStart(row))) {
             if (gapBefore(vi))
@@ -458,9 +483,50 @@ void Grid::mouseDoubleClickEvent(QMouseEvent *e) {
     const int vi = rowAt(int(e->position().y()));
     if (vi < 0) return;
     const size_t row = m_vis[vi];
+    if (e->modifiers() == Qt::NoModifier && isTreeHead(row)) return; // its press toggled the tree
     const int col = colAt(int(e->position().x()));
     const auto r = m_tab->s().row(row);
     m_tab->seekVideo(col == End ? r.end : r.start);
+}
+
+bool Grid::isTreeHead(size_t row) { return fs::q(m_tab->s().row(row).markers).contains("[tree_description]"); }
+
+void Grid::toggleTree(size_t row) {
+    m_tab->s().toggle_tree(row);
+    m_tab->changed();
+    // a line the tree folded away gives the active mark to the description (Kainote)
+    if (const int a = m_tab->active(); a > int(row) && std::ranges::binary_search(m_folded, size_t(a)))
+        m_tab->setActive(int(row));
+}
+
+// Kainote's menu on a tree's description line
+void Grid::treeMenu(const QPoint &global, size_t row) {
+    QMenu m(this);
+    m.addAction(tr("Copy tree"), this, [this, row] {
+        auto rows = fs::vec(m_tab->s().tree_members(row));
+        rows.insert(rows.begin(), row);
+        QApplication::clipboard()->setText(fs::q(m_tab->s().copy_rows(fs::slice(rows))));
+    });
+    m.addAction(tr("Change description"), this, [this, row] {
+        auto r = m_tab->s().row(row);
+        bool ok = false;
+        const QString d = QInputDialog::getText(this, tr("Tree"), tr("Description:"), QLineEdit::Normal, fs::q(r.text), &ok);
+        if (!ok) return;
+        r.text = fs::rs(d);
+        m_tab->s().set_row(row, r, "");
+        m_tab->changed();
+    });
+    m.addAction(tr("Select tree lines"), this, [this, row] {
+        const auto rows = fs::vec(m_tab->s().tree_members(row));
+        if (rows.empty()) return;
+        if (std::ranges::binary_search(m_folded, rows.front())) toggleTree(row); // shown to be selected
+        m_tab->setSelection(rows, int(rows.front()));
+    });
+    m.addAction(tr("Remove tree"), this, [this, row] {
+        m_tab->s().remove_tree(row);
+        m_tab->changed();
+    });
+    m.exec(global);
 }
 
 void Grid::wheelEvent(QWheelEvent *e) {
@@ -653,6 +719,8 @@ void Grid::splitRows(int how) {
 }
 
 void Grid::contextMenuEvent(QContextMenuEvent *e) {
+    if (const int vi = rowAt(e->pos().y()); e->reason() == QContextMenuEvent::Mouse && vi >= 0 && isTreeHead(m_vis[vi]))
+        return treeMenu(e->globalPos(), m_vis[vi]);
     if (colAt(e->pos().x()) == Num && e->reason() == QContextMenuEvent::Mouse) return; // sync marker
     contextMenu(e->globalPos());
 }
@@ -715,6 +783,14 @@ void Grid::contextMenu(const QPoint &global) {
         a->setChecked(columnHidden(c));
         connect(a, &QAction::toggled, this, [this, c](bool on) { setColumnHidden(c, on); });
     }
+    m.addAction(tr("Make tree"), this, [this, sel] {
+        bool ok = false;
+        const QString d = QInputDialog::getText(this, tr("Make tree"), tr("Description:"), QLineEdit::Normal, {}, &ok);
+        if (!ok) return;
+        const auto heads = fs::vec(m_tab->s().make_tree(fs::slice(sel), fs::Utf8(d)));
+        m_tab->changed();
+        if (!heads.empty()) m_tab->setActive(int(heads.front()));
+    })->setEnabled(!sel.empty() && !tl);
     m.addAction(tr("Hide selected lines"), this, [this, sel] {
         filterSpec.hide_rows.clear();
         for (size_t r : sel) filterSpec.hide_rows.push_back(r);

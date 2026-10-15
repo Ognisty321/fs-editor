@@ -491,6 +491,15 @@ pub mod ffi {
         fn duplicate_rows(self: &mut Session, rows: &[usize]) -> Vec<usize>;
         fn delete_rows(self: &mut Session, rows: &[usize]);
         fn clear_text(self: &mut Session, rows: &[usize]);
+        /// Kainote's trees: the rows closed trees fold away.
+        fn tree_hidden(self: &Session) -> Vec<usize>;
+        /// The rows of the tree `row` describes (empty when it describes none).
+        fn tree_members(self: &Session, row: usize) -> Vec<usize>;
+        /// A closed tree for each run of the rows, its description line holding `description`;
+        /// returns the description rows.
+        fn make_tree(self: &mut Session, rows: &[usize], description: &str) -> Vec<usize>;
+        fn toggle_tree(self: &mut Session, row: usize);
+        fn remove_tree(self: &mut Session, row: usize);
         fn join_rows(self: &mut Session, rows: &[usize], mode: u8) -> i64;
         fn recombine_rows(self: &mut Session, rows: &[usize]) -> Vec<usize>;
         fn change_fps(self: &mut Session, from: &str, to: &str, video: &[i64]) -> Result<()>;

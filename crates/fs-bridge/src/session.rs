@@ -200,6 +200,30 @@ fn event_line(ev: &Event) -> String {
     format!("{}: {}", ev.kind.key(), fields.join(","))
 }
 
+// Kainote's trees: a comment line marked `[tree_description]` (its text describes the tree) folds
+// the lines after it marked `[tree_closed]` or `[tree_opened]`, up to the first one without.
+const TREE_DESCRIPTION: &str = "[tree_description]";
+const TREE_OPENED: &str = "[tree_opened]";
+const TREE_CLOSED: &str = "[tree_closed]";
+
+fn tree_state(actor: &str) -> Option<&'static str> {
+    if !actor.starts_with('[') {
+        return None; // nearly every line: no need to look further
+    }
+    tlmode::split_actor(actor)
+        .0
+        .into_iter()
+        .find(|p| p.starts_with("[tree_"))
+}
+
+/// `actor` with its tree mark set to `state` (first, where Kainote writes it) or taken off.
+fn with_tree_state(actor: &str, state: Option<&'static str>) -> String {
+    let (marks, name) = tlmode::split_actor(actor);
+    let mut out: Vec<&str> = state.into_iter().collect();
+    out.extend(marks.into_iter().filter(|p| !p.starts_with("[tree_")));
+    tlmode::join_actor(&out, name)
+}
+
 impl Session {
     fn snapshot_loaded(&mut self) {
         self.loaded = events_by_id(&self.ed.doc);
@@ -833,6 +857,114 @@ impl Session {
     pub fn delete_rows(&mut self, rows: &[usize]) {
         let evs = self.all_events(rows);
         self.edit("Delete lines", |d| ops::delete_rows(d, &evs));
+    }
+
+    // shortcut: trees are off in translator mode, where a row pairs two events; add them there if
+    // people ask.
+    fn row_tree(&self, row: usize) -> Option<&'static str> {
+        let r = self.tl_row(row)?;
+        tree_state(&self.ed.doc.event(r.main())?.actor)
+    }
+
+    /// Rows that closed trees fold away. A line marked closed with no description above it (the
+    /// description was deleted) stays in view.
+    pub fn tree_hidden(&self) -> Vec<usize> {
+        if self.tl {
+            return Vec::new();
+        }
+        let mut inside = false;
+        let mut out = Vec::new();
+        for r in 0..self.rows.len() {
+            match self.row_tree(r) {
+                Some(TREE_DESCRIPTION) => inside = true,
+                Some(TREE_CLOSED) if inside => out.push(r),
+                Some(TREE_OPENED | TREE_CLOSED) => {}
+                _ => inside = false,
+            }
+        }
+        out
+    }
+
+    /// The rows of the tree `row` describes; empty when it describes none.
+    pub fn tree_members(&self, row: usize) -> Vec<usize> {
+        if self.tl || self.row_tree(row) != Some(TREE_DESCRIPTION) {
+            return Vec::new();
+        }
+        (row + 1..self.rows.len())
+            .take_while(|&r| matches!(self.row_tree(r), Some(TREE_OPENED | TREE_CLOSED)))
+            .collect()
+    }
+
+    /// Kainote's "Make tree": each run of the rows (those in no tree yet) gets a comment line
+    /// before it holding `description`, and folds closed. Returns the description rows.
+    pub fn make_tree(&mut self, rows: &[usize], description: &str) -> Vec<usize> {
+        if self.tl {
+            return Vec::new();
+        }
+        let mut evs: Vec<usize> = rows
+            .iter()
+            .copied()
+            .filter(|&r| r < self.rows.len() && self.row_tree(r).is_none())
+            .collect();
+        evs = self.main_events(&evs);
+        evs.sort_unstable();
+        evs.dedup();
+        let doc = &self.ed.doc;
+        let heads: Vec<(usize, Event)> = evs
+            .chunk_by(|a, b| b - a == 1)
+            .map(|run| {
+                let style = &doc.event(run[0]).unwrap().style;
+                let mut ev = Event::dialogue(Time(0), Time(0), style, description);
+                ev.kind = fs_core::model::EventKind::Comment;
+                ev.actor = TREE_DESCRIPTION.into();
+                (run[0], ev)
+            })
+            .collect();
+        if heads.is_empty() {
+            return Vec::new();
+        }
+        let made = self.edit("Make tree", move |d| {
+            for e in evs {
+                let ev = d.event_mut(e).unwrap();
+                ev.actor = with_tree_state(&ev.actor, Some(TREE_CLOSED));
+            }
+            d.insert_events(heads)
+        });
+        self.rows_of_events(&made)
+    }
+
+    /// Open a closed tree, or close an open one (a click on its description).
+    pub fn toggle_tree(&mut self, row: usize) {
+        let evs = self.main_events(&self.tree_members(row));
+        let Some(&first) = evs.first() else { return };
+        let closed = tree_state(&self.ed.doc.event(first).unwrap().actor) == Some(TREE_CLOSED);
+        let (to, desc) = if closed {
+            (TREE_OPENED, "Open tree")
+        } else {
+            (TREE_CLOSED, "Close tree")
+        };
+        self.edit(desc, move |d| {
+            for e in evs {
+                let ev = d.event_mut(e).unwrap();
+                ev.actor = with_tree_state(&ev.actor, Some(to));
+            }
+        });
+    }
+
+    /// Undo a tree: its lines lose the mark and the description line goes.
+    pub fn remove_tree(&mut self, row: usize) {
+        if self.tl || self.row_tree(row) != Some(TREE_DESCRIPTION) {
+            return;
+        }
+        let evs = self.main_events(&self.tree_members(row));
+        let head = self.tl_row(row).unwrap().main();
+        self.edit("Remove tree", move |d| {
+            for e in evs {
+                let ev = d.event_mut(e).unwrap();
+                ev.actor = with_tree_state(&ev.actor, None);
+            }
+            d.remove_events(&[head]);
+        });
     }
 
     pub fn clear_text(&mut self, rows: &[usize]) {
@@ -2525,6 +2657,42 @@ mod tests {
         let texts: Vec<String> = (0..s.row_count()).map(|i| s.row(i).text).collect();
         assert_eq!(texts, ["one", "p1", "plain p2", "two", "three", "x", "y"]);
         assert_eq!((s.row(1).start, s.row(2).end), (7000, 5000));
+    }
+
+    #[test]
+    fn trees_as_kainote() {
+        let mut s = session(ASS);
+        // rows 0 and 2 are two runs: two trees, each with its description before it
+        let heads = s.make_tree(&[2, 0], "intro");
+        assert_eq!(heads, [0, 3]);
+        assert_eq!(s.row_count(), 5);
+        assert_eq!((s.row(0).text.as_str(), s.row(0).comment), ("intro", true));
+        assert_eq!(s.row(1).markers, TREE_CLOSED);
+        assert_eq!(s.tree_hidden(), [1, 4]);
+        assert_eq!(s.tree_members(0), [1]);
+        // a line already in a tree makes no new one
+        assert!(s.make_tree(&[1], "x").is_empty());
+        s.toggle_tree(3);
+        assert_eq!(s.tree_hidden(), [1]);
+        assert_eq!(s.row(4).markers, TREE_OPENED);
+        // the actor stays the actor, other marks stay too
+        let mut r = s.row(4);
+        r.actor = "Ann".into();
+        s.set_row(4, &r, "");
+        s.remove_tree(3);
+        assert_eq!(s.row_count(), 4);
+        assert_eq!(
+            (s.row(3).actor.as_str(), s.row(3).markers.as_str()),
+            ("Ann", "")
+        );
+        // a closed line whose description went shows again
+        s.delete_rows(&[0]);
+        assert!(s.tree_hidden().is_empty());
+        // Kainote writes the tree mark before the bookmark
+        assert_eq!(
+            with_tree_state("[bookmark]Bob", Some(TREE_CLOSED)),
+            "[tree_closed][bookmark]Bob"
+        );
     }
 
     #[test]

@@ -705,6 +705,30 @@
         <translation>Tekst</translation>
     </message>
     <message>
+        <source>Copy tree</source>
+        <translation>Kopiuj drzewko</translation>
+    </message>
+    <message>
+        <source>Change description</source>
+        <translation>Zmień opis</translation>
+    </message>
+    <message>
+        <source>Tree</source>
+        <translation>Drzewko</translation>
+    </message>
+    <message>
+        <source>Description:</source>
+        <translation>Opis:</translation>
+    </message>
+    <message>
+        <source>Select tree lines</source>
+        <translation>Zaznacz linie drzewka</translation>
+    </message>
+    <message>
+        <source>Remove tree</source>
+        <translation>Usuń drzewko</translation>
+    </message>
+    <message>
         <source>Insert lines</source>
         <translation>Wstaw linijki</translation>
     </message>
@@ -803,6 +827,10 @@
     <message>
         <source>Hide columns</source>
         <translation>Ukryj kolumny</translation>
+    </message>
+    <message>
+        <source>Make tree</source>
+        <translation>Stwórz drzewko</translation>
     </message>
     <message>
         <source>Hide selected lines</source>

@@ -6,6 +6,7 @@
 
 #include <QAbstractScrollArea>
 #include <QHash>
+#include <algorithm>
 #include <map>
 #include <set>
 
@@ -80,11 +81,21 @@ private:
     TabPanel *m_tab;
     fsb::ColumnInfo m_colInfo{}; // rows are fetched when painted, not copied (100k lines took 400 ms a change)
     std::vector<size_t> m_vis;
+    std::vector<size_t> m_folded; // rows closed trees fold away (Kainote), sorted
     // filtered-out blocks the user expanded with "+" (Kainote), until the filter changes or rows
     // are added or removed (their numbers would point elsewhere)
     std::set<size_t> m_expanded;
     size_t m_rowCount = 0;
-    bool gapBefore(int vi) const { return vi > 0 ? m_vis[vi - 1] + 1 != m_vis[vi] : m_vis[vi] != 0; }
+    // a block the filter hid before the row (the lines a closed tree folds are none)
+    bool gapBefore(int vi) const {
+        const size_t from = vi > 0 ? m_vis[vi - 1] + 1 : 0, to = m_vis[vi];
+        const auto folded = std::lower_bound(m_folded.begin(), m_folded.end(), to) -
+                            std::lower_bound(m_folded.begin(), m_folded.end(), from);
+        return to - from > size_t(folded);
+    }
+    bool isTreeHead(size_t row);
+    void toggleTree(size_t row);
+    void treeMenu(const QPoint &global, size_t row);
     bool expandedStart(size_t row) const { return m_expanded.contains(row) && !(row && m_expanded.contains(row - 1)); }
     std::vector<int> m_cols;     // visible columns in order
     std::vector<int> m_widths;
