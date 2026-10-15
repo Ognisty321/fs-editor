@@ -15,8 +15,8 @@ use fs_core::tags::set_cps_ignore;
 pub use kanji::KanjiTimer;
 use kanji::new_kanji_timer;
 pub use media::{Audio, Renderer, Video};
-use session::collect_fonts;
 pub use session::{FontUses, Session};
+use session::{collect_fonts, syllables_of};
 pub use spell::{Speller, Thesaurus};
 use spell::{new_speller, new_thesaurus, text_words, thesaurus_word};
 
@@ -595,6 +595,8 @@ pub mod ffi {
         );
 
         fn syllables(self: &Session, row: usize) -> Vec<Syllable>;
+        /// The syllables `text` would have on a line from `start` to `end`.
+        fn syllables_of(text: &str, start: i64, end: i64) -> Vec<Syllable>;
         fn kara_split(self: &mut Session, row: usize, syl: usize, char_pos: usize);
         fn kara_join(self: &mut Session, row: usize, syl: usize);
         fn kara_set_boundary(
@@ -603,7 +605,9 @@ pub mod ffi {
             index: usize,
             ms: i64,
             shift_rest: bool,
+            amend: &str,
         );
+        fn kara_set_times(self: &mut Session, row: usize, start: i64, end: i64, amend: &str);
 
         fn set_video_context(
             self: &mut Session,

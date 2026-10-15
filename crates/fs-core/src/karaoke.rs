@@ -88,8 +88,10 @@ impl Karaoke {
     /// takes a share of the duration proportional to its text length
     /// (Aegisub `AssKaraoke::AddSplit`).
     pub fn split(&mut self, i: usize, pos: usize) {
+        // the shares go by visible characters, tags left out (Aegisub keeps tags apart)
+        let visible = |t: &str| crate::tags::strip_tags(t).chars().count() as i64;
         let syl = &mut self.syls[i];
-        let total_len = syl.text.len();
+        let total_len = visible(&syl.text);
         let mut new = Syllable {
             kind: syl.kind.clone(),
             ..Default::default()
@@ -103,13 +105,32 @@ impl Karaoke {
             new.duration_ms = syl.duration_ms;
             syl.duration_ms = 0;
         } else {
-            new.duration_ms =
-                round_cs(syl.duration_ms * new.text.len() as i64 / total_len.max(1) as i64);
+            new.duration_ms = round_cs(syl.duration_ms * visible(&new.text) / total_len.max(1));
             syl.duration_ms -= new.duration_ms;
         }
         // tags at the split point belong to the new syllable's start
         self.syls.insert(i + 1, new);
         self.recompute_starts();
+    }
+
+    /// [`split`](Self::split) at `units` UTF-16 units into the syllable's visible text (tags
+    /// skipped), where the karaoke bar's character positions point.
+    pub fn split_visible(&mut self, i: usize, units: usize) {
+        let raw = &self.syls[i].text;
+        let (mut seen, mut in_tag, mut at) = (0, false, raw.len());
+        for (b, c) in raw.char_indices() {
+            if seen >= units && !in_tag {
+                at = b; // before a tag that follows: it starts the new syllable
+                break;
+            }
+            match c {
+                '{' => in_tag = true,
+                '}' if in_tag => in_tag = false,
+                _ if !in_tag => seen += c.len_utf16(),
+                _ => {}
+            }
+        }
+        self.split(i, at);
     }
 
     /// Merge syllable `i` into the previous one (removes the marker before it).
@@ -235,6 +256,18 @@ mod tests {
             end: Time(end),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn split_at_a_visible_position() {
+        // a tag before the text and a letter of two bytes
+        let mut k = Karaoke::from_event(&ev(r"{\k100}{\i1}ąbc", 0, 1000));
+        k.split_visible(0, 1);
+        assert_eq!(k.text(), r"{\k33}{\i1}ą{\k67}bc");
+        // a tag at the split point goes with the new syllable
+        let mut k = Karaoke::from_event(&ev(r"{\k100}ab{\b1}c", 0, 1000));
+        k.split_visible(0, 2);
+        assert_eq!(k.text(), r"{\k67}ab{\k33}{\b1}c");
     }
 
     #[test]

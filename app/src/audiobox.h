@@ -44,10 +44,12 @@ private:
     std::unique_ptr<QRhiTexture> m_data, m_overlayTex;
     bool m_dataDirty = true, m_overlayDirty = true, m_spectrumTex = false;
     QRhiResourceUpdateBatch *m_pendingInit = nullptr;
-    // drag: 0 none, 1 start, 2 end, 3 ruler scroll, 10+k karaoke boundary k
+    // drag: 0 none, 1 start, 2 end, 3 ruler scroll, 4 a new selection from the press, 10+k
+    // karaoke boundary k
     int m_drag = 0;
     Qt::MouseButton m_button = Qt::NoButton;
     int m_pressX = 0;
+    qint64 m_pressT = 0;
     qint64 m_pressLeft = 0;
     int m_hoverX = -1;
 };
@@ -77,7 +79,8 @@ public:
 
     void lineChanged();   // active row changed
     void docChanged();    // document edited elsewhere
-    void commit();
+    void commit();        // writes the markers (auto-commit too)
+    void commitAndNext(); // the commit command: then the next line, when asked
 
 signals:
     void opened();
@@ -104,7 +107,9 @@ private:
     void stepSyllable(int dir);
     void modifyStart(int steps);
     void modifyLength(int steps, bool shiftFollowing);
-    void autoSplit();
+    bool followLine();
+    QString autoSplitText(const QString &text, qint64 duration) const;
+    void writeProposedSplit();
     void karaokeChanged();
     QWidget *buttonRow();
 
@@ -124,6 +129,7 @@ private:
     int m_dragId = 0;
     std::vector<fsb::Syllable> m_syl;
     int m_activeSyl = 0;
+    QString m_autoText; // the automatic split shown, not written until edited or committed
     mutable std::vector<std::pair<qint64, qint64>> m_inactive;
     mutable std::tuple<quint64, int, int> m_inactiveKey{~quint64(0), -1, -1};
 

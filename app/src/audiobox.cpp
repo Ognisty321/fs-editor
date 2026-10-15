@@ -235,7 +235,8 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
         if (b.m_karaoke && e->button() == Qt::MiddleButton) {
             for (size_t k = 1; k < b.m_syl.size(); ++k)
                 if (std::abs(b.xOf(b.m_syl[k].start) - x) < 5) {
-                    b.m_tab->s().kara_join(size_t(b.m_tab->active()), k - 1);
+                    b.writeProposedSplit();
+                    b.m_tab->s().kara_join(size_t(b.m_tab->active()), k);
                     b.m_tab->changed(TabPanel::FromAudio);
                     b.karaokeChanged();
                     return;
@@ -267,6 +268,7 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
                 int pos = 0;
                 while (pos < text.size() && x0 + fm.horizontalAdvance(text.left(pos + 1)) < x) ++pos;
                 if (pos > 0 && pos < text.size()) {
+                    b.writeProposedSplit();
                     b.m_tab->s().kara_split(size_t(b.m_tab->active()), k, size_t(pos));
                     b.m_tab->changed(TabPanel::FromAudio);
                     b.karaokeChanged();
@@ -276,13 +278,21 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
         }
         for (size_t k = 0; k < b.m_syl.size(); ++k)
             if (t >= b.m_syl[k].start && t < b.m_syl[k].end) b.m_activeSyl = int(k);
+        // a click only picks the syllable (Aegisub, Kainote); the line's own markers still drag
+        if (std::abs(b.xOf(b.m_selStart) - x) >= 6 && std::abs(b.xOf(b.m_selEnd) - x) >= 6) {
+            overlayChanged();
+            return;
+        }
     }
     const bool snapToggle = e->modifiers() & Qt::ShiftModifier;
     if (std::abs(b.xOf(b.m_selStart) - x) < 6) m_drag = 1;
     else if (std::abs(b.xOf(b.m_selEnd) - x) < 6) m_drag = 2;
     else if (e->button() == Qt::LeftButton) {
-        m_drag = 1;
-        b.setSelection(b.snap(t, snapToggle), std::max(b.m_selEnd, t), true);
+        // away from the markers the start goes here, and a drag times the line from scratch
+        // (Aegisub's drag timing, Kainote)
+        m_drag = 4;
+        m_pressT = b.snap(t, snapToggle);
+        b.setSelection(m_pressT, std::max(b.m_selEnd, m_pressT), true);
     } else if (e->button() == Qt::RightButton) {
         m_drag = 2;
         b.setSelection(b.m_selStart, std::max(b.m_selStart, b.snap(t, snapToggle)), true);
@@ -309,8 +319,15 @@ void AudioView::mouseMoveEvent(QMouseEvent *e) {
         b.setSelection(std::min(b.snap(t, snapToggle), b.m_selEnd), b.m_selEnd, true);
     } else if (m_drag == 2) {
         b.setSelection(b.m_selStart, std::max(b.snap(t, snapToggle), b.m_selStart), true);
+    } else if (m_drag == 4) {
+        if (std::abs(x - m_pressX) > 3) {
+            const qint64 u = b.snap(t, snapToggle);
+            b.setSelection(std::min(m_pressT, u), std::max(m_pressT, u), true);
+        }
     } else if (m_drag >= 10) {
-        b.m_tab->s().kara_set_boundary(size_t(b.m_tab->active()), size_t(m_drag - 10), t, m_button == Qt::RightButton);
+        b.writeProposedSplit();
+        b.m_tab->s().kara_set_boundary(size_t(b.m_tab->active()), size_t(m_drag - 10), t, m_button == Qt::RightButton,
+                                       fs::Utf8(QString("kara-%1").arg(b.m_dragId))); // one drag, one undo step
         b.m_tab->changed(TabPanel::FromAudio);
         b.karaokeChanged();
     }
@@ -319,7 +336,7 @@ void AudioView::mouseMoveEvent(QMouseEvent *e) {
 
 void AudioView::mouseReleaseEvent(QMouseEvent *) {
     auto &b = *m_box;
-    if ((m_drag == 1 || m_drag == 2) && b.m_autoCommit && b.m_selModified) b.commit();
+    if ((m_drag == 1 || m_drag == 2 || m_drag == 4) && b.m_autoCommit && b.m_selModified) b.commit();
     m_drag = 0;
 }
 
@@ -352,7 +369,7 @@ AudioBox::AudioBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     m_karaoke = st.value("karaoke", false).toBool();
     m_autoSplit = st.value("autoSplit", false).toBool();
     m_autoCommit = st.value("autoCommit", true).toBool();
-    m_nextOnCommit = st.value("nextOnCommit", false).toBool();
+    m_nextOnCommit = st.value("nextOnCommit", true).toBool(); // on in Aegisub and Kainote
     m_autoScroll = st.value("autoScroll", true).toBool();
     m_spectrum = st.value("spectrum", false).toBool();
     m_enhance = st.value("enhance", false).toBool();
@@ -476,13 +493,11 @@ QWidget *AudioBox::buttonRow() {
     btn("▶▶", tr("Play to the end"), [this] { play(m_selStart, m_duration); })->setIcon(icon("player-skip-forward", teal));
     btn("+in", tr("Add lead-in to the active line"), [this] {
         setSelection(std::max<qint64>(0, m_selStart - QSettings().value("audio/leadIn", 200).toInt()), m_selEnd, false);
-        commit();
     }, true)->setIcon(icon("arrow-autofit-left", green));
     btn("+out", tr("Add lead-out to the active line"), [this] {
         setSelection(m_selStart, m_selEnd + QSettings().value("audio/leadOut", 300).toInt(), false);
-        commit();
     })->setIcon(icon("arrow-autofit-right", green));
-    btn("✓", tr("Apply changes (commit)"), [this] { commit(); }, true)->setIcon(icon("check", green));
+    btn("✓", tr("Apply changes (commit)"), [this] { commitAndNext(); }, true)->setIcon(icon("check", green));
     btn("⌖", tr("Go to selection"), [this] { ensureVisible(m_selStart, m_selEnd); })->setIcon(icon("focus-centered", teal));
     h->addSpacing(8);
     toggle("K", tr("Enable / disable karaoke creation"), &m_karaoke, "karaoke", [this] { karaokeChanged(); })->setIcon(icon("microphone", teal));
@@ -606,8 +621,10 @@ qint64 AudioBox::snap(qint64 ms, bool toggle) const {
             best = t;
         }
     };
-    if (kf && m_tab->video()->hasVideo())
+    if (kf && m_tab->video()->hasVideo()) {
         for (qint64 f : m_tab->keyframes()) consider(m_tab->video()->timeAtStart(f)); // Aegisub's markers
+        consider(m_tab->video()->time()); // and the video's position
+    }
     if (lines)
         for (const auto &[start, end] : inactiveLines()) {
             consider(start);
@@ -697,70 +714,99 @@ void AudioBox::setSelection(qint64 start, qint64 end, bool fromDrag) {
 void AudioBox::commit() {
     const int row = m_tab->active();
     if (row < 0 || size_t(row) >= m_tab->s().row_count()) return;
+    writeProposedSplit();
     auto r = m_tab->s().row(size_t(row));
     if (r.start != m_selStart || r.end != m_selEnd) {
-        r.start = m_selStart;
-        r.end = m_selEnd;
-        m_tab->s().set_row(size_t(row), r, fs::Utf8(QString("audio-%1").arg(m_dragId)));
+        const auto amend = fs::Utf8(QString("audio-%1").arg(m_dragId));
+        // karaoke: the outer syllables take the change, the others keep their place (Aegisub)
+        if (m_karaoke) {
+            m_tab->s().kara_set_times(size_t(row), m_selStart, m_selEnd, amend);
+        } else {
+            r.start = m_selStart;
+            r.end = m_selEnd;
+            m_tab->s().set_row(size_t(row), r, amend);
+        }
         m_tab->changed(TabPanel::FromAudio);
     }
     m_selModified = false;
     m_view->overlayChanged();
-    if (m_nextOnCommit) stepLine(1);
+}
+
+// Aegisub's audio/commit: apply, then with "next line on commit" go on as grid/line/next/create
+// does - past the last line a new one follows - and a line not timed yet (end 0) is proposed
+// from where this one ended, for the default 5 s.
+void AudioBox::commitAndNext() {
+    commit();
+    if (!m_nextOnCommit) return;
+    const qint64 end = m_selEnd;
+    const auto vis = m_tab->grid()->visibleRows();
+    const auto it = std::upper_bound(vis.begin(), vis.end(), size_t(std::max(0, m_tab->active())));
+    if (it != vis.end()) m_tab->setActive(int(*it));
+    else m_tab->grid()->insertRow(true, 0); // starts where this line ends
+    if (const int row = m_tab->active(); row >= 0 && m_tab->s().row(size_t(row)).end == 0)
+        setSelection(end, end + 5000, true);
+    playSelection();
+}
+
+// The markers follow the active line; one not timed yet (end 0) keeps them where they are, to be
+// timed from there (Aegisub). False when they stayed.
+bool AudioBox::followLine() {
+    const int row = m_tab->active();
+    if (row < 0 || size_t(row) >= m_tab->s().row_count()) return false;
+    const auto r = m_tab->s().row(size_t(row));
+    if (r.end <= 0 && m_audio) return false;
+    m_selStart = r.start;
+    m_selEnd = r.end;
+    return true;
 }
 
 void AudioBox::lineChanged() {
-    const int row = m_tab->active();
-    if (row >= 0 && size_t(row) < m_tab->s().row_count()) {
-        const auto r = m_tab->s().row(size_t(row));
-        m_selStart = r.start;
-        m_selEnd = r.end;
-        m_selModified = false;
-        if (m_autoScroll && m_audio) ensureVisible(m_selStart, m_selEnd);
-    }
+    ++m_dragId; // a new line never merges into the last one's undo step
+    m_selModified = false;
+    if (followLine() && m_autoScroll && m_audio) ensureVisible(m_selStart, m_selEnd);
     m_activeSyl = 0;
     karaokeChanged();
 }
 
 void AudioBox::docChanged() {
-    if (!m_selModified) {
-        const int row = m_tab->active();
-        if (row >= 0 && size_t(row) < m_tab->s().row_count()) {
-            const auto r = m_tab->s().row(size_t(row));
-            m_selStart = r.start;
-            m_selEnd = r.end;
-        }
-    }
-    if (m_karaoke && size_t(std::max(0, m_tab->active())) < m_tab->s().row_count()) {
-        const auto syl = m_tab->s().syllables(size_t(std::max(0, m_tab->active())));
-        m_syl.assign(syl.begin(), syl.end());
-    }
-    m_view->overlayChanged();
+    if (!m_selModified) followLine();
+    karaokeChanged();
 }
 
 void AudioBox::karaokeChanged() {
     m_syl.clear();
+    m_autoText.clear();
     const int row = m_tab->active();
     if (m_karaoke && row >= 0 && size_t(row) < m_tab->s().row_count()) {
-        const auto syl = m_tab->s().syllables(size_t(row));
-        m_syl.assign(syl.begin(), syl.end());
-        if (m_syl.size() <= 1 && m_autoSplit) {
-            autoSplit();
-            const auto again = m_tab->s().syllables(size_t(row));
-            m_syl.assign(again.begin(), again.end());
+        auto syl = m_tab->s().syllables(size_t(row));
+        if (syl.size() <= 1 && m_autoSplit) {
+            // Kainote: the split is a proposal until it is edited or committed
+            const auto r = m_tab->s().row(size_t(row));
+            m_autoText = autoSplitText(fs::q(r.text), r.end - r.start);
+            if (!m_autoText.isEmpty()) syl = fsb::syllables_of(fs::Utf8(m_autoText), r.start, r.end);
         }
+        m_syl.assign(syl.begin(), syl.end());
     }
     m_activeSyl = std::clamp(m_activeSyl, 0, std::max(0, int(m_syl.size()) - 1));
     m_view->overlayChanged();
 }
 
-// Split a line without \k tags into syllables: words, and vowel-ended
-// chunks inside words (romaji).
-void AudioBox::autoSplit() {
+void AudioBox::writeProposedSplit() {
     const int row = m_tab->active();
+    if (m_autoText.isEmpty() || row < 0 || size_t(row) >= m_tab->s().row_count()) return;
     auto r = m_tab->s().row(size_t(row));
-    const QString plain = fs::q(fsb::strip_tags(r.text));
-    if (plain.trimmed().isEmpty()) return;
+    r.text = fs::rs(m_autoText);
+    m_autoText.clear();
+    m_tab->s().set_row(size_t(row), r, "");
+    m_tab->changed(TabPanel::FromAudio);
+}
+
+// Split a line without \k tags into syllables: words, and vowel-ended chunks inside words
+// (romaji). "" when it can't: a line with tags keeps them, so it is left to split by hand.
+QString AudioBox::autoSplitText(const QString &text, qint64 duration) const {
+    if (text.contains('{')) return {};
+    const QString &plain = text;
+    if (plain.trimmed().isEmpty()) return {};
     static const QRegularExpression syl("[^aeiouAEIOU\\s]*[aeiouAEIOU]+n?(?![aeiouAEIOU])|\\S+?(?=\\s|$)|\\s+");
     QStringList parts;
     for (auto it = syl.globalMatch(plain); it.hasNext();) {
@@ -768,8 +814,8 @@ void AudioBox::autoSplit() {
         if (m.trimmed().isEmpty() && !parts.isEmpty()) parts.last() += m;
         else parts << m;
     }
-    if (parts.size() < 2) return;
-    const qint64 cs = (r.end - r.start) / 10;
+    if (parts.size() < 2) return {};
+    const qint64 cs = duration / 10;
     QString out;
     qint64 used = 0;
     for (int k = 0; k < parts.size(); ++k) {
@@ -777,9 +823,7 @@ void AudioBox::autoSplit() {
         used += d;
         out += QString("{\\k%1}").arg(d) + parts[k];
     }
-    r.text = fs::rs(out);
-    m_tab->s().set_row(size_t(row), r, "");
-    m_tab->changed(TabPanel::FromAudio);
+    return out;
 }
 
 void AudioBox::stepLine(int dir) {
@@ -808,8 +852,9 @@ void AudioBox::stepSyllable(int dir) {
 void AudioBox::modifyStart(int steps) {
     if (!m_karaoke || m_syl.empty()) return setSelection(std::min(m_selStart + steps * 10, m_selEnd), m_selEnd, false);
     if (m_activeSyl <= 0) return;
+    writeProposedSplit();
     m_tab->s().kara_set_boundary(size_t(m_tab->active()), size_t(m_activeSyl), m_syl[m_activeSyl].start + steps * 10,
-                                 false);
+                                 false, "");
     m_tab->changed(TabPanel::FromAudio);
     karaokeChanged();
 }
@@ -818,7 +863,8 @@ void AudioBox::modifyLength(int steps, bool shiftFollowing) {
     if (!m_karaoke || m_syl.empty()) return setSelection(m_selStart, m_selEnd + steps * 10, false);
     const size_t next = size_t(m_activeSyl) + 1;
     if (next >= m_syl.size()) return;
-    m_tab->s().kara_set_boundary(size_t(m_tab->active()), next, m_syl[next].start + steps * 10, shiftFollowing);
+    writeProposedSplit();
+    m_tab->s().kara_set_boundary(size_t(m_tab->active()), next, m_syl[next].start + steps * 10, shiftFollowing, "");
     m_tab->changed(TabPanel::FromAudio);
     karaokeChanged();
 }
@@ -841,7 +887,7 @@ void AudioBox::keyPressEvent(QKeyEvent *e) {
     switch (e->key()) {
     case Qt::Key_Return:
     case Qt::Key_Enter:
-    case Qt::Key_G: commit(); break;
+    case Qt::Key_G: commitAndNext(); break;
     case Qt::Key_Left: m_karaoke ? stepSyllable(-1) : stepLine(-1); break;
     case Qt::Key_Z: stepLine(-1); break;
     case Qt::Key_Right: m_karaoke ? stepSyllable(1) : stepLine(1); break;
