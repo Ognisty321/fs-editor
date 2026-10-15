@@ -560,11 +560,14 @@ QWidget *AudioBox::buttonRow() {
     toggle("AC", tr("Automatically apply changes"), &m_autoCommit, "autoCommit", [] {});
     toggle("NL", tr("Go to the next line after applying changes"), &m_nextOnCommit, "nextOnCommit", [] {})->setIcon(icon("arrow-down-bar", teal));
     toggle("AS", tr("Automatic scrolling to the active line"), &m_autoScroll, "autoScroll", [] {});
-    toggle("Sp", tr("Spectrum mode"), &m_spectrum, "spectrum", [this] { m_view->dataChanged(); })->setIcon(icon("chart-histogram", teal));
+    m_spectrumToggle = toggle("Sp", tr("Spectrum mode"), &m_spectrum, "spectrum", [this] { m_view->dataChanged(); });
+    m_spectrumToggle->setIcon(icon("chart-histogram", teal));
     toggle("En", tr("Enhance speech frequencies in the spectrum"), &m_enhance, "enhance", [this] { m_view->dataChanged(); })->setIcon(icon("music-bolt", teal));
     h->addStretch();
     return row;
 }
+
+void AudioBox::setSpectrum(bool on) { m_spectrumToggle->setChecked(on); }
 
 void AudioBox::open(const QString &path) {
     close(); // also stops a load still decoding

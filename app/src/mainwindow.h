@@ -55,6 +55,8 @@ public:
     void error(const QString &msg);
     void log(const QString &text); // the log window, shown when text is not blank
     void editStyle(const QString &name);
+    // Offers the scripts the tab's file lists ("Automation Scripts") that are not loaded yet.
+    void loadLocalScripts(TabPanel *t);
     void pasteTranslation();
     void updateStatus();
 

@@ -588,6 +588,10 @@
         <translation>Ustaw jako niepewne i przejdź dalej</translation>
     </message>
     <message>
+        <source>Apply changes and stay on the line</source>
+        <translation>Zatwierdź zmiany i zostań na linijce</translation>
+    </message>
+    <message>
         <source>No unconfirmed lines found</source>
         <translation>Nie znaleziono niepewnych linijek</translation>
     </message>
@@ -1216,14 +1220,6 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Eksportuj</translation>
     </message>
     <message>
-        <source>Fix styles: lines with a style missing from the file get Default</source>
-        <translation>Popraw style: linijki ze stylem, którego nie ma w pliku, dostaną Default</translation>
-    </message>
-    <message>
-        <source>Transform framerate</source>
-        <translation>Zmień FPS</translation>
-    </message>
-    <message>
         <source>From video</source>
         <translation>Z wideo</translation>
     </message>
@@ -1234,10 +1230,6 @@ Backspace: rozłącz ostatnią grupę</translation>
     <message>
         <source>Convert to:</source>
         <translation>Konwertuj na:</translation>
-    </message>
-    <message>
-        <source>Automation filters:</source>
-        <translation>Filtry automatyzacji:</translation>
     </message>
     <message>
         <source>Export...</source>
@@ -1474,6 +1466,14 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Zamień linijki miejscami</translation>
     </message>
     <message>
+        <source>Move lines up</source>
+        <translation>Przesuń linijki w górę</translation>
+    </message>
+    <message>
+        <source>Move lines down</source>
+        <translation>Przesuń linijki w dół</translation>
+    </message>
+    <message>
         <source>Join and keep first</source>
         <translation>Złącz, zachowaj pierwszą</translation>
     </message>
@@ -1686,6 +1686,80 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Wysokość</translation>
     </message>
     <message>
+        <source>Zoom in</source>
+        <translation>Powiększ</translation>
+    </message>
+    <message>
+        <source>Zoom out</source>
+        <translation>Pomniejsz</translation>
+    </message>
+    <message>
+        <source>Zoom %1%</source>
+        <translation>Powiększenie %1%</translation>
+    </message>
+    <message>
+        <source>Focus the video slider</source>
+        <translation>Przejdź do suwaka wideo</translation>
+    </message>
+    <message>
+        <source>Spectrum display</source>
+        <translation>Widok widma</translation>
+    </message>
+    <message>
+        <source>Waveform display</source>
+        <translation>Widok fali dźwiękowej</translation>
+    </message>
+    <message>
+        <source>Automation Script referenced with unknown location specifier character.
+Location specifier found: %1
+Filename specified: %2</source>
+        <translation>Skrypt automatyzacji podany z nieznanym znakiem położenia.
+Znaleziony znak: %1
+Podana nazwa pliku: %2</translation>
+    </message>
+    <message>
+        <source>    %1 (%2)</source>
+        <translation>    %1 (%2)</translation>
+    </message>
+    <message>
+        <source>Load associated automation scripts?</source>
+        <translation>Wczytać powiązane skrypty automatyzacji?</translation>
+    </message>
+    <message>
+        <source>The subtitle file you have opened contains local automation scripts. Do you want to load the associated automation scripts?
+
+List of scripts:
+
+%1
+
+You should only load associated automation scripts if you trust their authors! They are not required to view or edit the subtitle file.</source>
+        <translation>Otwarty plik napisów zawiera lokalne skrypty automatyzacji. Czy wczytać powiązane skrypty?
+
+Lista skryptów:
+
+%1
+
+Wczytuj powiązane skrypty tylko wtedy, gdy ufasz ich autorom! Nie są potrzebne do oglądania ani edycji pliku napisów.</translation>
+    </message>
+    <message>
+        <source>Trust the authors &amp;&amp; load scripts</source>
+        <translation>Ufam autorom, wczytaj skrypty</translation>
+    </message>
+    <message>
+        <source>No</source>
+        <translation>Nie</translation>
+    </message>
+    <message>
+        <source>Automation Script referenced could not be found.
+Filename specified: %1
+Searched relative to: %2
+Resolved filename: %3</source>
+        <translation>Nie znaleziono podanego skryptu automatyzacji.
+Podana nazwa pliku: %1
+Szukano względem: %2
+Pełna ścieżka: %3</translation>
+    </message>
+    <message>
         <source>Export to EBU STL format</source>
         <translation>Eksport do formatu EBU STL</translation>
     </message>
@@ -1820,6 +1894,48 @@ Backspace: rozłącz ostatnią grupę</translation>
     <message>
         <source>All files (*)</source>
         <translation>Wszystkie pliki (*)</translation>
+    </message>
+    <message>
+        <source>Filters</source>
+        <translation>Filtry</translation>
+    </message>
+    <message>
+        <source>Transform subtitle times, including those in override tags, from an input framerate to an output framerate.
+
+This is useful for converting regular time subtitles to VFRaC time subtitles for hardsubbing.
+It can also be used to convert subtitles to a different speed video, such as NTSC to PAL speedup.</source>
+        <translation>Przelicza czasy napisów, także te w tagach, z wejściowej liczby klatek na sekundę na wyjściową.
+
+Przydaje się do zamiany napisów o zwykłych czasach na napisy VFRaC do wypalania.
+Można nim też dopasować napisy do wideo o innej prędkości, np. przy przyspieszeniu NTSC do PAL.</translation>
+    </message>
+    <message>
+        <source>Fixes styles by replacing any style that isn&apos;t available on file with Default.</source>
+        <translation>Naprawia style, zastępując stylem Default każdy styl, którego nie ma w pliku.</translation>
+    </message>
+    <message>
+        <source>Transform Framerate</source>
+        <translation>Przeliczenie klatkażu</translation>
+    </message>
+    <message>
+        <source>Fix Styles</source>
+        <translation>Naprawa stylów</translation>
+    </message>
+    <message>
+        <source>Move &amp;Up</source>
+        <translation>W &amp;górę</translation>
+    </message>
+    <message>
+        <source>Move &amp;Down</source>
+        <translation>W &amp;dół</translation>
+    </message>
+    <message>
+        <source>Select &amp;All</source>
+        <translation>Zaznacz &amp;wszystkie</translation>
+    </message>
+    <message>
+        <source>Select &amp;None</source>
+        <translation>&amp;Odznacz wszystkie</translation>
     </message>
     <message>
         <source>Duration</source>
@@ -3140,6 +3256,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Audio</translation>
     </message>
     <message>
+        <source>Automation</source>
+        <translation>Automatyzacja</translation>
+    </message>
+    <message>
         <source>Ignore whitespace in characters per second</source>
         <translation>Ignoruj spacje w znakach na sekundę</translation>
     </message>
@@ -3234,6 +3354,34 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Style catalog of new files</source>
         <translation>Katalog stylów nowych plików</translation>
+    </message>
+    <message>
+        <source>0: Fatal</source>
+        <translation>0: Błąd krytyczny</translation>
+    </message>
+    <message>
+        <source>1: Error</source>
+        <translation>1: Błąd</translation>
+    </message>
+    <message>
+        <source>2: Warning</source>
+        <translation>2: Ostrzeżenie</translation>
+    </message>
+    <message>
+        <source>3: Hint</source>
+        <translation>3: Wskazówka</translation>
+    </message>
+    <message>
+        <source>4: Debug</source>
+        <translation>4: Debugowanie</translation>
+    </message>
+    <message>
+        <source>5: Trace</source>
+        <translation>5: Śledzenie</translation>
+    </message>
+    <message>
+        <source>Trace level</source>
+        <translation>Poziom komunikatów</translation>
     </message>
 </context>
 <context>
@@ -3930,6 +4078,14 @@ do czasu audio</translation>
     <message>
         <source>Disable</source>
         <translation>Wyłącz</translation>
+    </message>
+    <message>
+        <source>Remove &quot;%1&quot; from dictionary</source>
+        <translation>Usuń „%1” ze słownika</translation>
+    </message>
+    <message>
+        <source>Spell checker language</source>
+        <translation>Język sprawdzania pisowni</translation>
     </message>
     <message>
         <source>Split at cursor (estimate times)</source>

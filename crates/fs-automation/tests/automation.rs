@@ -496,8 +496,8 @@ fn kara_templater_retime() {
 
 #[test]
 fn karaskel_furigana_layout() {
-    let mut f = fixture();
-    f.env.trace_level = 5;
+    let f = fixture();
+    f.env.trace_level.store(5, Ordering::Relaxed);
     let s = f.load(&aegisub_test("test-furi.lua"));
     let d = doc("furi-test.ass");
     let out = s
@@ -640,6 +640,90 @@ fn export_filters_and_context() {
     );
     let r = s.run_macro(0, &d, &[0], Some(0), &ctx).unwrap();
     assert_eq!(r.edit.map(|e| e.cursor), Some(3));
+}
+
+/// luabins as Aegisub ships it: the real module, with its deprecation warning on load.
+#[test]
+fn luabins_round_trips_with_aegisub_warning() {
+    let f = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let s = f.script(
+        dir.path(),
+        "bins.lua",
+        r#"
+        local luabins = require 'luabins'
+        local saved = luabins.save(1.5, "x\0y", true, nil, {a = {2, 3}})
+        local ok, n, str, b, none, t = luabins.load(saved)
+        assert(ok and n == 1.5 and str == "x\0y" and b == true and none == nil and t.a[2] == 3)
+        assert(not luabins.load("junk"))
+        assert(luabins._VERSION and require('luabins') == luabins)
+        aegisub.register_macro('Bins', '', function() end)
+        "#,
+    );
+    assert_eq!(s.macros.len(), 1);
+    let log = f.log();
+    assert!(log.contains("Warning in Automation script 'bins'"), "{log}");
+    assert!(log.contains("uses the library luabins"), "{log}");
+}
+
+/// A filter's settings as Aegisub keeps them for the file between exports: serialised in
+/// control order, put back into the next config dialog by name.
+#[test]
+fn filter_settings_round_trip_like_aegisub() {
+    use fs_automation::{
+        DialogValue, inline_string_decode, inline_string_encode, serialise_settings,
+    };
+    assert_eq!(inline_string_encode("a|b:c,#d\ne"), "a#7Cb#3Ac#2C#23d#0Ae");
+    assert_eq!(inline_string_decode("a#7Cb#3Ac#2C#23d#0Ae"), "a|b:c,#d\ne");
+    assert_eq!(inline_string_decode("zażółć #"), "zażółć #");
+    let f = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let s = f.script(
+        dir.path(),
+        "cfg.lua",
+        r#"
+        aegisub.register_filter('Cfg', '', 0, function() end, function()
+          return {
+            {class = 'label', label = 'x'},
+            {class = 'edit', name = 'text', value = ''},
+            {class = 'intedit', name = 'n', value = 1},
+            {class = 'floatedit', name = 'f', value = 0},
+            {class = 'checkbox', name = 'on', value = false},
+            {class = 'dropdown', name = 'pick', items = {'a', 'b|c'}, value = 'a'},
+            {class = 'coloralpha', name = 'col', value = '#000000'},
+          }
+        end)
+        "#,
+    );
+    let d = doc("kara-templater-retime.ass");
+    let ctx = Context::default();
+    let first = s.filter_config(0, &d, &ctx).unwrap().unwrap();
+    assert_eq!(
+        first.accept_defaults().values["pick"],
+        DialogValue::Text("a".into())
+    );
+    let set = [
+        ("text", DialogValue::Text("a:b|c, ż".into())),
+        ("n", DialogValue::Int(-7)),
+        ("f", DialogValue::Float(0.1234567)),
+        ("on", DialogValue::Bool(true)),
+        ("pick", DialogValue::Text("b|c".into())),
+        ("col", DialogValue::Color("#10203040".into())),
+    ];
+    let stored = serialise_settings(set.iter().map(|(n, v)| (*n, v)));
+    assert_eq!(
+        stored,
+        "text:a#3Ab#7Cc#2C ż|n:-7|f:0.1234567|on:1|pick:b#7Cc|col:#2310203040"
+    );
+    let mut next = s.filter_config(0, &d, &ctx).unwrap().unwrap();
+    next.unserialise(&stored);
+    let values = next.accept_defaults().values;
+    for (name, v) in &set {
+        assert_eq!(values.get(*name), Some(v), "{name}");
+    }
+    // a name the dialog no longer has, or a value that is no number, is no harm
+    next.unserialise("gone:1|n:x|bad");
+    assert_eq!(next.accept_defaults().values["n"], DialogValue::Int(0));
 }
 
 #[test]

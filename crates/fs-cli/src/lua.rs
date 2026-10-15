@@ -97,8 +97,9 @@ pub fn run(a: LuaArgs) -> Result<ExitCode> {
         a.data.unwrap_or_else(data_dir),
         a.user.unwrap_or_else(user_dir),
     );
-    let mut env = Env::new(paths, Arc::new(StderrHost));
-    env.trace_level = a.trace_level;
+    let env = Env::new(paths, Arc::new(StderrHost));
+    env.trace_level
+        .store(a.trace_level, std::sync::atomic::Ordering::Relaxed);
     let script = Script::load(&a.script, &env);
     if let Some(e) = &script.error {
         bail!("{e}");

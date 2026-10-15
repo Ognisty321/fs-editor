@@ -1,4 +1,5 @@
 #include "editbox.h"
+#include "audiobox.h"
 
 #include "dialogs.h"
 #include "grid.h"
@@ -144,12 +145,15 @@ QStringList spell::languages() {
     return out;
 }
 
+// "polski (pl_PL)", or the code where Qt doesn't know the language
+static QString languageLabel(const QString &code) {
+    const QLocale l(code);
+    return l.language() == QLocale::C ? code : QString("%1 (%2)").arg(l.nativeLanguageName(), code);
+}
+
 void spell::fillLanguages(QComboBox *box, const QString &current) {
     box->clear();
-    for (const QString &code : languages()) {
-        const QLocale l(code);
-        box->addItem(l.language() == QLocale::C ? code : QString("%1 (%2)").arg(l.nativeLanguageName(), code), code);
-    }
+    for (const QString &code : languages()) box->addItem(languageLabel(code), code);
     box->setCurrentIndex(std::max(0, box->findData(current)));
 }
 
@@ -319,6 +323,33 @@ void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
         }
     }
     const auto words = fsb::text_words(fs::Utf8(t));
+    // Aegisub: a word of the user dictionary can leave it, and the language is chosen here
+    for (size_t i = 0; i + 1 < words.size(); i += 2) {
+        const int s = int(words[i]), l = int(words[i + 1]);
+        if (at.positionInBlock() < s || at.positionInBlock() > s + l) continue;
+        if (const QString word = t.mid(s, l); spell::get() && spell::userWords().contains(word)) {
+            auto *remove = new QAction(tr("Remove \"%1\" from dictionary").arg(word), m.get());
+            connect(remove, &QAction::triggered, this, [word] { spell::removeWord(word); });
+            m->insertAction(first, remove);
+        }
+        break;
+    }
+    if (const QStringList langs = spell::languages(); !langs.isEmpty()) {
+        auto *langMenu = new QMenu(tr("Spell checker language"), m.get());
+        const QString cur = spell::get() ? g_spellLang : QString();
+        for (const QString &lang : QStringList{QString()} + langs) {
+            auto *a = langMenu->addAction(lang.isEmpty() ? tr("Disable") : languageLabel(lang), [lang] {
+                QSettings st;
+                st.setValue("spell/enabled", !lang.isEmpty());
+                if (!lang.isEmpty()) st.setValue("spell/lang", lang);
+                spell::reload();
+            });
+            a->setCheckable(true);
+            a->setChecked(lang == cur);
+        }
+        m->insertMenu(first, langMenu);
+        m->insertSeparator(first);
+    }
     if (const QStringList langs = thesaurus::languages(); !langs.isEmpty())
         for (size_t i = 0; i + 1 < words.size(); i += 2) {
             const int s = int(words[i]), l = int(words[i + 1]);
@@ -1167,6 +1198,8 @@ static const PanelKey kEditKeys[] = {
     {"editNextDoubtful", QT_TRANSLATE_NOOP("EditBox", "Next unconfirmed line"), "Ctrl+D"},
     {"editNextUntranslated", QT_TRANSLATE_NOOP("EditBox", "Next untranslated line"), "Ctrl+R"},
     {"editSetDoubtful", QT_TRANSLATE_NOOP("EditBox", "Mark as not confirmed and go to the next line"), "Alt+Down"},
+    // Aegisub's audio/commit in the edit box
+    {"editCommit", QT_TRANSLATE_NOOP("EditBox", "Apply changes and stay on the line"), "Ctrl+Return"},
 };
 
 std::span<const PanelKey> EditBox::keys() { return kEditKeys; }
@@ -1211,5 +1244,11 @@ void EditBox::runCommand(const QString &id, SubsTextEdit *e) {
         s.set_doubtful({&row, 1}, true);
         m_tab->changed();
         nextLine();
+    } else if (id == "editCommit") {
+        // the text is applied as it is typed: what follows is an undo step of its own, and the
+        // audio's selection goes to the line
+        ++m_undoStep;
+        m_initialTimes.clear();
+        if (m_tab->audio()->hasAudio()) m_tab->audio()->runCommand("audioCommitStay");
     }
 }

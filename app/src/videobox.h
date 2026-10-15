@@ -77,6 +77,10 @@ public:
     double scriptScale() const; // widget px per script px (x)
     QRectF zoom() const { return m_zoom; }
     void setZoom(QRectF uv);
+    // f < 1 zooms in, keeping the frame's point under the widget point at in place
+    void zoomBy(double f, QPointF at);
+    // the video's own pixels at that scale (Aegisub's 50/100/200%), around the view's centre
+    void zoomScale(double scale);
     const QImage &frame() const { return m_frame; }
 
 protected:
@@ -176,6 +180,7 @@ public:
     bool detached() const { return m_detached; }
     void zoomMode() { m_zoomMode = true; }
     void resetZoom();
+    void focusSeek();
     int seekOn() const;
     int playOn() const;
     VisualTools *tools() const { return m_tools; }

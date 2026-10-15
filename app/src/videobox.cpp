@@ -286,11 +286,13 @@ void VideoView::wheelEvent(QWheelEvent *e) {
         return;
     }
     if (m_box->m_tools->tool() != VisualTools::Pointer) return;
-    // zoom 100%..1000% around the cursor
-    const double f = e->angleDelta().y() > 0 ? 1 / 1.2 : 1.2;
+    zoomBy(e->angleDelta().y() > 0 ? 1 / 1.2 : 1.2, e->position()); // 100%..1000% around the cursor
+}
+
+void VideoView::zoomBy(double f, QPointF at) {
     const QRectF d = displayRect();
-    const QPointF c(m_zoom.left() + (e->position().x() - d.left()) / d.width() * m_zoom.width(),
-                    m_zoom.top() + (e->position().y() - d.top()) / d.height() * m_zoom.height());
+    const QPointF c(m_zoom.left() + (at.x() - d.left()) / d.width() * m_zoom.width(),
+                    m_zoom.top() + (at.y() - d.top()) / d.height() * m_zoom.height());
     const double nw = std::clamp(m_zoom.width() * f, 0.1, 1.0), nh = std::clamp(m_zoom.height() * f, 0.1, 1.0);
     QRectF z(c.x() - (c.x() - m_zoom.left()) * nw / m_zoom.width(), c.y() - (c.y() - m_zoom.top()) * nh / m_zoom.height(),
              nw, nh);
@@ -1063,6 +1065,21 @@ void VideoBox::closeEvent(QCloseEvent *e) {
 }
 
 void VideoBox::resetZoom() { m_view->setZoom({0, 0, 1, 1}); }
+
+void VideoBox::focusSeek() { m_seek->setFocus(); }
+
+void VideoView::zoomScale(double scale) {
+    const double vh = m_box->info().height;
+    if (vh <= 0) return;
+    // shortcut: the frame never shows smaller than fitted, so a scale below the fit shows it whole;
+    // a view that resizes with the zoom (Aegisub's) would be needed for that
+    const double s = std::clamp(displayRect().height() * devicePixelRatioF() / (scale * vh), 0.1, 1.0);
+    QRectF z(0, 0, s, s);
+    z.moveCenter(m_zoom.center());
+    z.moveLeft(std::clamp(z.left(), 0.0, 1 - s));
+    z.moveTop(std::clamp(z.top(), 0.0, 1 - s));
+    setZoom(z);
+}
 
 QImage VideoBox::grabFrame(Grab mode) {
     if (!hasVideo()) return {};

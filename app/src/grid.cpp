@@ -632,17 +632,10 @@ void Grid::keyPressEvent(QKeyEvent *e) {
     auto pos = std::find(m_vis.begin(), m_vis.end(), size_t(std::max(0, m_tab->active())));
     int vi = pos == m_vis.end() ? 0 : int(pos - m_vis.begin());
     const int page = verticalScrollBar()->pageStep();
-    const bool alt = e->modifiers() & Qt::AltModifier;
     int to = vi;
     switch (e->key()) {
-    case Qt::Key_Up:
-        if (alt) return moveSelection(-1);
-        to = vi - 1;
-        break;
-    case Qt::Key_Down:
-        if (alt) return moveSelection(1);
-        to = vi + 1;
-        break;
+    case Qt::Key_Up: to = vi - 1; break;
+    case Qt::Key_Down: to = vi + 1; break;
     case Qt::Key_PageUp: to = vi - page; break;
     case Qt::Key_PageDown: to = vi + page; break;
     case Qt::Key_Home: to = 0; break;

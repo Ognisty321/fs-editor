@@ -48,6 +48,10 @@ pub struct Session {
     /// The rate a file in frames (MicroDVD) was read in, to write it in the same.
     subs_fps: Option<Framerate>,
     pub(crate) keyframes: Vec<i64>,
+    /// Aegisub's `Properties.automation_settings`: each export filter's settings as the file
+    /// last exported with them, by inline-string-encoded filter name. Kept for the file while it
+    /// is open, never written into it (as in Aegisub).
+    pub(crate) filter_settings: HashMap<String, String>,
 }
 
 impl Default for Session {
@@ -70,6 +74,7 @@ impl Default for Session {
             framerate: None,
             subs_fps: None,
             keyframes: Vec::new(),
+            filter_settings: HashMap::new(),
         };
         // Document::new already holds the one empty line a new tab starts with
         s.ed.mark_saved();
@@ -77,6 +82,16 @@ impl Default for Session {
         s.refresh();
         s
     }
+}
+
+/// Transform Framerate's rates: "video" is the video's timecodes, else a rate as typed.
+pub(crate) fn export_rate(s: &str, video: &[i64]) -> Result<Framerate, String> {
+    if s == "video" {
+        Framerate::from_timecodes(video.to_vec())
+    } else {
+        Framerate::parse(s)
+    }
+    .map_err(|e| format!("{s}: {e}"))
 }
 
 fn event_hash(ev: &fs_core::Event) -> u64 {
@@ -492,6 +507,7 @@ impl Session {
     fn load(&mut self, l: fs_formats::Loaded, path: Option<PathBuf>) {
         self.ed = Editor::new(l.doc);
         self.subs_fps = None;
+        self.filter_settings.clear();
         self.path = path;
         self.format = l.format;
         self.disk_format = l.format;
@@ -1297,14 +1313,7 @@ impl Session {
         spec: &ExportSpec,
         video: &[i64],
     ) -> Result<(), String> {
-        let rate = |s: &str| {
-            if s == "video" {
-                Framerate::from_timecodes(video.to_vec())
-            } else {
-                Framerate::parse(s)
-            }
-            .map_err(|e| format!("{s}: {e}"))
-        };
+        let rate = |s: &str| export_rate(s, video);
         if spec.fix_styles {
             ops::fix_styles(&mut doc);
         }

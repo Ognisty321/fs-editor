@@ -77,6 +77,7 @@ public:
     QString path() const { return m_path; }
 
     void play(qint64 from, qint64 to, bool withVideo = false); // without: the video stops (Aegisub)
+    void setSpectrum(bool on); // the spectrum or the waveform, as its toggle sets it
     void stop();
     bool playing() const;
     qint64 positionMs() const;
@@ -154,7 +155,7 @@ private:
     AudioView *m_view;
     QScrollBar *m_scroll;
     QSlider *m_hzoom, *m_vzoomSlider, *m_volume;
-    QToolButton *m_link;
+    QToolButton *m_link, *m_spectrumToggle;
     QTimer *m_timer;
     // toggles
     bool m_karaoke = false, m_autoSplit = false, m_autoCommit = true, m_nextOnCommit = false, m_autoScroll = true,

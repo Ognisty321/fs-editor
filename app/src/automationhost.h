@@ -12,9 +12,19 @@
 #include <functional>
 #include <mutex>
 #include <optional>
+#include <vector>
 
+class QGridLayout;
 class QWidget;
 class ScriptProgress;
+
+// A script dialog's controls in `grid` (Aegisub's LuaDialog), for a dialog of its own or an export
+// filter's settings panel; the widgets are parallel to `controls`.
+std::vector<QWidget *> scriptControls(const rust::Vec<fsb::DialogControlData> &controls, QGridLayout *grid,
+                                      QWidget *parent);
+// `controls` with the values the widgets hold now.
+rust::Vec<fsb::DialogControlData> scriptValues(const rust::Vec<fsb::DialogControlData> &controls,
+                                               const std::vector<QWidget *> &widgets);
 
 class GuiAutomationHost : public fsb::AutomationHost {
 public:

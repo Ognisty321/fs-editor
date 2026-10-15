@@ -504,7 +504,11 @@ fn clipboard_fns() -> Fns {
 
 unsafe extern "C-unwind" {
     fn luaopen_lpeg(l: *mut mlua::ffi::lua_State) -> c_int;
+    fn luaopen_luabins(l: *mut mlua::ffi::lua_State) -> c_int;
 }
+
+/// Aegisub's warning for a script that requires luabins (libaegisub/lua/modules.cpp).
+const LUABINS_WARNING: &str = "This automation script uses the library luabins. This library is deprecated and will be removed in a future version of Aegisub. If your script critically depends on luabins and cannot be adapted to work without it, please let us know at https://github.com/TypesettingTools/Aegisub/issues/382 .";
 
 /// Register the native modules in `package.preload` and return the
 /// `__init_clipboard` function for the `aegisub` table.
@@ -523,5 +527,17 @@ pub fn install(lua: &Lua) -> Result<mlua::Function> {
         lua.create_function(|lua, ()| lib_table(lua, &["DirectoryIterator"], lfs_fns()))?,
     )?;
     preload.set("lpeg", unsafe { lua.create_c_function(luaopen_lpeg)? })?;
+    // luabins as Aegisub loads it: the module, after a deprecation warning
+    let open = unsafe { lua.create_c_function(luaopen_luabins)? };
+    preload.set(
+        "luabins",
+        lua.create_function(move |lua, args: mlua::MultiValue| {
+            let aegisub: Table = lua.globals().get("aegisub")?;
+            if let Ok(warn) = aegisub.get::<mlua::Function>("__raise_warning") {
+                warn.call::<()>(LUABINS_WARNING)?;
+            }
+            open.call::<mlua::MultiValue>(args)
+        })?,
+    )?;
     lua.create_function(|lua, ()| lib_table(lua, &[], clipboard_fns()))
 }

@@ -163,7 +163,7 @@ Kodowanie: UTF-8/UTF-16 z BOM jest rozpoznawane deterministycznie, w pozostałyc
 
 ## 6. Automatyzacja (`fs-automation`)
 
-* `mlua` z funkcjami `luajit` i `vendored`; lpeg kompilowany przez `cc` i rejestrowany jako `lpeg`.
+* `mlua` z funkcjami `luajit` i `vendored`; lpeg kompilowany przez `cc` i rejestrowany jako `lpeg`. luabins (C, z podprojektu Aegisub) też jest kompilowany przez `cc`; `require "luabins"` najpierw pokazuje ostrzeżenie Aegisub o przestarzałej bibliotece, a potem zwraca prawdziwy moduł.
 * Globalna tablica `aegisub` z pełnym API Automation 4: `register_macro`, `register_filter`, `progress`, `debug`, `log`, `dialog`, `cancel`, `text_extents`, `frame_from_ms`, `ms_from_frame`, `video_size`, `keyframes`, `decode_path`, `file_name`, `project_properties`, `get_audio_selection`, `set_undo_point`, `gettext`, `lua_automation_version = 4`.
 * Obiekt `subtitles` jako userdata z indeksowaniem 1..n po wszystkich liniach (info, style, eventy, format), `insert`, `append`, `delete`, `deleterange` i `[0]=`. Mapowanie na transakcję undo dokumentu.
 * Pliki include z Aegisub (karaskel, utils, unicode, cleantags, `aegisub.re`/`aegisub.unicode`/`aegisub.util` itd.), redystrybuowane zgodnie z ich licencjami (BSD/ISC), opisane w `THIRD_PARTY.md`.
@@ -172,6 +172,10 @@ Kodowanie: UTF-8/UTF-16 z BOM jest rozpoznawane deterministycznie, w pozostałyc
 * Menu Automatyzacji przy otwarciu pobiera stan wszystkich makr jednym wywołaniem: zaznaczenie i kontekst projektu liczą się raz. `validate` może zastąpić opis w pasku stanu, a makro z `is_active` jest pozycją z zaznaczeniem (COMMAND_TOGGLE z Aegisub).
 * `aegisub.video_size` zwraca proporcje i ich tryb jak Aegisub (Video AR Mode/Value projektu; wideo z niekwadratowymi pikselami to tryb własny). `text_extents` trzyma DC i czcionki w wątku zamiast tworzyć je przy każdym wywołaniu.
 * Makra i filtry eksportu działają w wątku roboczym; okno postępu przenosi dialogi do GUI. Pierwsze „Anuluj” ustawia `is_cancelled` (jak w Aegisub), drugie („Zatrzymaj skrypt”) przerywa skrypt hookiem LuaJIT nawet wtedy, gdy nie sprawdza anulowania. Pętli w całości skompilowanej przez JIT, bez wywołań, hook nie przerwie.
+* Eksport jak `DialogExport` z Aegisub. Łańcuch filtrów tworzą wbudowane „Transform Framerate” (priorytet 1000) i „Fix Styles” (−5000) oraz filtry skryptów w kolejności wczytania, posortowane malejąco po priorytecie; powtórzona nazwa dostaje „ (N)”. Okno dostaje panele konfiguracji wszystkich filtrów od razu (w wątku roboczym). Lista zaznaczonych filtrów (w kolejności z listy) trafia do pliku jako „Export Filters”, nawet po anulowaniu, a kodowanie jako „Export Encoding”. Wartości paneli skryptów są pamiętane w sesji dokumentu w formacie Aegisub (`nazwa:wartość|…`, zakodowane jak `inline_string_encode`), nie w pliku. Filtry działają na kopii dokumentu w wybranej kolejności.
+* Skrypty lokalne pliku („Automation Scripts”, `LocalScriptManager` z Aegisub): znaczniki `~` (folder pliku), `$` (folder automatyzacji) i `/` (ścieżka bezwzględna). Przy otwarciu pliku program pyta, czy ufasz autorom. Nieznany znacznik i brakujący plik dają ostrzeżenia Aegisub. Skrypt dodany ręcznie trafia na listę pliku pod najkrótszą z tych postaci, a usunięty w menedżerze z niej znika.
+* Autoload wczytuje skrypty równolegle, jak Aegisub (`std::async`): jeden stan Lua na skrypt, pula wątków o rozmiarze `available_parallelism`. Kolejność menu zostaje kolejnością plików, a skrypt, który spowoduje panikę, jest zgłaszany i pomijany.
+* `Automation/Trace Level` (Ustawienia → Automatyzacja) to wspólny atomik czytany przy każdym `aegisub.debug.out`, więc zmiana działa też w skryptach już wczytanych.
 * MoonScript: dołączony kompilator `moonscript` (Lua), który wymaga `lpeg`.
 * DependencyControl: ścieżki `?user/automation/include`, `?user/automation/autoload`, `lfs`, `ffi`, `json`.
 * Specyfikacja: `docs/research/automation4.md`.
@@ -184,7 +188,9 @@ Szczegóły są w `docs/research/kainote-ui.md`. W skrócie:
 * karta zawiera wideo (lewa góra) i obok edytor linii; audio jest nad edytorem, a grid na dole;
 * tryb tłumaczenia z dwoma polami tekstu w edytorze (oryginał i tłumaczenie) oraz kolumną oryginału w gridzie;
 * przesuwanie czasów w gridzie, panel przesuwania czasów i filtrowanie linii;
-* zoom wideo i tryb odtwarzacza (samo wideo bez edycji, pełny ekran);
+* zoom wideo (kółko, prostokąt, komendy Aegisub: powiększ/pomniejsz Ctrl+Num+/−, 50/100/200% pikseli wideo, „Ctrl+Spacja” na suwak) i tryb odtwarzacza (samo wideo bez edycji, pełny ekran). Widok nie zmienia rozmiaru z zoomem, więc skala poniżej dopasowania pokazuje całą klatkę;
+* komendy Aegisub z własnymi klawiszami w edytorze skrótów: przesuwanie linii (Alt+↑/↓; w polu tekstu Alt+↓ nadal oznacza linię jako niepotwierdzoną), widok widma lub fali audio, Ctrl+Enter w polu tekstu (zatwierdza czasy z audio i zamyka krok undo bez zmiany linii);
+* menu kontekstowe pola tekstu: podpowiedzi pisowni, dodanie słowa do słownika i usunięcie go stamtąd, język sprawdzania pisowni (albo jego wyłączenie) i tezaurus;
 * autozapis co N sekund (Aegisub): kopia dokumentu w O(1) w GUI, a zapis ASS na dysk w wątku roboczym. Przy awarii i wylogowaniu zapis odbywa się synchronicznie.
 
 ## 8. Etapy

@@ -23,7 +23,7 @@ use mlua::{
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use subs::{Handle, State};
 
@@ -209,6 +209,123 @@ impl Dialog {
                 .collect(),
         }
     }
+
+    /// Aegisub's LuaDialog::Unserialise: values kept by [`serialise_settings`] replace those of
+    /// the controls of their names (a label has none to replace).
+    pub fn unserialise(&mut self, stored: &str) {
+        for tok in stored.split('|') {
+            let Some((name, v)) = tok.split_once(':') else {
+                continue;
+            };
+            let name = inline_string_decode(name);
+            for c in &mut self.controls {
+                if c.name.as_deref().unwrap_or("") != name {
+                    continue;
+                }
+                let Some(value) = &mut c.value else { continue };
+                *value = match value {
+                    DialogValue::Text(_) => DialogValue::Text(inline_string_decode(v)),
+                    // atoi and atof: a value that is no number is 0
+                    DialogValue::Int(_) => {
+                        DialogValue::Int(v.trim().parse().unwrap_or_else(|_| {
+                            v.trim().parse::<f64>().map_or(0, |f| f.trunc() as i64)
+                        }))
+                    }
+                    DialogValue::Float(_) => DialogValue::Float(v.trim().parse().unwrap_or(0.0)),
+                    DialogValue::Bool(_) => DialogValue::Bool(v != "0"),
+                    DialogValue::Color(_) => {
+                        let t = inline_string_decode(v);
+                        // Aegisub writes coloralpha as #RRGGBBAA, which its color parser cannot
+                        // read back; kept here
+                        let rgba = (c.class == "coloralpha" && t.len() == 9)
+                            .then(|| t.get(..7).zip(t.get(7..)))
+                            .flatten()
+                            .and_then(|(rgb, a)| Some((rgb, u8::from_str_radix(a, 16).ok()?)));
+                        match rgba {
+                            Some((rgb, a)) => {
+                                let col = subs::parse_color(rgb);
+                                DialogValue::Color(format!(
+                                    "#{:02X}{:02X}{:02X}{a:02X}",
+                                    col.r, col.g, col.b
+                                ))
+                            }
+                            None => color_value(&c.class, &t),
+                        }
+                    }
+                };
+            }
+        }
+    }
+}
+
+/// Aegisub's LuaDialog::Serialise of a dialog's values, in control order: `name:value|…` with
+/// names and texts in inline-string encoding and checkboxes as `1`/`0`. Numbers keep every digit
+/// (Aegisub's `std::to_string` rounds a float to six decimals).
+pub fn serialise_settings<'a>(
+    values: impl IntoIterator<Item = (&'a str, &'a DialogValue)>,
+) -> String {
+    let mut out = String::new();
+    for (name, v) in values {
+        if !out.is_empty() {
+            out.push('|');
+        }
+        out += &inline_string_encode(name);
+        out.push(':');
+        match v {
+            DialogValue::Text(s) | DialogValue::Color(s) => out += &inline_string_encode(s),
+            DialogValue::Int(i) => out += &i.to_string(),
+            DialogValue::Float(f) => out += &f.to_string(),
+            DialogValue::Bool(b) => out.push(if *b { '1' } else { '0' }),
+        }
+    }
+    out
+}
+
+/// libaegisub's inline_string_encode: control characters and `#`, `,`, `:`, `|` as `#XX`.
+pub fn inline_string_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c <= '\u{1F}' || matches!(c, '#' | ',' | ':' | '|') {
+            out += &format!("#{:02X}", c as u32);
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// libaegisub's inline_string_decode: each `#XX` back to its byte.
+pub fn inline_string_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = (b[i] == b'#')
+            .then(|| s.get(i + 1..i + 3))
+            .flatten()
+            .and_then(|h| u8::from_str_radix(h, 16).ok());
+        match hex {
+            Some(byte) => {
+                out.push(byte);
+                i += 3;
+            }
+            None => {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// A color control's value as its class keeps it: `#RRGGBB`, with `AA` for coloralpha.
+fn color_value(class: &str, text: &str) -> DialogValue {
+    let col = subs::parse_color(text);
+    DialogValue::Color(if class == "coloralpha" {
+        format!("#{:02X}{:02X}{:02X}{:02X}", col.r, col.g, col.b, col.a)
+    } else {
+        format!("#{:02X}{:02X}{:02X}", col.r, col.g, col.b)
+    })
 }
 
 /// A decoded video frame for `aegisub.get_frame` (BGRA, `pitch` bytes per row).
@@ -272,8 +389,10 @@ impl Host for StderrHost {}
 pub struct Env {
     pub paths: Paths,
     pub host: Arc<dyn Host>,
-    /// `Automation/Trace Level`: `debug.out` messages above it are dropped.
-    pub trace_level: i32,
+    /// `Automation/Trace Level`: `debug.out` messages above it are dropped. Shared with the
+    /// scripts loaded with this environment, so a change reaches them at once (Aegisub reads the
+    /// option on every call).
+    pub trace_level: Arc<AtomicI32>,
 }
 
 impl Env {
@@ -281,7 +400,7 @@ impl Env {
         Env {
             paths,
             host,
-            trace_level: 3,
+            trace_level: Arc::new(AtomicI32::new(3)),
         }
     }
 }
@@ -467,7 +586,8 @@ pub struct Script {
     rt: Option<Runtime>,
 }
 
-fn canonical(p: &Path) -> PathBuf {
+/// The path as the scripts are known by: canonical, without Windows' `\\?\` prefix.
+pub fn canonical(p: &Path) -> PathBuf {
     let c = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let s = c.to_string_lossy();
     if let Some(r) = s.strip_prefix(r"\\?\UNC\") {
@@ -643,12 +763,7 @@ fn dialog_from_lua(
                 )))
             }
             "color" | "coloralpha" => {
-                let col = subs::parse_color(&string("value").unwrap_or_default());
-                c.value = Some(DialogValue::Color(if class == "color" {
-                    format!("#{:02X}{:02X}{:02X}", col.r, col.g, col.b)
-                } else {
-                    format!("#{:02X}{:02X}{:02X}{:02X}", col.r, col.g, col.b, col.a)
-                }));
+                c.value = Some(color_value(&class, &string("value").unwrap_or_default()));
             }
             _ => return Err("bad control table entry".into()),
         }
@@ -929,7 +1044,7 @@ fn fs_table(lua: &Lua) -> mlua::Result<Table> {
     )?;
     fs.set(
         "trace_level",
-        lua.create_function(|lua, ()| Ok(shared(lua)?.env.trace_level))?,
+        lua.create_function(|lua, ()| Ok(shared(lua)?.env.trace_level.load(Ordering::Relaxed)))?,
     )?;
     fs.set(
         "log",

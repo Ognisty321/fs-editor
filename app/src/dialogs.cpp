@@ -2145,7 +2145,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         return form;
     };
     QFormLayout *editor = page(tr("Editor")), *subs = page(tr("Subtitles")), *video = page(tr("Video")),
-                *audio = page(tr("Audio"));
+                *audio = page(tr("Audio")), *automation = page(tr("Automation"));
     struct Check { const char *key; const char *label; bool def; QFormLayout *page; };
     const Check checks[] = {
         {"main/askSession", QT_TR_NOOP("Load the last session at startup"), true, editor},
@@ -2241,10 +2241,16 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     newCatalog->setCurrentIndex(std::max(0, newCatalog->findData(st.value("styles/newFileCatalog", "Default"))));
     newCatalog->setToolTip(tr("A new file starts with the styles of this catalog of the style manager"));
     subs->addRow(tr("Style catalog of new files"), newCatalog);
+    // Aegisub's Automation/Trace Level: aegisub.debug.out messages above it are not shown
+    auto *trace = new QComboBox(this);
+    trace->addItems({tr("0: Fatal"), tr("1: Error"), tr("2: Warning"), tr("3: Hint"), tr("4: Debug"), tr("5: Trace")});
+    trace->setCurrentIndex(std::clamp(st.value("automation/traceLevel", 3).toInt(), 0, 5));
+    automation->addRow(tr("Trace level"), trace);
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(bb, &QDialogButtonBox::accepted, this,
-            [this, boxes, spins, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, newCatalog] {
+            [this, boxes, spins, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, newCatalog, trace] {
         QSettings st;
+        st.setValue("automation/traceLevel", trace->currentIndex());
         st.setValue("styles/newFileCatalog", newCatalog->currentData());
         st.setValue("main/language", language->currentData());
         st.setValue("spell/dir", QDir::fromNativeSeparators(dictDir->text()));

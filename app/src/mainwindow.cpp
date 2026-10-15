@@ -33,6 +33,7 @@
 #include <QFormLayout>
 #include <QFutureWatcher>
 #include <QGridLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -312,6 +313,7 @@ MainWindow::MainWindow() {
     m_host->onLog = [this](const QString &text) { log(text); };
     (*m_automation)->set_host(std::unique_ptr<fsb::AutomationHost>(m_host));
     (*m_automation)->set_cache_dir(fs::Utf8(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex"));
+    (*m_automation)->set_trace_level(QSettings().value("automation/traceLevel", 3).toInt());
     for (const auto &e : (*m_automation)->load_autoload()) status(fs::q(e));
     buildAutomationMenu();
 
@@ -597,13 +599,56 @@ void MainWindow::buildMenus() {
         auto *t = tab();
         const bool video = t->video()->hasVideo();
         QSettings st;
+        // Aegisub's DialogExport: every filter (the built-in ones among the scripts' by priority), checked
+        // as the file last exported, the settings panel of each checked one beside the list. The scripts'
+        // config functions run as it opens, as there.
+        const auto filters = (*m_automation)->export_filters();
+        rust::Vec<fsb::DialogData> panels;
+        try {
+            auto job = (*m_automation)->start_filter_configs(t->s());
+            runScript(*job);
+            panels = (*m_automation)->finish_filter_configs(std::move(job));
+        } catch (const rust::Error &) {
+            return; // cancelled while the config functions ran
+        }
         QDialog d(this);
         d.setWindowTitle(tr("Export"));
-        auto *f = new QFormLayout(&d);
-        auto *fix = new QCheckBox(tr("Fix styles: lines with a style missing from the file get Default"), &d);
-        fix->setChecked(st.value("export/fixStyles", false).toBool());
-        auto *fps = new QCheckBox(tr("Transform framerate"), &d);
-        fps->setChecked(st.value("export/fps", false).toBool());
+        auto *filterBox = new QGroupBox(tr("Filters"), &d);
+        auto *left = new QVBoxLayout(filterBox);
+        auto *list = new QListWidget(filterBox);
+        list->setMinimumSize(220, 120);
+        const QStringList checked = fs::q(t->s().project_value("Export Filters")).split('|');
+        auto description = [&](size_t k) {
+            switch (filters[k].kind) {
+            case 1:
+                return tr("Transform subtitle times, including those in override tags, from an input framerate to an "
+                          "output framerate.\n\nThis is useful for converting regular time subtitles to VFRaC time "
+                          "subtitles for hardsubbing.\nIt can also be used to convert subtitles to a different speed "
+                          "video, such as NTSC to PAL speedup.");
+            case 2: return tr("Fixes styles by replacing any style that isn't available on file with Default.");
+            default: return fs::q(filters[k].description);
+            }
+        };
+        for (size_t k = 0; k < filters.size(); ++k) {
+            const auto &fi = filters[k];
+            const QString name = fs::q(fi.name);
+            auto *it = new QListWidgetItem(fi.kind == 1   ? tr("Transform Framerate")
+                                           : fi.kind == 2 ? tr("Fix Styles")
+                                                          : name,
+                                           list);
+            it->setData(Qt::UserRole, qulonglong(k));
+            it->setCheckState(checked.contains(name) ? Qt::Checked : Qt::Unchecked);
+        }
+        left->addWidget(list, 1);
+        auto *moves = new QHBoxLayout;
+        auto *up = new QPushButton(tr("Move &Up"), filterBox), *down = new QPushButton(tr("Move &Down"), filterBox);
+        auto *all = new QPushButton(tr("Select &All"), filterBox), *none = new QPushButton(tr("Select &None"), filterBox);
+        for (auto *b : {up, down, all, none}) moves->addWidget(b);
+        left->addLayout(moves);
+        auto *about = new QPlainTextEdit(filterBox);
+        about->setReadOnly(true);
+        about->setFixedHeight(64);
+        left->addWidget(about);
         auto rate = [&](const QString &def) {
             auto *c = new QComboBox(&d);
             c->setEditable(true);
@@ -613,43 +658,88 @@ void MainWindow::buildMenus() {
             return c;
         };
         auto *from = rate(video ? tr("From video") : "23.976"), *to = rate(st.value("export/fpsTo", "25").toString());
-        auto *enc = new QComboBox(&d);
+        auto *enc = new QComboBox(filterBox);
         enc->addItems({"UTF-8", "UTF-16LE", "windows-1250", "windows-1252", "ISO-8859-2", "windows-1251"});
-        enc->setCurrentText(st.value("export/encoding", "UTF-8").toString());
-        f->addRow(fix);
-        f->addRow(fps);
-        f->addRow(tr("Subtitles timed to:"), from);
-        f->addRow(tr("Convert to:"), to);
-        f->addRow(tr("Text encoding:"), enc);
-        // Automation export filters, run on the copy before the steps above
-        auto *filters = new QListWidget(&d);
-        const QStringList checked = st.value("export/filters").toStringList();
-        for (const auto &fi : (*m_automation)->filters()) {
-            auto *it = new QListWidgetItem(fs::q(fi.name), filters);
-            it->setToolTip(fs::q(fi.description));
-            it->setCheckState(checked.contains(fs::q(fi.name)) ? Qt::Checked : Qt::Unchecked);
+        {
+            // the file's own, as Aegisub keeps it; Aegisub's names ("Unicode (UTF-8)") by what is in brackets
+            QString e = fs::q(t->s().project_value("Export Encoding"));
+            if (const qsizetype a = e.lastIndexOf('('), b = e.lastIndexOf(')'); a >= 0 && b > a) e = e.mid(a + 1, b - a - 1);
+            const int k = enc->findText(e, Qt::MatchFixedString);
+            enc->setCurrentIndex(std::max(0, k));
         }
-        filters->setMaximumHeight(110);
-        if (filters->count()) f->addRow(tr("Automation filters:"), filters);
-        else filters->hide();
-        auto sync = [=] { from->setEnabled(fps->isChecked()), to->setEnabled(fps->isChecked()); };
-        connect(fps, &QCheckBox::toggled, &d, sync);
-        sync();
+        auto *encRow = new QHBoxLayout;
+        encRow->addWidget(new QLabel(tr("Text encoding:"), filterBox));
+        encRow->addWidget(enc, 1);
+        left->addLayout(encRow);
+        // the settings panels, shown for the checked filters
+        auto *right = new QVBoxLayout;
+        std::map<size_t, QGroupBox *> boxes;
+        std::map<size_t, std::vector<QWidget *>> widgets;
+        for (size_t k = 0; k < filters.size(); ++k) {
+            if (filters[k].kind == 1) {
+                auto *box = new QGroupBox(tr("Transform Framerate"), &d);
+                auto *form = new QFormLayout(box);
+                form->addRow(tr("Subtitles timed to:"), from);
+                form->addRow(tr("Convert to:"), to);
+                boxes[k] = box;
+            } else if (k < panels.size() && !panels[k].controls.empty()) {
+                auto *box = new QGroupBox(fs::q(filters[k].name), &d);
+                widgets[k] = scriptControls(panels[k].controls, new QGridLayout(box), box);
+                boxes[k] = box;
+            }
+            if (boxes.count(k)) right->addWidget(boxes[k]);
+        }
+        right->addStretch();
+        auto refresh = [&] {
+            for (int r = 0; r < list->count(); ++r)
+                if (auto b = boxes.find(list->item(r)->data(Qt::UserRole).toULongLong()); b != boxes.end())
+                    b->second->setVisible(list->item(r)->checkState() == Qt::Checked);
+            d.adjustSize();
+        };
+        connect(list, &QListWidget::itemChanged, &d, refresh);
+        connect(list, &QListWidget::currentRowChanged, &d, [&](int r) {
+            about->setPlainText(r < 0 ? QString() : description(list->item(r)->data(Qt::UserRole).toULongLong()));
+        });
+        auto move = [&](int by) {
+            const int r = list->currentRow();
+            if (r < 0 || r + by < 0 || r + by >= list->count()) return;
+            list->insertItem(r + by, list->takeItem(r));
+            list->setCurrentRow(r + by);
+        };
+        connect(up, &QPushButton::clicked, &d, [&] { move(-1); });
+        connect(down, &QPushButton::clicked, &d, [&] { move(1); });
+        auto setAll = [&](bool on) {
+            for (int r = 0; r < list->count(); ++r) list->item(r)->setCheckState(on ? Qt::Checked : Qt::Unchecked);
+        };
+        connect(all, &QPushButton::clicked, &d, [&] { setAll(true); });
+        connect(none, &QPushButton::clicked, &d, [&] { setAll(false); });
+        auto *columns = new QHBoxLayout;
+        columns->addWidget(filterBox);
+        columns->addLayout(right, 1);
+        auto *f = new QVBoxLayout(&d);
+        f->addLayout(columns, 1);
         auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
         bb->button(QDialogButtonBox::Ok)->setText(tr("Export..."));
         connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
         connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
-        f->addRow(bb);
-        if (d.exec() != QDialog::Accepted) return;
+        f->addWidget(bb);
+        list->setCurrentRow(0);
+        refresh();
+        const bool accepted = d.exec() == QDialog::Accepted;
+        // in list order, as they run; the file remembers which, closed or not (Aegisub)
         std::vector<size_t> ids;
         QStringList on;
-        for (int k = 0; k < filters->count(); ++k)
-            if (filters->item(k)->checkState() == Qt::Checked) ids.push_back(size_t(k)), on << filters->item(k)->text();
-        st.setValue("export/filters", on);
-        st.setValue("export/fixStyles", fix->isChecked());
-        st.setValue("export/fps", fps->isChecked());
+        for (int r = 0; r < list->count(); ++r)
+            if (list->item(r)->checkState() == Qt::Checked) {
+                const size_t k = list->item(r)->data(Qt::UserRole).toULongLong();
+                ids.push_back(k);
+                on << fs::q(filters[k].name);
+            }
+        t->s().set_project_value("Export Filters", fs::Utf8(on.join('|')));
+        if (!accepted) return;
+        for (auto &[k, w] : widgets) panels[k].controls = scriptValues(panels[k].controls, w);
+        t->s().set_project_value("Export Encoding", fs::Utf8(enc->currentText()));
         st.setValue("export/fpsTo", to->currentText());
-        st.setValue("export/encoding", enc->currentText());
         QStringList types;
         for (const auto &e : kExportTypes) types << tr(e.filter);
         QString type = st.value("export/type", types[0]).toString();
@@ -669,9 +759,8 @@ void MainWindow::buildMenus() {
             return c->currentText() == c->itemText(0) && c->itemData(0).isValid() ? QString("video") : c->currentText();
         };
         fsb::ExportSpec spec;
-        spec.fix_styles = fix->isChecked();
         spec.fps_from = fs::rs(value(from));
-        spec.fps_to = fs::rs(fps->isChecked() ? value(to) : QString());
+        spec.fps_to = fs::rs(value(to)); // read by the chain's Transform Framerate only
         spec.encoding = fs::rs(enc->currentText());
         const QString lower = p.toLower();
         if (lower.endsWith(".encore.txt") || lower.endsWith(".transtation.txt")) {
@@ -711,9 +800,11 @@ void MainWindow::buildMenus() {
         try {
             bool done = true;
             if (ids.empty()) {
+                spec.fps_to = rust::String();
                 t->s().export_copy(fs::Utf8(p), spec, {tc.data(), tc.size()});
             } else {
-                auto job = (*m_automation)->start_export(fs::slice(ids), t->s());
+                auto job = (*m_automation)->start_export(fs::slice(ids), {panels.data(), panels.size()}, spec,
+                                                         {tc.data(), tc.size()}, t->s());
                 runScript(*job);
                 done = (*m_automation)->finish_export(std::move(job), t->s(), fs::Utf8(p), spec, {tc.data(), tc.size()});
             }
@@ -776,6 +867,7 @@ void MainWindow::buildMenus() {
     file->addSeparator();
     add("settings", tr("Settings"), {}, file, [this] {
         if (SettingsDialog(this).exec() != QDialog::Accepted) return;
+        (*m_automation)->set_trace_level(QSettings().value("automation/traceLevel", 3).toInt());
         for (auto *t : tabs()) { // the limits colour the grid and the edit box
             t->grid()->viewport()->update();
             t->edit()->reload();
@@ -834,6 +926,10 @@ void MainWindow::buildMenus() {
     for (int k = 0; k < 6; ++k)
         add(insertIds[k], tr(insertNames[k]), {}, insert, [=] { tab()->grid()->insertRow(k % 2, k / 2); });
     add("swapLines", tr("Swap lines"), {}, lines, [=] { tab()->grid()->swapRows(); });
+    // Aegisub's grid/move/up|down and their keys
+    add("moveLinesUp", tr("Move lines up"), QKeySequence("Alt+Up"), lines, [=] { tab()->grid()->moveSelection(-1); });
+    add("moveLinesDown", tr("Move lines down"), QKeySequence("Alt+Down"), lines,
+        [=] { tab()->grid()->moveSelection(1); });
     const char *joinNames[] = {QT_TR_NOOP("Join lines"), QT_TR_NOOP("Join and keep first"),
                                QT_TR_NOOP("Join and keep last"), QT_TR_NOOP("Join as karaoke")};
     const char *joinIds[] = {"joinLines", "joinKeepFirst", "joinKeepLast", "joinKaraoke"};
@@ -1205,6 +1301,19 @@ void MainWindow::buildMenus() {
         add(VisualTools::tools()[t].id, QCoreApplication::translate("VisualTools", VisualTools::tools()[t].name), {},
             visualTools, [=] { tab()->video()->tools()->setTool(t); });
     add("resetZoom", tr("Turn off video zoom"), QKeySequence("Ctrl+Shift+Z"), video, [=] { tab()->video()->resetZoom(); });
+    // Aegisub's video/zoom/* (its keys for in and out) and video/focus_seek
+    add("zoomIn", tr("Zoom in"), QKeySequence("Ctrl+Num++"), video, [=] {
+        auto *v = tab()->video()->view();
+        v->zoomBy(1 / 1.2, v->displayRect().center());
+    });
+    add("zoomOut", tr("Zoom out"), QKeySequence("Ctrl+Num+-"), video, [=] {
+        auto *v = tab()->video()->view();
+        v->zoomBy(1.2, v->displayRect().center());
+    });
+    for (const int p : {50, 100, 200})
+        add(QString("zoom%1").arg(p), tr("Zoom %1%").arg(p), {}, video, [=] { tab()->video()->view()->zoomScale(p / 100.0); });
+    add("focusSeek", tr("Focus the video slider"), QKeySequence("Ctrl+Space"), video,
+        [=] { tab()->video()->focusSeek(); });
     panelKeys(sub(video, tr("Video keys")), VideoBox::keys(), "VideoBox",
               [=](const char *id) { tab()->video()->runCommand(id); });
     auto *detach = add("detachVideo", tr("Detach video"), {}, video, [=] {
@@ -1227,6 +1336,9 @@ void MainWindow::buildMenus() {
     });
     add("blankAudio", tr("Open blank 2h30m audio"), {}, audio, [=] { tab()->openBlankAudio(150LL * 60 * 1000); });
     add("closeAudio", tr("Close audio"), {}, audio, [=] { tab()->closeAudio(); });
+    // Aegisub's audio/view/spectrum|waveform
+    add("audioSpectrum", tr("Spectrum display"), {}, audio, [=] { tab()->audio()->setSpectrum(true); });
+    add("audioWaveform", tr("Waveform display"), {}, audio, [=] { tab()->audio()->setSpectrum(false); });
     panelKeys(sub(audio, tr("Timing keys")), AudioBox::keys(), "AudioBox",
               [=](const char *id) { tab()->audio()->runCommand(id); });
     // Aegisub's audio/save/clip: from the earliest start to the latest end of the selected lines
@@ -1517,10 +1629,15 @@ void MainWindow::buildMenus() {
     auto *spellOn = add("spellCheck", tr("Underline misspelled words"), {}, subs, {});
     spellOn->setCheckable(true);
     spellOn->setChecked(QSettings().value("spell/enabled", true).toBool());
-    connect(spellOn, &QAction::triggered, this, [](bool on) {
+    connect(spellOn, &QAction::triggered, this, [spellOn] {
+        // from the setting: the edit box's language menu turns it off too
+        const bool on = !QSettings().value("spell/enabled", true).toBool();
+        spellOn->setChecked(on);
         QSettings().setValue("spell/enabled", on);
         spell::reload();
     });
+    connect(subs, &QMenu::aboutToShow, spellOn,
+            [spellOn] { spellOn->setChecked(QSettings().value("spell/enabled", true).toBool()); });
     // Aegisub's tag hiding modes in the grid; the toolbar's "hideTags" cycles them
     auto *tagModes = new QActionGroup(this);
     const std::pair<const char *, QString> tagNames[] = {
@@ -1555,6 +1672,7 @@ void MainWindow::buildMenus() {
         } catch (const rust::Error &e) {
             log(QString::fromUtf8(e.what()));
         }
+        (*m_automation)->add_local_script(current()->s(), fs::Utf8(f)); // the file asks for it next time (Aegisub)
         buildAutomationMenu();
     });
     add("reloadScripts", tr("Reload all scripts"), {}, nullptr, [this] {
@@ -2183,7 +2301,8 @@ bool MainWindow::eventFilter(QObject *o, QEvent *e) {
             if (const int t = current()->video()->tools()->tool(); vv && (t == VisualTools::VClip || t == VisualTools::Draw))
                 wanted = wanted || ke->matches(QKeySequence::SelectAll);
         } else if (dynamic_cast<Grid *>(o)) {
-            wanted = (!(mods & Qt::ControlModifier) &&
+            // Alt+arrows are left to the window's commands (Aegisub's grid/move/up|down)
+            wanted = (!(mods & (Qt::ControlModifier | Qt::AltModifier)) &&
                       (k == Qt::Key_Up || k == Qt::Key_Down || k == Qt::Key_PageUp || k == Qt::Key_PageDown ||
                        k == Qt::Key_Home || k == Qt::Key_End || k == Qt::Key_Return || k == Qt::Key_Enter)) ||
                      ke->matches(QKeySequence::SelectAll) || ke->matches(QKeySequence::Copy) ||
@@ -2433,9 +2552,12 @@ void MainWindow::automationManager() {
         } catch (const rust::Error &e) {
             log(QString::fromUtf8(e.what()));
         }
+        // Aegisub's local scripts: the file lists those added here
+        (*m_automation)->add_local_script(current()->s(), fs::Utf8(f));
         refresh(int(scripts.size()));
     });
     remove = button(tr("Remove"), [&, this] {
+        (*m_automation)->remove_local_script(current()->s(), scripts[size_t(row())].path);
         (*m_automation)->remove_script(size_t(row()));
         refresh(row());
     });
@@ -2466,6 +2588,50 @@ void MainWindow::automationManager() {
     connect(list, &QTreeWidget::currentItemChanged, &d, enable);
     refresh(0);
     d.exec();
+}
+
+void MainWindow::loadLocalScripts(TabPanel *t) {
+    // Aegisub's LocalScriptManager: the scripts the file lists load only once the user trusts them
+    const auto scripts = (*m_automation)->local_scripts(t->s());
+    QStringList listed;
+    for (const auto &s : scripts) {
+        if (s.path.empty()) {
+            const QString tok = fs::q(s.token);
+            log(tr("Automation Script referenced with unknown location specifier character.\nLocation specifier "
+                   "found: %1\nFilename specified: %2")
+                    .arg(tok.left(1), tok.mid(1)));
+            continue;
+        }
+        listed << tr("    %1 (%2)").arg(fs::q(s.token), QDir::toNativeSeparators(fs::q(s.path)));
+    }
+    if (listed.isEmpty()) return;
+    QMessageBox box(QMessageBox::Warning, tr("Load associated automation scripts?"),
+                    tr("The subtitle file you have opened contains local automation scripts. Do you want to load "
+                       "the associated automation scripts?\n\nList of scripts:\n\n%1\n\nYou should only load "
+                       "associated automation scripts if you trust their authors! They are not required to view or "
+                       "edit the subtitle file.")
+                        .arg(listed.join('\n')),
+                    QMessageBox::Ok | QMessageBox::Cancel, this);
+    box.button(QMessageBox::Ok)->setText(tr("Trust the authors && load scripts"));
+    box.button(QMessageBox::Cancel)->setText(tr("No"));
+    box.setDefaultButton(QMessageBox::Cancel);
+    if (box.exec() != QMessageBox::Ok) return;
+    for (const auto &s : scripts) {
+        if (s.path.empty()) continue;
+        if (!s.exists) {
+            log(tr("Automation Script referenced could not be found.\nFilename specified: %1\nSearched relative to: "
+                   "%2\nResolved filename: %3")
+                    .arg(fs::q(s.token).mid(1), QDir::toNativeSeparators(fs::q(s.base)),
+                         QDir::toNativeSeparators(fs::q(s.path))));
+            continue;
+        }
+        try {
+            (*m_automation)->load_script(s.path);
+        } catch (const rust::Error &e) {
+            log(QString::fromUtf8(e.what()));
+        }
+    }
+    buildAutomationMenu();
 }
 
 void MainWindow::runScript(fsb::ScriptJob &job) {

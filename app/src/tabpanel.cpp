@@ -202,6 +202,7 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
         if (const QString t = resolve("Timecodes File"); !t.isEmpty()) openTimecodes(t);
     }
     emit titleChanged();
+    m_main->loadLocalScripts(this);
     return true;
 }
 

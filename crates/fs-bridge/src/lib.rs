@@ -377,6 +377,32 @@ pub mod ffi {
         help: String,
     }
 
+    /// An entry of the export dialog's filter list (Aegisub's): the built-in filters among the
+    /// scripts' by priority.
+    #[derive(Debug, Clone, Default)]
+    struct FilterItem {
+        /// Unique: a script filter named like one before it gets " (1)", " (2)", ….
+        name: String,
+        description: String,
+        /// 0 a script's filter, 1 Transform Framerate, 2 Fix Styles.
+        kind: u8,
+        /// A script filter with a config function: its settings panel.
+        config: bool,
+    }
+
+    /// A script the file's "Automation Scripts" lists that is not loaded yet (Aegisub's local
+    /// scripts).
+    #[derive(Debug, Clone, Default)]
+    struct LocalScript {
+        /// As the file has it, location specifier first.
+        token: String,
+        /// Empty for an unknown location specifier.
+        path: String,
+        /// The folder `path` is relative to.
+        base: String,
+        exists: bool,
+    }
+
     /// A loaded automation script, for the Automation Manager.
     #[derive(Debug, Clone, Default)]
     struct ScriptItem {
@@ -884,6 +910,8 @@ pub mod ffi {
         /// Without a host, dialogs are answered with their defaults.
         fn set_host(self: &mut Automation, host: UniquePtr<AutomationHost>);
         fn set_cache_dir(self: &mut Automation, dir: &str);
+        /// Aegisub's Automation/Trace Level (0 fatal … 5 trace): debug.out above it is dropped.
+        fn set_trace_level(self: &Automation, level: i32);
         fn scripts(self: &Automation) -> Vec<ScriptItem>;
         /// Reload every script and load new files in the autoload dirs; returns the load errors.
         fn reload(self: &mut Automation) -> Vec<String>;
@@ -892,10 +920,31 @@ pub mod ffi {
         /// Reload script `index` (of `scripts()`) in place.
         fn reload_script(self: &mut Automation, index: usize) -> Result<()>;
         fn remove_script(self: &mut Automation, index: usize);
+        /// The scripts the file asks for that are not loaded (Aegisub's local scripts).
+        fn local_scripts(self: &Automation, session: &Session) -> Vec<LocalScript>;
+        /// The file lists (or no longer lists) a script added (removed) by hand.
+        fn add_local_script(self: &Automation, session: &mut Session, path: &str);
+        fn remove_local_script(self: &Automation, session: &mut Session, path: &str);
         fn macros(self: &Automation) -> Vec<MacroItem>;
-        fn filters(self: &Automation) -> Vec<MacroItem>;
-        /// Export filters `ids` (of `filters()`) as a job: run it with `run_script_job`.
-        fn start_export(self: &Automation, ids: &[usize], session: &Session) -> Box<ScriptJob>;
+        fn export_filters(self: &Automation) -> Vec<FilterItem>;
+        /// The export dialog's settings panels, as a job: every script filter's config function
+        /// with what the file last exported with put back.
+        fn start_filter_configs(self: &Automation, session: &Session) -> Box<ScriptJob>;
+        /// The panels parallel to `export_filters()` (no controls: none); an error when the
+        /// user cancelled.
+        fn finish_filter_configs(self: &Automation, job: Box<ScriptJob>)
+        -> Result<Vec<DialogData>>;
+        /// Export filters `ids` (of `export_filters()`, in the order they run) as a job: run it
+        /// with `run_script_job`. `panels` as the export dialog left them; the session keeps
+        /// them for the next export.
+        fn start_export(
+            self: &Automation,
+            ids: &[usize],
+            panels: &[DialogData],
+            spec: &ExportSpec,
+            video: &[i64],
+            session: &mut Session,
+        ) -> Result<Box<ScriptJob>>;
         /// Saves what the filters made; false when they were cancelled or failed (see the log).
         fn finish_export(
             self: &Automation,

@@ -143,83 +143,109 @@ QString colorText(const QColor &c, bool alpha) {
 }
 } // namespace
 
+std::vector<QWidget *> scriptControls(const rust::Vec<fsb::DialogControlData> &controls, QGridLayout *grid,
+                                      QWidget *parent) {
+    std::vector<QWidget *> widgets;
+    for (const auto &c : controls) {
+        const QString cls = fs::q(c.class_name).toLower();
+        QWidget *w = nullptr;
+        if (cls == "label") {
+            w = new QLabel(fs::q(c.label), parent);
+        } else if (cls == "edit" || cls == "alpha") {
+            w = new QLineEdit(fs::q(c.text), parent);
+        } else if (cls == "textbox") {
+            auto *t = new QPlainTextEdit(fs::q(c.text), parent);
+            t->setMinimumHeight(std::max(1, c.height) * 24);
+            w = t;
+        } else if (cls == "intedit") {
+            auto *s = new QSpinBox(parent);
+            s->setRange(c.has_min ? int(c.min) : INT_MIN, c.has_max ? int(c.max) : INT_MAX);
+            s->setValue(int(c.num));
+            w = s;
+        } else if (cls == "floatedit" && c.step == 0) {
+            // Aegisub: no step is a plain text field, every digit the value has
+            auto *e = new QLineEdit(QString::number(c.num, 'g', 17), parent);
+            auto *v = new QDoubleValidator(e);
+            v->setLocale(QLocale::c());
+            if (c.has_min) v->setBottom(c.min);
+            if (c.has_max) v->setTop(c.max);
+            e->setValidator(v);
+            w = e;
+        } else if (cls == "floatedit") {
+            auto *s = new QDoubleSpinBox(parent);
+            s->setDecimals(4);
+            s->setRange(c.has_min ? c.min : -1e9, c.has_max ? c.max : 1e9);
+            s->setSingleStep(c.step);
+            s->setValue(c.num);
+            w = s;
+        } else if (cls == "dropdown") {
+            auto *b = new QComboBox(parent);
+            for (const auto &it : c.items) b->addItem(fs::q(it));
+            b->setCurrentText(fs::q(c.text));
+            w = b;
+        } else if (cls == "checkbox") {
+            auto *b = new QCheckBox(fs::q(c.label), parent);
+            b->setChecked(c.flag);
+            w = b;
+        } else if (cls == "color" || cls == "coloralpha") {
+            const bool alpha = cls == "coloralpha";
+            auto *b = new QPushButton(parent);
+            b->setProperty("color", fs::q(c.text));
+            auto paint = [b] {
+                QPixmap px(40, 14);
+                QColor col = parseColor(b->property("color").toString());
+                col.setAlpha(255);
+                px.fill(col);
+                b->setIcon(px);
+                b->setText(b->property("color").toString());
+            };
+            paint();
+            QObject::connect(b, &QPushButton::clicked, b, [b, paint, alpha] {
+                const QColor c = QColorDialog::getColor(parseColor(b->property("color").toString()), b, {},
+                                                        alpha ? QColorDialog::ShowAlphaChannel
+                                                              : QColorDialog::ColorDialogOptions());
+                if (!c.isValid()) return;
+                b->setProperty("color", colorText(c, alpha));
+                paint();
+            });
+            w = b;
+        } else {
+            w = new QLabel(fs::q(c.label), parent); // unknown class: show its label like Aegisub ignores it
+        }
+        if (!c.hint.empty()) w->setToolTip(fs::q(c.hint));
+        grid->addWidget(w, c.y, c.x, std::max(1, c.height), std::max(1, c.width));
+        widgets.push_back(w);
+    }
+    return widgets;
+}
+
+rust::Vec<fsb::DialogControlData> scriptValues(const rust::Vec<fsb::DialogControlData> &controls,
+                                               const std::vector<QWidget *> &widgets) {
+    rust::Vec<fsb::DialogControlData> out;
+    for (size_t i = 0; i < controls.size() && i < widgets.size(); ++i) {
+        fsb::DialogControlData c = controls[i];
+        QWidget *w = widgets[i];
+        if (auto *e = qobject_cast<QLineEdit *>(w)) {
+            if (fs::q(c.class_name).toLower() == "floatedit") c.num = e->text().toDouble();
+            else c.text = fs::rs(e->text());
+        } else if (auto *t = qobject_cast<QPlainTextEdit *>(w)) c.text = fs::rs(t->toPlainText());
+        else if (auto *sb = qobject_cast<QSpinBox *>(w)) c.num = sb->value();
+        else if (auto *db = qobject_cast<QDoubleSpinBox *>(w)) c.num = db->value();
+        else if (auto *cb = qobject_cast<QComboBox *>(w)) c.text = fs::rs(cb->currentText());
+        else if (auto *ch = qobject_cast<QCheckBox *>(w)) c.flag = ch->isChecked();
+        else if (auto *pb = qobject_cast<QPushButton *>(w)) c.text = fs::rs(pb->property("color").toString());
+        out.push_back(std::move(c));
+    }
+    return out;
+}
+
 fsb::DialogReply GuiAutomationHost::dialog(const fsb::DialogData &d) const {
     return onGui([&] {
         return aboveProgress(m_progress, [&] {
             QDialog dlg(m_parent);
             dlg.setWindowTitle(d.title.empty() ? QApplication::applicationDisplayName() : fs::q(d.title));
             auto *grid = new QGridLayout;
-            std::vector<QWidget *> widgets;
-            for (const auto &c : d.controls) {
-                const QString cls = fs::q(c.class_name).toLower();
-                QWidget *w = nullptr;
-                if (cls == "label") {
-                    w = new QLabel(fs::q(c.label), &dlg);
-                } else if (cls == "edit" || cls == "alpha") {
-                    w = new QLineEdit(fs::q(c.text), &dlg);
-                } else if (cls == "textbox") {
-                    auto *t = new QPlainTextEdit(fs::q(c.text), &dlg);
-                    t->setMinimumHeight(std::max(1, c.height) * 24);
-                    w = t;
-                } else if (cls == "intedit") {
-                    auto *s = new QSpinBox(&dlg);
-                    s->setRange(c.has_min ? int(c.min) : INT_MIN, c.has_max ? int(c.max) : INT_MAX);
-                    s->setValue(int(c.num));
-                    w = s;
-                } else if (cls == "floatedit" && c.step == 0) {
-                    // Aegisub: no step is a plain text field, every digit the value has
-                    auto *e = new QLineEdit(QString::number(c.num, 'g', 17), &dlg);
-                    auto *v = new QDoubleValidator(e);
-                    v->setLocale(QLocale::c());
-                    if (c.has_min) v->setBottom(c.min);
-                    if (c.has_max) v->setTop(c.max);
-                    e->setValidator(v);
-                    w = e;
-                } else if (cls == "floatedit") {
-                    auto *s = new QDoubleSpinBox(&dlg);
-                    s->setDecimals(4);
-                    s->setRange(c.has_min ? c.min : -1e9, c.has_max ? c.max : 1e9);
-                    s->setSingleStep(c.step);
-                    s->setValue(c.num);
-                    w = s;
-                } else if (cls == "dropdown") {
-                    auto *b = new QComboBox(&dlg);
-                    for (const auto &it : c.items) b->addItem(fs::q(it));
-                    b->setCurrentText(fs::q(c.text));
-                    w = b;
-                } else if (cls == "checkbox") {
-                    auto *b = new QCheckBox(fs::q(c.label), &dlg);
-                    b->setChecked(c.flag);
-                    w = b;
-                } else if (cls == "color" || cls == "coloralpha") {
-                    const bool alpha = cls == "coloralpha";
-                    auto *b = new QPushButton(&dlg);
-                    b->setProperty("color", fs::q(c.text));
-                    auto paint = [b] {
-                        QPixmap px(40, 14);
-                        QColor col = parseColor(b->property("color").toString());
-                        col.setAlpha(255);
-                        px.fill(col);
-                        b->setIcon(px);
-                        b->setText(b->property("color").toString());
-                    };
-                    paint();
-                    QObject::connect(b, &QPushButton::clicked, b, [b, paint, alpha] {
-                        const QColor c = QColorDialog::getColor(parseColor(b->property("color").toString()), b, {},
-                                                                alpha ? QColorDialog::ShowAlphaChannel
-                                                                      : QColorDialog::ColorDialogOptions());
-                        if (!c.isValid()) return;
-                        b->setProperty("color", colorText(c, alpha));
-                        paint();
-                    });
-                    w = b;
-                } else {
-                    w = new QLabel(fs::q(c.label), &dlg); // unknown class: show its label like Aegisub ignores it
-                }
-                if (!c.hint.empty()) w->setToolTip(fs::q(c.hint));
-                grid->addWidget(w, c.y, c.x, std::max(1, c.height), std::max(1, c.width));
-                widgets.push_back(w);
-            }
+            const std::vector<QWidget *> widgets = scriptControls(d.controls, grid, &dlg);
             auto *v = new QVBoxLayout(&dlg);
             v->addLayout(grid);
             auto *buttons = new QHBoxLayout;
@@ -270,20 +296,7 @@ fsb::DialogReply GuiAutomationHost::dialog(const fsb::DialogData &d) const {
             fsb::DialogReply r;
             r.accepted = accepted;
             r.button = fs::rs(pressed);
-            for (size_t i = 0; i < d.controls.size(); ++i) {
-                fsb::DialogControlData c = d.controls[i];
-                QWidget *w = widgets[i];
-                if (auto *e = qobject_cast<QLineEdit *>(w)) {
-                    if (fs::q(c.class_name).toLower() == "floatedit") c.num = e->text().toDouble();
-                    else c.text = fs::rs(e->text());
-                } else if (auto *t = qobject_cast<QPlainTextEdit *>(w)) c.text = fs::rs(t->toPlainText());
-                else if (auto *sb = qobject_cast<QSpinBox *>(w)) c.num = sb->value();
-                else if (auto *db = qobject_cast<QDoubleSpinBox *>(w)) c.num = db->value();
-                else if (auto *cb = qobject_cast<QComboBox *>(w)) c.text = fs::rs(cb->currentText());
-                else if (auto *ch = qobject_cast<QCheckBox *>(w)) c.flag = ch->isChecked();
-                else if (auto *pb = qobject_cast<QPushButton *>(w)) c.text = fs::rs(pb->property("color").toString());
-                r.controls.push_back(std::move(c));
-            }
+            r.controls = scriptValues(d.controls, widgets);
             return r;
         });
     });

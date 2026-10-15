@@ -248,12 +248,6 @@ aegisub = {
   },
 }
 
--- luabins is deprecated in Aegisub 3.5; keep the name but warn.
-package.preload.luabins = function()
-  aegisub.__raise_warning('luabins is deprecated and not available in FS Editor')
-  return {}
-end
-
 -- ---- per-run tables ----------------------------------------------------------
 
 local function debug_out(...)
