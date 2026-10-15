@@ -355,6 +355,19 @@ pub fn to_subs(doc: &Document) -> Vec<Sub> {
 /// Whether a line has any text that survives conversion to a simple format
 /// (drawings and tag-only lines do not).
 fn has_visible_text(text: &str) -> bool {
+    if !text.contains('{') {
+        // no blocks to parse: anything but spaces and the \N, \n, \h escapes shows
+        let mut it = text.chars().peekable();
+        while let Some(c) = it.next() {
+            if c == '\\' && it.next_if(|n| matches!(n, 'N' | 'n' | 'h')).is_some() {
+                continue;
+            }
+            if !c.is_whitespace() {
+                return true;
+            }
+        }
+        return false;
+    }
     markup::ass_to_runs(text)
         .0
         .iter()
@@ -422,13 +435,14 @@ pub fn lossless(doc: &Document, format: Format, opts: &SaveOptions) -> bool {
             && e.actor.is_empty()
             && e.effect.is_empty()
             && (e.layer, e.margin_l, e.margin_r, e.margin_v) == (0, 0, 0, 0)
-            && Line::parse(&e.text).blocks.iter().all(|b| match b {
-                Block::Override { tags, .. } => {
-                    tags.iter().all(|t| KNOWN.contains(&t.name.as_str()))
-                }
-                Block::Text(_) => true,
-                Block::Drawing { .. } | Block::Comment(_) => false,
-            })
+            && (!e.text.contains('{')
+                || Line::parse(&e.text).blocks.iter().all(|b| match b {
+                    Block::Override { tags, .. } => {
+                        tags.iter().all(|t| KNOWN.contains(&t.name.as_str()))
+                    }
+                    Block::Text(_) => true,
+                    Block::Drawing { .. } | Block::Comment(_) => false,
+                }))
     };
     let mut evs: Vec<&Event> = doc.events().iter().map(|e| &e.event).collect();
     if !doc.attachments().is_empty() || !evs.iter().all(|e| plain(e)) {
@@ -451,7 +465,7 @@ pub fn lossless(doc: &Document, format: Format, opts: &SaveOptions) -> bool {
         && evs
             .iter()
             .zip(&back)
-            .all(|(e, b)| canon(&e.text) == canon(&b.text))
+            .all(|(e, b)| e.text == b.text || canon(&e.text) == canon(&b.text))
 }
 
 /// The encoding and BOM it was written with: UTF-8 with a BOM, the one Aegisub always saves in,

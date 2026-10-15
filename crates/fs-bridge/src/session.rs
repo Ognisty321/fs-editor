@@ -3655,5 +3655,31 @@ mod tests {
         s.save(out.to_str().unwrap()).unwrap();
         eprintln!("save: {:?}", t0.elapsed());
         std::fs::remove_file(out).ok();
+        // Ctrl+S on an SRT reads what it would write back first
+        let srt = std::env::temp_dir().join(format!("fsb-bench-{}.srt", std::process::id()));
+        let cues: String = (0..100_000)
+            .map(|i| {
+                let t = Time(i * 2000);
+                let e = Time(i * 2000 + 1500);
+                format!(
+                    "{}\n{} --> {}\n<i>Line</i> {i}\nwith text\n\n",
+                    i + 1,
+                    t.to_srt(),
+                    e.to_srt()
+                )
+            })
+            .collect();
+        std::fs::write(&srt, cues).unwrap();
+        let mut s = Session::default();
+        let t0 = Instant::now();
+        s.open(srt.to_str().unwrap()).unwrap();
+        eprintln!("open srt: {:?}", t0.elapsed());
+        let t0 = Instant::now();
+        assert!(s.lossless());
+        eprintln!("lossless srt: {:?}", t0.elapsed());
+        let t0 = Instant::now();
+        s.save(srt.to_str().unwrap()).unwrap();
+        eprintln!("save srt: {:?}", t0.elapsed());
+        std::fs::remove_file(srt).ok();
     }
 }
