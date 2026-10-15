@@ -7,6 +7,7 @@
 
 #include <QObject>
 #include <QPointF>
+#include <set>
 #include <span>
 #include <vector>
 
@@ -86,6 +87,8 @@ private:
     // the l/b command whose segment passes near the point (t: where on it), or -1
     int hitSegment(QPointF widgetPos, double &t) const;
     // the active line is on the video's frame and not a comment: only then the tools work (Aegisub)
+    bool vecKey(QKeyEvent *e); // Ctrl+A, Delete and WASD on the selected vector points
+    QPointF toVec(QPointF script) const; // script coordinates -> the vector's own units
     void grabLines();         // the selected lines, as they are, for moveLines
     void moveLines(QPointF d); // the grabbed lines moved by d
 
@@ -107,6 +110,11 @@ private:
     QPointF m_pressS, m_pressW, m_mouseW;
     fsb::Visual m_start{};
     std::pair<int, int> m_vecHandle{-1, -1};
+    // the vector points selected (Aegisub: a box or Ctrl+click), of line m_vecRow, and where they
+    // were when a drag began
+    std::set<std::pair<int, int>> m_vecSel;
+    int m_vecRow = -1;
+    std::vector<std::pair<std::pair<int, int>, QPointF>> m_vecStart;
     int m_dragId = 0;
     QString m_amend;
     QStackedWidget *m_sub = nullptr;

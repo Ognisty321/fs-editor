@@ -1931,6 +1931,10 @@ bool MainWindow::eventFilter(QObject *o, QEvent *e) {
         bool wanted = false;
         if (dynamic_cast<VideoView *>(o) || dynamic_cast<AudioView *>(o)) {
             wanted = !(mods & Qt::ControlModifier) && !(mods & Qt::AltModifier) && k < Qt::Key_F1;
+            // Ctrl+A picks every point of a vector clip or drawing
+            if (const int t = current()->video()->tools()->tool();
+                dynamic_cast<VideoView *>(o) && (t == VisualTools::VClip || t == VisualTools::Draw))
+                wanted = wanted || ke->matches(QKeySequence::SelectAll);
         } else if (dynamic_cast<Grid *>(o)) {
             wanted = (!(mods & Qt::ControlModifier) &&
                       (k == Qt::Key_Up || k == Qt::Key_Down || k == Qt::Key_PageUp || k == Qt::Key_PageDown ||

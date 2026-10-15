@@ -259,23 +259,28 @@ int main(int argc, char **argv) {
                     QApplication::sendEvent(view, &e);
                 }
                 // FSED_SMOKE_DRAG="x1,y1,x2,y2": a left-button drag on the video, in view fractions 0..1;
-                // "x1,y1,x2,y2,z" zooms in a step first
-                const QStringList d = qEnvironmentVariable("FSED_SMOKE_DRAG").split(',');
-                if (d.size() < 4) return;
-                QWidget *view = w.current()->video()->view();
-                if (d.size() > 4) {
-                    const QPointF c(view->width() / 2.0, view->height() / 2.0);
-                    QWheelEvent e(c, view->mapToGlobal(c), {}, {0, 120}, Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
-                    QApplication::sendEvent(view, &e);
+                // "x1,y1,x2,y2,z" zooms in a step first; "...;x1,y1,x2,y2" drags again
+                for (const QString &drag : qEnvironmentVariable("FSED_SMOKE_DRAG").split(';')) {
+                    const QStringList d = drag.split(',');
+                    if (d.size() < 4) return;
+                    QWidget *view = w.current()->video()->view();
+                    if (d.size() > 4) {
+                        const QPointF c(view->width() / 2.0, view->height() / 2.0);
+                        QWheelEvent e(c, view->mapToGlobal(c), {}, {0, 120}, Qt::NoButton, Qt::NoModifier,
+                                      Qt::NoScrollPhase, false);
+                        QApplication::sendEvent(view, &e);
+                    }
+                    const auto at = [&](int k) {
+                        return QPointF(d[k].toDouble() * view->width(), d[k + 1].toDouble() * view->height());
+                    };
+                    auto send = [view](QEvent::Type t, QPointF p, Qt::MouseButtons held) {
+                        QMouseEvent e(t, p, view->mapToGlobal(p), Qt::LeftButton, held, Qt::NoModifier);
+                        QApplication::sendEvent(view, &e);
+                    };
+                    send(QEvent::MouseButtonPress, at(0), Qt::LeftButton);
+                    for (int k = 1; k <= 4; ++k) send(QEvent::MouseMove, at(0) + (at(2) - at(0)) * k / 4, Qt::LeftButton);
+                    send(QEvent::MouseButtonRelease, at(2), Qt::NoButton);
                 }
-                const auto at = [&](int k) { return QPointF(d[k].toDouble() * view->width(), d[k + 1].toDouble() * view->height()); };
-                auto send = [view](QEvent::Type t, QPointF p, Qt::MouseButtons held) {
-                    QMouseEvent e(t, p, view->mapToGlobal(p), Qt::LeftButton, held, Qt::NoModifier);
-                    QApplication::sendEvent(view, &e);
-                };
-                send(QEvent::MouseButtonPress, at(0), Qt::LeftButton);
-                for (int k = 1; k <= 4; ++k) send(QEvent::MouseMove, at(0) + (at(2) - at(0)) * k / 4, Qt::LeftButton);
-                send(QEvent::MouseButtonRelease, at(2), Qt::NoButton);
             });
     // FSED_SMOKE_ACTION runs a menu command by id ("a;b" one after the other); a modal dialog
     // it opens is grabbed instead.

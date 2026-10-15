@@ -407,6 +407,7 @@ QWidget *VisualTools::options() const { return m_sub; }
 
 void VisualTools::setTool(int t) {
     m_tool = t;
+    m_vecSel.clear();
     if (t < int(m_buttons.size())) m_buttons[t]->setChecked(true);
     if (m_sub) {
         m_sub->setCurrentIndex(t == VClip || t == Draw || t == RClip ? 1 : t == Pos || t == Move ? 2 : t == Shifter ? 3 : t == AllTags ? 4 : t == Scale ? 5 : t == RotZ ? 6 : 0);
@@ -431,6 +432,8 @@ void VisualTools::reload() {
     m_first = r.comment ? 0 : m_box->frameAtStart(r.start);
     m_last = r.comment ? -1 : m_box->frameAtEnd(r.end);
     if (m_drag) return; // keep the vector and its frame stable while dragging
+    if (row != m_vecRow) m_vecSel.clear();
+    m_vecRow = row;
     if (m_tool == VClip)
         m_vec = m_v.clip == 2   ? Drawing::parse(fs::q(m_v.clip_drawing))
                 : m_v.clip == 1 ? Drawing::parse(QString("m %1 %2 l %3 %2 %3 %4 %1 %4") // a rectangle's corners (Aegisub)
@@ -444,6 +447,13 @@ void VisualTools::reload() {
         m_drawOrigin = QPointF(m_v.x, m_v.y);
         m_vec.translate(-alignShift(m_vec));
     }
+    std::erase_if(m_vecSel, [this](std::pair<int, int> h) {
+        return h.first >= int(m_vec.cmds.size()) || h.second >= int(m_vec.cmds[size_t(h.first)].pts.size());
+    });
+}
+
+QPointF VisualTools::toVec(QPointF sp) const {
+    return m_tool == VClip ? sp * std::pow(2.0, std::max(1, m_v.clip_scale) - 1) : scriptToDraw(sp);
 }
 
 std::vector<std::pair<size_t, QPointF>> VisualTools::others() const {
@@ -807,6 +817,14 @@ void VisualTools::paint(QPainter &p) {
             }
         }
         if (m_tool == Draw) handle(p, pos, true, kAccent);
+        p.setPen(Qt::NoPen);
+        p.setBrush(kAccent);
+        for (const auto &h : m_vecSel) p.drawRect(QRectF(map(m_vec.at(h)) - QPointF(3, 3), QSizeF(6, 6)));
+        p.setBrush(Qt::NoBrush);
+        if (m_drag == 7) {
+            p.setPen(QPen(kLine, 1, Qt::DashLine));
+            p.drawRect(QRectF(m_pressW, m_mouseW).normalized());
+        }
         break;
     }
     }
@@ -896,6 +914,26 @@ bool VisualTools::press(QMouseEvent *e) {
             m_vec.cmds.erase(m_vec.cmds.begin() + hs[h].first);
             if (!m_vec.cmds.empty() && m_vec.cmds[0].type != 'm') m_vec.cmds[0] = {'m', {m_vec.cmds[0].pts.back()}};
             writeVector();
+            return true;
+        }
+        if (m_vecMode == VecMove && e->button() == Qt::LeftButton && !m_vec.cmds.empty()) {
+            // Aegisub: Ctrl+click picks a point more or less, a point dragged takes the picked ones
+            // along, a box dragged from nowhere picks the points in it
+            const bool ctrl = e->modifiers() & Qt::ControlModifier;
+            if (h >= 0 && ctrl) {
+                if (!m_vecSel.erase(hs[h])) m_vecSel.insert(hs[h]);
+                m_drag = 0;
+                return true;
+            }
+            if (h >= 0) {
+                if (!m_vecSel.contains(hs[h])) m_vecSel = {hs[h]};
+                m_vecHandle = hs[h];
+                m_vecStart.clear();
+                for (const auto &s : m_vecSel) m_vecStart.emplace_back(s, m_vec.at(s));
+                return true;
+            }
+            if (!ctrl) m_vecSel.clear();
+            m_drag = 7;
             return true;
         }
         if (h >= 0 && (m_vecMode == VecMove || m_vecMode >= VecFreehand || e->button() != Qt::LeftButton)) {
@@ -1104,6 +1142,12 @@ bool VisualTools::move(QMouseEvent *e) {
     case VClip:
     case Draw: {
         if (m_vecHandle.first < 0 && m_drag != 5 && m_drag != 6) break;
+        if (m_vecStart.size() > 1) { // the picked points by as much
+            const QPointF by = toVec(m_pressS + delta) - toVec(m_pressS);
+            for (const auto &[h, at] : m_vecStart) m_vec.at(h) = at + by;
+            writeVector();
+            break;
+        }
         QPointF pt = m_drag == 5 ? now : m_pressS + delta; // Shift keeps a point on one axis
         if (m_tool == VClip) pt *= std::pow(2.0, std::max(1, m_v.clip_scale) - 1);
         else pt = scriptToDraw(now);
@@ -1172,11 +1216,50 @@ bool VisualTools::move(QMouseEvent *e) {
 
 bool VisualTools::release(QMouseEvent *e) {
     if (!m_drag) return m_tool == Pointer;
+    if (m_drag == 7) { // the selection box
+        const QRectF box = QRectF(m_pressW, e->position()).normalized();
+        for (const auto &h : m_vec.handles())
+            if (box.contains(vecW(m_vec.at(h)))) m_vecSel.insert(h);
+    }
     m_drag = 0;
     m_vecHandle = {-1, -1};
+    m_vecStart.clear();
     m_button = Qt::NoButton;
-    Q_UNUSED(e);
     reload();
+    return true;
+}
+
+bool VisualTools::vecKey(QKeyEvent *e) {
+    if (e->matches(QKeySequence::SelectAll)) {
+        for (const auto &h : m_vec.handles()) m_vecSel.insert(h);
+        return true;
+    }
+    if (m_vecSel.empty()) return false;
+    if (e->key() == Qt::Key_Delete) {
+        // their commands go, as the delete mode's click; the first one left starts the shape
+        std::set<int> cmds;
+        for (const auto &h : m_vecSel) cmds.insert(h.first);
+        for (auto it = cmds.rbegin(); it != cmds.rend(); ++it) m_vec.cmds.erase(m_vec.cmds.begin() + *it);
+        if (!m_vec.cmds.empty() && m_vec.cmds[0].type != 'm') m_vec.cmds[0] = {'m', {m_vec.cmds[0].pts.back()}};
+        m_vecSel.clear();
+        m_amend = QString("visual-%1").arg(++m_dragId);
+        writeVector();
+        return true;
+    }
+    // WASD by a pixel of the script, Shift a tenth (Kainote)
+    const double st = e->modifiers() & Qt::ShiftModifier ? 0.1 : 1;
+    QPointF d;
+    switch (e->key()) {
+    case Qt::Key_W: d = {0, -st}; break;
+    case Qt::Key_S: d = {0, st}; break;
+    case Qt::Key_A: d = {-st, 0}; break;
+    case Qt::Key_D: d = {st, 0}; break;
+    default: return false;
+    }
+    const QPointF by = toVec(d) - toVec({});
+    for (const auto &h : m_vecSel) m_vec.at(h) += by;
+    m_amend = QString("visual-nudge-vec-%1").arg(m_box->tab()->active());
+    writeVector();
     return true;
 }
 
@@ -1191,6 +1274,7 @@ bool VisualTools::doubleClick(QMouseEvent *e) {
 }
 
 bool VisualTools::key(QKeyEvent *e) {
+    if ((m_tool == VClip || m_tool == Draw) && shown()) return vecKey(e);
     const bool rect = m_tool == RClip && m_v.clip == 1;
     if (!shown() || (m_tool != Pos && m_tool != Move && !rect)) return false;
     const double st = e->modifiers() & Qt::ShiftModifier ? (rect ? 10 : 0.1) : 1;
