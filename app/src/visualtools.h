@@ -7,6 +7,7 @@
 
 #include <QObject>
 #include <QPointF>
+#include <span>
 #include <vector>
 
 class VideoBox;
@@ -36,9 +37,16 @@ struct Drawing {
     QPointF last() const; // the last point of the figure being drawn
 };
 
+// A tool of the row: its command id (the Video menu, the hotkey editor), icon and name (translated
+// in the VisualTools context)
+struct ToolInfo {
+    const char *id, *icon, *name;
+};
+
 class VisualTools : public QObject {
     Q_OBJECT
 public:
+    static std::span<const ToolInfo> tools(); // in Tool order
     bool shown() const; // the active line is on the video frame
     enum Tool { Pointer, Pos, Move, Scale, RotZ, RotXY, RClip, VClip, Draw, Shifter, AllTags, ToolCount };
     enum VecMode { VecMove, VecLine, VecBezier, VecNewFigure, VecDelete, VecFreehand, VecInsert, VecConvert, VecSpline };

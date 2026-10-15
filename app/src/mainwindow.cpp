@@ -8,6 +8,7 @@
 #include "grid.h"
 #include "tabpanel.h"
 #include "videobox.h"
+#include "visualtools.h"
 
 #include <QActionGroup>
 #include <set>
@@ -1073,6 +1074,11 @@ void MainWindow::buildMenus() {
         [=] { if (tab()->audio()->hasAudio()) tab()->audio()->setMark(tab()->videoTime()); });
     video->addSeparator();
     add("zoomVideo", tr("Zoom video"), {}, video, [=] { tab()->video()->zoomMode(); });
+    // the tool row's tools, for keys of one's own (Aegisub has them on A..J, taken here by WASD)
+    auto *visualTools = sub(video, tr("Visual tools"));
+    for (int t = 0; t < VisualTools::ToolCount; ++t)
+        add(VisualTools::tools()[t].id, QCoreApplication::translate("VisualTools", VisualTools::tools()[t].name), {},
+            visualTools, [=] { tab()->video()->tools()->setTool(t); });
     add("resetZoom", tr("Turn off video zoom"), QKeySequence("Ctrl+Shift+Z"), video, [=] { tab()->video()->resetZoom(); });
     auto *detach = add("detachVideo", tr("Detach video"), {}, video, [=] {
         tab()->video()->setDetached(!tab()->video()->detached());

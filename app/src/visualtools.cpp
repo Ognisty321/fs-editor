@@ -152,22 +152,33 @@ VisualTools::VisualTools(VideoBox *box)
 QPointF VisualTools::w(QPointF p) const { return m_box->view()->toWidget(p); }
 QPointF VisualTools::s(QPointF p) const { return m_box->view()->toScript(p); }
 
+static const ToolInfo kTools[] = {
+    {"toolPointer", "pointer", QT_TRANSLATE_NOOP("VisualTools", "Position pointer")},
+    {"toolPos", "crosshair", QT_TRANSLATE_NOOP("VisualTools", "Text positioning")},
+    {"toolMove", "route", QT_TRANSLATE_NOOP("VisualTools", "Text moving")},
+    {"toolScale", "arrows-diagonal", QT_TRANSLATE_NOOP("VisualTools", "Text scaling")},
+    {"toolRotZ", "rotate-clockwise", QT_TRANSLATE_NOOP("VisualTools", "Z rotation")},
+    {"toolRotXY", "rotate-3d", QT_TRANSLATE_NOOP("VisualTools", "X/Y rotation")},
+    {"toolRClip", "crop", QT_TRANSLATE_NOOP("VisualTools", "Rectangle clipping")},
+    {"toolVClip", "scissors", QT_TRANSLATE_NOOP("VisualTools", "Vector clipping")},
+    {"toolDraw", "vector-bezier", QT_TRANSLATE_NOOP("VisualTools", "Vector drawing")},
+    {"toolShifter", "arrows-move", QT_TRANSLATE_NOOP("VisualTools", "Position shifter")},
+    {"toolAllTags", "typography", QT_TRANSLATE_NOOP("VisualTools", "All tags (drag left/right to change the value)")},
+};
+static_assert(std::size(kTools) == VisualTools::ToolCount);
+
+std::span<const ToolInfo> VisualTools::tools() { return kTools; }
+
 QWidget *VisualTools::toolRow(QWidget *parent) {
     auto *row = new QWidget(parent);
     auto *h = new QHBoxLayout(row);
     h->setContentsMargins(0, 0, 0, 0);
     h->setSpacing(1);
-    const char *icons[] = {"pointer", "crosshair", "route", "arrows-diagonal", "rotate-clockwise", "rotate-3d",
-                           "crop", "scissors", "vector-bezier", "arrows-move", "typography"};
-    const char *tips[] = {QT_TR_NOOP("Position pointer"), QT_TR_NOOP("Text positioning"), QT_TR_NOOP("Text moving"),
-                          QT_TR_NOOP("Text scaling"), QT_TR_NOOP("Z rotation"), QT_TR_NOOP("X/Y rotation"),
-                          QT_TR_NOOP("Rectangle clipping"), QT_TR_NOOP("Vector clipping"), QT_TR_NOOP("Vector drawing"),
-                          QT_TR_NOOP("Position shifter"), QT_TR_NOOP("All tags (drag left/right to change the value)")};
     auto *group = new QButtonGroup(row);
     for (int t = 0; t < ToolCount; ++t) {
         auto *b = new QToolButton(row);
-        b->setIcon(icon(icons[t], QColor(t == AllTags ? 0xf2665c : t >= 6 && t <= 8 ? 0xb48cff : 0x4aa3ff)));
-        b->setToolTip(tr(tips[t]));
+        b->setIcon(icon(kTools[t].icon, QColor(t == AllTags ? 0xf2665c : t >= 6 && t <= 8 ? 0xb48cff : 0x4aa3ff)));
+        b->setToolTip(tr(kTools[t].name));
         b->setCheckable(true);
         b->setAutoRaise(true);
         b->setFixedSize(26, 26);
@@ -634,8 +645,21 @@ void VisualTools::paint(QPainter &p) {
         return;
     }
     // the other selected lines on this frame (Kainote), a click makes one the active line (Aegisub)
-    for (const auto &o : others()) handle(p, o.second, true, kLine);
-    if (!shown()) return;
+    const auto oth = others();
+    for (const auto &o : oth) handle(p, o.second, true, kLine);
+    if (!shown()) {
+        // why the tool does nothing (Kainote)
+        if (m_valid && oth.empty()) {
+            const bool comment = m_box->tab()->s().row(size_t(m_box->tab()->active())).comment;
+            const QString t = comment ? tr("The visual tools do not work on comments")
+                                      : tr("The line is not visible on this frame\nor lasts no time");
+            p.setPen(kShadow);
+            p.drawText(d.translated(1, 1), Qt::AlignCenter, t);
+            p.setPen(QColor(255, 90, 90));
+            p.drawText(d, Qt::AlignCenter, t);
+        }
+        return;
+    }
     p.setClipRect(d);
     const QPointF pos = w({m_v.x, m_v.y});
     switch (m_tool) {

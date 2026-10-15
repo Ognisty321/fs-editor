@@ -1700,6 +1700,10 @@ Dekoder: BestSource</translation>
         <translation>Powiększ wideo</translation>
     </message>
     <message>
+        <source>Visual tools</source>
+        <translation>Narzędzia wizualne</translation>
+    </message>
+    <message>
         <source>Turn off video zoom</source>
         <translation>Wyłącz powiększenie wideo</translation>
     </message>
@@ -4031,6 +4035,16 @@ Dopasować rozdzielczość napisów do wideo?</translation>
     <message>
         <source>Set the angle from 2 points: drag along an edge in the video</source>
         <translation>Ustaw kąt z 2 punktów: przeciągnij wzdłuż krawędzi na wideo</translation>
+    </message>
+    <message>
+        <source>The visual tools do not work on comments</source>
+        <translation>Narzędzia wizualne nie działają na komentarzach</translation>
+    </message>
+    <message>
+        <source>The line is not visible on this frame
+or lasts no time</source>
+        <translation>Linijka nie jest widoczna na tej klatce
+albo nie trwa wcale</translation>
     </message>
 </context>
 </TS>
