@@ -459,8 +459,9 @@ pub mod ffi {
         ) -> Result<()>;
         fn open_embedded(self: &mut Session, video: &str, index: i32) -> Result<()>;
         fn save(self: &mut Session, path: &str) -> Result<()>;
-        /// Whether the file's format holds all of the subtitles; Save asks for an ASS name if not.
-        fn lossless(self: &Session) -> bool;
+        /// Whether the format a save to `path` writes (its extension's, for a new name) holds
+        /// all of the subtitles; Save asks for an ASS name if not.
+        fn lossless(self: &Session, path: &str) -> bool;
         fn export_copy(
             self: &Session,
             path: &str,
@@ -473,6 +474,8 @@ pub mod ffi {
         fn save_translation(self: &Session, path: &str) -> Result<()>;
         fn autosave(self: &Session, path: &str) -> Result<()>;
         fn convert(self: &mut Session, format: &str) -> Result<()>;
+        /// Whether the format was converted since the file was read or saved: Save asks for a name.
+        fn converted(self: &Session) -> bool;
         fn file_info(self: &Session) -> FileInfo;
         /// Edits with the same non-empty `amend` make one undo step.
         fn set_info_value(self: &mut Session, key: &str, value: &str, amend: &str);

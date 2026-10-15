@@ -449,13 +449,7 @@ pub fn lossless(doc: &Document, format: Format, opts: &SaveOptions) -> bool {
         return false;
     }
     // what the format cannot say (italics in part of an MPL2 line …) does not come back
-    let text = save_text(doc, format, opts);
-    let back = match format {
-        Format::Srt => simple::parse_srt(&text),
-        Format::Mpl2 => simple::parse_mpl2(&text),
-        Format::MicroDvd => simple::parse_microdvd(&text, &opts.fps).0,
-        _ => simple::parse_tmp(&text, LoadOptions::default().tmp_max_duration),
-    };
+    let back = read_back(doc, format, opts);
     let canon = |t: &str| {
         let (runs, an) = markup::ass_to_runs(t);
         markup::runs_to_ass(&runs, an)
@@ -466,6 +460,33 @@ pub fn lossless(doc: &Document, format: Format, opts: &SaveOptions) -> bool {
             .iter()
             .zip(&back)
             .all(|(e, b)| e.text == b.text || canon(&e.text) == canon(&b.text))
+}
+
+/// The lines a save of `doc` in the simple `format` writes, read back.
+fn read_back(doc: &Document, format: Format, opts: &SaveOptions) -> Vec<Sub> {
+    let text = save_text(doc, format, opts);
+    match format {
+        Format::Srt => simple::parse_srt(&text),
+        Format::Mpl2 => simple::parse_mpl2(&text),
+        Format::MicroDvd => simple::parse_microdvd(&text, &opts.fps).0,
+        _ => simple::parse_tmp(&text, LoadOptions::default().tmp_max_duration),
+    }
+}
+
+/// `doc` cut down to what `format` holds (Kainote's conversion): the lines a save writes, read
+/// back, in place of its events, and no attachments. ASS and SSA hold it all.
+pub fn reduce(doc: &mut Document, format: Format, opts: &SaveOptions) {
+    if format.is_ass() {
+        return;
+    }
+    let subs = read_back(doc, format, opts);
+    doc.retain_events(|_| false);
+    for s in subs {
+        doc.push_event(Event::dialogue(s.start, s.end, "Default", &s.text));
+    }
+    for a in doc.attachments() {
+        doc.remove_attachment(a.font, &a.name);
+    }
 }
 
 /// The encoding and BOM it was written with: UTF-8 with a BOM, the one Aegisub always saves in,
@@ -680,6 +701,16 @@ mod tests {
         assert!(!lossless(&part, Format::Mpl2, &opts));
         assert!(lossless(&part, Format::Srt, &opts));
         assert!(lossless(&doc(&[r"{\i1}a\N{\i0}b"]), Format::Mpl2, &opts));
+
+        // a conversion leaves what the format holds
+        let mut d = doc(&[r"{\pos(1,2)\i1}a", "b", "c"]);
+        d.event_mut(1).unwrap().kind = EventKind::Comment;
+        d.event_mut(2).unwrap().style = "Signs".into();
+        d.attach(true, "f.ttf", b"font");
+        reduce(&mut d, Format::Srt, &opts);
+        assert!(lossless(&d, Format::Srt, &opts) && d.attachments().is_empty());
+        let texts: Vec<_> = d.events().iter().map(|e| e.event.text.as_str()).collect();
+        assert_eq!(texts, [r"{\i1}a", "c"]);
     }
 
     #[test]

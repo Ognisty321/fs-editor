@@ -27,6 +27,8 @@ pub struct Session {
     pub(crate) ed: Editor,
     pub(crate) path: Option<PathBuf>,
     format: Format,
+    /// The format of the file at `path`; a conversion away from it saves under a new name.
+    disk_format: Format,
     encoding: &'static Encoding,
     bom: bool,
     /// Events as loaded / as last saved, for the grid's number-cell state.
@@ -51,6 +53,7 @@ impl Default for Session {
             ed: Editor::new(Document::new()),
             path: None,
             format: Format::Ass,
+            disk_format: Format::Ass,
             encoding: encoding_rs::UTF_8,
             bom: true,
             loaded: HashMap::new(),
@@ -414,28 +417,34 @@ impl Session {
         self.subs_fps = None;
         self.path = path;
         self.format = l.format;
+        self.disk_format = l.format;
         self.encoding = l.encoding;
         self.bom = l.bom;
         self.snapshot_loaded();
         self.refresh();
     }
 
-    pub fn save(&mut self, path: &str) -> Result<(), String> {
-        let p = PathBuf::from(path);
-        // the extension of a new name picks the format (Save as…)
-        let format = match &self.path {
-            Some(old) if *old == p => self.format,
+    /// The format a save to `p` writes: the extension of a new name picks it (Save as…).
+    fn format_for(&self, p: &Path) -> Format {
+        match &self.path {
+            Some(old) if old == p => self.format,
             _ => p
                 .extension()
                 .and_then(|e| e.to_str())
                 .and_then(Format::from_name)
                 .unwrap_or(self.format),
-        };
+        }
+    }
+
+    pub fn save(&mut self, path: &str) -> Result<(), String> {
+        let p = PathBuf::from(path);
+        let format = self.format_for(&p);
         (self.encoding, self.bom) =
             fs_formats::save_file(&self.ed.doc, &p, format, &self.save_options())
                 .map_err(|e| format!("{path}: {e}"))?;
         self.path = Some(p);
         self.format = format;
+        self.disk_format = format;
         self.ed.mark_saved();
         self.saved = events_by_id(&self.ed.doc);
         self.generation += 1;
@@ -454,9 +463,10 @@ impl Session {
         }
     }
 
-    /// Whether the file's format holds all of the subtitles (Aegisub's CanSave).
-    pub fn lossless(&self) -> bool {
-        fs_formats::lossless(&self.ed.doc, self.format, &self.save_options())
+    /// Whether the format a save to `path` writes holds all of the subtitles (Aegisub's CanSave).
+    pub fn lossless(&self, path: &str) -> bool {
+        let format = self.format_for(Path::new(path));
+        fs_formats::lossless(&self.ed.doc, format, &self.save_options())
     }
 
     /// Write a backup copy as ASS (Aegisub's `.AUTOSAVE.ass`); path, format
@@ -484,16 +494,29 @@ impl Session {
             .map_err(|e| format!("{path}: {e}"))
     }
 
-    /// Switch the format the file is saved in (Kainote "Conversion"). Text
-    /// formats lose styling on save; the document itself stays ASS.
+    /// Switch the format the file is saved in (Kainote "Conversion"): the lines become what it
+    /// holds, as one undo step, and the next Save asks for a name.
     pub fn convert(&mut self, format: &str) -> Result<(), String> {
         let f = Format::from_name(format).ok_or_else(|| format!("unknown format {format}"))?;
+        if self.tl {
+            return Err("translation mode is on: turn it off to convert".into());
+        }
+        let opts = self.save_options();
+        // shortcut: undo brings the lines back but not the format, a history entry for it if missed
+        if !f.is_ass() {
+            self.edit("Convert", |d| fs_formats::reduce(d, f, &opts));
+        }
         self.format = f;
         if let Some(p) = &mut self.path {
             p.set_extension(f.extension());
         }
         self.generation += 1;
         Ok(())
+    }
+
+    /// Whether the format was converted since the file was read or saved.
+    pub fn converted(&self) -> bool {
+        self.format != self.disk_format
     }
 
     pub fn file_info(&self) -> FileInfo {
@@ -508,7 +531,7 @@ impl Session {
             format: self.format.name().into(),
             encoding: self.encoding.name().into(),
             tl_mode: self.tl,
-            modified: self.ed.is_modified(),
+            modified: self.ed.is_modified() || self.converted(),
             play_res_x: x,
             play_res_y: y,
             video_file: info("Video File"),
@@ -3126,6 +3149,24 @@ mod tests {
     }
 
     #[test]
+    fn a_conversion_saves_under_a_new_name() {
+        let mut s = session(ASS);
+        assert!(!s.converted() && !s.file_info().modified);
+        let n = s.row_count();
+        s.convert("srt").unwrap();
+        // the lines are what SRT holds, the next Save asks for a name
+        assert!(s.converted() && s.file_info().modified);
+        assert!(s.lossless("a.srt") && s.row_count() <= n);
+        s.undo();
+        assert_eq!(s.row_count(), n);
+        let p = std::env::temp_dir().join(format!("fsb-conv-{}.srt", std::process::id()));
+        s.convert("srt").unwrap();
+        s.save(p.to_str().unwrap()).unwrap();
+        assert!(!s.converted() && !s.file_info().modified);
+        std::fs::remove_file(p).ok();
+    }
+
+    #[test]
     fn split_row_estimates_or_keeps_times() {
         let mut s = session(ASS);
         assert_eq!(s.split_row(2, 2, -2), 3);
@@ -3675,8 +3716,10 @@ mod tests {
         s.open(srt.to_str().unwrap()).unwrap();
         eprintln!("open srt: {:?}", t0.elapsed());
         let t0 = Instant::now();
-        assert!(s.lossless());
+        assert!(s.lossless(srt.to_str().unwrap()));
         eprintln!("lossless srt: {:?}", t0.elapsed());
+        // MPL2 italics are whole lines
+        assert!(!s.lossless("a.mpl") && s.lossless("a.ass"));
         let t0 = Instant::now();
         s.save(srt.to_str().unwrap()).unwrap();
         eprintln!("save srt: {:?}", t0.elapsed());

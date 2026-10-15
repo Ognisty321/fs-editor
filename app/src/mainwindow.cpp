@@ -1490,7 +1490,7 @@ void MainWindow::pasteTranslation() {
 
 bool MainWindow::saveAs(TabPanel *tab) {
     QString start = tab->path();
-    if (!start.isEmpty() && !tab->s().lossless()) {
+    if (!start.isEmpty() && !tab->s().lossless(fs::Utf8(start))) {
         // Aegisub's: to an ASS name when the file's format cannot hold it all
         status(tr("Its format cannot hold everything in these subtitles: save them as ASS"));
         const QFileInfo fi(start);
@@ -1503,14 +1503,25 @@ bool MainWindow::saveAs(TabPanel *tab) {
     }
     if (start.isEmpty()) start = QSettings().value("main/lastDir").toString() + "/" + tr("Untitled") + ".ass";
     const QString p = QFileDialog::getSaveFileName(this, tr("Save subtitles as"), start, kSubsFilter);
-    if (p.isEmpty() || !tab->save(p)) return false;
+    if (p.isEmpty()) return false;
+    if (!tab->s().lossless(fs::Utf8(p)) &&
+        QMessageBox::warning(this, tr("Save subtitles as"),
+                             tr("%1 cannot hold everything in these subtitles: styles, tags, comments or "
+                                "attachments will be missing from the file. Save anyway?")
+                                 .arg(QFileInfo(p).suffix().toUpper()),
+                             QMessageBox::Save | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Save)
+        return false;
+    if (!tab->save(p)) return false;
     addRecent("subs", p);
     return true;
 }
 
-// a file in a format that cannot hold the subtitles goes to Save as (Aegisub)
+// a file in a format that cannot hold the subtitles goes to Save as (Aegisub), and so does a
+// converted one, not to overwrite a file of the new extension (Kainote)
 bool MainWindow::saveTab(TabPanel *tab) {
-    if (tab->path().isEmpty() || !tab->s().lossless() || !tab->save()) return saveAs(tab);
+    if (tab->path().isEmpty() || tab->s().converted() || !tab->s().lossless(fs::Utf8(tab->path())) ||
+        !tab->save())
+        return saveAs(tab);
     addRecent("subs", tab->path());
     return true;
 }
@@ -1540,6 +1551,14 @@ bool MainWindow::closeTab(int index) {
 
 void MainWindow::convert(const QString &format) {
     auto *tab = current();
+    // Kainote's: a conversion that loses something asks first
+    if (!tab->s().lossless(fs::Utf8("x." + format.toLower())) &&
+        QMessageBox::warning(this, tr("Conversion"),
+                             tr("%1 cannot hold everything in these subtitles: styles, tags, comments or "
+                                "attachments will be lost. Convert anyway?")
+                                 .arg(format),
+                             QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+        return;
     try {
         tab->s().convert(fs::Utf8(format));
     } catch (const rust::Error &e) {
@@ -1556,7 +1575,7 @@ void MainWindow::updateActions() {
     const QString fmt = fs::q(fi.format).toUpper();
     const std::pair<const char *, const char *> conv[] = {
         {"toASS", "ASS"}, {"toSRT", "SRT"}, {"toMDVD", "MICRODVD"}, {"toMPL2", "MPL2"}, {"toTMP", "TMP"}};
-    for (auto [id, f] : conv) action(id)->setEnabled(fmt != f);
+    for (auto [id, f] : conv) action(id)->setEnabled(fmt != f && !fi.tl_mode);
     action("saveTranslation")->setEnabled(fi.tl_mode);
     action("translationMatching")->setEnabled(fi.tl_mode);
     action("subsFromVideo")->setEnabled(!tab->video()->path().isEmpty());

@@ -1916,12 +1916,20 @@ Tłumaczenie: wklejony tekst, który przejmuje timing oryginału.</translation>
         <translation>Zapisz napisy jako</translation>
     </message>
     <message>
+        <source>%1 cannot hold everything in these subtitles: styles, tags, comments or attachments will be missing from the file. Save anyway?</source>
+        <translation>%1 nie pomieści wszystkiego, co jest w tych napisach: style, tagi, komentarze lub załączniki nie trafią do pliku. Zapisać mimo to?</translation>
+    </message>
+    <message>
         <source>Save changes</source>
         <translation>Zapisz zmiany</translation>
     </message>
     <message>
         <source>Save changes to %1?</source>
         <translation>Zapisać zmiany w %1?</translation>
+    </message>
+    <message>
+        <source>%1 cannot hold everything in these subtitles: styles, tags, comments or attachments will be lost. Convert anyway?</source>
+        <translation>%1 nie pomieści wszystkiego, co jest w tych napisach: style, tagi, komentarze lub załączniki przepadną. Konwertować mimo to?</translation>
     </message>
     <message>
         <source>Hotkey for &quot;%1&quot;</source>
