@@ -386,6 +386,12 @@ impl Filter {
         } else {
             Vec::new()
         };
+        // sorted once, so a long row list is a binary search per line
+        let rows = self.rows.as_ref().map(|r| {
+            let mut r = r.clone();
+            r.sort_unstable();
+            r
+        });
         (0..doc.event_count())
             .filter(|&i| {
                 let ev = doc.event(i).unwrap();
@@ -394,7 +400,7 @@ impl Filter {
                     && (self.effects.is_empty() || self.effects.contains(&ev.effect))
                     && self.text.as_ref().is_none_or(|m| m.is_match(ev))
                     && self.comments.is_none_or(|c| ev.is_comment() == c)
-                    && self.rows.as_ref().is_none_or(|r| r.contains(&i))
+                    && rows.as_ref().is_none_or(|r| r.binary_search(&i).is_ok())
                     && (!self.only_overlapping || overlap[i])
                     && self
                         .min_cps
