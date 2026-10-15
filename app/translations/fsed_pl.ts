@@ -797,6 +797,10 @@
         <translation>Pokaż nieprzetłumaczone</translation>
     </message>
     <message>
+        <source>Filter after loading subtitles</source>
+        <translation>Filtruj po wczytaniu napisów</translation>
+    </message>
+    <message>
         <source>Filter</source>
         <translation>Filtruj</translation>
     </message>

@@ -118,6 +118,7 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
     m_sel.clear();
     m_active = 0;
     m_edit->load(-1); // a new file: forget the revert text of the old one
+    m_grid->resetFilter();
     changed();
     setActive(std::clamp(fs::q(s().project_value("Active Line")).toInt(), 0, std::max(0, int(s().row_count()) - 1)));
     if (const int top = fs::q(s().project_value("Scroll Position")).toInt(); top > 0) // after setActive, as Aegisub
@@ -153,6 +154,7 @@ bool TabPanel::openEmbedded(const QString &video, int index) {
     }
     m_sel.clear();
     m_active = 0;
+    m_grid->resetFilter();
     changed();
     setActive(0);
     emit titleChanged();

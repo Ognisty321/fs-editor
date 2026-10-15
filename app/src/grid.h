@@ -35,6 +35,9 @@ public:
     bool filterOn = false;
     bool ignoreFilterInActions = false;
     void applyFilter();
+    // a newly loaded file: drops the old rows' filter, refilters with the options when
+    // "Filter after loading subtitles" is on (Kainote)
+    void resetFilter();
     std::vector<size_t> visibleRows() const { return m_vis; }
     int syncMarker() const { return m_marker; }
 

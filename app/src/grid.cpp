@@ -63,6 +63,18 @@ Grid::Grid(TabPanel *tab) : QAbstractScrollArea(tab), m_tab(tab) {
     setFont(st.value("grid/font", QFont("Tahoma", 10)).value<QFont>());
     for (const auto &v : st.value("grid/hiddenColumns").toList()) m_userHidden.insert(v.toInt());
     m_tagMode = st.value("grid/tagMode").toInt();
+    // the last filter's options, as Kainote keeps them (the TL-only ones stay per tab)
+    for (const QString &x : st.value("grid/filterStyles").toStringList()) filterSpec.hide_styles.push_back(fs::rs(x));
+    filterSpec.hide_comments = st.value("grid/filterComments").toBool();
+    filterSpec.invert = st.value("grid/filterInvert").toBool();
+}
+
+void Grid::resetFilter() {
+    filterSpec.hide_rows.clear();
+    m_expanded.clear();
+    filterOn = QSettings().value("grid/filterAfterLoad").toBool() &&
+               (!filterSpec.hide_styles.empty() || filterSpec.hide_comments);
+    applyFilter();
 }
 
 QString Grid::colName(int c) {
@@ -728,15 +740,23 @@ void Grid::contextMenu(const QPoint &global) {
         check(tr("Show untranslated"), filterSpec.only_untranslated,
               [this](bool v) { filterSpec.only_untranslated = v; });
     }
+    check(tr("Filter after loading subtitles"), QSettings().value("grid/filterAfterLoad").toBool(),
+          [](bool v) { QSettings().setValue("grid/filterAfterLoad", v); });
     flt->addSeparator();
     flt->addAction(tr("Filter"), this, [this] {
         filterOn = true;
         m_expanded.clear();
         applyFilter();
+        QStringList styles;
+        for (const auto &x : filterSpec.hide_styles) styles << fs::q(x);
+        QSettings st;
+        st.setValue("grid/filterStyles", styles);
+        st.setValue("grid/filterComments", filterSpec.hide_comments);
+        st.setValue("grid/filterInvert", filterSpec.invert);
     });
     flt->addAction(tr("Turn off filtering"), this, [this] {
         filterOn = false;
-        filterSpec = {};
+        filterSpec.hide_rows.clear(); // the options stay for the next filter (Kainote)
         applyFilter();
     });
     auto *ign = m.addAction(tr("Ignore filtering in some actions"));
