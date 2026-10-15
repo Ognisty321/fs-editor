@@ -203,11 +203,12 @@ QString Grid::cell(const fsb::Row &r, int col, size_t index) const {
         if (s.size() > Cap) s = s.left(Cap) + QChar(0x2026);
         return s;
     };
+    const auto frames = [this] { return m_tab->edit() && m_tab->edit()->framesMode() && m_tab->video()->hasVideo(); };
     switch (col) {
     case Num: return QString::number(index + 1);
     case Layer: return QString::number(r.layer);
-    case Start: return fs::fmtTime(r.start);
-    case End: return fs::fmtTime(r.end);
+    case Start: return frames() ? QString::number(m_tab->video()->frameAtStart(r.start)) : fs::fmtTime(r.start);
+    case End: return frames() ? QString::number(m_tab->video()->frameAtEnd(r.end)) : fs::fmtTime(r.end);
     case Style: return fs::q(r.style);
     case Actor: return fs::q(r.actor);
     case MarginL: return QString::number(r.margin_l);

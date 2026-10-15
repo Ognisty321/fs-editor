@@ -116,8 +116,19 @@ public:
 
     qint64 frameAt(qint64 ms) const;      // frame shown at ms
     qint64 frameAtStart(qint64 ms) const; // first frame a line starting at ms is visible on (Aegisub START)
+    qint64 frameAtEnd(qint64 ms) const { return frameAt(ms - 1); } // last frame a line ending at ms is on (END)
     void seekStart(qint64 ms) { seekFrame(frameAtStart(ms)); }
     qint64 timeAt(qint64 frame) const;
+    // Aegisub's TimeAtFrame START/END: halfway to the neighbouring frame, so rounding to centiseconds
+    // cannot move the line onto another frame
+    qint64 timeAtStart(qint64 frame) const {
+        const qint64 prev = timeAt(frame - 1), cur = timeAt(frame);
+        return prev + (cur - prev + 1) / 2;
+    }
+    qint64 timeAtEnd(qint64 frame) const {
+        const qint64 cur = timeAt(frame), next = timeAt(frame + 1);
+        return cur + (next - cur + 1) / 2;
+    }
     qint64 time() const { return timeAt(m_frame); }
     qint64 frame() const { return m_frame; }
     qint64 nextFrameTime() const { return timeAt(m_frame + 1); }

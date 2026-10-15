@@ -87,12 +87,14 @@ public:
     void focusText();
     void selectText(int from, int length); // UTF-16 positions in the line text
     int row() const { return m_row; }
+    bool framesMode() const { return m_framesMode; } // the grid shows frames too (Aegisub)
 
 protected:
     void resizeEvent(QResizeEvent *) override;
 
 private:
     void commit(const char *field);
+    void showTimes(const fsb::Row &r, const QString &skip);
     void updateInfo(const fsb::Row &r);
     void rebuildTagButtons();
     void onKey(int key, Qt::KeyboardModifiers mods);

@@ -560,6 +560,7 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
         m_framesMode = on;
         for (auto *t : {m_start, m_end, m_duration}) t->setFrames(on);
         reload();
+        m_tab->grid()->viewport()->update();
     });
 
     // TL original + buttons
@@ -824,12 +825,8 @@ void EditBox::reload() {
     m_doubtful->setChecked(r.doubtful);
     m_comment->setChecked(r.comment);
     m_layer->setValue(r.layer);
-    auto *v = m_tab->video();
-    auto fr = [v](qint64 ms) { return v->hasVideo() ? v->frameAt(ms) : 0; };
-    if (m_framesMode && !v->hasVideo()) m_timeRadio->setChecked(true);
-    m_start->setMs(r.start, fr(r.start));
-    m_end->setMs(r.end, fr(r.end));
-    m_duration->setMs(r.end - r.start, fr(r.end) - fr(r.start));
+    if (m_framesMode && !m_tab->video()->hasVideo()) m_timeRadio->setChecked(true);
+    showTimes(r, {});
     // style list
     m_style->clear();
     for (const auto &st : s.styles()) m_style->addItem(fs::q(st.name));
@@ -870,25 +867,25 @@ void EditBox::commit(const char *field) {
     fsb::Row r = s.row(size_t(m_row));
     const QString f(field);
     auto *v = m_tab->video();
-    auto ms = [&](TimeEdit *t) {
+    auto ms = [&](TimeEdit *t, bool end) {
         if (!m_framesMode) return t->ms();
-        return t->frame() < 0 ? qint64(-1) : v->timeAt(t->frame());
+        return t->frame() < 0 ? qint64(-1) : end ? v->timeAtEnd(t->frame()) : v->timeAtStart(t->frame());
     };
     r.text = fs::rs(m_text->text().replace('\n', "\\N"));
     r.original = fs::rs(m_original->text().replace('\n', "\\N"));
     r.doubtful = m_doubtful->isChecked();
     r.comment = m_comment->isChecked();
     r.layer = m_layer->value();
-    if (f == "start" && ms(m_start) >= 0) {
-        const qint64 dur = r.end - r.start;
-        r.start = ms(m_start);
+    if (f == "start" && ms(m_start, false) >= 0) {
+        r.start = ms(m_start, false);
         r.end = std::max(r.start, r.end);
-        Q_UNUSED(dur);
-    } else if (f == "end" && ms(m_end) >= 0) {
-        r.end = std::max<std::int64_t>(r.start, ms(m_end));
+    } else if (f == "end" && ms(m_end, true) >= 0) {
+        r.end = std::max<std::int64_t>(r.start, ms(m_end, true));
     } else if (f == "duration") {
-        const qint64 d = m_framesMode ? (m_duration->frame() < 0 ? -1 : v->timeAt(v->frameAt(r.start) + m_duration->frame()) - r.start)
-                                      : m_duration->ms();
+        // frames: the count from the first frame through the last (Aegisub)
+        const qint64 d = !m_framesMode            ? m_duration->ms()
+                         : m_duration->frame() < 0 ? -1
+                                                   : v->timeAtEnd(v->frameAtStart(r.start) + m_duration->frame() - 1) - r.start;
         if (d >= 0) r.end = r.start + d;
     }
     r.style = fs::rs(m_style->currentText());
@@ -901,13 +898,19 @@ void EditBox::commit(const char *field) {
     m_tab->changed(TabPanel::FromEditBox);
     m_loading = true;
     const fsb::Row now = s.row(size_t(m_row));
-    if (f != "start") m_start->setMs(now.start, v->hasVideo() ? v->frameAtStart(now.start) : 0);
-    if (f != "end") m_end->setMs(now.end, v->hasVideo() ? v->frameAt(now.end) : 0);
-    if (f != "duration")
-        m_duration->setMs(now.end - now.start,
-                          v->hasVideo() ? v->frameAt(now.end) - v->frameAt(now.start) : 0);
+    showTimes(now, f);
     updateInfo(now);
     m_loading = false;
+}
+
+// Frames as Aegisub shows them: the first and the last frame the line is on, and their count.
+void EditBox::showTimes(const fsb::Row &r, const QString &skip) {
+    auto *v = m_tab->video();
+    const qint64 first = v->hasVideo() ? v->frameAtStart(r.start) : 0;
+    const qint64 last = v->hasVideo() ? v->frameAtEnd(r.end) : 0;
+    if (skip != "start") m_start->setMs(r.start, first);
+    if (skip != "end") m_end->setMs(r.end, last);
+    if (skip != "duration") m_duration->setMs(r.end - r.start, last - first + 1);
 }
 
 void EditBox::focusText() { m_text->setFocus(); }
