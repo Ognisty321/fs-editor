@@ -109,6 +109,9 @@ public:
     fsb::VideoInfo info() const { return m_info; }
     std::vector<std::int64_t> timecodes() const; // int64_t = cxx i64 (qint64 is long long, int64_t is long on Linux)
     std::vector<std::int64_t> keyframes() const;
+    // the file's chapters (Kainote): first frame and title, by frame
+    const std::vector<std::pair<qint64, QString>> &chapters() const { return m_chapters; }
+    void stepChapter(int dir); // to the nearest chapter start before (dir < 0) or after the current frame
     void setTimecodes(std::vector<std::int64_t> tc); // empty: the video's own
     void setAspect(double ar); // display width / height, expressed as the sample aspect ratio; 0: the file's own
     // Aegisub's Video AR Mode: 1 4:3, 2 16:9, 3 2.35, 4 the custom value, else 0 (the file's own)
@@ -187,6 +190,7 @@ private:
     qint64 m_frames = 0, m_frame = 0;
     qint64 m_scriptAt = -2; // frame of a one-frame script; -1 the whole script; -2 out of date
     std::vector<std::int64_t> m_timecodes, m_keyframes;
+    std::vector<std::pair<qint64, QString>> m_chapters;
     double m_dummyFps = 0;
     bool m_playing = false, m_zoomMode = false;
     qint64 m_playEnd = -1, m_playStartMs = 0;

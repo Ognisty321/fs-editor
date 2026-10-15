@@ -11,6 +11,7 @@ namespace fsmedia::ffi {
 
 struct TrackInfo;
 struct FontFile;
+struct Chapter;
 struct SubPacket;
 struct VideoProps;
 struct AudioProps;
@@ -18,6 +19,7 @@ struct ProgressSink;
 
 rust::Vec<TrackInfo> list_tracks(rust::Str path);
 rust::Vec<FontFile> attached_fonts(rust::Str path);
+rust::Vec<Chapter> chapters(rust::Str path);
 rust::String subtitle_packets(rust::Str path, int32_t index, rust::Vec<SubPacket> &out);
 
 std::unique_ptr<VideoSource> open_video(rust::Str path, int32_t track, rust::Str cache_dir, ProgressSink &progress);

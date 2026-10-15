@@ -193,6 +193,12 @@ fn embedded_subtitles() {
         .collect();
     assert_eq!(kinds, [(0, "ass", "pol"), (1, "subrip", "eng")]);
 
+    assert_eq!(
+        fs_media::chapters(&path).unwrap(),
+        [(0, "Początek".to_owned()), (1500, String::new())]
+    );
+    assert!(fs_media::chapters(&media("cfr.mkv")).unwrap().is_empty());
+
     let (ass, ext) = fs_media::extract_subtitles(&path, 0).unwrap();
     assert_eq!(ext, "ass");
     let doc = fs_core::Document::parse(&ass);

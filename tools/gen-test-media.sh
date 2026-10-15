@@ -44,7 +44,9 @@ Dialogue: 1,0:00:02.00,0:00:03.50,Default,B,0,0,0,,{\i1}Druga, z przecinkiem{\i0
 Dialogue: 0,0:00:00.50,0:00:01.25,Default,A,0,0,0,,Pierwsza\Nlinia
 EOF
 printf '1\n00:00:00,500 --> 00:00:01,250\nFirst\n\n2\n00:00:02,000 --> 00:00:03,500\nSecond <i>line</i>\n\n' > "$tmp/s.srt"
-ffmpeg -v error -y -i "$tmp/s.ass" -i "$tmp/s.srt" -map 0 -map 1 -c copy \
+# and two chapters, the second untitled
+printf ';FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=1500\ntitle=Początek\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=1500\nEND=4000\n' > "$tmp/ch.txt"
+ffmpeg -v error -y -i "$tmp/s.ass" -i "$tmp/s.srt" -i "$tmp/ch.txt" -map 0 -map 1 -map_chapters 2 -c copy \
     -metadata:s:0 language=pol -metadata:s:1 language=eng "$out/subs.mkv"
 
 ls -l "$out"

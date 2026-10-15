@@ -1330,6 +1330,14 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Przejdź do następnej klatki kluczowej</translation>
     </message>
     <message>
+        <source>Go to previous chapter</source>
+        <translation>Przejdź do poprzedniego rozdziału</translation>
+    </message>
+    <message>
+        <source>Go to next chapter</source>
+        <translation>Przejdź do następnego rozdziału</translation>
+    </message>
+    <message>
         <source>Previous boundary</source>
         <translation>Poprzednia granica</translation>
     </message>
@@ -3184,6 +3192,10 @@ do czasu audio</translation>
         <source>Indexing %1… %2%</source>
         <translation>Indeksowanie %1… %2%</translation>
     </message>
+    <message>
+        <source>Chapter %1</source>
+        <translation>Rozdział %1</translation>
+    </message>
 </context>
 <context>
     <name>VideoView</name>
@@ -3230,6 +3242,10 @@ do czasu audio</translation>
     <message>
         <source>Show progress bar</source>
         <translation>Pokaż pasek postępu</translation>
+    </message>
+    <message>
+        <source>Chapters</source>
+        <translation>Rozdziały</translation>
     </message>
     <message>
         <source>Change aspect ratio</source>

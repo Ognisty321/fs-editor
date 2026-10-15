@@ -259,6 +259,12 @@ pub mod ffi {
         size: usize,
     }
 
+    /// A chapter of a media file.
+    struct Chapter {
+        start: i64,
+        title: String,
+    }
+
     /// A text subtitle stream inside a media file.
     struct SubTrack {
         index: i32,
@@ -569,6 +575,8 @@ pub mod ffi {
         fn open_video(path: &str, cache_dir: &str, progress: &Progress) -> Result<Box<Video>>;
         /// Empty when the file cannot be read or has no text subtitles.
         fn subtitle_tracks(path: &str) -> Vec<SubTrack>;
+        /// By start time; empty when the file cannot be read or has none.
+        fn chapters(path: &str) -> Vec<Chapter>;
         fn info(self: &Video) -> VideoInfo;
         fn frame(self: &mut Video, n: i64, out: &mut [u8]) -> Result<()>;
         fn timecodes(self: &Video) -> Vec<i64>;
@@ -754,6 +762,14 @@ fn save_timecodes(path: &str, timecodes: &[i64]) -> Result<(), String> {
     let f =
         fs_core::vfr::Framerate::from_timecodes(timecodes.to_vec()).map_err(|e| e.to_string())?;
     std::fs::write(path, f.to_v2_string(timecodes.len())).map_err(|e| format!("{path}: {e}"))
+}
+
+fn chapters(path: &str) -> Vec<ffi::Chapter> {
+    fs_media::chapters(std::path::Path::new(path))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(start, title)| ffi::Chapter { start, title })
+        .collect()
 }
 
 fn subtitle_tracks(path: &str) -> Vec<ffi::SubTrack> {

@@ -28,6 +28,11 @@ pub(crate) mod bridge {
         data: Vec<u8>,
     }
 
+    struct Chapter {
+        start_ms: i64,
+        title: String,
+    }
+
     struct SubPacket {
         start_ms: i64,
         duration_ms: i64,
@@ -75,6 +80,7 @@ pub(crate) mod bridge {
 
         fn list_tracks(path: &str) -> Result<Vec<TrackInfo>>;
         fn attached_fonts(path: &str) -> Result<Vec<FontFile>>;
+        fn chapters(path: &str) -> Result<Vec<Chapter>>;
         fn subtitle_packets(path: &str, index: i32, out: &mut Vec<SubPacket>) -> Result<String>;
 
         fn open_video(

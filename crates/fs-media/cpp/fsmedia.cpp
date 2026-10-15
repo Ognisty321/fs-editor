@@ -138,6 +138,21 @@ std::vector<std::pair<std::string, std::vector<uint8_t>>> attached_fonts(const s
     return out;
 }
 
+std::vector<std::pair<int64_t, std::string>> chapters(const std::filesystem::path &file) {
+    AVFormatContext *ctx = nullptr;
+    if (avformat_open_input(&ctx, reinterpret_cast<const char *>(file.u8string().c_str()), nullptr, nullptr) < 0)
+        throw MediaError("cannot open " + file.filename().string());
+    std::unique_ptr<AVFormatContext *, void (*)(AVFormatContext **)> guard(&ctx, avformat_close_input);
+    std::vector<std::pair<int64_t, std::string>> out;
+    for (unsigned i = 0; i < ctx->nb_chapters; ++i) {
+        const AVChapter *ch = ctx->chapters[i];
+        const AVDictionaryEntry *title = av_dict_get(ch->metadata, "title", nullptr, 0);
+        out.emplace_back(av_rescale_q(ch->start, ch->time_base, AVRational{1, 1000}), title ? title->value : "");
+    }
+    std::ranges::stable_sort(out, {}, [](const auto &c) { return c.first; });
+    return out;
+}
+
 std::string subtitle_packets(const std::filesystem::path &file, int index, std::vector<SubPacket> &out) {
     AVFormatContext *ctx = nullptr;
     if (avformat_open_input(&ctx, reinterpret_cast<const char *>(file.u8string().c_str()), nullptr, nullptr) < 0)

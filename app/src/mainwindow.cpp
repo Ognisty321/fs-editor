@@ -857,6 +857,8 @@ void MainWindow::buildMenus() {
     };
     add("prevKeyframe", tr("Go to previous keyframe"), {}, video, [=] { stepKeyframe(-1); });
     add("nextKeyframe", tr("Go to next keyframe"), {}, video, [=] { stepKeyframe(1); });
+    add("prevChapter", tr("Go to previous chapter"), {}, video, [=] { tab()->video()->stepChapter(-1); });
+    add("nextChapter", tr("Go to next chapter"), {}, video, [=] { tab()->video()->stepChapter(1); });
     // Aegisub: video/frame/prev|next/boundary - the active line's start or end, then the neighbour line
     add("prevBoundary", tr("Previous boundary"), {}, video, [=] {
         auto *t = tab();

@@ -37,6 +37,13 @@ rust::Vec<FontFile> attached_fonts(rust::Str path) {
     return out;
 }
 
+rust::Vec<Chapter> chapters(rust::Str path) {
+    rust::Vec<Chapter> out;
+    for (const auto &[ms, title] : fsmedia::chapters(to_path(path)))
+        out.push_back(Chapter{ms, str(title)});
+    return out;
+}
+
 rust::String subtitle_packets(rust::Str path, int32_t index, rust::Vec<SubPacket> &out) {
     std::vector<fsmedia::SubPacket> v;
     const std::string header = fsmedia::subtitle_packets(to_path(path), index, v);

@@ -28,7 +28,9 @@
 #include <QSplitter>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QStyleOptionSlider>
 #include <QToolButton>
+#include <QToolTip>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
@@ -259,6 +261,8 @@ void VideoView::keyPressEvent(QKeyEvent *e) {
     case Qt::Key_Right: m_box->stepFrames(1); return;
     case Qt::Key_Period: m_box->openSibling(1); return;
     case Qt::Key_Comma: m_box->openSibling(-1); return;
+    case Qt::Key_N: m_box->stepChapter(-1); return; // Kainote's chapter keys
+    case Qt::Key_M: m_box->stepChapter(1); return;
     case Qt::Key_F: m_box->setFullscreen(!m_box->isFullScreen()); return;
     case Qt::Key_Escape: m_box->setFullscreen(false); return;
     case Qt::Key_B:
@@ -294,6 +298,16 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
     m.addAction(mw->action("openSubs"));
     m.addAction(m_box->m_seek->isVisible() ? tr("Hide progress bar") : tr("Show progress bar"), m_box,
                 [this] { m_box->m_seek->setVisible(!m_box->m_seek->isVisible()); });
+    if (const auto &ch = m_box->chapters(); !ch.empty()) {
+        auto *chMenu = m.addMenu(tr("Chapters"));
+        for (size_t i = 0; i < ch.size(); ++i) {
+            const qint64 f = ch[i].first;
+            auto *a = chMenu->addAction(QString("%1\t[%2]").arg(ch[i].second, fs::fmtTime(m_box->timeAt(f))), m_box,
+                                        [this, f] { m_box->seekFrame(f); });
+            a->setCheckable(true); // the one playing
+            a->setChecked(f <= m_box->frame() && (i + 1 == ch.size() || ch[i + 1].first > m_box->frame()));
+        }
+    }
     // Aegisub's aspect ratio modes, kept in the script's Video AR Mode/Value
     auto *arMenu = m.addMenu(tr("Change aspect ratio"));
     const auto setMode = [this](int mode, double custom) {
@@ -342,6 +356,45 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
 // ---- box ----------------------------------------------------------------------
 
 namespace {
+// The seek bar with the chapters marked and named in tooltips (Kainote)
+class SeekBar : public QSlider {
+public:
+    explicit SeekBar(VideoBox *box) : QSlider(Qt::Horizontal, box), m_box(box) {}
+
+protected:
+    void paintEvent(QPaintEvent *e) override {
+        QSlider::paintEvent(e);
+        if (m_box->chapters().empty()) return;
+        QPainter p(this);
+        p.setPen(QPen(palette().color(QPalette::Highlight), 2));
+        for (const auto &c : m_box->chapters()) {
+            const int x = xOf(c.first);
+            p.drawLine(x, 0, x, height() / 3);
+            p.drawLine(x, height() - height() / 3, x, height());
+        }
+    }
+    bool event(QEvent *e) override {
+        if (e->type() != QEvent::ToolTip) return QSlider::event(e);
+        const auto *h = static_cast<QHelpEvent *>(e);
+        for (const auto &[f, title] : m_box->chapters())
+            if (std::abs(xOf(f) - h->pos().x()) <= 4) {
+                QToolTip::showText(h->globalPos(), QString("%1 [%2]").arg(title, fs::fmtTime(m_box->timeAt(f))), this);
+                return true;
+            }
+        QToolTip::hideText();
+        return true;
+    }
+
+private:
+    int xOf(qint64 frame) const { // the handle's centre at that frame, whatever the style
+        QStyleOptionSlider o;
+        initStyleOption(&o);
+        o.sliderPosition = o.sliderValue = int(frame);
+        return style()->subControlRect(QStyle::CC_Slider, &o, QStyle::SC_SliderHandle, this).center().x();
+    }
+    const VideoBox *m_box;
+};
+
 QToolButton *button(QWidget *parent, const char *name, const QString &tip) {
     auto *b = new QToolButton(parent);
     b->setIcon(icon(name, QColor(0x4cc38a)));
@@ -372,7 +425,7 @@ VideoBox::VideoBox(TabPanel *tab) : QWidget(tab), m_tab(tab), m_media(std::make_
     v->setSpacing(2);
     m_view = new VideoView(this);
     v->addWidget(m_view, 1);
-    m_seek = new QSlider(Qt::Horizontal, this);
+    m_seek = new SeekBar(this);
     v->addWidget(m_seek);
     connect(m_seek, &QSlider::sliderMoved, this, [this](int f) { seekFrame(f); });
 
@@ -476,6 +529,7 @@ void VideoBox::open(const QString &path, qint64 frame, double ar) {
     const QString cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex";
     QMetaObject::invokeMethod(m_worker, [this, media, path, name, cache, cancel, frame, ar] {
         QString err;
+        std::vector<std::pair<qint64, QString>> chapters; // start ms, title
         {
             std::lock_guard g(media->m);
             try {
@@ -492,12 +546,15 @@ void VideoBox::open(const QString &path, qint64 frame, double ar) {
                 media->video.emplace(std::move(v));
                 if (!media->renderer) media->renderer.emplace(fsb::new_renderer());
                 (*media->renderer)->load_attached_fonts(fs::Utf8(path));
+                for (const auto &c : fsb::chapters(fs::Utf8(path)))
+                    chapters.emplace_back(c.start, c.title.empty() ? tr("Chapter %1").arg(chapters.size() + 1)
+                                                                   : fs::q(c.title));
                 media->scriptDirty = true;
             } catch (const rust::Error &e) {
                 err = QString::fromUtf8(e.what());
             }
         }
-        QMetaObject::invokeMethod(this, [this, path, err, cancel, frame, ar] {
+        QMetaObject::invokeMethod(this, [this, path, err, cancel, frame, ar, chapters] {
             if (*cancel) { // closed, or replaced by a newer open (which has its own status)
                 if (cancel == m_openCancel) m_tab->main()->status(QString());
                 return;
@@ -521,6 +578,8 @@ void VideoBox::open(const QString &path, qint64 frame, double ar) {
             m_frame = std::clamp<qint64>(frame, 0, std::max<qint64>(0, m_frames - 1));
             m_scriptAt = -2;
             m_seek->setRange(0, int(std::max<qint64>(0, m_frames - 1)));
+            m_chapters.clear();
+            for (const auto &[ms, title] : chapters) m_chapters.emplace_back(frameAtStart(ms), title);
             m_tab->main()->status(QString());
             emit opened();
         });
@@ -566,6 +625,7 @@ void VideoBox::openDummy(int w, int h, double fps, qint64 ms) {
     m_timecodes.clear();
     for (qint64 f = 0; f <= m_frames; ++f) m_timecodes.push_back(qint64(f * 1000 / fps));
     m_keyframes.clear();
+    m_chapters.clear();
     m_path.clear();
     m_frame = 0;
     m_scriptAt = -2;
@@ -581,10 +641,22 @@ void VideoBox::close() {
         m_media->video.reset();
     }
     m_frames = 0;
+    m_chapters.clear();
     m_path.clear();
     m_info = {};
     m_view->setFrame(QImage());
     emit opened();
+}
+
+void VideoBox::stepChapter(int dir) {
+    const auto by = [](const auto &c) { return c.first; };
+    if (dir > 0) {
+        const auto it = std::ranges::upper_bound(m_chapters, m_frame, {}, by);
+        if (it != m_chapters.end()) seekFrame(it->first);
+    } else {
+        const auto it = std::ranges::lower_bound(m_chapters, m_frame, {}, by);
+        if (it != m_chapters.begin()) seekFrame(std::prev(it)->first);
+    }
 }
 
 qint64 VideoBox::frameAt(qint64 ms) const {

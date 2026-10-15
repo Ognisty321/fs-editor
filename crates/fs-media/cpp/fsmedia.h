@@ -43,6 +43,9 @@ std::vector<Track> list_tracks(const std::filesystem::path &file);
 /// Font attachments of a file (Matroska), as (filename, bytes).
 std::vector<std::pair<std::string, std::vector<uint8_t>>> attached_fonts(const std::filesystem::path &file);
 
+/// Chapters of a file (Matroska, MP4), as (start in ms, title), by start.
+std::vector<std::pair<int64_t, std::string>> chapters(const std::filesystem::path &file);
+
 /// Packets of one subtitle stream: the codec header (ASS: the script up to the
 /// [Events] Format line) and each packet's text with times in milliseconds.
 struct SubPacket {

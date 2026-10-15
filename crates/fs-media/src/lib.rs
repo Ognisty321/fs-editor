@@ -117,6 +117,14 @@ pub fn attached_fonts(path: &Path) -> Result<Vec<(String, Vec<u8>)>> {
         .collect())
 }
 
+/// Chapters of a Matroska/MP4 file, as (start in ms, title), by start.
+pub fn chapters(path: &Path) -> Result<Vec<(i64, String)>> {
+    Ok(bridge::chapters(path_str(path)?)?
+        .into_iter()
+        .map(|c| (c.start_ms, c.title))
+        .collect())
+}
+
 /// YUV→RGB matrix override (Aegisub's "Override colour matrix").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Matrix {
