@@ -2446,6 +2446,35 @@ fn system_fonts() -> fontdb::Database {
 
 /// The syllables `text` would have on a line from `start` to `end` (a proposed split, before it
 /// is written).
+const CATALOG_HEAD: &str = "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n";
+
+pub fn parse_style_lines(text: &str) -> Vec<StyleData> {
+    let lines: String = text
+        .lines()
+        .map(|l| l.trim_start_matches('\u{feff}'))
+        .filter(|l| l.starts_with("Style:"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    Document::parse(&format!("{CATALOG_HEAD}{lines}"))
+        .styles()
+        .map(style_data)
+        .collect()
+}
+
+pub fn style_lines(styles: &[StyleData]) -> String {
+    let mut d = Document::parse(CATALOG_HEAD);
+    for st in styles {
+        let mut s = Style::default();
+        apply_style_data(&mut s, st);
+        d.add_style(s);
+    }
+    d.to_ass_string()
+        .lines()
+        .filter(|l| l.starts_with("Style:"))
+        .map(|l| format!("{l}\n"))
+        .collect()
+}
+
 pub fn syllables_of(text: &str, start: i64, end: i64) -> Vec<Syllable> {
     let ev = Event::dialogue(Time(start), Time(end), "", text);
     bar_syllables(&Karaoke::from_event(&ev))
@@ -3209,6 +3238,26 @@ mod tests {
         assert_eq!(s.info_value("Video File"), "");
         s.set_info_value("Title", "x", "");
         assert!(s.file_info().modified && s.can_undo());
+    }
+
+    #[test]
+    fn catalog_files_round_trip() {
+        let line = "Style: Sign,Open Sans,40,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,4,2,150,8,-20,10,10,1";
+        let text = format!(
+            "\u{feff}{line}\r\n; a comment\r\nStyle: Second,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n"
+        );
+        let styles = parse_style_lines(&text);
+        assert_eq!(styles.len(), 2);
+        assert_eq!(
+            (
+                styles[0].name.as_str(),
+                styles[0].border_style,
+                styles[0].margin_l
+            ),
+            ("Sign", 4, -20)
+        );
+        assert_eq!(style_lines(&styles[..1]), format!("{line}\n"));
+        assert!(parse_style_lines("").is_empty());
     }
 
     #[test]

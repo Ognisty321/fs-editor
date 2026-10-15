@@ -16,7 +16,7 @@ pub use kanji::KanjiTimer;
 use kanji::new_kanji_timer;
 pub use media::{Audio, Renderer, Video};
 pub use session::{FontUses, Session};
-use session::{collect_fonts, syllables_of};
+use session::{collect_fonts, parse_style_lines, style_lines, syllables_of};
 pub use spell::{Speller, Thesaurus};
 use spell::{new_speller, new_thesaurus, text_words, thesaurus_word};
 
@@ -584,6 +584,10 @@ pub mod ffi {
         fn remove_attachment(self: &mut Session, font: bool, name: &str);
         /// The file name an attachment extracts to (without SSA's `_0`).
         fn attachment_file_name(name: &str) -> String;
+        /// The styles of a catalog file (Aegisub's and Kainote's .sty): its `Style:` lines.
+        fn parse_style_lines(text: &str) -> Vec<StyleData>;
+        /// `styles` as `Style:` lines, one per line, as a catalog file holds them.
+        fn style_lines(styles: &[StyleData]) -> String;
         /// `index` < 0 adds it; a rename moves the lines to the new name when `rename_lines`.
         fn set_style(self: &mut Session, index: i64, style: &StyleData, rename_lines: bool);
         /// One undo step for them all.

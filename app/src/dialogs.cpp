@@ -42,6 +42,7 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QSettings>
 #include <QSpinBox>
 #include <QStackedWidget>
@@ -611,16 +612,9 @@ namespace {
 QString assColorString(const QColor &c) {
     return QString::asprintf("&H%02X%02X%02X%02X", 255 - c.alpha(), c.blue(), c.green(), c.red());
 }
-QString styleLine(const fsb::StyleData &s) {
-    return QString("Style: %1,%2,%3,%4,%5,%6,%7,%8,%9,%10,%11,%12,%13,%14,%15,%16,%17,%18,%19,%20,%21,%22,%23")
-        .arg(fs::q(s.name), fs::q(s.font)).arg(s.size).arg(fs::q(s.primary), fs::q(s.secondary),
-                                                              fs::q(s.outline_color), fs::q(s.back))
-        .arg(s.bold ? -1 : 0).arg(s.italic ? -1 : 0).arg(s.underline ? -1 : 0).arg(s.strikeout ? -1 : 0)
-        .arg(s.scale_x).arg(s.scale_y).arg(s.spacing).arg(s.angle).arg(s.border_style).arg(s.outline)
-        .arg(s.shadow).arg(s.alignment).arg(s.margin_l).arg(s.margin_r).arg(s.margin_v).arg(s.encoding);
-}
-QVariantMap toMap(const fsb::StyleData &s) {
-    return {{"line", styleLine(s)}};
+// Style catalogs are files of Style: lines, as Aegisub and Kainote keep them: theirs can be copied in
+QString catalogFile(const QString &name) {
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/catalog/" + name + ".sty";
 }
 template <class List> QStringList namesOf(const List &styles) {
     QStringList l;
@@ -873,7 +867,7 @@ void StyleEditor::preview() {
                 "StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, "
                 "MarginR, MarginV, Encoding\n%3\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, "
                 "MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:01:00.00,Preview,,0,0,0,,{\\an5\\q2}%4\n")
-            .arg(w).arg(h).arg(styleLine(st), m_previewText->text());
+            .arg(w).arg(h).arg(fs::q(fsb::style_lines({&st, 1})), m_previewText->text());
     try {
         static std::optional<rust::Box<fsb::Renderer>> r;
         if (!r) r.emplace(fsb::new_renderer());
@@ -908,8 +902,21 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     auto *g = new QGridLayout(this);
     auto *catRow = new QHBoxLayout;
     m_catalog = new QComboBox(this);
+    const QDir dir = QFileInfo(catalogFile("x")).dir();
+    dir.mkpath(".");
     QSettings st;
-    QStringList cats = st.value("styles/catalogs", QStringList{"Default"}).toStringList();
+    // catalogs kept in the settings before become their files, once
+    for (const QString &n : st.value("styles/catalogs").toStringList()) {
+        QFile f(catalogFile(QString(n).replace(QRegularExpression(R"([\\/:*?"<>|])"), "_")));
+        if (!f.exists() && f.open(QIODevice::WriteOnly))
+            f.write("\xEF\xBB\xBF" + st.value("styles/catalog/" + n).toStringList().join('\n').toUtf8() + '\n');
+        if (f.exists()) st.remove("styles/catalog/" + n);
+    }
+    st.remove("styles/catalogs");
+    QStringList cats;
+    for (const QFileInfo &fi : dir.entryInfoList({"*.sty"}, QDir::Files, QDir::Name | QDir::IgnoreCase))
+        cats << fi.completeBaseName();
+    if (cats.isEmpty()) cats << "Default";
     m_catalog->addItems(cats);
     auto *newCat = new QPushButton(tr("New"), this);
     auto *delCat = new QPushButton(tr("Delete"), this);
@@ -1156,22 +1163,20 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     });
     connect(newCat, &QPushButton::clicked, this, [this] {
         bool ok;
-        const QString n = QInputDialog::getText(this, tr("Catalog"), tr("Name"), QLineEdit::Normal, {}, &ok);
+        QString n = QInputDialog::getText(this, tr("Catalog"), tr("Name"), QLineEdit::Normal, {}, &ok).trimmed();
+        n.replace(QRegularExpression(R"([\\/:*?"<>|])"), "_"); // it names a file (Aegisub)
         if (!ok || n.isEmpty()) return;
+        // file names ignore case on Windows: the one there is
+        if (const int k = m_catalog->findText(n, Qt::MatchFixedString); k >= 0) return m_catalog->setCurrentIndex(k);
         m_catalog->addItem(n);
-        QStringList all;
-        for (int k = 0; k < m_catalog->count(); ++k) all << m_catalog->itemText(k);
-        QSettings().setValue("styles/catalogs", all);
         m_catalog->setCurrentText(n);
+        saveCatalog(); // listed next time even while empty
     });
     connect(delCat, &QPushButton::clicked, this, [this] {
         if (m_catalog->count() <= 1 || !m_main->confirm(tr("Delete the catalog \"%1\"?").arg(m_catalog->currentText())))
             return;
-        QSettings().remove("styles/catalog/" + m_catalog->currentText());
+        QFile::remove(catalogFile(m_catalog->currentText()));
         m_catalog->removeItem(m_catalog->currentIndex());
-        QStringList all;
-        for (int k = 0; k < m_catalog->count(); ++k) all << m_catalog->itemText(k);
-        QSettings().setValue("styles/catalogs", all);
     });
     connect(m_catalog, &QComboBox::currentTextChanged, this, [this] {
         loadCatalog();
@@ -1188,31 +1193,17 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
 
 void StyleManager::loadCatalog() {
     m_stored.clear();
-    const QStringList lines = QSettings().value("styles/catalog/" + m_catalog->currentText()).toStringList();
-    // stored as ASS "Style:" lines; parse them through a throwaway session
-    if (lines.isEmpty()) return;
-    const QString script = "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, "
-                           "PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, "
-                           "StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
-                           "MarginL, MarginR, MarginV, Encoding\n" + lines.join('\n') + "\n";
-    const QString tmp = QDir::temp().filePath(QString("fsed-styles-%1.ass").arg(QCoreApplication::applicationPid()));
-    QFile f(tmp);
-    if (!f.open(QIODevice::WriteOnly)) return;
-    f.write(script.toUtf8());
-    f.close();
-    auto s = fsb::new_session();
-    try {
-        s->open(fs::Utf8(tmp));
-        for (const auto &st : s->styles()) m_stored.push_back(st);
-    } catch (const rust::Error &) {
-    }
-    QFile::remove(tmp);
+    QFile f(catalogFile(m_catalog->currentText()));
+    if (!f.open(QIODevice::ReadOnly)) return; // a catalog with nothing saved yet
+    for (const auto &s : fsb::parse_style_lines(fs::Utf8(QString::fromUtf8(f.readAll())))) m_stored.push_back(s);
 }
 
 void StyleManager::saveCatalog() {
-    QStringList lines;
-    for (const auto &s : m_stored) lines << styleLine(s);
-    QSettings().setValue("styles/catalog/" + m_catalog->currentText(), lines);
+    QSaveFile f(catalogFile(m_catalog->currentText()));
+    if (!f.open(QIODevice::WriteOnly)) return m_main->error(f.errorString());
+    f.write("\xEF\xBB\xBF"); // UTF-8 with a BOM, as Aegisub writes them
+    f.write(fs::q(fsb::style_lines({m_stored.data(), m_stored.size()})).toUtf8());
+    if (!f.commit()) m_main->error(f.errorString());
 }
 
 void StyleManager::moveStyles(bool storage, int type) {
