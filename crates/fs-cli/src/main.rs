@@ -199,6 +199,9 @@ enum Cmd {
         /// Link lines closer than this.
         #[arg(long)]
         adjacent: Option<String>,
+        /// Link lines overlapping by no more than this.
+        #[arg(long)]
+        overlap: Option<String>,
         /// Where linked lines meet within the gap (0 = previous end, 1 = next start).
         #[arg(long, default_value_t = 0.5)]
         bias: f64,
@@ -998,6 +1001,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
             lead_in,
             lead_out,
             adjacent,
+            overlap,
             bias,
             keyframes,
             snap,
@@ -1020,6 +1024,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 lead_in: lead_in.as_deref().map(parse_time).transpose()?,
                 lead_out: lead_out.as_deref().map(parse_time).transpose()?,
                 adjacent_threshold: adjacent.as_deref().map(parse_time).transpose()?,
+                adjacent_overlap: overlap.as_deref().map(parse_time).transpose()?,
                 adjacent_bias: bias,
                 keyframes: kfs.as_deref().zip(fr.as_ref()),
                 kf_before_start: snap,

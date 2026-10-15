@@ -1235,6 +1235,7 @@ impl Session {
                 lead_in: opt(spec.lead_in),
                 lead_out: opt(spec.lead_out),
                 adjacent_threshold: opt(spec.adjacent),
+                adjacent_overlap: None, // Kainote's thresholds close gaps, never overlaps
                 adjacent_bias: spec.bias,
                 keyframes: None,
                 kf_before_start: Time(spec.kf_before_start),

@@ -942,9 +942,11 @@ pub fn make_continuous(doc: &mut Document, rows: &[usize], use_next_start: bool)
 pub struct PostProcess<'a> {
     pub lead_in: Option<Time>,
     pub lead_out: Option<Time>,
-    /// Link lines whose gap is below `adjacent_threshold`; `adjacent_bias`
-    /// (0..1) chooses where in the gap they meet (0 = previous end, 1 = next start).
+    /// Link lines whose gap is below `adjacent_threshold`, or which overlap by no more than
+    /// `adjacent_overlap` (Aegisub's "Max overlap"); `adjacent_bias` (0..1) chooses where in
+    /// the gap they meet (0 = previous end, 1 = next start).
     pub adjacent_threshold: Option<Time>,
+    pub adjacent_overlap: Option<Time>,
     pub adjacent_bias: f64,
     /// Snap to keyframes within these distances (ms).
     pub keyframes: Option<(&'a [i64], &'a Framerate)>,
@@ -967,42 +969,45 @@ pub fn post_process(doc: &mut Document, rows: &Rows, pp: &PostProcess<'_>) {
             !e.is_comment() && (pp.styles.is_empty() || pp.styles.contains(&e.style))
         })
         .collect();
-    let orig: Vec<(Time, Time)> = idx
-        .iter()
-        .map(|&i| (doc.event(i).unwrap().start, doc.event(i).unwrap().end))
-        .collect();
-    // lead in/out — but never past the neighbouring line's original time
     idx.sort_by_key(|&i| doc.event(i).unwrap().start);
-    for (k, &i) in idx.iter().enumerate() {
-        let ev = doc.event(i).unwrap().clone();
-        let mut s = ev.start;
-        let mut e = ev.end;
-        if let Some(li) = pp.lead_in {
-            let limit = if k > 0 {
-                doc.event(idx[k - 1]).unwrap().end.min(s)
-            } else {
-                Time::ZERO
-            };
-            s = (s - li).max(limit).max(Time::ZERO);
-        }
-        if let Some(lo) = pp.lead_out {
-            let limit = idx.get(k + 1).map(|&n| doc.event(n).unwrap().start.max(e));
-            e += lo;
-            if let Some(l) = limit {
-                e = e.min(l);
+    // Aegisub's lead-in, then lead-out: a line grows up to the lines it doesn't overlap yet, and
+    // lead-out stops at their new starts. Aegisub compares every pair; a line before this one
+    // is clear of it when it ends by this start, so the latest such end is the limit.
+    if let Some(li) = pp.lead_in {
+        let mut ends = std::collections::BinaryHeap::new();
+        let mut limit = Time::ZERO;
+        for &i in &idx {
+            let ev = doc.event_mut(i).unwrap();
+            while let Some(&std::cmp::Reverse(e)) = ends.peek()
+                && e <= ev.start
+            {
+                limit = limit.max(e);
+                ends.pop();
             }
+            ends.push(std::cmp::Reverse(ev.end));
+            ev.start = (ev.start - li).max(limit).max(Time::ZERO);
         }
-        let evm = doc.event_mut(i).unwrap();
-        evm.start = s;
-        evm.end = e;
+    }
+    // the new starts are still in order (each is the larger of two growing values), so the
+    // first line after this one that starts at or past its end is the limit
+    if let Some(lo) = pp.lead_out {
+        let starts: Vec<Time> = idx.iter().map(|&i| doc.event(i).unwrap().start).collect();
+        for (k, &i) in idx.iter().enumerate() {
+            let ev = doc.event_mut(i).unwrap();
+            let later = &starts[k + 1..];
+            let next = later.get(later.partition_point(|&s| s < ev.end));
+            ev.end = next.map_or(ev.end + lo, |&n| (ev.end + lo).min(n));
+        }
     }
     // adjacent linking
-    if let Some(th) = pp.adjacent_threshold {
+    if pp.adjacent_threshold.is_some() || pp.adjacent_overlap.is_some() {
+        let gap_max = pp.adjacent_threshold.unwrap_or(Time(-1));
+        let overlap_max = pp.adjacent_overlap.unwrap_or(Time(-1));
         for w in idx.windows(2) {
             let (a, b) = (w[0], w[1]);
             let (ae, bs) = (doc.event(a).unwrap().end, doc.event(b).unwrap().start);
             let gap = bs - ae;
-            if gap.ms() >= 0 && gap <= th || (gap.ms() < 0 && -gap <= th) {
+            if (gap.ms() > 0 && gap <= gap_max) || (gap.ms() < 0 && -gap <= overlap_max) {
                 let meet =
                     ae + Time((gap.ms() as f64 * pp.adjacent_bias.clamp(0.0, 1.0)).round() as i64);
                 doc.event_mut(a).unwrap().end = meet;
@@ -1030,7 +1035,6 @@ pub fn post_process(doc: &mut Document, rows: &Rows, pp: &PostProcess<'_>) {
             evm.end = e;
         }
     }
-    let _ = orig;
 }
 
 /// The keyframe nearest `t` within `before`/`after` of it (the earlier one on a tie), else `t`.
@@ -1153,7 +1157,7 @@ pub fn resample(doc: &mut Document, r: &Resample) {
 
     for i in 0..doc.style_count() {
         let st = doc.style_mut(i).unwrap();
-        st.size *= ry;
+        st.size = (st.size * ry).round(); // whole, as Aegisub writes it
         st.outline *= ry;
         st.shadow *= ry;
         st.spacing *= ry; // \fscx, so the stretch, applies to it when rendering
@@ -1186,6 +1190,8 @@ pub fn resample(doc: &mut Document, r: &Resample) {
             let s = |v: f64| crate::model::fmt_f64((v * 1000.0).round() / 1000.0);
             let int = |v: f64| (v.round() as i64).to_string();
             let factor = match t.name.as_str() {
+                // \fs+n and \fs-n change the size by n tenths of itself: nothing to scale
+                "fs" if t.args.first().is_some_and(|a| a.starts_with(['+', '-'])) => None,
                 // \blur too, unlike Aegisub: libass measures it in script pixels
                 "fs" | "bord" | "shad" | "ybord" | "yshad" | "fsp" | "pbo" | "blur" => Some(ry),
                 "xbord" | "xshad" => Some(rx),
@@ -1705,6 +1711,89 @@ mod tests {
         assert_eq!(d.event(1).unwrap().start, Time(2075));
     }
 
+    /// Aegisub's lead-in/out, checked against its pairwise version (every line clear of this one
+    /// limits it), with a gap smaller than both leads and lines that overlap already.
+    #[test]
+    fn leads_match_aegisub() {
+        let times = |d: &Document| -> Vec<(i64, i64)> {
+            (0..d.event_count())
+                .map(|i| d.event(i).unwrap())
+                .map(|e| (e.start.ms(), e.end.ms()))
+                .collect()
+        };
+        let aegisub = |mut v: Vec<(i64, i64)>, li: i64, lo: i64| {
+            let n = v.len();
+            let collide = |a: (i64, i64), b: (i64, i64)| a.0 < b.1 && a.1 > b.0;
+            for i in 0..n {
+                let mut s = v[i].0 - li;
+                for j in 0..i {
+                    if !collide(v[i], v[j]) {
+                        s = s.max(v[j].1);
+                    }
+                }
+                v[i].0 = s.max(0);
+            }
+            for i in 0..n {
+                let mut e = v[i].1 + lo;
+                for j in i + 1..n {
+                    if !collide(v[i], v[j]) {
+                        e = e.min(v[j].0);
+                    }
+                }
+                v[i].1 = e;
+            }
+            v
+        };
+        let pp = PostProcess {
+            lead_in: Some(Time(100)),
+            lead_out: Some(Time(350)),
+            ..Default::default()
+        };
+        let cases: [&[(&str, &str)]; 3] = [
+            &[("0:00:01.00", "0:00:02.00"), ("0:00:02.20", "0:00:03.00")],
+            &[("0:00:01.00", "0:00:03.00"), ("0:00:02.00", "0:00:04.00")],
+            &[
+                ("0:00:00.05", "0:00:01.00"),
+                ("0:00:00.50", "0:00:05.00"),
+                ("0:00:01.10", "0:00:02.00"),
+                ("0:00:02.05", "0:00:02.50"),
+                ("0:00:05.20", "0:00:06.00"),
+            ],
+        ];
+        for case in cases {
+            let lines: Vec<_> = case.iter().map(|&(s, e)| (s, e, "Default", "x")).collect();
+            let mut d = doc(&lines);
+            let want = aegisub(times(&d), 100, 350);
+            post_process(&mut d, &Rows::All, &pp);
+            assert_eq!(times(&d), want);
+        }
+        // the audit's example: the lead-in of the second line wins the gap first
+        let mut d = doc(&[
+            ("0:00:01.00", "0:00:02.00", "Default", "a"),
+            ("0:00:02.20", "0:00:03.00", "Default", "b"),
+        ]);
+        post_process(&mut d, &Rows::All, &pp);
+        assert_eq!(times(&d), [(900, 2100), (2100, 3350)]);
+    }
+
+    #[test]
+    fn overlaps_link_only_within_their_own_threshold() {
+        let mut d = doc(&[
+            ("0:00:01.00", "0:00:03.00", "Default", "a"),
+            ("0:00:02.60", "0:00:04.00", "Default", "b"),
+        ]);
+        let mut pp = PostProcess {
+            adjacent_threshold: Some(Time(500)),
+            adjacent_bias: 1.0,
+            ..Default::default()
+        };
+        post_process(&mut d, &Rows::All, &pp);
+        assert_eq!(d.event(0).unwrap().end, Time(3000)); // a 400 ms overlap is no gap
+        pp.adjacent_overlap = Some(Time(400));
+        post_process(&mut d, &Rows::All, &pp);
+        assert_eq!(d.event(0).unwrap().end, Time(2600));
+    }
+
     #[test]
     fn snap_to_matches_a_scan_of_every_keyframe() {
         let kfs = [100, 300, 500, 520, 900];
@@ -1761,7 +1850,7 @@ mod tests {
             "0:00:00.00",
             "0:00:01.00",
             "Default",
-            r"{\pos(100,50)\fs30\clip(0,0,10,10)\p1}m 0 0 l 10 10",
+            r"{\pos(100,50)\fs30\fs+2\clip(0,0,10,10)\p1}m 0 0 l 10 10",
         )]);
         resample(
             &mut d,
@@ -1773,12 +1862,21 @@ mod tests {
         );
         assert_eq!(
             d.event(0).unwrap().text,
-            r"{\pos(200,100)\fs60\clip(0,0,20,20)\p1}m 0 0 l 20 20"
+            r"{\pos(200,100)\fs60\fs+2\clip(0,0,20,20)\p1}m 0 0 l 20 20"
         );
         let st = d.style("Default").unwrap();
         assert_eq!(st.size, 40.0);
         assert_eq!(st.margin_l, 20);
         assert_eq!(d.play_res(), (1280, 720));
+        // 720p to 1080p: Fontsize 45 becomes 68, not 67.5
+        d.style_mut(0).unwrap().size = 45.0;
+        let r = Resample {
+            from: (1280, 720),
+            to: (1920, 1080),
+            ..Resample::default()
+        };
+        resample(&mut d, &r);
+        assert_eq!(d.style("Default").unwrap().size, 68.0);
     }
 
     #[test]
