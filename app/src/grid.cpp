@@ -405,6 +405,10 @@ void Grid::paintEvent(QPaintEvent *) {
     }
 }
 
+void Grid::setAnchor(size_t row) {
+    m_anchor = int(std::lower_bound(m_vis.begin(), m_vis.end(), row) - m_vis.begin());
+}
+
 void Grid::ensureVisible(int row) {
     auto it = std::find(m_vis.begin(), m_vis.end(), size_t(row));
     if (it == m_vis.end()) return;
@@ -418,7 +422,8 @@ void Grid::clickRow(int vi, Qt::KeyboardModifiers mods) {
     const size_t row = m_vis[vi];
     if (mods & Qt::ShiftModifier) {
         const int a = std::min(m_anchor, vi), b = std::max(m_anchor, vi);
-        std::vector<size_t> rows;
+        // with Ctrl the range adds to the selection (Aegisub)
+        std::vector<size_t> rows = mods & Qt::ControlModifier ? m_tab->selection() : std::vector<size_t>{};
         for (int k = a; k <= b; ++k) rows.push_back(m_vis[k]);
         m_tab->setSelection(rows, int(row));
         return;
@@ -614,7 +619,8 @@ void Grid::cut() {
 void Grid::paste() {
     const QString text = QApplication::clipboard()->text();
     if (text.isEmpty()) return;
-    const int at = m_tab->active() + 1;
+    // before the active line, as Aegisub and Kainote paste
+    const int at = std::max(0, m_tab->active());
     const auto rows = fs::vec(m_tab->s().paste_rows(size_t(at), fs::Utf8(text)));
     m_tab->changed();
     if (!rows.empty()) m_tab->setSelection(rows, int(rows.front()));
@@ -789,7 +795,7 @@ void Grid::contextMenu(const QPoint &global) {
                            "insertAfterFrame"})
         ins->addAction(mw->action(id));
     for (const char *id : {"duplicate", "swapLines", "joinLines", "joinKeepFirst", "joinKeepLast", "joinKaraoke",
-                           "continuousPrev", "continuousNext"})
+                           "recombine", "continuousPrev", "continuousNext"})
         m.addAction(mw->action(id));
     auto *split = m.addMenu(tr("Split lines"));
     for (const char *id : {"splitBefore", "splitAfter", "splitFrames", "splitChars", "splitWords", "splitWraps"})

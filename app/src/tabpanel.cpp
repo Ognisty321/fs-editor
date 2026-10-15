@@ -263,7 +263,10 @@ void TabPanel::setActive(int row, bool select) {
         m_sel.clear();
     } else {
         row = std::clamp(row, 0, n - 1);
-        if (select) m_sel = {size_t(row)};
+        if (select) {
+            m_sel = {size_t(row)};
+            m_grid->setAnchor(size_t(row));
+        }
         m_active = row;
     }
     syncSelection();

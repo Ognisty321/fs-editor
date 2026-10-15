@@ -22,6 +22,7 @@ public:
     void refresh();
     const fsb::ColumnInfo &columnInfo(); // distinct styles/actors/effects, current with the document
     void ensureVisible(int row);
+    void setAnchor(size_t row); // where Shift+click selects from (follows the active line, Aegisub)
     void setVideoTime(qint64 ms);
     // rows that differ from the compared tab (Kainote subtitle comparison)
     // rows that differ from the compared tab, with the differing parts of their text (Kainote)
