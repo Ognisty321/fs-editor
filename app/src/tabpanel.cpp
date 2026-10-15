@@ -71,6 +71,8 @@ TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fs
         if (m_keyframesPath.isEmpty()) setKeyframes(m_video->keyframes());
         if (!m_timecodesPath.isEmpty()) openTimecodes(m_timecodesPath);
         if (m_video->hasVideo()) matchResolution();
+        // a dummy is saved too, and opens again with the script (Aegisub)
+        if (!m_video->dummySpec().isEmpty()) s().set_project_value("Video File", fs::Utf8(m_video->dummySpec()));
         if (!m_video->path().isEmpty()) {
             s().set_project_value("Video File", fs::Utf8(m_video->path()));
             if (QSettings().value("video/openAudio", true).toBool() && !m_audio->hasAudio())
@@ -189,6 +191,7 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
         return QFileInfo::exists(abs) ? abs : QString();
     };
     if (QSettings().value("video/openWithSubs", true).toBool()) {
+        if (const QString v = fs::q(s().project_value("Video File")); v.startsWith("?dummy")) m_video->openDummy(v);
         if (const QString v = resolve("Video File"); !v.isEmpty()) {
             const double ar = VideoBox::aspectOfMode(fs::q(s().project_value("Video AR Mode")).toInt(),
                                                      fs::q(s().project_value("Video AR Value")).toDouble());
@@ -426,7 +429,9 @@ void TabPanel::matchResolution() {
     changed();
 }
 
-void TabPanel::openDummyVideo(int w, int h, double fps, qint64 ms) { m_video->openDummy(w, h, fps, ms); }
+void TabPanel::openDummyVideo(const QString &spec) {
+    if (!m_video->openDummy(spec)) m_main->error(tr("Not a dummy video: %1").arg(spec));
+}
 
 void TabPanel::openAudio(const QString &path) {
     m_audio->open(path);

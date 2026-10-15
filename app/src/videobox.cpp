@@ -44,11 +44,22 @@ namespace {
 // it from the cached one.
 QImage decode(VideoMedia &m, qint64 frame) {
     if (m.video && frame == m.cachedFrame) return m.cached;
-    QImage img(m.width, m.height, QImage::Format_RGBA8888);
-    if (!m.video) {
-        img.fill(QColor(0x30, 0x30, 0x30)); // dummy video
-        return img;
+    if (!m.video) { // a dummy: one picture for every frame
+        if (m.cached.isNull()) {
+            m.cached = QImage(m.width, m.height, QImage::Format_RGBA8888);
+            m.cached.fill(m.dummyColor);
+            if (m.dummyPattern) { // Aegisub's: 8x8 squares, every other one lighter (darker for light colours)
+                QColor other = m.dummyColor.toHsl();
+                const int l = other.lightness();
+                other.setHsl(other.hue(), other.saturation(), l + 24 <= 255 ? l + 24 : l - 24);
+                QPainter p(&m.cached);
+                for (int y = 0; y < m.height; y += 8)
+                    for (int x = (y / 8) % 2 ? 0 : 8; x < m.width; x += 16) p.fillRect(x, y, 8, 8, other);
+            }
+        }
+        return m.cached;
     }
+    QImage img(m.width, m.height, QImage::Format_RGBA8888);
     (*m.video)->frame(frame, rust::Slice<uint8_t>(img.bits(), size_t(img.sizeInBytes())));
     m.cachedFrame = frame;
     m.cached = img;
@@ -700,6 +711,7 @@ void VideoBox::open(const QString &path, qint64 frame, double ar) {
             if (ar > 0) setAspect(ar);
             m_frames = m_info.frames;
             m_dummyFps = 0;
+            m_dummySpec.clear();
             m_path = path;
             m_frame = std::clamp<qint64>(frame, 0, std::max<qint64>(0, m_frames - 1));
             m_scriptAt = -2;
@@ -731,12 +743,47 @@ double VideoBox::aspectOfMode(int mode, double custom) {
     return mode > 0 && mode < 5 ? ar[mode] : 0;
 }
 
-void VideoBox::openDummy(int w, int h, double fps, qint64 ms) {
+QString VideoBox::dummySpec(double fps, qint64 frames, int w, int h, QColor c, bool pattern) {
+    return QString("?dummy:%1:%2:%3:%4:%5:%6:%7:%8")
+        .arg(QString::number(fps, 'g', 10))
+        .arg(frames)
+        .arg(w)
+        .arg(h)
+        .arg(c.red())
+        .arg(c.green())
+        .arg(c.blue())
+        .arg(pattern ? "c" : "");
+}
+
+bool VideoBox::openDummy(const QString &spec) {
+    const QStringList t = spec.mid(7).split(':');
+    if (!spec.startsWith("?dummy:") || t.size() != 8) return false;
+    bool ok = true;
+    const auto num = [&](int k, qint64 lo, qint64 hi) {
+        const qint64 v = t[k].toLongLong(&ok);
+        if (v < lo || v > hi) ok = false;
+        return v;
+    };
+    double fps = t[0].toDouble();
+    if (const QStringList nd = t[0].split('/'); nd.size() == 2 && nd[1].toDouble() > 0) fps = nd[0].toDouble() / nd[1].toDouble();
+    const qint64 frames = num(1, 1, 100'000'000);
+    if (!ok) return false;
+    const int w = int(num(2, 16, 8192));
+    if (!ok) return false;
+    const int h = int(num(3, 16, 8192));
+    if (!ok) return false;
+    int rgb[3];
+    for (int k = 0; k < 3 && ok; ++k) rgb[k] = int(num(4 + k, 0, 255));
+    if (!ok || !(fps > 0 && fps <= 1000)) return false;
+    const qint64 ms = qint64(frames * 1000 / fps);
+    *m_openCancel = true; // a video still being indexed would replace it
     {
         std::lock_guard g(m_media->m);
         m_media->video.reset();
         m_media->cachedFrame = -1;
         m_media->cached = QImage();
+        m_media->dummyColor = QColor(rgb[0], rgb[1], rgb[2]);
+        m_media->dummyPattern = t[7] == "c";
         m_media->width = w;
         m_media->height = h;
         if (!m_media->renderer) m_media->renderer.emplace(fsb::new_renderer());
@@ -746,10 +793,11 @@ void VideoBox::openDummy(int w, int h, double fps, qint64 ms) {
     m_info.width = w;
     m_info.height = h;
     m_info.fps = fps;
-    m_info.frames = qint64(ms * fps / 1000);
+    m_info.frames = frames;
     m_info.duration_ms = ms;
     m_frames = m_info.frames;
     m_dummyFps = fps;
+    m_dummySpec = spec;
     m_timecodes.clear();
     for (qint64 f = 0; f <= m_frames; ++f) m_timecodes.push_back(qint64(f * 1000 / fps));
     m_keyframes.clear();
@@ -759,6 +807,7 @@ void VideoBox::openDummy(int w, int h, double fps, qint64 ms) {
     m_scriptAt = -2;
     m_seek->setRange(0, int(std::max<qint64>(0, m_frames - 1)));
     emit opened();
+    return true;
 }
 
 void VideoBox::close() {
@@ -773,6 +822,7 @@ void VideoBox::close() {
     m_frames = 0;
     m_chapters.clear();
     m_path.clear();
+    m_dummySpec.clear();
     m_info = {};
     m_view->setFrame(QImage());
     emit opened();

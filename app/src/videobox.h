@@ -37,6 +37,8 @@ struct VideoMedia {
     // the same frame again (Aegisub's frame cache); -1 after the video changed
     qint64 cachedFrame = -1;
     QImage cached;
+    QColor dummyColor{0x30, 0x30, 0x30}; // the dummy video's picture, plain or a checkerboard
+    bool dummyPattern = false;
 };
 
 class FrameWorker : public QObject {
@@ -111,7 +113,11 @@ public:
     TabPanel *tab() const { return m_tab; }
     // frame: where to start, ar: display aspect override (a script's "Video Position" / "Video AR Value")
     void open(const QString &path, qint64 frame = 0, double ar = 0);
-    void openDummy(int w, int h, double fps, qint64 ms);
+    // Aegisub's dummy video, "?dummy:fps:frames:width:height:r:g:b:c" ("c": a checkerboard), as
+    // scripts save it; false when the text is not one
+    bool openDummy(const QString &spec);
+    static QString dummySpec(double fps, qint64 frames, int w, int h, QColor c, bool pattern);
+    QString dummySpec() const { return m_dummySpec; } // empty unless a dummy is open
     void close();
     bool hasVideo() const { return m_frames > 0; }
     QString path() const { return m_path; }
@@ -201,6 +207,7 @@ private:
     std::vector<std::int64_t> m_timecodes, m_keyframes;
     std::vector<std::pair<qint64, QString>> m_chapters;
     double m_dummyFps = 0;
+    QString m_dummySpec;
     bool m_playing = false, m_zoomMode = false;
     qint64 m_playEnd = -1, m_playStartMs = 0;
     QElapsedTimer m_clock;

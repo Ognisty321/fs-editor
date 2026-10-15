@@ -1558,6 +1558,10 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Dummy wideo</translation>
     </message>
     <message>
+        <source>Checkerboard pattern</source>
+        <translation>Wzór szachownicy</translation>
+    </message>
+    <message>
         <source>Width</source>
         <translation>Szerokość</translation>
     </message>
@@ -1572,6 +1576,10 @@ Backspace: rozłącz ostatnią grupę</translation>
     <message>
         <source>Duration</source>
         <translation>Czas trwania</translation>
+    </message>
+    <message>
+        <source>Colour</source>
+        <translation>Kolor</translation>
     </message>
     <message>
         <source>Insert start time from video</source>
@@ -3595,6 +3603,10 @@ Dopasować rozdzielczość napisów do wideo?</translation>
     <message>
         <source>Don&apos;t ask again (can be turned back on in the settings)</source>
         <translation>Nie pytaj więcej (można to włączyć w ustawieniach)</translation>
+    </message>
+    <message>
+        <source>Not a dummy video: %1</source>
+        <translation>To nie jest zastępcze wideo: %1</translation>
     </message>
 </context>
 <context>

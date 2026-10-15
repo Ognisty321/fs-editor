@@ -72,7 +72,7 @@ public:
 
     // media
     void openVideo(const QString &path, qint64 frame = 0, double ar = 0);
-    void openDummyVideo(int w, int h, double fps, qint64 ms);
+    void openDummyVideo(const QString &spec); // VideoBox::openDummy's
     void openAudio(const QString &path);
     void openBlankAudio(qint64 ms);
     void closeAudio();

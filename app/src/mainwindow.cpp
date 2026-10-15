@@ -49,6 +49,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QCheckBox>
+#include <QColorDialog>
 #include <QSettings>
 #include <QSpinBox>
 #include <QStandardPaths>
@@ -922,17 +923,33 @@ void MainWindow::buildMenus() {
         fps->setDecimals(3);
         fps->setValue(23.976);
         auto *len = new QLineEdit("0:30:00.00", &d);
+        // the colour and Aegisub's checkerboard, the last ones used
+        QSettings st;
+        QColor colour = st.value("video/dummyColor", QColor(0x30, 0x30, 0x30)).value<QColor>();
+        auto *pick = new QPushButton(&d);
+        const auto show = [pick, &colour] { pick->setStyleSheet(QString("background:%1").arg(colour.name())); };
+        show();
+        connect(pick, &QPushButton::clicked, &d, [&, show] {
+            if (const QColor c = QColorDialog::getColor(colour, &d); c.isValid()) colour = c, show();
+        });
+        auto *pattern = new QCheckBox(tr("Checkerboard pattern"), &d);
+        pattern->setChecked(st.value("video/dummyPattern").toBool());
         f->addRow(tr("Width"), w);
         f->addRow(tr("Height"), h);
         f->addRow(tr("FPS"), fps);
         f->addRow(tr("Duration"), len);
+        f->addRow(tr("Colour"), pick);
+        f->addRow(pattern);
         auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
         connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
         connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
         f->addRow(bb);
         if (d.exec() != QDialog::Accepted) return;
         const qint64 ms = fs::parseTime(len->text());
-        tab()->openDummyVideo(w->value(), h->value(), fps->value(), ms > 0 ? ms : 1800000);
+        st.setValue("video/dummyColor", colour);
+        st.setValue("video/dummyPattern", pattern->isChecked());
+        tab()->openDummyVideo(VideoBox::dummySpec(fps->value(), std::max<qint64>(1, qint64((ms > 0 ? ms : 1800000) * fps->value() / 1000)),
+                                                  w->value(), h->value(), colour, pattern->isChecked()));
     });
     video->addSeparator();
     // Aegisub's: every selected line, and the other end follows when it would be passed
