@@ -1705,10 +1705,19 @@ bool MainWindow::eventFilter(QObject *o, QEvent *e) {
             auto *me = static_cast<QMouseEvent *>(e);
             auto *dst = qobject_cast<QToolButton *>(QApplication::widgetAt(me->globalPosition().toPoint()));
             const bool onOther = dst && dst != src && dst->parent() == m_toolbar && dst->defaultAction();
+            // the button whose place the drop takes is shown pressed
+            static QPointer<QToolButton> target;
+            auto mark = [](QToolButton *b) {
+                if (target == b) return;
+                if (target) target->setDown(false);
+                if ((target = b)) b->setDown(true);
+            };
             if (e->type() == QEvent::MouseMove && (me->buttons() & Qt::LeftButton)) {
                 src->setCursor(onOther ? Qt::DragMoveCursor : Qt::ArrowCursor);
+                mark(onOther ? dst : nullptr);
             } else if (e->type() == QEvent::MouseButtonRelease && me->button() == Qt::LeftButton) {
                 src->unsetCursor();
+                mark(nullptr);
                 QStringList l = QSettings().value("toolbar/ids", kToolbarDefault).toStringList();
                 const int from = l.indexOf(m_actions.key(src->defaultAction()));
                 const int to = onOther ? l.indexOf(m_actions.key(dst->defaultAction())) : -1;
