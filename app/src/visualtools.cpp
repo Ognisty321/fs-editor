@@ -134,12 +134,14 @@ bool near(QPointF a, QPointF b, double r = 7) { return QLineF(a, b).length() <= 
 
 // Shapes for the vector tools, drawn in a 0..100 box.
 const std::pair<const char *, const char *> kShapes[] = {
-    {"Rectangle", "m 0 0 l 100 0 100 100 0 100"},
-    {"Ellipse", "m 50 0 b 78 0 100 22 100 50 b 100 78 78 100 50 100 b 22 100 0 78 0 50 b 0 22 22 0 50 0"},
-    {"Rounded rectangle", "m 15 0 l 85 0 b 93 0 100 7 100 15 l 100 85 b 100 93 93 100 85 100 l 15 100 "
-                          "b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0"},
-    {"Triangle", "m 50 0 l 100 100 0 100"},
-    {"Star", "m 50 0 l 61 35 98 35 68 57 79 91 50 70 21 91 32 57 2 35 39 35"},
+    {QT_TRANSLATE_NOOP("VisualTools", "Rectangle"), "m 0 0 l 100 0 100 100 0 100"},
+    {QT_TRANSLATE_NOOP("VisualTools", "Ellipse"),
+     "m 50 0 b 78 0 100 22 100 50 b 100 78 78 100 50 100 b 22 100 0 78 0 50 b 0 22 22 0 50 0"},
+    {QT_TRANSLATE_NOOP("VisualTools", "Rounded rectangle"),
+     "m 15 0 l 85 0 b 93 0 100 7 100 15 l 100 85 b 100 93 93 100 85 100 l 15 100 "
+     "b 7 100 0 93 0 85 l 0 15 b 0 7 7 0 15 0"},
+    {QT_TRANSLATE_NOOP("VisualTools", "Triangle"), "m 50 0 l 100 100 0 100"},
+    {QT_TRANSLATE_NOOP("VisualTools", "Star"), "m 50 0 l 61 35 98 35 68 57 79 91 50 70 21 91 32 57 2 35 39 35"},
 };
 } // namespace
 
@@ -157,9 +159,10 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     h->setSpacing(1);
     const char *icons[] = {"pointer", "crosshair", "route", "arrows-diagonal", "rotate-clockwise", "rotate-3d",
                            "crop", "scissors", "vector-bezier", "arrows-move", "typography"};
-    const char *tips[] = {"Position pointer", "Text positioning", "Text moving", "Text scaling", "Z rotation",
-                          "X/Y rotation", "Rectangle clipping", "Vector clipping", "Vector drawing",
-                          "Position shifter", "All tags (drag left/right to change the value)"};
+    const char *tips[] = {QT_TR_NOOP("Position pointer"), QT_TR_NOOP("Text positioning"), QT_TR_NOOP("Text moving"),
+                          QT_TR_NOOP("Text scaling"), QT_TR_NOOP("Z rotation"), QT_TR_NOOP("X/Y rotation"),
+                          QT_TR_NOOP("Rectangle clipping"), QT_TR_NOOP("Vector clipping"), QT_TR_NOOP("Vector drawing"),
+                          QT_TR_NOOP("Position shifter"), QT_TR_NOOP("All tags (drag left/right to change the value)")};
     auto *group = new QButtonGroup(row);
     for (int t = 0; t < ToolCount; ++t) {
         auto *b = new QToolButton(row);
@@ -182,9 +185,10 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     vh->setContentsMargins(6, 0, 0, 0);
     vh->setSpacing(1);
     auto *modes = new QButtonGroup(vec);
-    const char *mt[] = {"Move points", "Add line", "Add Bézier curve", "Add separate point (move)", "Delete point",
-                        "Draw freehand", "Insert a point into a segment", "Convert a segment between line and Bézier",
-                        "Add B-spline point"};
+    const char *mt[] = {QT_TR_NOOP("Move points"), QT_TR_NOOP("Add line"), QT_TR_NOOP("Add Bézier curve"),
+                        QT_TR_NOOP("Add separate point (move)"), QT_TR_NOOP("Delete point"),
+                        QT_TR_NOOP("Draw freehand"), QT_TR_NOOP("Insert a point into a segment"),
+                        QT_TR_NOOP("Convert a segment between line and Bézier"), QT_TR_NOOP("Add B-spline point")};
     const char *mi[] = {"arrows-move", "line",    "vector-bezier-2", "point",        "x",
                         "scribble",    "circle-plus", "replace",      "vector-spline"};
     for (int k = 0; k < 9; ++k) {
@@ -238,7 +242,8 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     auto *sh = new QHBoxLayout(shift);
     sh->setContentsMargins(6, 0, 0, 0);
     sh->setSpacing(1);
-    const char *what[] = {"\\pos", "\\move start", "\\move end", "clips", "drawings", "\\org"};
+    const char *what[] = {QT_TR_NOOP("\\pos"), QT_TR_NOOP("\\move start"), QT_TR_NOOP("\\move end"),
+                          QT_TR_NOOP("clips"), QT_TR_NOOP("drawings"), QT_TR_NOOP("\\org")};
     for (int k = 0; k < 6; ++k) {
         auto *b = new QToolButton(shift);
         b->setText(tr(what[k]));
@@ -261,8 +266,9 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     for (const auto &t : fsb::adjustable_tags()) m_tagName->addItem("\\" + fs::q(t), fs::q(t));
     m_tagName->setCurrentIndex(std::max(0, m_tagName->findData(QSettings().value("visual/allTagsTag", "blur"))));
     m_tagMode = new QComboBox(tags);
-    for (const char *m : {"Add", "Set", "Multiply by line number", "Gradient text increasing",
-                          "Gradient text decreasing", "Gradient lines increasing", "Gradient lines decreasing"})
+    for (const char *m : {QT_TR_NOOP("Add"), QT_TR_NOOP("Set"), QT_TR_NOOP("Multiply by line number"),
+                          QT_TR_NOOP("Gradient text increasing"), QT_TR_NOOP("Gradient text decreasing"),
+                          QT_TR_NOOP("Gradient lines increasing"), QT_TR_NOOP("Gradient lines decreasing")})
         m_tagMode->addItem(tr(m));
     m_tagMode->setCurrentIndex(QSettings().value("visual/allTagsMode", 0).toInt());
     m_tagValue = new QDoubleSpinBox(tags);
@@ -293,7 +299,7 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     ch->setContentsMargins(6, 0, 0, 0);
     ch->setSpacing(1);
     const char *si[] = {"arrow-autofit-width", "link", "arrow-autofit-height"};
-    const char *st[] = {"Scale width", "Keep proportions", "Scale height"};
+    const char *st[] = {QT_TR_NOOP("Scale width"), QT_TR_NOOP("Keep proportions"), QT_TR_NOOP("Scale height")};
     for (int k = 0; k < 3; ++k) {
         auto *b = new QToolButton(scale);
         b->setIcon(icon(si[k], QColor(0x4aa3ff)));

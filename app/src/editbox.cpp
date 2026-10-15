@@ -343,7 +343,8 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
         const QFont f = QFontDialog::getFont(&ok, QFont(fs::q(m_tab->s().row(size_t(m_row)).style)), this);
         if (ok) m_text->insertTag("\\fn" + f.family() + "\\fs" + QString::number(f.pointSize()));
     });
-    const char *toggles[][2] = {{"b", "Bold"}, {"i", "Italic"}, {"u", "Underline"}, {"s", "Strikethrough"}};
+    const char *toggles[][2] = {{"b", QT_TR_NOOP("Bold")}, {"i", QT_TR_NOOP("Italic")}, {"u", QT_TR_NOOP("Underline")},
+                                {"s", QT_TR_NOOP("Strikethrough")}};
     for (auto &t : toggles) {
         auto *b = tool(QString(t[0]).toUpper(), tr(t[1]));
         QFont f = b->font();
@@ -354,7 +355,8 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
         b->setFont(f);
         connect(b, &QToolButton::clicked, this, [this, n = QString(t[0])] { m_text->toggleTag(n); });
     }
-    const char *colors[] = {"Primary color", "Secondary color for karaoke", "Border color", "Shadow color"};
+    const char *colors[] = {QT_TR_NOOP("Primary color"), QT_TR_NOOP("Secondary color for karaoke"),
+                            QT_TR_NOOP("Border color"), QT_TR_NOOP("Shadow color")};
     const QColor bars[] = {QColor(0xf0, 0xf0, 0xf0), QColor(0xe0, 0x50, 0x50), QColor(0x20, 0x20, 0x20),
                            QColor(0x80, 0x80, 0x80)};
     for (int k = 0; k < 4; ++k) {
@@ -378,8 +380,9 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     }
     m_an = new QComboBox(this);
     m_an->setToolTip(tr("Text position"));
-    const char *an[] = {"Bottom-left", "Bottom-center", "Bottom-right", "Middle-left", "Middle-center",
-                        "Middle-right", "Top-left", "Top-center", "Top-right"};
+    const char *an[] = {QT_TR_NOOP("Bottom-left"), QT_TR_NOOP("Bottom-center"), QT_TR_NOOP("Bottom-right"),
+                        QT_TR_NOOP("Middle-left"), QT_TR_NOOP("Middle-center"), QT_TR_NOOP("Middle-right"),
+                        QT_TR_NOOP("Top-left"), QT_TR_NOOP("Top-center"), QT_TR_NOOP("Top-right")};
     for (int k = 0; k < 9; ++k) m_an->addItem(QString("%1 (an%2)").arg(tr(an[k])).arg(k + 1));
     m_an->setCurrentIndex(1);
     connect(m_an, &QComboBox::activated, this, [this](int k) {

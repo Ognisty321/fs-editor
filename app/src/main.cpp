@@ -9,11 +9,13 @@
 #include <QDialog>
 #include <QDir>
 #include <QDropEvent>
+#include <QLibraryInfo>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QSettings>
 #include <QTextEdit>
 #include <QTimer>
+#include <QTranslator>
 #include <QUrl>
 
 #include <atomic>
@@ -128,6 +130,12 @@ int main(int argc, char **argv) {
         for (const QString &kv : qEnvironmentVariable("FSED_SMOKE_SET").split(';', Qt::SkipEmptyParts))
             st.setValue(kv.section('=', 0, 0), kv.section('=', 1));
     }
+    // UI language: main/language ("" follows the system), applied at startup
+    const QString lang = QSettings().value("main/language").toString();
+    const QLocale locale = lang.isEmpty() ? QLocale() : QLocale(lang);
+    QTranslator own, qt;
+    if (own.load(locale, "fsed", "_", ":/i18n")) app.installTranslator(&own);
+    if (qt.load(locale, "qtbase", "_", QLibraryInfo::path(QLibraryInfo::TranslationsPath))) app.installTranslator(&qt);
     MainWindow w;
     g_main = &w;
     w.show();

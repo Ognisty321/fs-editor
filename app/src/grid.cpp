@@ -39,8 +39,9 @@ Grid::Grid(TabPanel *tab) : QAbstractScrollArea(tab), m_tab(tab) {
 }
 
 QString Grid::colName(int c) {
-    static const char *names[] = {"#", "L.", "Start", "End", "Style", "Actor", "Left", "Right", "Vert.",
-                                  "Effect", "CPS", "Wraps", "Original text", "Text"};
+    static const char *names[] = {"#", QT_TR_NOOP("L."), QT_TR_NOOP("Start"), QT_TR_NOOP("End"), QT_TR_NOOP("Style"),
+        QT_TR_NOOP("Actor"), QT_TR_NOOP("Left"), QT_TR_NOOP("Right"), QT_TR_NOOP("Vert."), QT_TR_NOOP("Effect"),
+        QT_TR_NOOP("CPS"), QT_TR_NOOP("Wraps"), QT_TR_NOOP("Original text"), QT_TR_NOOP("Text")};
     return tr(names[c]);
 }
 

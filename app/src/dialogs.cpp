@@ -104,12 +104,12 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
     auto *groups = new QHBoxLayout;
     auto *fg = new QGroupBox(tr("In field"), this);
     auto *fl = new QVBoxLayout(fg);
-    const char *fields[] = {"Text", "Styles", "Actor", "Effect"};
+    const char *fields[] = {QT_TR_NOOP("Text"), QT_TR_NOOP("Styles"), QT_TR_NOOP("Actor"), QT_TR_NOOP("Effect")};
     for (int k = 0; k < 4; ++k) fl->addWidget(m_field[k] = new QRadioButton(tr(fields[k]), fg));
     m_field[0]->setChecked(true);
     auto *lg = new QGroupBox(tr("Lines"), this);
     auto *ll = new QVBoxLayout(lg);
-    const char *lines[] = {"All", "Selected", "From selected"};
+    const char *lines[] = {QT_TR_NOOP("All"), QT_TR_NOOP("Selected"), QT_TR_NOOP("From selected")};
     for (int k = 0; k < 3; ++k) ll->addWidget(m_lines[k] = new QRadioButton(tr(lines[k]), lg));
     m_lines[0]->setChecked(true);
     groups->addWidget(fg);
@@ -419,7 +419,7 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
     group(left, tr("Font and size"), fontL);
 
     auto *colorL = new QGridLayout;
-    const char *names[] = {"Primary", "Secondary", "Outline", "Shadow"};
+    const char *names[] = {QT_TR_NOOP("Primary"), QT_TR_NOOP("Secondary"), QT_TR_NOOP("Outline"), QT_TR_NOOP("Shadow")};
     const rust::String *src[] = {&style.primary, &style.secondary, &style.outline_color, &style.back};
     for (int k = 0; k < 4; ++k) {
         m_colors[k] = fs::q(*src[k]);
@@ -901,8 +901,9 @@ PropertiesDialog::PropertiesDialog(TabPanel *tab) : QDialog(tab), m_tab(tab) {
     auto &s = tab->s();
     auto *f = new QFormLayout(this);
     const std::pair<const char *, const char *> info[] = {
-        {"Title", "Title"}, {"Author", "Original Script"}, {"Translator", "Original Translation"},
-        {"Proofreading", "Original Editing"}, {"Timer", "Original Timing"}, {"Editing", "Script Updated By"}};
+        {QT_TR_NOOP("Title"), "Title"}, {QT_TR_NOOP("Author"), "Original Script"},
+        {QT_TR_NOOP("Translator"), "Original Translation"}, {QT_TR_NOOP("Proofreading"), "Original Editing"},
+        {QT_TR_NOOP("Timer"), "Original Timing"}, {QT_TR_NOOP("Editing"), "Script Updated By"}};
     for (auto [label, key] : info) {
         auto *e = new QLineEdit(fs::q(s.info_value(key)), this);
         f->addRow(tr(label), e);
@@ -1092,12 +1093,12 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     auto *f = new QFormLayout(this);
     struct Check { const char *key; const char *label; bool def; };
     const Check checks[] = {
-        {"video/openAudio", "Open audio together with video", true},
-        {"video/openWithSubs", "Open video and audio named in the subtitles", true},
-        {"audio/snapKeyframes", "Snap audio boundaries to keyframes", false},
-        {"audio/snapLines", "Snap audio boundaries to other lines", false},
-        {"audio/wheelZooms", "Mouse wheel zooms the audio (Shift scrolls)", false},
-        {"main/askSession", "Load the last session at startup", true},
+        {"video/openAudio", QT_TR_NOOP("Open audio together with video"), true},
+        {"video/openWithSubs", QT_TR_NOOP("Open video and audio named in the subtitles"), true},
+        {"audio/snapKeyframes", QT_TR_NOOP("Snap audio boundaries to keyframes"), false},
+        {"audio/snapLines", QT_TR_NOOP("Snap audio boundaries to other lines"), false},
+        {"audio/wheelZooms", QT_TR_NOOP("Mouse wheel zooms the audio (Shift scrolls)"), false},
+        {"main/askSession", QT_TR_NOOP("Load the last session at startup"), true},
     };
     std::vector<std::pair<QString, QCheckBox *>> boxes;
     for (const auto &c : checks) {
@@ -1144,9 +1145,17 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         dictLang->setCurrentText(keep);
     });
     f->addRow(tr("Spell check language"), dictLang);
+    auto *language = new QComboBox(this);
+    language->addItem(tr("System"), "");
+    language->addItem("English", "en");
+    language->addItem("Polski", "pl");
+    language->setCurrentIndex(std::max(0, language->findData(st.value("main/language", ""))));
+    f->addRow(tr("Language (after restart)"), language);
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    connect(bb, &QDialogButtonBox::accepted, this, [this, boxes, leadIn, leadOut, autosave, dictDir, dictLang] {
+    connect(bb, &QDialogButtonBox::accepted, this,
+            [this, boxes, leadIn, leadOut, autosave, dictDir, dictLang, language] {
         QSettings st;
+        st.setValue("main/language", language->currentData());
         st.setValue("spell/dir", QDir::fromNativeSeparators(dictDir->text()));
         st.setValue("spell/lang", dictLang->currentText());
         spell::reload();
@@ -1380,8 +1389,12 @@ int pasteOverFields(QWidget *parent) {
     v->addWidget(new QLabel(QDialog::tr("Please select the fields that you want to paste over:"), &d));
     auto *list = new QListWidget(&d);
     const int saved = QSettings().value("edit/pasteOverFields", 1024).toInt();
-    for (const char *f : {"Comment", "Layer", "Start time", "End time", "Style", "Actor", "Margin left",
-                          "Margin right", "Margin vertical", "Effect", "Text"}) {
+    for (const char *f : {QT_TRANSLATE_NOOP("QDialog", "Comment"), QT_TRANSLATE_NOOP("QDialog", "Layer"),
+                          QT_TRANSLATE_NOOP("QDialog", "Start time"), QT_TRANSLATE_NOOP("QDialog", "End time"),
+                          QT_TRANSLATE_NOOP("QDialog", "Style"), QT_TRANSLATE_NOOP("QDialog", "Actor"),
+                          QT_TRANSLATE_NOOP("QDialog", "Margin left"), QT_TRANSLATE_NOOP("QDialog", "Margin right"),
+                          QT_TRANSLATE_NOOP("QDialog", "Margin vertical"), QT_TRANSLATE_NOOP("QDialog", "Effect"),
+                          QT_TRANSLATE_NOOP("QDialog", "Text")}) {
         auto *it = new QListWidgetItem(QDialog::tr(f), list);
         it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
         it->setCheckState(saved & (1 << (list->count() - 1)) ? Qt::Checked : Qt::Unchecked);
@@ -1391,7 +1404,10 @@ int pasteOverFields(QWidget *parent) {
     auto set = [list](int bits) {
         for (int k = 0; k < list->count(); ++k) list->item(k)->setCheckState(bits & (1 << k) ? Qt::Checked : Qt::Unchecked);
     };
-    for (auto [text, bits] : {std::pair{"All", 2047}, {"None", 0}, {"Times", 4 | 8}, {"Text", 1024}}) {
+    for (auto [text, bits] : {std::pair{QT_TRANSLATE_NOOP("QDialog", "All"), 2047},
+                              {QT_TRANSLATE_NOOP("QDialog", "None"), 0},
+                              {QT_TRANSLATE_NOOP("QDialog", "Times"), 4 | 8},
+                              {QT_TRANSLATE_NOOP("QDialog", "Text"), 1024}}) {
         auto *b = new QPushButton(QDialog::tr(text), &d);
         b->setAutoDefault(false);
         QObject::connect(b, &QPushButton::clicked, &d, [set, bits] { set(bits); });

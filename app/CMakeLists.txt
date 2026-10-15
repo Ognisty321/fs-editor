@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui GuiPrivate Widgets Concurrent ShaderTools Svg)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui GuiPrivate Widgets Concurrent ShaderTools Svg LinguistTools)
 qt_standard_project_setup()
 
 # Rust core + cxx bridge, built by cargo through Corrosion.
@@ -52,6 +52,10 @@ qt_add_shaders(fsed "shaders"
     PREFIX "/"
     FILES shaders/quad.vert shaders/texture.frag shaders/audio.frag
 )
+# Polish UI, embedded as :/i18n/fsed_pl.qm; `cmake --build <dir> --target update_translations` refreshes the .ts
+qt_add_translations(fsed TS_FILES translations/fsed_pl.ts RESOURCE_PREFIX /i18n NO_GENERATE_PLURALS_TS_FILE
+    IMMEDIATE_CALL # deferred, the call breaks on a space in the build path
+    LUPDATE_OPTIONS -no-obsolete -locations none)
 file(GLOB FS_ICONS CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} icons/*.svg)
 qt_add_resources(fsed "icons" PREFIX "/" FILES ${FS_ICONS})
 target_include_directories(fsed PRIVATE ${FS_BRIDGE_INCLUDE_DIR})

@@ -47,8 +47,11 @@ QComboBox *combo(QWidget *parent, std::initializer_list<const char *> items) {
 }
 // "Which lines": a choice plus a style list filled by the "+" button
 QComboBox *whichLines(QGroupBox *g, QLineEdit *&styles, TabPanel *tab) {
-    auto *c = combo(g, {"All lines", "Selected lines", "From the selected line", "All times higher and equal",
-                        "All times lower and equal", "According to the selected styles"});
+    auto *c = combo(g, {QT_TRANSLATE_NOOP("ShiftPanel", "All lines"), QT_TRANSLATE_NOOP("ShiftPanel", "Selected lines"),
+                        QT_TRANSLATE_NOOP("ShiftPanel", "From the selected line"),
+                        QT_TRANSLATE_NOOP("ShiftPanel", "All times higher and equal"),
+                        QT_TRANSLATE_NOOP("ShiftPanel", "All times lower and equal"),
+                        QT_TRANSLATE_NOOP("ShiftPanel", "According to the selected styles")});
     auto *pick = new QToolButton(g);
     pick->setText("+");
     pick->setToolTip(ShiftPanel::tr("Add a style"));
@@ -132,10 +135,14 @@ ShiftPanel::ShiftPanel(TabPanel *tab) : QScrollArea(tab), m_tab(tab) {
 
     m_lines = whichLines(group(tr("Which lines"), page, pv), m_styles, m_tab);
     auto *mb = group(tr("A method of time shift"), page, pv);
-    m_which = combo(mb, {"Both times", "The starting time", "End time"});
+    m_which = combo(mb, {QT_TRANSLATE_NOOP("ShiftPanel", "Both times"),
+                        QT_TRANSLATE_NOOP("ShiftPanel", "The starting time"),
+                        QT_TRANSLATE_NOOP("ShiftPanel", "End time")});
     grid(mb)->addWidget(m_which, 0, 0);
     auto *eb = group(tr("Correction of end times"), page, pv);
-    m_endFix = combo(eb, {"Leave unchanged", "Adjust overlapping times", "New times"});
+    m_endFix = combo(eb, {QT_TRANSLATE_NOOP("ShiftPanel", "Leave unchanged"),
+                        QT_TRANSLATE_NOOP("ShiftPanel", "Adjust overlapping times"),
+                        QT_TRANSLATE_NOOP("ShiftPanel", "New times")});
     grid(eb)->addWidget(m_endFix, 0, 0);
     m_stack->addWidget(page);
     connect(go, &QPushButton::clicked, this, &ShiftPanel::shift);
