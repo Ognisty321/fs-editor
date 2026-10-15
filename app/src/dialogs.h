@@ -48,8 +48,8 @@ private:
     void findAll(const QList<TabPanel *> &tabs);
     void findInFiles();
     void clearResults();
-    void addResults(TabPanel *tab, const QString &title, const QString &path, const fsb::Session &s,
-                    const rust::Vec<size_t> &rows);
+    using Lines = QList<std::pair<size_t, QString>>; // row, text
+    void addResults(TabPanel *tab, const QString &title, const QString &path, const Lines &lines);
     void showResults(const QString &summary);
     void goToResult(class QTreeWidgetItem *item);
     MainWindow *m_main;
@@ -58,6 +58,7 @@ private:
     QCheckBox *m_case, *m_regex, *m_comments, *m_skipTags, *m_skipText, *m_atStart, *m_atEnd, *m_subdirs;
     QRadioButton *m_field[4], *m_lines[3];
     QLineEdit *m_dir, *m_filter;
+    class QPushButton *m_findFiles;
     QDialog *m_results = nullptr;
     QTreeWidget *m_tree = nullptr;
     QLabel *m_summary = nullptr;

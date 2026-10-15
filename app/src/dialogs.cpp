@@ -156,7 +156,7 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
     auto *find = new QPushButton(tr("Find"), this);
     auto *findAll = new QPushButton(tr("Find all"), this);
     auto *findOpen = new QPushButton(tr("Find in all open subtitles"), this);
-    auto *findFiles = new QPushButton(tr("Find in files"), this);
+    auto *findFiles = m_findFiles = new QPushButton(tr("Find in files"), this);
     auto *replNext = new QPushButton(tr("Replace next"), this);
     auto *replAll = new QPushButton(tr("Replace all"), this);
     auto *replOpen = new QPushButton(tr("Replace in all open subtitles"), this);
@@ -272,7 +272,9 @@ void FindDialog::findAll(const QList<TabPanel *> &tabs) {
         try {
             const auto rows = tab->s().find_all(s);
             if (rows.empty()) continue;
-            addResults(tab, tab->title(), tab->path(), tab->s(), rows);
+            Lines found;
+            for (size_t r : rows) found.append({r, fs::q(tab->s().row(r).text)});
+            addResults(tab, tab->title(), tab->path(), found);
             lines += rows.size();
             ++files;
         } catch (const rust::Error &e) {
@@ -282,7 +284,6 @@ void FindDialog::findAll(const QList<TabPanel *> &tabs) {
     showResults(tr("Lines found: %1, in files: %2").arg(lines).arg(files));
 }
 
-// shortcut: reads the files on the GUI thread; move it to a worker if people search big folders
 void FindDialog::findInFiles() {
     const QString dir = m_dir->text().trimmed();
     if (m_find->currentText().isEmpty() || !QFileInfo(dir).isDir()) return;
@@ -297,29 +298,48 @@ void FindDialog::findInFiles() {
     } catch (const rust::Error &e) {
         return m_main->error(QString::fromUtf8(e.what()));
     }
-    clearResults();
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    size_t lines = 0;
-    int files = 0, searched = 0;
-    QDirIterator it(dir, m_filter->text().split(QRegularExpression("[;,\\s]+"), Qt::SkipEmptyParts), QDir::Files,
-                    m_subdirs->isChecked() ? QDirIterator::Subdirectories : QDirIterator::NoIteratorFlags);
-    while (it.hasNext()) {
-        const QString path = it.next();
-        auto file = fsb::new_session();
-        try {
-            file->open(fs::Utf8(path));
-        } catch (const rust::Error &) {
-            continue; // not subtitles after all
+    // the files are read on a worker, each into its own session
+    struct Found {
+        QList<std::pair<QString, Lines>> files; // path, matching lines
+        int searched = 0;
+    };
+    const QStringList filters = m_filter->text().split(QRegularExpression("[;,\\s]+"), Qt::SkipEmptyParts);
+    const auto flags = m_subdirs->isChecked() ? QDirIterator::Subdirectories : QDirIterator::NoIteratorFlags;
+    m_findFiles->setEnabled(false);
+    m_main->status(tr("Searching in %1...").arg(dir));
+    auto *watch = new QFutureWatcher<Found>(this);
+    connect(watch, &QFutureWatcher<Found>::finished, this, [this, watch, dir] {
+        const Found f = watch->result();
+        watch->deleteLater();
+        m_findFiles->setEnabled(true);
+        clearResults();
+        size_t lines = 0;
+        for (const auto &[path, found] : f.files) {
+            addResults(nullptr, QDir(dir).relativeFilePath(path), path, found);
+            lines += size_t(found.size());
         }
-        ++searched;
-        const auto rows = file->find_all(s);
-        if (rows.empty()) continue;
-        addResults(nullptr, QDir(dir).relativeFilePath(path), path, *file, rows);
-        lines += rows.size();
-        ++files;
-    }
-    QApplication::restoreOverrideCursor();
-    showResults(tr("Lines found: %1, in files: %2 (searched: %3)").arg(lines).arg(files).arg(searched));
+        showResults(tr("Lines found: %1, in files: %2 (searched: %3)").arg(lines).arg(f.files.size()).arg(f.searched));
+    });
+    watch->setFuture(QtConcurrent::run([dir, filters, flags, s] {
+        Found f;
+        QDirIterator it(dir, filters, QDir::Files, flags);
+        while (it.hasNext()) {
+            const QString path = it.next();
+            auto file = fsb::new_session();
+            try {
+                file->open(fs::Utf8(path));
+            } catch (const rust::Error &) {
+                continue; // not subtitles after all
+            }
+            ++f.searched;
+            const auto rows = file->find_all(s);
+            if (rows.empty()) continue;
+            Lines found;
+            for (size_t r : rows) found.append({r, fs::q(file->row(r).text)});
+            f.files.append({path, std::move(found)});
+        }
+        return f;
+    }));
 }
 
 void FindDialog::clearResults() {
@@ -342,16 +362,15 @@ void FindDialog::clearResults() {
     m_resultTabs.clear();
 }
 
-void FindDialog::addResults(TabPanel *tab, const QString &title, const QString &path, const fsb::Session &s,
-                            const rust::Vec<size_t> &rows) {
+void FindDialog::addResults(TabPanel *tab, const QString &title, const QString &path, const Lines &lines) {
     auto *file = new QTreeWidgetItem(m_tree, {title});
     file->setFirstColumnSpanned(true);
     file->setData(0, Qt::UserRole, int(m_resultTabs.size()));
     file->setData(0, Qt::UserRole + 1, path);
     file->setToolTip(0, path);
     m_resultTabs.append(tab);
-    for (size_t r : rows) {
-        auto *it = new QTreeWidgetItem(file, {QString::number(r + 1), fs::q(s.row(r).text)});
+    for (const auto &[r, text] : lines) {
+        auto *it = new QTreeWidgetItem(file, {QString::number(r + 1), text});
         it->setData(0, Qt::UserRole, qulonglong(r));
     }
     file->setExpanded(true);
