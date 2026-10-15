@@ -943,6 +943,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     matcher: m,
                     replacement: replace,
                     first_only: false,
+                    keep_case: false,
                 },
             );
             eprintln!("{n} replacement(s)");

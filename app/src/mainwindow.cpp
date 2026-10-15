@@ -41,6 +41,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QListWidget>
+#include <QLocale>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QCheckBox>
@@ -83,7 +84,8 @@ const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"automationManager", {"list-check", kAmber}},
     {"exit", {"logout", kRed}}, {"undo", {"arrow-back-up", {}}}, {"undoToSave", {"arrow-back-up-double", {}}},
     {"redo", {"arrow-forward-up", {}}}, {"history", {"history", {}}}, {"findReplace", {"replace", kOrange}},
-    {"find", {"search", kOrange}}, {"findNext", {"search", kOrange}}, {"selectLines", {"list-check", kGreen}},
+    {"find", {"search", kOrange}}, {"findNext", {"search", kOrange}}, {"correctErrors", {"replace", kGreen}},
+    {"selectLines", {"list-check", kGreen}},
     {"duplicate", {"copy", {}}}, {"deleteText", {"eraser", kRed}}, {"deleteLines", {"row-remove", kRed}}, {"pasteOver", {"clipboard-text", kBlue}},
     {"prevLine", {"arrow-up", {}}}, {"nextLine", {"arrow-down", {}}}, {"joinPrev", {"arrows-join", {}}},
     {"joinNext", {"arrows-join-2", {}}}, {"recombine", {"arrows-join", kGreen}},
@@ -575,6 +577,7 @@ void MainWindow::buildMenus() {
         if (m_find) m_find->findNext();
         else findDlg()->showTab(0);
     });
+    add("correctErrors", tr("Correct minor errors..."), {}, edit, [this] { correctErrors(); });
     edit->addSeparator();
     const QString sortNames[] = {tr("Start time"), tr("End time"), tr("Styles"), tr("Actor"), tr("Effect"), tr("Layer")};
     for (bool selected : {false, true}) {
@@ -1490,6 +1493,135 @@ void MainWindow::buildAutomationMenu() {
 }
 
 // Aegisub's Automation Manager: G(lobal, autoload) / L(oaded by hand) scripts, failed ones in red.
+// Kainote's minor error corrector: checked regex rules, run in one undo step. Rules
+// live in corrector/rules; a case-insensitive rule keeps the case of what it replaces.
+void MainWindow::correctErrors() {
+    struct Rule {
+        QString description, find, replace;
+    };
+    // Kainote's defaults; \b is a word boundary, $1 a group. All start unchecked.
+    std::vector<Rule> defaults = {
+        {tr("Remove spaces before punctuation"), " +([,.!?%])", "${1}"},
+        {tr("Remove double spaces"), "  +", " "},
+        {tr("Change four or more dots to an ellipsis"), "\\.{4,}", "..."},
+        {tr("Change two dots to an ellipsis"), "(^|[^.])\\.\\.($|[^.])", "${1}...${2}"},
+        {tr("Add a missing space after punctuation"), "([^.]\\.|[,!?%])([^\\s,.!?%\"'’”»)\\]}\\\\0-9-])",
+         "${1} ${2}"},
+        {tr("Remove Japanese honorifics"), " ?- ?(san|chan|kun|sama|nee|dono|senpai|sensei)\\b", ""},
+    };
+    const QString lang = QSettings().value("main/language").toString();
+    if ((lang.isEmpty() ? QLocale() : QLocale(lang)).language() == QLocale::Polish)
+        defaults.insert(defaults.end(),
+                        {{tr("Change \"sie\" to \"się\""), "\\bsie\\b", "się"},
+                         {tr("Change \"nie możliwe\" to \"niemożliwe\""), "\\bnie możliwe\\b", "niemożliwe"},
+                         {tr("Change \"nie ważne\" to \"nieważne\""), "\\bnie ważne\\b", "nieważne"},
+                         {tr("Fix misspellings of \"w ogóle\""), "\\b(w ?og[uo]le|wogóle)\\b", "w ogóle"},
+                         {tr("Fix misspellings of \"będę\""), "\\b(bed[eę]|będe)\\b", "będę"}});
+
+    QDialog d(this);
+    d.setWindowTitle(tr("Correct minor errors"));
+    d.resize(1000, 420);
+    auto *v = new QVBoxLayout(&d);
+    auto *list = new QTreeWidget(&d);
+    list->setHeaderLabels(
+        {tr("Description"), tr("Find (regular expression)"), tr("Replace with"), tr("Match case"), tr("Only text")});
+    list->setRootIsDecorated(false);
+    list->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    list->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    v->addWidget(list);
+    auto addRule = [list](const QString &desc, const QString &find, const QString &repl, bool on, bool matchCase,
+                          bool onlyText) {
+        auto *it = new QTreeWidgetItem(list, {desc, find, repl});
+        it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
+        it->setCheckState(0, on ? Qt::Checked : Qt::Unchecked);
+        it->setCheckState(3, matchCase ? Qt::Checked : Qt::Unchecked);
+        it->setCheckState(4, onlyText ? Qt::Checked : Qt::Unchecked);
+        return it;
+    };
+    QSettings st;
+    const int n = st.beginReadArray("corrector/rules");
+    for (int i = 0; i < n; ++i) {
+        st.setArrayIndex(i);
+        addRule(st.value("description").toString(), st.value("find").toString(), st.value("replace").toString(),
+                st.value("enabled").toBool(), st.value("matchCase").toBool(), st.value("onlyText", true).toBool());
+    }
+    st.endArray();
+    auto restore = [&] {
+        for (const Rule &r : defaults)
+            if (list->findItems(r.find, Qt::MatchExactly, 1).isEmpty())
+                addRule(r.description, r.find, r.replace, false, false, true);
+    };
+    if (!n) restore();
+    for (int c = 1; c < 5; ++c) list->resizeColumnToContents(c);
+    // text columns edit on a double click, the check columns toggle
+    connect(list, &QTreeWidget::itemDoubleClicked, &d, [list](QTreeWidgetItem *it, int col) {
+        if (col < 3) list->editItem(it, col);
+    });
+
+    auto *h = new QHBoxLayout;
+    v->addLayout(h);
+    auto button = [&](const QString &text, auto fn) {
+        auto *b = new QPushButton(text, &d);
+        connect(b, &QPushButton::clicked, &d, fn);
+        h->addWidget(b);
+        return b;
+    };
+    button(tr("Add"), [&] {
+        auto *it = addRule(tr("New rule"), {}, {}, true, false, true);
+        list->setCurrentItem(it);
+        list->editItem(it, 1);
+    });
+    button(tr("Remove"), [&] { delete list->currentItem(); });
+    button(tr("Restore defaults"), restore);
+    h->addStretch();
+    auto *scope = new QComboBox(&d);
+    scope->addItems({tr("All lines"), tr("Selected lines")});
+    h->addWidget(scope);
+    auto *run = button(tr("Replace"), [&, this] {
+        auto *t = current();
+        if (!t) return;
+        std::vector<fsb::FindSpec> specs;
+        for (int i = 0; i < list->topLevelItemCount(); ++i) {
+            const auto *it = list->topLevelItem(i);
+            if (it->checkState(0) != Qt::Checked || it->text(1).isEmpty()) continue;
+            fsb::FindSpec &s = specs.emplace_back();
+            s.pattern = fs::rs(it->text(1));
+            s.replacement = fs::rs(it->text(2));
+            s.regex = true;
+            s.match_case = it->checkState(3) == Qt::Checked;
+            s.skip_tags = it->checkState(4) == Qt::Checked;
+            if (scope->currentIndex() == 1)
+                for (size_t r : t->selection()) s.rows.push_back(r);
+        }
+        if (specs.empty()) return status(tr("No rule is checked"));
+        // nothing selected must not mean every line
+        if (scope->currentIndex() == 1 && t->selection().empty()) return status(tr("No lines selected"));
+        try {
+            const size_t count = t->s().replace_rules({specs.data(), specs.size()});
+            t->changed();
+            status(tr("Replacements: %1").arg(count));
+        } catch (const rust::Error &e) {
+            error(QString::fromUtf8(e.what()));
+        }
+    });
+    run->setDefault(true);
+    button(tr("Close"), [&] { d.accept(); });
+    d.exec();
+
+    st.beginWriteArray("corrector/rules", list->topLevelItemCount());
+    for (int i = 0; i < list->topLevelItemCount(); ++i) {
+        const auto *it = list->topLevelItem(i);
+        st.setArrayIndex(i);
+        st.setValue("description", it->text(0));
+        st.setValue("find", it->text(1));
+        st.setValue("replace", it->text(2));
+        st.setValue("enabled", it->checkState(0) == Qt::Checked);
+        st.setValue("matchCase", it->checkState(3) == Qt::Checked);
+        st.setValue("onlyText", it->checkState(4) == Qt::Checked);
+    }
+    st.endArray();
+}
+
 void MainWindow::automationManager() {
     QDialog d(this);
     d.setWindowTitle(tr("Automation manager"));

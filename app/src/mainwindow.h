@@ -68,6 +68,7 @@ private:
     void convert(const QString &format);
     void runMacro(size_t id);
     void automationManager();
+    void correctErrors();
     void updateActions();
     void withRow(const std::function<void(TabPanel *, fsb::Row &)> &fn);
 

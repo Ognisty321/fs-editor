@@ -435,6 +435,7 @@ pub mod ffi {
         fn filter(self: &Session, spec: &FilterSpec) -> Vec<usize>;
         fn find(self: &Session, spec: &FindSpec, from: usize) -> Result<i64>;
         fn replace_all(self: &mut Session, spec: &FindSpec) -> Result<usize>;
+        fn replace_rules(self: &mut Session, specs: &[FindSpec]) -> Result<usize>;
         fn overlapping(self: &Session, row: usize) -> Vec<usize>;
         fn rows_at(self: &Session, ms: i64) -> Vec<usize>;
         fn resample(self: &mut Session, x: i32, y: i32);

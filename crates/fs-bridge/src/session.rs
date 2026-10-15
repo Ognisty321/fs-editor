@@ -1222,7 +1222,12 @@ impl Session {
         Ok(-1)
     }
 
-    pub fn replace_all(&mut self, spec: &FindSpec) -> Result<usize, String> {
+    /// The events `spec` replaces in and how.
+    fn replace_job(
+        &self,
+        spec: &FindSpec,
+        keep_case: bool,
+    ) -> Result<(Rows, ops::Replace), String> {
         let m = Self::matcher(spec)?;
         let rows: Vec<usize> = if spec.rows.is_empty() {
             (0..self.rows.len()).collect()
@@ -1239,8 +1244,29 @@ impl Session {
             matcher: m,
             replacement: spec.replacement.clone(),
             first_only: false,
+            keep_case,
         };
-        Ok(self.edit("Replace", |d| ops::replace(d, &Rows::Selected(evs), &r)))
+        Ok((Rows::Selected(evs), r))
+    }
+
+    pub fn replace_all(&mut self, spec: &FindSpec) -> Result<usize, String> {
+        let (rows, r) = self.replace_job(spec, false)?;
+        Ok(self.edit("Replace", |d| ops::replace(d, &rows, &r)))
+    }
+
+    /// Kainote's minor error corrector: every rule in turn, one undo step. A rule that
+    /// ignores case writes its replacement in the case of each match ("Sie" -> "Się").
+    pub fn replace_rules(&mut self, specs: &[FindSpec]) -> Result<usize, String> {
+        let jobs = specs
+            .iter()
+            .map(|s| {
+                self.replace_job(s, !s.match_case)
+                    .map_err(|e| format!("{}: {e}", s.pattern))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(self.edit("Correct minor errors", |d| {
+            jobs.iter().map(|(rows, r)| ops::replace(d, rows, r)).sum()
+        }))
     }
 
     /// Rows overlapping `row` in time (collision colouring).
@@ -2079,6 +2105,28 @@ mod tests {
         assert_eq!(s.row(1).text, "two");
         assert_eq!(s.move_rows(&[2], -2), vec![0]);
         assert_eq!(s.row(0).text, "three");
+    }
+
+    #[test]
+    fn replace_rules_in_one_undo_step() {
+        let mut s = session(ASS);
+        let rule = |pattern: &str, replacement: &str| FindSpec {
+            pattern: pattern.into(),
+            replacement: replacement.into(),
+            regex: true,
+            skip_tags: true,
+            rows: vec![0, 1],
+            ..Default::default()
+        };
+        let bad = [rule("o", "0"), rule("(", "")];
+        assert!(s.replace_rules(&bad).is_err());
+        assert_eq!(s.row(0).text, "one");
+        let rules = [rule(r"\bone\b", "One!"), rule("!", "?"), rule("T", "t")];
+        assert_eq!(s.replace_rules(&rules), Ok(3));
+        let texts = |s: &Session| (0..3).map(|i| s.row(i).text).collect::<Vec<_>>();
+        assert_eq!(texts(&s), ["One?", "two", "three"]);
+        assert!(s.undo());
+        assert_eq!(texts(&s), ["one", "two", "three"]);
     }
 
     #[test]

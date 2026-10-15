@@ -403,6 +403,30 @@ pub struct Replace {
     pub replacement: String,
     /// Replace only the first match per line.
     pub first_only: bool,
+    /// Write each replacement in the case of its match ([`follow_case`]).
+    pub keep_case: bool,
+}
+
+/// `rep` in the case of `matched`, so a case-insensitive "sie" -> "się" turns "Sie" into
+/// "Się" and "SIE" into "SIĘ" (Kainote's error corrector): all capitals stay capitals, a
+/// leading capital stays a leading capital, anything else is left as written.
+pub fn follow_case(matched: &str, rep: String) -> String {
+    let letters: Vec<char> = matched.chars().filter(|c| c.is_alphabetic()).collect();
+    if !letters.first().is_some_and(|c| c.is_uppercase()) {
+        return rep;
+    }
+    if letters.len() > 1 && letters.iter().all(|c| c.is_uppercase()) {
+        return rep.to_uppercase();
+    }
+    let Some((i, c)) = rep.char_indices().find(|(_, c)| c.is_alphabetic()) else {
+        return rep;
+    };
+    format!(
+        "{}{}{}",
+        &rep[..i],
+        c.to_uppercase(),
+        &rep[i + c.len_utf8()..]
+    )
 }
 
 /// Replace in the given rows; returns number of replacements made. When
@@ -420,16 +444,19 @@ pub fn replace(doc: &mut Document, rows: &Rows, r: &Replace) -> usize {
                 return None;
             }
             *count += if r.first_only { 1 } else { found };
-            Some(if literal {
-                r.matcher
-                    .regex
-                    .replacen(s, n, regex::NoExpand(&r.replacement))
+            let re = &r.matcher.regex;
+            Some(if r.keep_case {
+                re.replacen(s, n, |c: &regex::Captures| {
+                    let mut out = String::new();
+                    c.expand(&r.replacement, &mut out);
+                    follow_case(&c[0], out)
+                })
+                .into_owned()
+            } else if literal {
+                re.replacen(s, n, regex::NoExpand(&r.replacement))
                     .into_owned()
             } else {
-                r.matcher
-                    .regex
-                    .replacen(s, n, r.replacement.as_str())
-                    .into_owned()
+                re.replacen(s, n, r.replacement.as_str()).into_owned()
             })
         };
         let new: Option<String> = match r.matcher.field {
@@ -1449,6 +1476,7 @@ mod tests {
                 matcher: m,
                 replacement: "$".into(),
                 first_only: false,
+                keep_case: false,
             },
         );
         assert_eq!(n, 4);
@@ -1461,9 +1489,33 @@ mod tests {
                 matcher: m,
                 replacement: "${1}!".into(),
                 first_only: true,
+                keep_case: false,
             },
         );
         assert_eq!(d.event(0).unwrap().text, r"{\i1}$o$ is\N{\i0}$o$");
+    }
+
+    #[test]
+    fn replace_following_case() {
+        let mut d = doc(&[(
+            "0:00:00.00",
+            "0:00:01.00",
+            "Default",
+            r"Sie sie SIE {\i1}sie",
+        )]);
+        let mut m = TextMatcher::new(r"\bsie\b", true, false, Field::Text).unwrap();
+        m.strip_tags = true;
+        let r = Replace {
+            matcher: m,
+            replacement: "się".into(),
+            first_only: false,
+            keep_case: true,
+        };
+        assert_eq!(replace(&mut d, &Rows::All, &r), 4);
+        assert_eq!(d.event(0).unwrap().text, r"Się się SIĘ {\i1}się");
+        assert_eq!(follow_case("a..B", "a...B".into()), "a...B");
+        assert_eq!(follow_case("W ogole", "w ogóle".into()), "W ogóle");
+        assert_eq!(follow_case("-San", String::new()), "");
     }
 
     #[test]

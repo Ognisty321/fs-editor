@@ -1066,6 +1066,10 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Znajdź następny</translation>
     </message>
     <message>
+        <source>Correct minor errors...</source>
+        <translation>Popraw drobne błędy...</translation>
+    </message>
+    <message>
         <source>Start time</source>
         <translation>Czas początkowy</translation>
     </message>
@@ -1678,6 +1682,102 @@ Dekoder: BestSource</translation>
     <message>
         <source>Reload all scripts</source>
         <translation>Przeładuj wszystkie skrypty</translation>
+    </message>
+    <message>
+        <source>Remove spaces before punctuation</source>
+        <translation>Usuń spacje przed znakami interpunkcyjnymi</translation>
+    </message>
+    <message>
+        <source>Remove double spaces</source>
+        <translation>Usuń podwójne spacje</translation>
+    </message>
+    <message>
+        <source>Change four or more dots to an ellipsis</source>
+        <translation>Zamień cztery i więcej kropek na wielokropek</translation>
+    </message>
+    <message>
+        <source>Change two dots to an ellipsis</source>
+        <translation>Zamień dwie kropki na wielokropek</translation>
+    </message>
+    <message>
+        <source>Add a missing space after punctuation</source>
+        <translation>Dodaj brakującą spację po znaku interpunkcyjnym</translation>
+    </message>
+    <message>
+        <source>Remove Japanese honorifics</source>
+        <translation>Usuń japońskie zwroty grzecznościowe</translation>
+    </message>
+    <message>
+        <source>Change &quot;sie&quot; to &quot;się&quot;</source>
+        <translation>Zamień „sie” na „się”</translation>
+    </message>
+    <message>
+        <source>Change &quot;nie możliwe&quot; to &quot;niemożliwe&quot;</source>
+        <translation>Zamień „nie możliwe” na „niemożliwe”</translation>
+    </message>
+    <message>
+        <source>Change &quot;nie ważne&quot; to &quot;nieważne&quot;</source>
+        <translation>Zamień „nie ważne” na „nieważne”</translation>
+    </message>
+    <message>
+        <source>Fix misspellings of &quot;w ogóle&quot;</source>
+        <translation>Popraw błędy w wyrażeniu „w ogóle”</translation>
+    </message>
+    <message>
+        <source>Fix misspellings of &quot;będę&quot;</source>
+        <translation>Popraw błędy w wyrazie „będę”</translation>
+    </message>
+    <message>
+        <source>Correct minor errors</source>
+        <translation>Popraw drobne błędy</translation>
+    </message>
+    <message>
+        <source>Find (regular expression)</source>
+        <translation>Szukaj (wyrażenie regularne)</translation>
+    </message>
+    <message>
+        <source>Replace with</source>
+        <translation>Zamień na</translation>
+    </message>
+    <message>
+        <source>Match case</source>
+        <translation>Rozróżniaj wielkość znaków</translation>
+    </message>
+    <message>
+        <source>Only text</source>
+        <translation>Tylko w tekście</translation>
+    </message>
+    <message>
+        <source>New rule</source>
+        <translation>Nowa reguła</translation>
+    </message>
+    <message>
+        <source>Restore defaults</source>
+        <translation>Przywróć domyślne</translation>
+    </message>
+    <message>
+        <source>All lines</source>
+        <translation>Wszystkie linijki</translation>
+    </message>
+    <message>
+        <source>Selected lines</source>
+        <translation>Zaznaczone linijki</translation>
+    </message>
+    <message>
+        <source>Replace</source>
+        <translation>Zamień</translation>
+    </message>
+    <message>
+        <source>No rule is checked</source>
+        <translation>Nie zaznaczono żadnej reguły</translation>
+    </message>
+    <message>
+        <source>No lines selected</source>
+        <translation>Nie zaznaczono żadnych linijek</translation>
+    </message>
+    <message>
+        <source>Replacements: %1</source>
+        <translation>Zamiany: %1</translation>
     </message>
     <message>
         <source>Automation manager</source>
