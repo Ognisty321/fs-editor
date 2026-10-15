@@ -30,6 +30,13 @@ QStringList languages();
 void addWord(const QString &word); // to the user dictionary of the loaded language
 } // namespace spell
 
+// Character counter limits from Settings (subs/maxCps, subs/maxLineLength, subs/maxLines).
+namespace limits {
+int cps();
+bool wrapsOver(const QString &wraps); // "a/b/c" line lengths: too many lines or one too long
+void reload();                        // after a settings change
+} // namespace limits
+
 class TimeEdit : public QLineEdit {
     Q_OBJECT
 public:

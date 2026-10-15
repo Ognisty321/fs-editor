@@ -34,6 +34,7 @@
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
+#include <algorithm>
 #include <optional>
 
 // ---- TimeEdit ---------------------------------------------------------------
@@ -167,6 +168,31 @@ void spell::reload() {
         if (auto *e = qobject_cast<SubsTextEdit *>(w))
             if (auto *h = e->document()->findChild<QSyntaxHighlighter *>()) h->rehighlight();
 }
+
+namespace {
+struct Limits {
+    int cps, length, lines;
+};
+Limits loadLimits() {
+    QSettings st;
+    return {st.value("subs/maxCps", 15).toInt(), st.value("subs/maxLineLength", 43).toInt(),
+            st.value("subs/maxLines", 2).toInt()};
+}
+Limits &g_limits() {
+    static Limits l = loadLimits(); // read per painted cell, so cached
+    return l;
+}
+} // namespace
+
+int limits::cps() { return g_limits().cps; }
+
+bool limits::wrapsOver(const QString &wraps) {
+    const auto parts = wraps.split('/');
+    return parts.size() > g_limits().lines ||
+           std::ranges::any_of(parts, [](const QString &v) { return v.toInt() > g_limits().length; });
+}
+
+void limits::reload() { g_limits() = loadLimits(); }
 
 void spell::addWord(const QString &word) {
     QSettings st;
@@ -786,14 +812,11 @@ void EditBox::reload() {
 
 void EditBox::updateInfo(const fsb::Row &r) {
     m_lineLabel->setText(tr("Line: %1").arg(m_row + 1));
-    const auto parts = fs::q(r.wraps).split('/');
-    bool bad = parts.size() > 2;
-    for (const auto &p : parts) bad |= p.toInt() > 43;
     m_wrapsLabel->setText(tr("Wraps: %1").arg(fs::q(r.wraps)));
-    m_wrapsLabel->setStyleSheet(bad ? "color: #e05050" : "");
+    m_wrapsLabel->setStyleSheet(limits::wrapsOver(fs::q(r.wraps)) ? "color: #e05050" : "");
     const int cps = int(r.cps + 0.5);
-    m_cpsLabel->setText(tr("Characters per second: %1<=15").arg(cps));
-    m_cpsLabel->setStyleSheet(cps > 15 ? "color: #e05050" : "");
+    m_cpsLabel->setText(tr("Characters per second: %1<=%2").arg(cps).arg(limits::cps()));
+    m_cpsLabel->setStyleSheet(cps > limits::cps() ? "color: #e05050" : "");
 }
 
 void EditBox::commit(const char *field) {

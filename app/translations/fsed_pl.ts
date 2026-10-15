@@ -400,8 +400,8 @@
         <translation>Łamania: %1</translation>
     </message>
     <message>
-        <source>Characters per second: %1&lt;=15</source>
-        <translation>Znaki na sekundę: %1&lt;=15</translation>
+        <source>Characters per second: %1&lt;=%2</source>
+        <translation>Znaki na sekundę: %1&lt;=%2</translation>
     </message>
     <message>
         <source>No unconfirmed lines found</source>
@@ -2326,6 +2326,18 @@ Filtry eksportu: %8</translation>
     <message>
         <source>Autosave every</source>
         <translation>Autozapis co</translation>
+    </message>
+    <message>
+        <source>Maximum characters per second</source>
+        <translation>Maksymalna liczba znaków na sekundę</translation>
+    </message>
+    <message>
+        <source>Maximum line length</source>
+        <translation>Maksymalna długość linii</translation>
+    </message>
+    <message>
+        <source>Maximum lines</source>
+        <translation>Maksymalna liczba linii</translation>
     </message>
     <message>
         <source>Grid font (applies to new tabs)</source>

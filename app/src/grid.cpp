@@ -268,14 +268,10 @@ void Grid::paintEvent(QPaintEvent *) {
                     p.drawText(QRect(cr.left(), cr.top() + 2, 8, 8), Qt::AlignCenter, "+");
                 }
                 if (int(i) == m_marker) p.fillRect(cr.right() - 4, cr.top(), 4, rh, T.collision);
-            } else if ((c == Cps && r.cps > 15.0) ||
-                       (c == Style && !styleNames.isEmpty() && !styleNames.contains(fs::q(r.style)))) {
+            } else if ((c == Cps && int(r.cps + 0.5) > limits::cps()) ||
+                       (c == Style && !styleNames.isEmpty() && !styleNames.contains(fs::q(r.style))) ||
+                       (c == Wraps && limits::wrapsOver(fs::q(r.wraps)))) {
                 p.fillRect(cr, T.error);
-            } else if (c == Wraps) {
-                const auto parts = fs::q(r.wraps).split('/');
-                bool bad = parts.size() > 2;
-                for (const auto &v : parts) bad |= v.toInt() > 43;
-                if (bad) p.fillRect(cr, T.error);
             }
             const bool collide = (c == Text || c == Original) && m_collisions.contains(i);
             p.setPen(collide ? T.collision : T.text);

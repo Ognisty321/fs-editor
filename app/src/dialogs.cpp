@@ -1123,6 +1123,19 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     autosave->setSpecialValueText(tr("off"));
     autosave->setValue(st.value("main/autosaveSeconds", 60).toInt());
     f->addRow(tr("Autosave every"), autosave);
+    // the character counter's limits, red in the grid and the edit box (Aegisub's, Kainote's)
+    const std::pair<const char *, int> limitKeys[] = {
+        {"subs/maxCps", 15}, {"subs/maxLineLength", 43}, {"subs/maxLines", 2}};
+    const char *limitLabels[] = {QT_TR_NOOP("Maximum characters per second"), QT_TR_NOOP("Maximum line length"),
+                                 QT_TR_NOOP("Maximum lines")};
+    std::vector<std::pair<QString, QSpinBox *>> spins;
+    for (int k = 0; k < 3; ++k) {
+        auto *s = new QSpinBox(this);
+        s->setRange(1, k == 2 ? 20 : 1000);
+        s->setValue(st.value(limitKeys[k].first, limitKeys[k].second).toInt());
+        f->addRow(tr(limitLabels[k]), s);
+        spins.emplace_back(limitKeys[k].first, s);
+    }
     auto *font = new QPushButton(st.value("grid/font", QFont("Tahoma", 10)).value<QFont>().toString(), this);
     connect(font, &QPushButton::clicked, this, [font] {
         bool ok;
@@ -1154,7 +1167,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     f->addRow(tr("Language (after restart)"), language);
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(bb, &QDialogButtonBox::accepted, this,
-            [this, boxes, leadIn, leadOut, autosave, dictDir, dictLang, language] {
+            [this, boxes, spins, leadIn, leadOut, autosave, dictDir, dictLang, language] {
         QSettings st;
         st.setValue("main/language", language->currentData());
         st.setValue("spell/dir", QDir::fromNativeSeparators(dictDir->text()));
@@ -1164,6 +1177,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         st.setValue("audio/leadIn", leadIn->value());
         st.setValue("audio/leadOut", leadOut->value());
         st.setValue("main/autosaveSeconds", autosave->value());
+        for (auto &[k, s] : spins) st.setValue(k, s->value());
+        limits::reload();
         accept();
     });
     connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);

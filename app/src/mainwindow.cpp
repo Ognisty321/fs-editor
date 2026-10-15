@@ -585,7 +585,13 @@ void MainWindow::buildMenus() {
     ask->setChecked(QSettings().value("main/askSession", true).toBool());
     connect(ask, &QAction::toggled, this, [](bool on) { QSettings().setValue("main/askSession", on); });
     file->addSeparator();
-    add("settings", tr("Settings"), {}, file, [this] { SettingsDialog(this).exec(); });
+    add("settings", tr("Settings"), {}, file, [this] {
+        if (SettingsDialog(this).exec() != QDialog::Accepted) return;
+        for (auto *t : tabs()) { // the limits colour the grid and the edit box
+            t->grid()->viewport()->update();
+            t->edit()->reload();
+        }
+    });
     add("hotkeys", tr("Hotkeys..."), {}, file, [this] { editHotkeys(); });
     add("exit", tr("Exit"), QKeySequence("Alt+F4"), file, [this] { close(); });
 
