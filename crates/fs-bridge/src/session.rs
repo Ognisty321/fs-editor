@@ -19,8 +19,8 @@ use fs_core::{Color, Document, Event, EventEntry, EventId, Time};
 use fs_formats::{Format, LoadOptions, SaveOptions};
 
 use crate::ffi::{
-    ColumnInfo, FileInfo, FilterSpec, FindSpec, PostSpec, ResampleSpec, Row, RowSpan, ShiftSpec,
-    StyleData, Syllable, Visual,
+    ColumnInfo, ComparePair, FileInfo, FilterSpec, FindSpec, PostSpec, ResampleSpec, Row, RowSpan,
+    ShiftSpec, StyleData, Syllable, Visual,
 };
 
 pub struct Session {
@@ -475,34 +475,56 @@ impl Session {
 
     /// Rows whose start and end match non-comment lines of `other` none of
     /// which has the same text (comments are not compared).
-    pub fn compare_rows(&self, other: &Session) -> Vec<usize> {
-        let mut by_time: HashMap<(Time, Time), Vec<&str>> = HashMap::new();
-        for i in 0..other.rows.len() {
-            if let Some((start, end, text)) = other.timed_text(i) {
-                by_time.entry((start, end)).or_default().push(text);
+    /// Kainote's comparison: walks `rows` and `other_rows` in order and pairs each line with
+    /// the next one on the other side, which must have the same times and/or style when
+    /// asked (comments are skipped); returns the pairs whose texts differ.
+    pub fn compare(
+        &self,
+        other: &Session,
+        rows: &[usize],
+        other_rows: &[usize],
+        by_times: bool,
+        by_styles: bool,
+    ) -> Vec<ComparePair> {
+        let mut out = Vec::new();
+        let mut next = 0;
+        for &i in rows {
+            let Some(a) = self.compared(i) else { continue };
+            let Some((k, b)) = other_rows[next..].iter().enumerate().find_map(|(k, &j)| {
+                other
+                    .compared(j)
+                    .filter(|b| {
+                        (!by_times || (a.0, a.1) == (b.0, b.1)) && (!by_styles || a.2 == b.2)
+                    })
+                    .map(|b| (k, b))
+            }) else {
+                continue;
+            };
+            let j = other_rows[next + k];
+            next += k + 1;
+            if a.3 != b.3 {
+                let (spans, other_spans) = diff_spans(a.3, b.3);
+                out.push(ComparePair {
+                    row: i,
+                    other: j,
+                    spans,
+                    other_spans,
+                });
             }
         }
-        (0..self.rows.len())
-            .filter(|&i| {
-                self.timed_text(i).is_some_and(|(start, end, text)| {
-                    by_time
-                        .get(&(start, end))
-                        .is_some_and(|v| !v.contains(&text))
-                })
-            })
-            .collect()
+        out
     }
 
-    /// Times and shown text of a non-comment row.
-    fn timed_text(&self, i: usize) -> Option<(Time, Time, &str)> {
-        let r = self.rows[i];
+    /// Times, style and shown text of a non-comment row.
+    fn compared(&self, i: usize) -> Option<(Time, Time, &str, &str)> {
+        let r = *self.rows.get(i)?;
         let ev = &self.ed.doc.events()[r.main()].event;
         let text = if self.tl {
             tlmode::translation_text(&self.ed.doc, r)
         } else {
             &ev.text
         };
-        (!ev.is_comment()).then_some((ev.start, ev.end, text))
+        (!ev.is_comment()).then_some((ev.start, ev.end, ev.style.as_str(), text))
     }
 
     pub fn column_info(&mut self) -> ColumnInfo {
@@ -1989,6 +2011,64 @@ fn fix_overlaps(d: &mut Document, evs: &[usize]) {
     }
 }
 
+/// The parts of `a` and `b` outside their longest common subsequence of characters, as
+/// (start, length) pairs in UTF-16 units (Kainote's comparison).
+fn diff_spans(a: &str, b: &str) -> (Vec<usize>, Vec<usize>) {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    // edits are usually local: the common ends keep the table small
+    let pre = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let suf = a[pre..]
+        .iter()
+        .rev()
+        .zip(b[pre..].iter().rev())
+        .take_while(|(x, y)| x == y)
+        .count();
+    let (x, y) = (&a[pre..a.len() - suf], &b[pre..b.len() - suf]);
+    let (mut in_x, mut in_y) = (vec![false; x.len()], vec![false; y.len()]);
+    // shortcut: longer middles (whole drawings) are marked whole; diff them in pieces if needed
+    if x.len() * y.len() <= 1_000_000 {
+        // t[i][j]: LCS length of x[i..] and y[j..]
+        let w = y.len() + 1;
+        let mut t = vec![0u32; (x.len() + 1) * w];
+        for i in (0..x.len()).rev() {
+            for j in (0..y.len()).rev() {
+                t[i * w + j] = if x[i] == y[j] {
+                    t[(i + 1) * w + j + 1] + 1
+                } else {
+                    t[(i + 1) * w + j].max(t[i * w + j + 1])
+                };
+            }
+        }
+        let (mut i, mut j) = (0, 0);
+        while i < x.len() && j < y.len() {
+            if x[i] == y[j] {
+                (in_x[i], in_y[j]) = (true, true);
+                (i, j) = (i + 1, j + 1);
+            } else if t[(i + 1) * w + j] >= t[i * w + j + 1] {
+                i += 1;
+            } else {
+                j += 1;
+            }
+        }
+    }
+    let spans = |s: &[char], common: &[bool]| {
+        let mut out: Vec<usize> = Vec::new();
+        let mut at: usize = s[..pre].iter().map(|c| c.len_utf16()).sum();
+        for (c, &same) in s[pre..].iter().zip(common) {
+            let n = c.len_utf16();
+            if !same {
+                match out.len() {
+                    l if l >= 2 && out[l - 2] + out[l - 1] == at => out[l - 1] += n,
+                    _ => out.extend([at, n]),
+                }
+            }
+            at += n;
+        }
+        out
+    };
+    (spans(&a, &in_x), spans(&b, &in_y))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2062,13 +2142,38 @@ mod tests {
     }
 
     #[test]
-    fn compare_marks_time_matches_with_other_text() {
+    fn compare_pairs_lines_in_order() {
         let a = session(ASS);
         let mut b = session(ASS);
-        b.set_texts(&[1], &["changed".to_string()], "edit");
+        let old = a.row(1).text;
+        b.set_texts(&[1], &[format!("{old}!")], "edit");
         b.set_rows_field(&[2], "start", "5100");
-        assert_eq!(a.compare_rows(&b), [1]);
-        assert_eq!(b.compare_rows(&a), [1]);
+        let all = [0, 1, 2];
+        let pairs = |by_times| {
+            a.compare(&b, &all, &all, by_times, false)
+                .iter()
+                .map(|p| (p.row, p.other, p.spans.clone(), p.other_spans.clone()))
+                .collect::<Vec<_>>()
+        };
+        let one = (1, 1, vec![], vec![old.encode_utf16().count(), 1]);
+        assert_eq!(pairs(true), [one.clone()]);
+        // without times the third lines pair up too; their texts are the same
+        assert_eq!(pairs(false), [one]);
+        // only the given rows: line 0 against line 1
+        let p = a.compare(&b, &[0], &[1], false, false);
+        assert_eq!((p.len(), p[0].row, p[0].other), (1, 0, 1));
+    }
+
+    #[test]
+    fn diff_spans_outside_the_common_part() {
+        assert_eq!(diff_spans("abc", "abc"), (vec![], vec![]));
+        assert_eq!(
+            diff_spans("kot ma", "kat mam"),
+            (vec![1, 1], vec![1, 1, 6, 1])
+        );
+        // UTF-16 units: the emoji counts 2
+        assert_eq!(diff_spans("😀a", "😀b"), (vec![2, 1], vec![2, 1]));
+        assert_eq!(diff_spans("", "xy"), (vec![], vec![0, 2]));
     }
 
     #[test]

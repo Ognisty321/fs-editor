@@ -217,10 +217,21 @@ MainWindow::MainWindow() {
             m.addAction(tr("Show two tabs"), this, [this, other] { setSplit(other); })->setEnabled(other != t);
         auto *cmp = m.addMenu(tr("Subtitle comparison"));
         cmp->setEnabled(m_tabs->count() > 1);
-        cmp->addAction(tr("Compare by times"), this, [this, other] {
-            if (!m_second) setSplit(other);
-            compareTabs(true);
-        });
+        // the modes combine; while off, a mode starts a comparison by just that one
+        const int by = QSettings().value("compare/by", 1).toInt();
+        const char *modes[] = {QT_TR_NOOP("Compare by times"), QT_TR_NOOP("Compare by visible lines"),
+                               QT_TR_NOOP("Compare by selections"), QT_TR_NOOP("Compare by styles")};
+        for (int k = 0; k < 4; ++k) {
+            auto *a = cmp->addAction(tr(modes[k]), this, [this, other, by, bit = 1 << k] {
+                const int now = m_compareOn ? by ^ bit : bit;
+                if (now) QSettings().setValue("compare/by", now);
+                if (now && !m_second) setSplit(other);
+                compareTabs(now != 0);
+            });
+            a->setCheckable(true);
+            a->setChecked(m_compareOn && by & 1 << k);
+        }
+        cmp->addSeparator();
         cmp->addAction(tr("Turn off comparison"), this, [this] { compareTabs(false); })->setEnabled(m_compareOn);
         m.exec(m_tabs->tabBar()->mapToGlobal(pos));
     });
@@ -301,19 +312,30 @@ void MainWindow::setSplit(TabPanel *second) {
     compareTabs(m_compareOn);
 }
 
-// Kainote "compare by times": lines with the same start and end in both tabs but different text are marked;
-// lines without a time match are not compared.
+// Kainote's subtitle comparison: lines of the two tabs pair up in order, by the modes in "compare/by"
+// (1 same times, 2 visible lines only, 4 selected lines only, 8 same style); paired lines with different
+// texts are marked, with the differing characters.
 void MainWindow::compareTabs(bool on) {
-    m_compareOn = on && m_second;
+    const int by = QSettings().value("compare/by", 1).toInt();
+    m_compareOn = on && m_second && by;
     if (auto *a = action("compareTabs")) a->setChecked(m_compareOn);
     for (auto *t : tabs()) t->grid()->setCompare({});
     if (!m_compareOn) return;
-    auto diff = [](TabPanel *x, TabPanel *y) {
-        const auto rows = x->s().compare_rows(y->s());
-        return std::set<size_t>(rows.begin(), rows.end());
+    auto rows = [by](TabPanel *t) {
+        std::vector<size_t> r = by & 2 ? t->grid()->visibleRows() : std::vector<size_t>(t->s().row_count());
+        if (!(by & 2)) std::iota(r.begin(), r.end(), size_t(0));
+        if (by & 4) std::erase_if(r, [t](size_t i) { return !t->isSelected(i); });
+        return r;
     };
-    current()->grid()->setCompare(diff(current(), m_second));
-    m_second->grid()->setCompare(diff(m_second, current()));
+    const auto a = rows(current()), b = rows(m_second);
+    std::map<size_t, std::vector<size_t>> x, y;
+    for (const auto &p : current()->s().compare(m_second->s(), {a.data(), a.size()}, {b.data(), b.size()}, by & 1,
+                                                by & 8)) {
+        x[p.row] = fs::vec(p.spans);
+        y[p.other] = fs::vec(p.other_spans);
+    }
+    current()->grid()->setCompare(std::move(x));
+    m_second->grid()->setCompare(std::move(y));
 }
 
 void MainWindow::showPanel(TabPanel *t) {
@@ -1001,7 +1023,7 @@ void MainWindow::buildMenus() {
         setSplit(m_second ? nullptr : panel((m_tabs->currentIndex() + 1) % m_tabs->count()));
     });
     split->setCheckable(true);
-    auto *compare = add("compareTabs", tr("Compare subtitles by times"), {}, view, [this] {
+    auto *compare = add("compareTabs", tr("Compare subtitles"), {}, view, [this] {
         if (!m_second) setSplit(panel((m_tabs->currentIndex() + 1) % m_tabs->count()));
         compareTabs(!m_compareOn);
     });

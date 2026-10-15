@@ -231,6 +231,16 @@ pub mod ffi {
         fry: f64,
     }
 
+    /// Compared lines whose texts differ, with the differing parts of each text as
+    /// (start, length) pairs in UTF-16 units.
+    #[derive(Debug, Clone, Default)]
+    struct ComparePair {
+        row: usize,
+        other: usize,
+        spans: Vec<usize>,
+        other_spans: Vec<usize>,
+    }
+
     /// A row's times without its text: cheap to fetch for every row.
     #[derive(Debug, Clone, Default)]
     struct RowSpan {
@@ -442,8 +452,15 @@ pub mod ffi {
         fn row_count(self: &Session) -> usize;
         fn row_spans(self: &Session) -> Vec<RowSpan>;
         fn column_info(self: &mut Session) -> ColumnInfo;
-        /// Kainote "compare by times": rows timed like a line of `other` whose text differs.
-        fn compare_rows(self: &Session, other: &Session) -> Vec<usize>;
+        /// Kainote's subtitle comparison of `rows` with `other_rows` of `other`.
+        fn compare(
+            self: &Session,
+            other: &Session,
+            rows: &[usize],
+            other_rows: &[usize],
+            by_times: bool,
+            by_styles: bool,
+        ) -> Vec<ComparePair>;
         fn row(self: &Session, i: usize) -> Row;
         fn set_row(self: &mut Session, i: usize, row: &Row, amend: &str);
         fn set_rows_field(self: &mut Session, rows: &[usize], field: &str, value: &str);

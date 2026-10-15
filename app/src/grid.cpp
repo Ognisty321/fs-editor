@@ -20,13 +20,40 @@
 namespace {
 struct GridTheme {
     QColor background{0x1f, 0x22, 0x27}, dialogue{0x27, 0x2b, 0x31}, comment{0x3b, 0x33, 0x2e};
-    QColor selection{80, 140, 220, 90}, onVideo{70, 140, 70, 60}, collision{0xe0, 0x6c, 0x6c}, compare{0x9a, 0x5a, 0xd0, 80};
+    QColor selection{80, 140, 220, 90}, onVideo{70, 140, 70, 60}, collision{0xe0, 0x6c, 0x6c}, compare{0x9a, 0x5a, 0xd0, 80},
+        compareText{0xb0, 0x70, 0xf0, 150};
     QColor text{0xdc, 0xdc, 0xdc}, lines{0x3a, 0x3f, 0x46}, header{0x17, 0x19, 0x1d}, headerText{0xb0, 0xb6, 0xbe};
     QColor labelNormal{0x2d, 0x3e, 0x57}, labelModified{0x55, 0x70, 0x2c}, labelSaved{0x4a, 0x4e, 0x56},
         labelDoubtful{0xb8, 0x64, 0x1a}, active{0xf0, 0xb0, 0x30}, error{0x8a, 0x25, 0x25};
 };
 const GridTheme T;
 constexpr int Pad = 4;
+
+// Calls draw(x, width) for each (start, length) span of the raw text as the cell shows it: with
+// tags hidden (mode 2) or simplified to one character (mode 1)
+template <class F>
+void eachSpan(const std::vector<size_t> &spans, const QString &raw, const QString &shown, int mode,
+              const QRect &rect, const QFontMetrics &fm, F draw) {
+    const auto shownAt = [&](size_t at) {
+        int out = 0;
+        bool block = false;
+        for (size_t k = 0; k < at && k < size_t(raw.size()); ++k) {
+            if (block) block = raw[k] != '}';
+            else if (mode && raw[k] == '{') {
+                block = true;
+                out += mode == 1;
+            } else {
+                ++out;
+            }
+        }
+        return out;
+    };
+    for (size_t k = 0; k + 1 < spans.size(); k += 2) {
+        const int s = shownAt(spans[k]), e = shownAt(spans[k] + spans[k + 1]);
+        if (s >= shown.size()) break;
+        draw(rect.left() + fm.horizontalAdvance(shown.left(s)), fm.horizontalAdvance(shown.mid(s, e - s)));
+    }
+}
 } // namespace
 
 Grid::Grid(TabPanel *tab) : QAbstractScrollArea(tab), m_tab(tab) {
@@ -101,7 +128,7 @@ void Grid::applyFilter() {
     viewport()->update();
 }
 
-void Grid::setCompare(std::set<size_t> rows) {
+void Grid::setCompare(std::map<size_t, std::vector<size_t>> rows) {
     m_compare = std::move(rows);
     viewport()->update();
 }
@@ -248,31 +275,12 @@ void Grid::underlineMisspelled(QPainter &p, const fsb::Row &r, const QString &sh
         it = m_misspelled.insert(raw, fs::vec(sp->misspelled(r.text)));
     }
     if (it->empty()) return;
-    const auto shownAt = [&raw, mode = m_tagMode](size_t at) {
-        int out = 0;
-        bool block = false;
-        for (size_t k = 0; k < at && k < size_t(raw.size()); ++k) {
-            if (block) block = raw[k] != '}';
-            else if (mode && raw[k] == '{') {
-                block = true;
-                out += mode == 1;
-            } else {
-                ++out;
-            }
-        }
-        return out;
-    };
     const QFontMetrics fm = p.fontMetrics();
     p.save();
     p.setPen(QPen(QColor(0xe0, 0x40, 0x40), 1));
     p.setClipRect(rect);
     const int y = rect.center().y() + (fm.ascent() - fm.descent()) / 2 + 2; // under the baseline
-    for (size_t k = 0; k + 1 < it->size(); k += 2) {
-        const int s = shownAt((*it)[k]), e = shownAt((*it)[k] + (*it)[k + 1]);
-        if (s >= shown.size()) break;
-        const int x = rect.left() + fm.horizontalAdvance(shown.left(s));
-        p.drawLine(x, y, x + fm.horizontalAdvance(shown.mid(s, e - s)), y);
-    }
+    eachSpan(*it, raw, shown, m_tagMode, rect, fm, [&](int x, int w) { p.drawLine(x, y, x + w, y); });
     p.restore();
 }
 
@@ -303,7 +311,8 @@ void Grid::paintEvent(QPaintEvent *) {
         const fsb::Row r = m_tab->s().row(i);
         p.fillRect(0, y, w, rh, r.comment ? T.comment : T.dialogue);
         if (m_onVideo.contains(i)) p.fillRect(0, y, w, rh, T.onVideo);
-        if (m_compare.contains(i)) p.fillRect(0, y, w, rh, T.compare);
+        const auto cmp = m_compare.find(i);
+        if (cmp != m_compare.end()) p.fillRect(0, y, w, rh, T.compare);
         // a gap in the visible rows marks a filtered block, "+" to expand; "-" folds it again
         const char *fold = !filterOn ? nullptr : gapBefore(vi) ? "+" : expandedStart(i) ? "-" : nullptr;
         x = 0;
@@ -330,6 +339,14 @@ void Grid::paintEvent(QPaintEvent *) {
             const bool collide = (c == Text || c == Original) && m_collisions.contains(i);
             p.setPen(collide ? T.collision : T.text);
             const QString shown = cell(r, c, i);
+            if (c == Text && cmp != m_compare.end()) {
+                const QRect tx = cr.adjusted(Pad, 0, -Pad, 0);
+                p.save();
+                p.setClipRect(tx);
+                eachSpan(cmp->second, fs::q(r.text), shown, m_tagMode, tx, p.fontMetrics(),
+                         [&](int x, int w) { p.fillRect(x, cr.top() + 2, std::max(w, 2), rh - 4, T.compareText); });
+                p.restore();
+            }
             p.drawText(cr.adjusted(Pad, 0, -Pad, 0), Qt::AlignVCenter | Qt::AlignLeft,
                        p.fontMetrics().elidedText(shown, Qt::ElideRight, cr.width() - 2 * Pad));
             if (c == Text) underlineMisspelled(p, r, shown, cr.adjusted(Pad, 0, -Pad, 0));

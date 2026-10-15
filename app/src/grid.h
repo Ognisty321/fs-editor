@@ -6,6 +6,7 @@
 
 #include <QAbstractScrollArea>
 #include <QHash>
+#include <map>
 #include <set>
 
 class TabPanel;
@@ -22,7 +23,8 @@ public:
     void ensureVisible(int row);
     void setVideoTime(qint64 ms);
     // rows that differ from the compared tab (Kainote subtitle comparison)
-    void setCompare(std::set<size_t> rows);
+    // rows that differ from the compared tab, with the differing parts of their text (Kainote)
+    void setCompare(std::map<size_t, std::vector<size_t>> rows);
     void setTagMode(int mode); // Aegisub's: 0 show tags, 1 simplify them to ☀, 2 hide them
     static QString colName(int c);
     void setColumnHidden(int c, bool hidden);
@@ -82,7 +84,8 @@ private:
     std::vector<int> m_cols;     // visible columns in order
     std::vector<int> m_widths;
     std::set<int> m_userHidden;
-    std::set<size_t> m_collisions, m_onVideo, m_compare;
+    std::set<size_t> m_collisions, m_onVideo;
+    std::map<size_t, std::vector<size_t>> m_compare;
     quint64 m_gen = ~0ull;
     qint64 m_videoMs = -1;
     int m_tagMode = 0;

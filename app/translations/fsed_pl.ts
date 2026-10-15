@@ -948,6 +948,18 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Porównaj według czasów</translation>
     </message>
     <message>
+        <source>Compare by visible lines</source>
+        <translation>Porównaj według widocznych linijek</translation>
+    </message>
+    <message>
+        <source>Compare by selections</source>
+        <translation>Porównaj według zaznaczeń</translation>
+    </message>
+    <message>
+        <source>Compare by styles</source>
+        <translation>Porównaj według stylów</translation>
+    </message>
+    <message>
         <source>Turn off comparison</source>
         <translation>Wyłącz porównanie</translation>
     </message>
@@ -1528,10 +1540,6 @@ Dekoder: BestSource</translation>
         <translation>Tylko napisy</translation>
     </message>
     <message>
-        <source>Compare subtitles by times</source>
-        <translation>Porównaj napisy według czasów</translation>
-    </message>
-    <message>
         <source>&amp;Subtitles</source>
         <translation>&amp;Napisy</translation>
     </message>
@@ -2010,6 +2018,10 @@ Tłumaczenie: wklejony tekst, który przejmuje timing oryginału.</translation>
     <message>
         <source>Description</source>
         <translation>Opis</translation>
+    </message>
+    <message>
+        <source>Compare subtitles</source>
+        <translation>Porównaj napisy</translation>
     </message>
     <message>
         <source>Add</source>
