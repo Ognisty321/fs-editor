@@ -84,8 +84,7 @@ fn field_of(code: u8) -> Field {
 }
 
 fn wraps(text: &str) -> String {
-    let plain = tags::strip_tags(text);
-    plain
+    tags::visible_text(text)
         .split("\\N")
         .flat_map(|l| l.split("\\n"))
         .map(|l| l.replace("\\h", " ").chars().count().to_string())

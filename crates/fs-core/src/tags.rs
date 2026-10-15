@@ -462,6 +462,35 @@ pub fn strip_tags(text: &str) -> String {
     s
 }
 
+/// The text shown as characters: without override blocks and without the
+/// drawing commands between `\pN` (N > 0) and `\p0`.
+pub fn visible_text(text: &str) -> String {
+    let mut s = String::with_capacity(text.len());
+    let (mut rest, mut drawing) = (text, false);
+    while let Some(open) = rest.find('{') {
+        if !drawing {
+            s.push_str(&rest[..open]);
+        }
+        // an unclosed block hides the rest, as in strip_tags
+        let Some(len) = rest[open..].find('}') else {
+            return s;
+        };
+        let mut block = &rest[open + 1..open + len];
+        while let Some(i) = block.find("\\p") {
+            block = &block[i + 2..];
+            let digits = block.bytes().take_while(u8::is_ascii_digit).count();
+            if digits > 0 {
+                drawing = block[..digits].bytes().any(|b| b != b'0');
+            }
+        }
+        rest = &rest[open + len + 1..];
+    }
+    if !drawing {
+        s.push_str(rest);
+    }
+    s
+}
+
 /// Plain readable text: tags stripped, `\N`/`\n` → ' ', `\h` → ' '.
 pub fn display_text(text: &str) -> String {
     strip_tags(text)
@@ -473,7 +502,7 @@ pub fn display_text(text: &str) -> String {
 /// Character count used for CPS, following Aegisub's default: tags,
 /// whitespace and punctuation are ignored; `\N` counts as nothing.
 pub fn char_count(text: &str, ignore_whitespace: bool, ignore_punctuation: bool) -> usize {
-    let t = strip_tags(text)
+    let t = visible_text(text)
         .replace("\\N", "")
         .replace("\\n", "")
         .replace("\\h", " ");
@@ -846,5 +875,13 @@ mod tests {
         assert_eq!(strip_tags(r"{\b1}Hel{x}lo"), "Hello");
         assert_eq!(char_count(r"{\b1}Hel lo,\Nworld!", true, true), 10);
         assert!((cps("abcdefghij", 1000) - 10.0).abs() < 1e-9);
+        // drawing commands are not characters; \pos and \pbo are not \p
+        assert_eq!(
+            visible_text(r"{\an7\p1}m 0 0 l 10 0{\p0}ab{\pos(1,2)}c"),
+            "abc"
+        );
+        assert_eq!(visible_text(r"a{\p2\pbo5}m 0 0{\p0\b1}b{\p1}m 1 1"), "ab");
+        assert_eq!(visible_text(r"x{\p10}m 0 0 l{\p00}y{unclosed"), "xy");
+        assert_eq!(char_count(r"{\p1}m 0 0 l 100 0 100 100", true, true), 0);
     }
 }

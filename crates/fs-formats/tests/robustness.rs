@@ -128,6 +128,7 @@ fn exercise_text(text: &str) {
     let _ = line.plain_text();
     let _ = tags::strip_tags(text);
     let _ = tags::display_text(text);
+    let _ = tags::visible_text(text);
     let _ = tags::cps(text, 1000);
     let _ = tags::char_count(text, true, true);
     let syl = tags::karaoke_syllables(text);

@@ -12,7 +12,7 @@
 #include <QInputDialog>
 #include <QMenu>
 #include <QPainter>
-#include <QRegularExpression>
+#include <string_view>
 #include <QScrollBar>
 #include <QSettings>
 #include <numeric>
@@ -187,12 +187,21 @@ int Grid::colAt(int x) const {
 }
 
 QString Grid::cell(const fsb::Row &r, int col, size_t index) const {
+    // Aegisub's text column: hidden tag blocks become ☀, and at most 512 characters are kept, so a long
+    // drawing is not converted and shaped in full on every paint
     auto text = [&](const rust::String &t) {
-        QString s = fs::q(t);
-        if (m_hideTags) {
-            static const QRegularExpression re("\\{[^}]*\\}");
-            s.replace(re, QStringLiteral("☀"));
+        constexpr qsizetype Cap = 512;
+        const std::string_view v(t.data(), t.size());
+        QString s;
+        for (size_t at = 0; at < v.size() && s.size() <= Cap;) {
+            const size_t end = std::min(m_hideTags ? v.find('{', at) : v.npos, v.size());
+            s += QString::fromUtf8(v.data() + at, qsizetype(std::min<size_t>(end - at, 4 * Cap)));
+            if (end == v.size()) break;
+            s += QChar(0x2600);
+            const size_t close = v.find('}', end);
+            at = close == v.npos ? v.size() : close + 1;
         }
+        if (s.size() > Cap) s = s.left(Cap) + QChar(0x2026);
         return s;
     };
     switch (col) {
