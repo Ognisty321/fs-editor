@@ -650,9 +650,16 @@ void MainWindow::buildMenus() {
     auto *session = sub(file, tr("Last session"));
     add("loadSession", tr("Load last session"), {}, session, [this] {
         const QStringList files = QSettings().value("session/files").toStringList();
-        for (const auto &f : files)
-            if (QFileInfo::exists(f)) openFile(f);
-        m_tabs->setCurrentIndex(std::clamp(QSettings().value("session/current").toInt(), 0, m_tabs->count() - 1));
+        const int front = QSettings().value("session/current").toInt();
+        TabPanel *pick = nullptr;
+        for (int k = 0; k < files.size(); ++k) {
+            if (!QFileInfo::exists(files[k])) continue;
+            // each file its own tab: a video alone would otherwise take the next script in
+            if (!untouched(current()) || current()->video()->hasVideo()) newTab();
+            openFile(files[k]);
+            if (k == front || !pick) pick = current();
+        }
+        if (pick) showPanel(pick);
     });
     auto *ask = add("sessionAtStart", tr("Load last session after program start"), {}, session, {});
     ask->setCheckable(true);
@@ -1538,13 +1545,17 @@ void MainWindow::updateActions() {
 
 void MainWindow::closeEvent(QCloseEvent *e) {
     QStringList files;
+    int front = 0;
     for (auto *t : tabs()) {
         if (!maybeSave(t)) return e->ignore();
-        if (!t->path().isEmpty()) files << t->path();
+        // a tab with no script file comes back with its video, as in Kainote's session
+        const QString f = t->path().isEmpty() ? t->video()->path() : t->path();
+        if (t == current()) front = int(files.size()); // counted among the files kept
+        if (!f.isEmpty()) files << f;
     }
     QSettings st;
     st.setValue("session/files", files);
-    st.setValue("session/current", m_tabs->currentIndex());
+    st.setValue("session/current", front);
     st.setValue("main/geometry", saveGeometry());
     e->accept();
 }
