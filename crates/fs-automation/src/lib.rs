@@ -1305,14 +1305,18 @@ impl Script {
 
         // Map absolute indices of the final vector to event rows.
         let lines = &st.lines;
-        let row_of = |idx: i64| -> Option<usize> {
-            let l = lines.get((idx - 1) as usize)?;
-            l.is_event().then(|| {
-                lines[..(idx - 1) as usize]
-                    .iter()
-                    .filter(|l| l.is_event())
-                    .count()
+        // the events before each line, counted once (a whole selection maps in one pass)
+        let events_before: Vec<usize> = lines
+            .iter()
+            .scan(0, |n, l| {
+                let before = *n;
+                *n += usize::from(l.is_event());
+                Some(before)
             })
+            .collect();
+        let row_of = |idx: i64| -> Option<usize> {
+            let i = usize::try_from(idx - 1).ok()?;
+            lines.get(i)?.is_event().then(|| events_before[i])
         };
         let final_doc = commits.last().map(|c| &c.1).unwrap_or(doc);
         let cur_active = orig_active_id.and_then(|id| final_doc.index_of_id(id));

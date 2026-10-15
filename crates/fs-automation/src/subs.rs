@@ -935,9 +935,16 @@ impl Handle {
         }
         ids.sort_unstable();
         ids.dedup();
-        for &i in ids.iter().rev() {
-            let l = st.lines.remove(i as usize - 1);
-            st.touch(&l);
+        // one pass: removing line by line moved the rest of the file for every id
+        let mut gone = ids.into_iter().map(|i| i as usize - 1).peekable();
+        let old = std::mem::take(&mut st.lines);
+        st.lines.reserve(old.len());
+        for (k, l) in old.into_iter().enumerate() {
+            if gone.next_if_eq(&k).is_some() {
+                st.touch(&l);
+            } else {
+                st.lines.push(l);
+            }
         }
         Ok(())
     }

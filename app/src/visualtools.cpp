@@ -447,14 +447,16 @@ void VisualTools::apply(const QString &tags, bool allSelected) {
 void VisualTools::toggleMove() {
     auto *tab = m_box->tab();
     auto &s = tab->s();
-    const QString amend = QString("visual-toggle-move-%1").arg(++m_dragId); // one undo step
-    for (size_t r : tab->selection()) {
+    const auto rows = tab->selection();
+    QStringList tags;
+    for (size_t r : rows) {
         const fsb::Visual v = s.visual(r);
         const fsb::Row row = s.row(r);
-        const QString t = v.has_move ? QString("\\pos(%1,%2)").arg(n2(v.x), n2(v.y))
-                                     : QString("\\move(%1,%2,%1,%2,0,%3)").arg(n2(v.x), n2(v.y)).arg(row.end - row.start);
-        s.set_tags(fs::slice(std::vector<size_t>{r}), fs::Utf8(t), fs::Utf8(amend));
+        tags << (v.has_move ? QString("\\pos(%1,%2)").arg(n2(v.x), n2(v.y))
+                            : QString("\\move(%1,%2,%1,%2,0,%3)").arg(n2(v.x), n2(v.y)).arg(row.end - row.start));
     }
+    const auto t = fs::rvec(tags);
+    s.set_each_tags(fs::slice(rows), {t.data(), t.size()}, fs::Utf8(QString("visual-toggle-move-%1").arg(++m_dragId)));
     tab->changed(TabPanel::FromVideo);
     reload();
 }
@@ -875,11 +877,13 @@ bool VisualTools::move(QMouseEvent *e) {
                 }
                 m_drag = 3;
             }
+            QStringList tags;
             for (size_t r : sel) {
                 const QPointF p = starts[r] + delta;
-                const size_t row = r;
-                tab->s().set_tags({&row, 1}, fs::Utf8(QString("\\pos(%1,%2)").arg(n2(p.x()), n2(p.y()))), fs::Utf8(m_amend));
+                tags << QString("\\pos(%1,%2)").arg(n2(p.x()), n2(p.y()));
             }
+            const auto t = fs::rvec(tags);
+            tab->s().set_each_tags(fs::slice(sel), {t.data(), t.size()}, fs::Utf8(m_amend));
             tab->changed(TabPanel::FromVideo);
         } else {
             applyPos(QPointF(m_start.x, m_start.y) + delta);

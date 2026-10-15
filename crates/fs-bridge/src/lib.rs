@@ -490,10 +490,12 @@ pub mod ffi {
         /// `at_ms`: -1 estimates the split time from the text lengths, -2 keeps both parts' times.
         fn split_row(self: &mut Session, row: usize, byte_pos: usize, at_ms: i64) -> i64;
         fn swap_rows(self: &mut Session, a: usize, b: usize);
-        /// Replace a row by one copy per part (split into words, wraps, frames…).
-        fn explode_row(
+        /// Replace each row by one copy per part (split into words, wraps, frames…): `rows[i]`
+        /// takes the next `counts[i]` parts. One undo step; returns the new rows.
+        fn explode_rows(
             self: &mut Session,
-            row: usize,
+            rows: &[usize],
+            counts: &[usize],
             texts: &[String],
             starts: &[i64],
             ends: &[i64],
@@ -560,6 +562,8 @@ pub mod ffi {
 
         fn visual(self: &Session, row: usize) -> Visual;
         fn set_tags(self: &mut Session, rows: &[usize], tags: &str, amend: &str);
+        /// `tags[i]` into `rows[i]`, one edit.
+        fn set_each_tags(self: &mut Session, rows: &[usize], tags: &[String], amend: &str);
         fn adjust_tag(
             self: &mut Session,
             rows: &[usize],

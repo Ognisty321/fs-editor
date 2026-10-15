@@ -995,30 +995,51 @@ impl Session {
         self.edit("Swap lines", |d| ops::swap_rows(d, ra.main(), rb.main()));
     }
 
-    pub fn explode_row(
+    pub fn explode_rows(
         &mut self,
-        row: usize,
+        rows: &[usize],
+        counts: &[usize],
         texts: &[String],
         starts: &[i64],
         ends: &[i64],
     ) -> Vec<usize> {
-        let n = texts.len().min(starts.len()).min(ends.len());
-        let Some(r) = self.tl_row(row).filter(|_| n > 0 && !self.tl) else {
+        if self.tl {
             return Vec::new();
-        };
-        let e = r.main();
-        let base = self.ed.doc.event(e).unwrap().clone();
-        self.edit("Split line", |d| {
-            d.remove_event(e);
-            for k in 0..n {
-                let mut ev = base.clone();
-                ev.text = texts[k].clone();
-                ev.start = Time(starts[k]);
-                ev.end = Time(ends[k]);
-                d.insert_event(e + k, ev);
+        }
+        let n = texts.len().min(starts.len()).min(ends.len());
+        // (event, its parts), by event
+        let mut jobs = Vec::new();
+        let mut at = 0;
+        for (&row, &count) in rows.iter().zip(counts) {
+            let parts = at.min(n)..(at + count).min(n);
+            at += count;
+            if let Some(r) = self.tl_row(row).filter(|_| !parts.is_empty()) {
+                jobs.push((r.main(), parts));
             }
+        }
+        jobs.sort_by_key(|j| j.0);
+        jobs.dedup_by_key(|j| j.0);
+        let gone: Vec<usize> = jobs.iter().map(|j| j.0).collect();
+        // the parts go where their line was, once the lines before it are gone too
+        let mut parts = Vec::new();
+        for (k, (e, range)) in jobs.into_iter().enumerate() {
+            let base = self.ed.doc.event(e).unwrap();
+            for p in range {
+                let mut ev = base.clone();
+                ev.text = texts[p].clone();
+                ev.start = Time(starts[p]);
+                ev.end = Time(ends[p]);
+                parts.push((e - k, ev));
+            }
+        }
+        if parts.is_empty() {
+            return Vec::new();
+        }
+        let made = self.edit("Split lines", |d| {
+            d.remove_events(&gone);
+            d.insert_events(parts)
         });
-        self.rows_of_events(&(e..e + n).collect::<Vec<_>>())
+        self.rows_of_events(&made)
     }
 
     /// Entries grouped per row, so TL pairs move together.
@@ -1286,9 +1307,14 @@ impl Session {
     pub fn find(&self, spec: &FindSpec, from: usize) -> Result<i64, String> {
         let m = Self::matcher(spec)?;
         let n = self.rows.len();
+        // the rows to search, marked once ("from selected" passes most of the file)
+        let mut only = vec![spec.rows.is_empty(); n];
+        for &r in spec.rows.iter().filter(|&&r| r < n) {
+            only[r] = true;
+        }
         for k in 1..=n {
             let r = (from + k) % n;
-            if (spec.rows.is_empty() || spec.rows.contains(&r)) && self.row_hit(&m, spec, r) {
+            if only[r] && self.row_hit(&m, spec, r) {
                 return Ok(r as i64);
             }
         }
@@ -1420,34 +1446,19 @@ impl Session {
 
     /// Paste `Dialogue:` lines (or plain text, one line per row) before row `at`.
     pub fn paste_rows(&mut self, at: usize, text: &str) -> Vec<usize> {
-        let fmt = EventField::default_format(AssVersion::Ass)
-            .iter()
-            .map(|f| f.name().to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        let parsed = Document::parse(&format!("[Events]\nFormat: {fmt}\n{text}\n"));
-        let mut evs: Vec<Event> = (0..parsed.event_count())
-            .map(|i| parsed.event(i).unwrap().clone())
+        let style = self.style_or_default(at.saturating_sub(1));
+        let evs: Vec<Event> = pasted_lines(text)
+            .into_iter()
+            .map(|p| p.unwrap_or_else(|l| Event::dialogue(Time(0), Time(5000), &style, l)))
             .collect();
-        if evs.is_empty() {
-            let style = self.style_or_default(at.saturating_sub(1));
-            evs = text
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .map(|l| Event::dialogue(Time(0), Time(5000), &style, l))
-                .collect();
-        }
         let ev_at = self
             .tl_row(at)
             .map(|r| r.original)
             .unwrap_or(self.ed.doc.event_count());
-        let n = evs.len();
-        self.edit("Paste lines", |d| {
-            for (k, ev) in evs.into_iter().enumerate() {
-                d.insert_event(ev_at + k, ev);
-            }
+        let made = self.edit("Paste lines", |d| {
+            d.insert_events(evs.into_iter().map(|ev| (ev_at, ev)).collect())
         });
-        self.rows_of_events(&(ev_at..ev_at + n).collect::<Vec<_>>())
+        self.rows_of_events(&made)
     }
 
     /// Aegisub's "Paste lines over": clipboard line k goes onto `rows[k]`,
@@ -1455,21 +1466,10 @@ impl Session {
     /// 4 start, 8 end, 16 style, 32 actor, 64/128/256 margins L/R/V,
     /// 512 effect, 1024 text). Returns the rows changed.
     pub fn paste_over(&mut self, rows: &[usize], text: &str, fields: u16) -> Vec<usize> {
-        let fmt = EventField::default_format(AssVersion::Ass)
-            .iter()
-            .map(|f| f.name().to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        // a line that is not a Dialogue/Comment line is plain text (Aegisub: End 0)
-        let pasted: Vec<Event> = text
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .map(|l| {
-                let d = Document::parse(&format!("[Events]\nFormat: {fmt}\n{}\n", l.trim()));
-                d.event(0)
-                    .cloned()
-                    .unwrap_or_else(|| Event::dialogue(Time(0), Time(0), "", l.trim()))
-            })
+        // plain text has End 0 here (Aegisub)
+        let pasted: Vec<Event> = pasted_lines(text)
+            .into_iter()
+            .map(|p| p.unwrap_or_else(|l| Event::dialogue(Time(0), Time(0), "", l)))
             .collect();
         let n = pasted.len().min(rows.len());
         let evs = self.main_events(&rows[..n]);
@@ -1767,14 +1767,22 @@ impl Session {
         let new = tags::parse_tags(tags_text);
         self.edit_amend(amend, "Visual typesetting", move |d| {
             for e in evs {
-                let mut line = Line::parse(&d.event(e).unwrap().text);
-                for t in &new {
-                    line.set_line_tag(t.clone());
-                }
-                let text = line.to_text();
-                if d.event(e).unwrap().text != text {
-                    d.event_mut(e).unwrap().text = text;
-                }
+                put_line_tags(d, e, &new);
+            }
+        });
+    }
+
+    /// [`set_tags`](Self::set_tags) with each row's own tags (`tags_texts[i]` for `rows[i]`), in
+    /// one edit: a drag of many lines is one change per mouse move, not one per line.
+    pub fn set_each_tags(&mut self, rows: &[usize], tags_texts: &[String], amend: &str) {
+        let jobs: Vec<(usize, Vec<Tag>)> = rows
+            .iter()
+            .zip(tags_texts)
+            .filter_map(|(&r, t)| Some((self.tl_row(r)?.main(), tags::parse_tags(t))))
+            .collect();
+        self.edit_amend(amend, "Visual typesetting", move |d| {
+            for (e, new) in &jobs {
+                put_line_tags(d, *e, new);
             }
         });
     }
@@ -2002,15 +2010,57 @@ fn new_end_times(d: &mut Document, evs: &[usize]) {
     }
 }
 
+/// The clipboard's lines as Aegisub pastes them: a `Dialogue:`/`Comment:` line is an event,
+/// any other line plain text for the caller to wrap.
+fn pasted_lines(text: &str) -> Vec<Result<Event, &str>> {
+    let fmt = EventField::default_format(AssVersion::Ass)
+        .iter()
+        .map(|f| f.name().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            let d = Document::parse(&format!("[Events]\nFormat: {fmt}\n{l}\n"));
+            d.event(0).cloned().ok_or(l)
+        })
+        .collect()
+}
+
+/// Set line tags (\pos, \clip…) in the event's first block, leaving an unchanged text alone.
+fn put_line_tags(d: &mut Document, e: usize, new: &[Tag]) {
+    let mut line = Line::parse(&d.event(e).unwrap().text);
+    for t in new {
+        line.set_line_tag(t.clone());
+    }
+    let text = line.to_text();
+    if d.event(e).unwrap().text != text {
+        d.event_mut(e).unwrap().text = text;
+    }
+}
+
 /// End each line no later than the next line of the same style starts.
 fn fix_overlaps(d: &mut Document, evs: &[usize]) {
+    // the starts by style, sorted once (only ends change here): a lookup per line instead of a scan
+    let mut starts: HashMap<String, Vec<Time>> = HashMap::new();
+    for o in d
+        .events()
+        .iter()
+        .map(|x| &x.event)
+        .filter(|o| !o.is_comment())
+    {
+        match starts.get_mut(o.style.as_str()) {
+            Some(v) => v.push(o.start),
+            None => drop(starts.insert(o.style.clone(), vec![o.start])),
+        }
+    }
+    starts.values_mut().for_each(|v| v.sort_unstable());
     for &e in evs {
-        let me = d.event(e).unwrap().clone();
-        let next = (0..d.event_count())
-            .filter_map(|j| d.event(j))
-            .filter(|o| o.style == me.style && !o.is_comment() && o.start > me.start)
-            .map(|o| o.start)
-            .min();
+        let me = d.event(e).unwrap();
+        let next = starts
+            .get(me.style.as_str())
+            .and_then(|v| v.get(v.partition_point(|&s| s <= me.start)).copied());
         if let Some(n) = next
             && me.end > n
         {
@@ -2313,6 +2363,51 @@ mod tests {
             s.row(0).text,
             r"{\pos(10,0)\fscx200\frz90\p1}m 0 10 l 10 10 10 20"
         );
+    }
+
+    #[test]
+    fn each_row_gets_its_own_tags_in_one_step() {
+        let mut s = session(ASS);
+        let t = [r"\pos(1,2)".to_string(), r"\pos(3,4)".to_string()];
+        s.set_each_tags(&[2, 0], &t, "drag-1");
+        s.set_each_tags(&[2, 0], &t, "drag-1");
+        assert_eq!(s.row(2).text, r"{\pos(1,2)}three");
+        assert_eq!(s.row(0).text, r"{\pos(3,4)}one");
+        assert!(s.undo());
+        assert_eq!(s.row(0).text, "one");
+    }
+
+    #[test]
+    fn pasted_lines_go_before_the_row_in_order() {
+        let mut s = session(ASS);
+        let pasted = "Dialogue: 0,0:00:07.00,0:00:08.00,Default,,0,0,0,,p1\nplain p2";
+        // a line that is not a subtitle line comes in as text (Aegisub)
+        assert_eq!(s.paste_rows(1, pasted), [1, 2]);
+        assert_eq!(s.paste_rows(9, "x\ny"), [5, 6]);
+        let texts: Vec<String> = (0..s.row_count()).map(|i| s.row(i).text).collect();
+        assert_eq!(texts, ["one", "p1", "plain p2", "two", "three", "x", "y"]);
+        assert_eq!((s.row(1).start, s.row(2).end), (7000, 5000));
+    }
+
+    #[test]
+    fn explode_rows_splits_the_lines_in_one_step() {
+        let mut s = session(ASS);
+        let parts = |v: &[&str]| v.iter().map(|t| t.to_string()).collect::<Vec<_>>();
+        // rows given in any order; row 1 stays
+        let made = s.explode_rows(
+            &[2, 0],
+            &[2, 3],
+            &parts(&["c1", "c2", "a1", "a2", "a3"]),
+            &[5000, 5500, 1000, 1300, 1600],
+            &[5500, 6000, 1300, 1600, 2000],
+        );
+        let texts: Vec<String> = (0..s.row_count()).map(|i| s.row(i).text).collect();
+        assert_eq!(texts, ["a1", "a2", "a3", "two", "c1", "c2"]);
+        assert_eq!(made, [0, 1, 2, 4, 5]);
+        assert_eq!((s.row(4).start, s.row(5).end), (5000, 6000));
+        assert!(s.undo());
+        let texts: Vec<String> = (0..s.row_count()).map(|i| s.row(i).text).collect();
+        assert_eq!(texts, ["one", "two", "three"]);
     }
 
     #[test]

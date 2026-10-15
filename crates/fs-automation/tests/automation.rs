@@ -351,6 +351,29 @@ fn selection_set_and_undo_points() {
 }
 
 #[test]
+fn delete_many_lines_and_select_by_index() {
+    let f = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let s = f.script(
+        dir.path(),
+        "delete.lua",
+        "aegisub.register_macro('D', '', function(subs, sel) subs.delete(sel) return {sel[1]}, sel[1] end)\n",
+    );
+    let d = doc("kara-templater-retime.ass");
+    let n = d.event_count();
+    let out = s
+        .run_macro(0, &d, &[0, 2], Some(0), &Context::default())
+        .unwrap();
+    let new = &out.commits.last().unwrap().1;
+    // both lines gone, the rest in order; the first selected index now holds the old second line
+    assert_eq!(new.event_count(), n - 2);
+    assert_eq!(new.event_id(0), d.event_id(1));
+    assert_eq!(new.event_id(n - 3), d.event_id(n - 1));
+    assert_eq!(out.selection, vec![0]);
+    assert_eq!(out.active, Some(0));
+}
+
+#[test]
 fn cancel_discards_changes_and_read_only_validate() {
     let f = fixture();
     let dir = tempfile::tempdir().unwrap();

@@ -591,11 +591,12 @@ void Grid::selectVisibleOnVideo() {
 // how: 0 at video time, 1 into frames, 2 characters, 3 words, 4 wraps
 void Grid::splitRows(int how) {
     auto &s = m_tab->s();
-    auto sel = m_tab->selection();
-    std::vector<size_t> all;
-    // walk backwards so earlier rows keep their indices
-    for (auto it = sel.rbegin(); it != sel.rend(); ++it) {
-        const fsb::Row r = s.row(*it);
+    // every line's parts, split in one go
+    std::vector<size_t> rows, counts;
+    QStringList all;
+    std::vector<std::int64_t> starts, ends;
+    for (const size_t row : m_tab->selection()) {
+        const fsb::Row r = s.row(row);
         QStringList parts;
         std::vector<std::int64_t> st, en;
         const QString text = fs::q(r.text);
@@ -634,15 +635,20 @@ void Grid::splitRows(int how) {
             }
         }
         if (parts.size() < 2) continue;
-        const auto texts = fs::rvec(parts);
-        const auto rows = fs::vec(s.explode_row(*it, {texts.data(), texts.size()}, {st.data(), st.size()},
-                                                {en.data(), en.size()}));
-        all.insert(all.end(), rows.begin(), rows.end());
+        rows.push_back(row);
+        counts.push_back(size_t(parts.size()));
+        all << parts;
+        starts.insert(starts.end(), st.begin(), st.end());
+        ends.insert(ends.end(), en.begin(), en.end());
     }
+    if (rows.empty()) return;
+    const auto texts = fs::rvec(all);
+    const auto made = fs::vec(s.explode_rows(fs::slice(rows), fs::slice(counts), {texts.data(), texts.size()},
+                                             {starts.data(), starts.size()},
+                                             {ends.data(), ends.size()}));
     m_tab->changed();
-    if (!all.empty()) {
-        std::sort(all.begin(), all.end());
-        m_tab->setSelection(all, int(all.front()));
+    if (!made.empty()) {
+        m_tab->setSelection(made, int(made.front()));
     }
 }
 
