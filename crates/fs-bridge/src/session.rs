@@ -287,6 +287,15 @@ impl Session {
             .collect()
     }
 
+    /// (translation, original) of each translated row: timing works on the translations, the
+    /// line's own times, and the originals take theirs after ([`sync_originals`]).
+    fn tl_pairs(&self, rows: &[usize]) -> Vec<(usize, usize)> {
+        rows.iter()
+            .filter_map(|&r| self.tl_row(r))
+            .filter_map(|r| Some((r.translation?, r.original)))
+            .collect()
+    }
+
     /// Every event of each row (both halves of TL pairs).
     fn all_events(&self, rows: &[usize]) -> Vec<usize> {
         let mut v: Vec<usize> = rows
@@ -1298,9 +1307,11 @@ impl Session {
             .filter(|w| w[1] == w[0] + 1)
             .filter_map(|w| Some((self.tl_row(w[0])?.main(), self.tl_row(w[1])?.main())))
             .collect();
+        let tl = self.tl_pairs(&rows);
         if !pairs.is_empty() {
             self.edit("Continuous times", |d| {
-                ops::make_continuous(d, &pairs, next)
+                ops::make_continuous(d, &pairs, next);
+                sync_originals(d, &tl);
             });
         }
     }
@@ -1370,6 +1381,8 @@ impl Session {
     pub fn shift(&mut self, spec: &ShiftSpec, timecodes: &[i64]) -> usize {
         let rows = self.spec_rows(spec.lines, &spec.selected, spec.active, &spec.styles);
         let evs = self.all_events(&rows);
+        // the end fixes compare lines: the rows' own, so a pair is not one line and the next
+        let (mains, tl) = (self.main_events(&rows), self.tl_pairs(&rows));
         let which = match spec.which {
             1 => ShiftWhich::Start,
             2 => ShiftWhich::End,
@@ -1405,19 +1418,22 @@ impl Session {
                 }
             }
             match spec.end_fix {
-                1 => fix_overlaps(d, &evs),
+                1 => fix_overlaps(d, &mains),
                 2 => {
-                    new_end_times(d, &evs);
-                    fix_overlaps(d, &evs);
+                    new_end_times(d, &mains);
+                    fix_overlaps(d, &mains);
                 }
                 _ => {}
             }
+            sync_originals(d, &tl);
             n
         })
     }
 
     pub fn post_process(&mut self, spec: &PostSpec, keyframes: &[i64], timecodes: &[i64]) {
-        let evs = self.all_events(&spec.rows);
+        // the rows' own events: with both halves of a pair, one line's original became the
+        // "next line" of the one before
+        let (evs, tl) = (self.main_events(&spec.rows), self.tl_pairs(&spec.rows));
         let fr = Framerate::from_timecodes(timecodes.to_vec())
             .ok()
             .or_else(|| self.framerate.clone());
@@ -1453,6 +1469,7 @@ impl Session {
                 ..pp
             };
             ops::post_process(d, &Rows::Selected(evs), &pp);
+            sync_originals(d, &tl);
         });
     }
 
@@ -1780,7 +1797,7 @@ impl Session {
             .map(|p| p.unwrap_or_else(|l| Event::dialogue(Time(0), Time(0), "", l)))
             .collect();
         let n = pasted.len().min(rows.len());
-        let evs = self.main_events(&rows[..n]);
+        let (evs, tl) = (self.main_events(&rows[..n]), self.tl_pairs(&rows[..n]));
         self.edit("Paste lines over", |d| {
             for (src, &e) in pasted.iter().zip(&evs) {
                 let ev = d.event_mut(e).unwrap();
@@ -1819,6 +1836,7 @@ impl Session {
                     ev.text.clone_from(&src.text);
                 }
             }
+            sync_originals(d, &tl);
         });
         rows[..n].to_vec()
     }
@@ -2370,6 +2388,20 @@ fn shift_tag_times(ev: &mut Event, delta: i64) {
     ev.text = line.to_text();
 }
 
+/// The originals of translation pairs take their translations' times.
+fn sync_originals(d: &mut Document, pairs: &[(usize, usize)]) {
+    for &(t, o) in pairs {
+        let (Some(tr), Some(or)) = (d.event(t), d.event(o)) else {
+            continue;
+        };
+        let times = (tr.start, tr.end);
+        if (or.start, or.end) != times {
+            let ev = d.event_mut(o).unwrap();
+            (ev.start, ev.end) = times;
+        }
+    }
+}
+
 /// Kainote's "new times": a line that does not run into the next shifted one (nor ends with
 /// it) lasts 110 ms per shown character, at least a second.
 fn new_end_times(d: &mut Document, evs: &[usize]) {
@@ -2905,6 +2937,57 @@ mod tests {
         s.paste_translation(1, "dwa");
         s.make_continuous(&[0, 1], true);
         assert_eq!((s.row(0).end, s.row(1).start), (3000, 3000));
+    }
+
+    #[test]
+    fn timing_keeps_translation_pairs_together() {
+        let mut s = session(ASS);
+        s.tl_enable(true);
+        for (r, t) in ["jeden", "dwa", "trzy"].into_iter().enumerate() {
+            s.paste_translation(r, t);
+        }
+        let paired = |s: &Session| {
+            (0..s.row_count()).all(|r| {
+                let (t, d) = (s.rows[r], &s.ed.doc);
+                let (o, m) = (d.event(t.original).unwrap(), d.event(t.main()).unwrap());
+                t.translation.is_some() && (o.start, o.end) == (m.start, m.end)
+            })
+        };
+        let times = |s: &Session| {
+            (0..s.row_count())
+                .map(|r| (s.row(r).start, s.row(r).end))
+                .collect::<Vec<_>>()
+        };
+        s.make_continuous(&[0, 1], true);
+        assert!(paired(&s));
+        assert!(s.undo());
+        // the gaps close between rows, not between a line's two halves
+        s.post_process(
+            &PostSpec {
+                adjacent: 1500,
+                bias: 0.5,
+                rows: vec![0, 1, 2],
+                ..Default::default()
+            },
+            &[],
+            &[],
+        );
+        assert_eq!(times(&s), [(1000, 2500), (2500, 4500), (4500, 6000)]);
+        assert!(paired(&s));
+        assert!(s.undo());
+        // ends pushed past the next line come back to it
+        let n = s.shift(
+            &ShiftSpec {
+                amount: 1500,
+                which: 2,
+                end_fix: 1,
+                ..Default::default()
+            },
+            &[],
+        );
+        assert_eq!(n, 6);
+        assert_eq!(times(&s), [(1000, 3000), (3000, 5000), (5000, 7500)]);
+        assert!(paired(&s));
     }
 
     #[test]
