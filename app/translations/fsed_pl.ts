@@ -2779,6 +2779,10 @@ do czasu audio</translation>
         <source>Revert</source>
         <translation>Przywróć</translation>
     </message>
+    <message>
+        <source>Insert original</source>
+        <translation>Wstaw oryginał</translation>
+    </message>
 </context>
 <context>
     <name>TabPanel</name>

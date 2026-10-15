@@ -222,6 +222,7 @@ void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
     m->addAction(tr("Split at cursor (preserve times)"), this, [this] { emit splitRequested(-2); });
     m->addAction(tr("Split at cursor (at video frame)"), this, [this] { emit splitRequested(0); });
     m->addAction(tr("Revert"), this, [this] { emit revertRequested(); });
+    m->addAction(tr("Insert original"), this, [this] { emit insertOriginalRequested(); });
     m->exec(e->globalPos());
 }
 
@@ -475,6 +476,8 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
         splitAtCursor(at == 0 ? m_tab->videoTime() : at);
     });
     connect(m_text, &SubsTextEdit::revertRequested, this, [this] { m_text->setText(m_initial); });
+    // Aegisub's edit/insert_original: the text from before the edits, at the cursor
+    connect(m_text, &SubsTextEdit::insertOriginalRequested, this, [this] { m_text->insertPlainText(m_initial); });
 
     // fields row (wraps into two rows when narrow)
     m_fields1 = new QWidget(this);

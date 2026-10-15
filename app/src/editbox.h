@@ -57,6 +57,7 @@ signals:
     void keyCommand(int key, Qt::KeyboardModifiers mods);
     void splitRequested(qint64 atMs); // -1 estimate, -2 keep both times, else at that time
     void revertRequested();
+    void insertOriginalRequested();
 protected:
     void keyPressEvent(QKeyEvent *) override;
     void contextMenuEvent(QContextMenuEvent *) override;
