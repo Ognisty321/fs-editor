@@ -420,7 +420,11 @@ void VisualTools::reload() {
     m_first = r.comment ? 0 : m_box->frameAtStart(r.start);
     m_last = r.comment ? -1 : m_box->frameAtEnd(r.end);
     if (m_drag) return; // keep the vector and its frame stable while dragging
-    if (m_tool == VClip) m_vec = m_v.clip == 2 ? Drawing::parse(fs::q(m_v.clip_drawing)) : Drawing{};
+    if (m_tool == VClip)
+        m_vec = m_v.clip == 2   ? Drawing::parse(fs::q(m_v.clip_drawing))
+                : m_v.clip == 1 ? Drawing::parse(QString("m %1 %2 l %3 %2 %3 %4 %1 %4") // a rectangle's corners (Aegisub)
+                                                     .arg(n2(m_v.clip_x1), n2(m_v.clip_y1), n2(m_v.clip_x2), n2(m_v.clip_y2)))
+                                : Drawing{};
     if (m_tool == Draw) {
         // m_vec holds the points as offsets from \pos; libass also shifts them by the alignment
         m_vec = Drawing::parse(fs::q(m_v.drawing));
@@ -900,13 +904,14 @@ bool VisualTools::move(QMouseEvent *e) {
     if (m_tool == Pointer) return true;
     if (!m_drag || !m_valid) return false;
     const QPointF now = s(e->position());
-    QPointF delta = now - m_pressS;
+    QPointF delta = now - m_pressS, dw = e->position() - m_pressW;
     if (e->modifiers() & Qt::ShiftModifier) {
         // constrain to the dominant axis
         if (std::abs(delta.x()) > std::abs(delta.y())) delta.setY(0);
         else delta.setX(0);
+        if (std::abs(dw.x()) > std::abs(dw.y())) dw.setY(0);
+        else dw.setX(0);
     }
-    const QPointF dw = e->position() - m_pressW;
     auto *tab = m_box->tab();
     switch (m_tool) {
     case Pos:
@@ -941,7 +946,11 @@ bool VisualTools::move(QMouseEvent *e) {
             sx *= f;
             sy *= f;
         }
-        apply(QString("\\fscx%1\\fscy%2").arg(n2(sx), n2(sy)), true);
+        // whole percents, Ctrl in steps of 25 (Aegisub)
+        const double step = e->modifiers() & Qt::ControlModifier ? 25 : 1;
+        sx = std::round(sx / step) * step;
+        sy = std::round(sy / step) * step;
+        apply(QString("\\fscx%1\\fscy%2").arg(sx).arg(sy), true);
         break;
     }
     case RotZ:
