@@ -377,6 +377,14 @@ impl Default for Style {
 }
 
 /// Convert legacy SSA alignment (1–3 sub, +4 top, +8 mid) to numpad.
+/// An override `\a` as numpad `\an`, as libass reads it: outside 1..=11 the style's (`None`),
+/// and `\a4`/`\a8`, which name no horizontal place, as VSFilter's `\a5`.
+pub fn legacy_tag_align(a: i32) -> Option<u8> {
+    (1..=11)
+        .contains(&a)
+        .then(|| ssa_to_numpad(if a & 3 == 0 { 5 } else { a }))
+}
+
 pub fn ssa_to_numpad(a: i32) -> u8 {
     let h = match a & 3 {
         0 => 2, // invalid horizontal → centre
@@ -606,7 +614,7 @@ impl EventKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Event {
     pub kind: EventKind,
     pub layer: i32,
@@ -774,6 +782,15 @@ mod tests {
         assert_eq!(ssa_to_numpad(2), 2);
         assert_eq!(ssa_to_numpad(6), 8);
         assert_eq!(ssa_to_numpad(10), 5);
+    }
+
+    #[test]
+    fn override_alignment_as_libass_reads_it() {
+        assert_eq!(
+            [1, 2, 3, 5, 6, 7, 9, 10, 11, 4, 8].map(legacy_tag_align),
+            [1, 2, 3, 7, 8, 9, 4, 5, 6, 7, 7].map(Some)
+        );
+        assert_eq!([0, 12, -3].map(legacy_tag_align), [None; 3]);
     }
 
     #[test]

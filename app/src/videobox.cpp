@@ -75,10 +75,7 @@ void FrameWorker::render(quint64 id, qint64 frame, qint64 ms, bool subs) {
         img = decode(*m_media, frame);
         if (subs && m_media->renderer) {
             const rust::Slice<uint8_t> px(img.bits(), size_t(img.sizeInBytes()));
-            if (m_media->scriptDirty) {
-                (*m_media->renderer)->set_script(m_media->script);
-                m_media->scriptDirty = false;
-            }
+            if (auto s = m_media->takeSubs()) (*m_media->renderer)->load_subs(**s);
             (*m_media->renderer)->blend(ms, size_t(img.width()), size_t(img.height()), size_t(img.width()),
                                         size_t(img.height()), px);
         }
@@ -659,10 +656,8 @@ std::vector<std::int64_t> VideoBox::keyframes() const { return m_keyframes; }
 
 void VideoBox::setTimecodes(std::vector<std::int64_t> tc) {
     if (tc.empty()) {
-        std::lock_guard g(m_media->m);
-        if (!m_media->video) return; // a dummy keeps its constant rate
-        const auto own = (**m_media->video).timecodes();
-        tc.assign(own.begin(), own.end());
+        if (m_videoTimecodes.empty()) return; // a dummy keeps its constant rate
+        tc = m_videoTimecodes;
     }
     m_timecodes = std::move(tc);
     m_scriptAt = -2; // frame times moved
@@ -680,30 +675,33 @@ void VideoBox::open(const QString &path, qint64 frame, double ar) {
     QMetaObject::invokeMethod(m_worker, [this, media, path, name, cache, cancel, frame, ar] {
         QString err;
         std::vector<std::pair<qint64, QString>> chapters; // start ms, title
-        {
-            std::lock_guard g(media->m);
-            try {
-                const fs::PercentProgress progress([this, name, cancel](int pct) {
-                    QMetaObject::invokeMethod(this, [this, name, pct, cancel] {
-                        if (!*cancel) m_tab->main()->status(tr("Indexing %1… %2%").arg(name).arg(pct));
-                    });
-                    return !*cancel;
+        try {
+            // built outside the lock: the GUI thread can grab or close meanwhile
+            const fs::PercentProgress progress([this, name, cancel](int pct) {
+                QMetaObject::invokeMethod(this, [this, name, pct, cancel] {
+                    if (!*cancel) m_tab->main()->status(tr("Indexing %1… %2%").arg(name).arg(pct));
                 });
-                auto v = fsb::open_video(fs::Utf8(path), fs::Utf8(cache), progress);
-                const auto info = v->info();
+                return !*cancel;
+            });
+            auto v = fsb::open_video(fs::Utf8(path), fs::Utf8(cache), progress);
+            // a fresh renderer: the last video's attached fonts go with it; the subtitles come
+            // again from opened() (Aegisub's subtitles provider per video)
+            auto r = fsb::new_renderer();
+            r->load_attached_fonts(fs::Utf8(path));
+            for (const auto &c : fsb::chapters(fs::Utf8(path)))
+                chapters.emplace_back(c.start, c.title.empty() ? tr("Chapter %1").arg(chapters.size() + 1)
+                                                               : fs::q(c.title));
+            const auto info = v->info();
+            std::lock_guard g(media->m);
+            if (!*cancel) {
                 media->width = info.width;
                 media->height = info.height;
                 media->video.emplace(std::move(v));
+                media->renderer.emplace(std::move(r));
                 media->cachedFrame = -1;
-                if (!media->renderer) media->renderer.emplace(fsb::new_renderer());
-                (*media->renderer)->load_attached_fonts(fs::Utf8(path));
-                for (const auto &c : fsb::chapters(fs::Utf8(path)))
-                    chapters.emplace_back(c.start, c.title.empty() ? tr("Chapter %1").arg(chapters.size() + 1)
-                                                                   : fs::q(c.title));
-                media->scriptDirty = true;
-            } catch (const rust::Error &e) {
-                err = QString::fromUtf8(e.what());
             }
+        } catch (const rust::Error &e) {
+            err = QString::fromUtf8(e.what());
         }
         QMetaObject::invokeMethod(this, [this, path, err, cancel, frame, ar, chapters] {
             if (*cancel) { // closed, or replaced by a newer open (which has its own status)
@@ -722,6 +720,9 @@ void VideoBox::open(const QString &path, qint64 frame, double ar) {
                 m_timecodes.assign(tc.begin(), tc.end());
                 m_keyframes.assign(kf.begin(), kf.end());
             }
+            m_videoTimecodes = m_timecodes;
+            m_videoSarNum = m_info.sar_num;
+            m_videoSarDen = m_info.sar_den;
             if (ar > 0) setAspect(ar);
             m_frames = m_info.frames;
             m_dummyFps = 0;
@@ -743,10 +744,8 @@ void VideoBox::setAspect(double ar) {
         m_info.sar_num = int(ar * m_info.height * 1000);
         m_info.sar_den = std::max(1, m_info.width * 1000);
     } else {
-        std::lock_guard g(m_media->m);
-        const auto own = m_media->video ? (*m_media->video)->info() : fsb::VideoInfo{};
-        m_info.sar_num = own.sar_num;
-        m_info.sar_den = own.sar_den;
+        m_info.sar_num = m_videoSarNum;
+        m_info.sar_den = m_videoSarDen;
     }
     m_view->updateOverlay();
     m_tab->fitVideo();
@@ -801,8 +800,9 @@ bool VideoBox::openDummy(const QString &spec) {
         m_media->width = w;
         m_media->height = h;
         if (!m_media->renderer) m_media->renderer.emplace(fsb::new_renderer());
-        m_media->scriptDirty = true;
     }
+    m_videoTimecodes.clear();
+    m_videoSarNum = m_videoSarDen = 0;
     m_info = {};
     m_info.width = w;
     m_info.height = h;
@@ -833,6 +833,8 @@ void VideoBox::close() {
         m_media->cachedFrame = -1;
         m_media->cached = QImage();
     }
+    m_videoTimecodes.clear();
+    m_videoSarNum = m_videoSarDen = 0;
     m_frames = 0;
     m_chapters.clear();
     m_path.clear();
@@ -909,11 +911,11 @@ void VideoBox::request() {
 // the shown frame (cheap for long scripts); the whole script once another frame
 // is wanted, since edits and seeks tend to come in runs.
 void VideoBox::loadScript(bool shownFrameOnly) {
-    auto script = m_tab->s().script_for_render(m_tab->hideOriginal(), shownFrameOnly ? time() : -1);
-    std::lock_guard g(m_media->m);
-    if (m_media->renderer) (*m_media->renderer)->sync_fonts(m_tab->s()); // decoded only when they changed
-    m_media->script = std::move(script);
-    m_media->scriptDirty = true;
+    auto subs = m_tab->s().render_subs(m_tab->hideOriginal(), shownFrameOnly ? time() : -1);
+    {
+        std::lock_guard g(m_media->subsM);
+        m_media->subs = std::move(subs);
+    }
     m_scriptAt = shownFrameOnly ? m_frame : -1;
 }
 
@@ -1077,8 +1079,7 @@ QImage VideoBox::grabFrame(Grab mode) {
         if (mode != Raw && m_media->renderer) {
             const rust::Slice<uint8_t> px(img.bits(), size_t(img.sizeInBytes()));
             const size_t w = size_t(img.width()), h = size_t(img.height());
-            (*m_media->renderer)->set_script(m_media->script);
-            m_media->scriptDirty = false;
+            if (auto s = m_media->takeSubs()) (*m_media->renderer)->load_subs(**s);
             if (mode == SubsOnly) (*m_media->renderer)->overlay(time(), w, h, w, h, px);
             else (*m_media->renderer)->blend(time(), w, h, w, h, px);
         }

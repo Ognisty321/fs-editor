@@ -666,7 +666,7 @@ void AudioBox::tick() {
 void AudioBox::playSelection() { play(m_selStart, m_selEnd); }
 
 qint64 AudioBox::snap(qint64 ms, bool toggle) const {
-    QSettings st;
+    const QSettings &st = m_settings;
     const bool kf = st.value("audio/snapKeyframes", false).toBool() != toggle;
     const bool lines = st.value("audio/snapLines", false).toBool() != toggle;
     const qint64 range = qint64(8 * m_msPerPx);
@@ -695,7 +695,7 @@ qint64 AudioBox::snap(qint64 ms, bool toggle) const {
 // Aegisub's inactive lines: none (0), the previous (1), the previous and next (2) or all the other
 // lines (3), comments only when asked. Cached: the overlay repaints with every play cursor step.
 const std::vector<std::pair<qint64, qint64>> &AudioBox::inactiveLines() const {
-    QSettings st;
+    const QSettings &st = m_settings;
     const int mode = std::clamp(st.value("audio/inactiveLines", 3).toInt(), 0, 3);
     const bool comments = st.value("audio/inactiveComments", false).toBool();
     auto &s = m_tab->s();

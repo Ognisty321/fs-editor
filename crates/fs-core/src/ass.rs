@@ -46,7 +46,8 @@ pub struct EventEntry {
     pub id: EventId,
     pub leading: Vec<RawLine>,
     pub event: Event,
-    pub orig: Option<Box<str>>,
+    /// Shared, not copied, when an edit copies the entry: the undo history keeps both.
+    pub orig: Option<Arc<str>>,
     pub ending: LineEnding,
 }
 

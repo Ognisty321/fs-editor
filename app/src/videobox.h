@@ -28,12 +28,18 @@ class QScreen;
 
 // Decoder state shared with the worker thread.
 struct VideoMedia {
-    std::mutex m;
+    std::mutex m; // the worker holds it while it renders
     std::optional<rust::Box<fsb::Video>> video;
     std::optional<rust::Box<fsb::Renderer>> renderer;
     int width = 640, height = 480;
-    rust::String script;
-    bool scriptDirty = false;
+    // The subtitles the GUI thread hands over, under their own lock so an edit never waits for
+    // a frame; the worker loads them into the renderer before the next frame with subtitles.
+    std::mutex subsM;
+    std::optional<rust::Box<fsb::RenderSubs>> subs;
+    std::optional<rust::Box<fsb::RenderSubs>> takeSubs() {
+        std::lock_guard g(subsM);
+        return std::exchange(subs, std::nullopt);
+    }
     // the last frame decoded, without the subtitles: a visual tool's drag or a typed letter renders
     // the same frame again (Aegisub's frame cache); -1 after the video changed
     qint64 cachedFrame = -1;
@@ -123,6 +129,8 @@ public:
     bool hasVideo() const { return m_frames > 0; }
     QString path() const { return m_path; }
     fsb::VideoInfo info() const { return m_info; }
+    // the video's own pixel aspect; info()'s is the one shown, after a ratio set by hand
+    std::pair<int, int> videoSar() const { return {m_videoSarNum, m_videoSarDen}; }
     std::vector<std::int64_t> timecodes() const; // int64_t = cxx i64 (qint64 is long long, int64_t is long on Linux)
     std::vector<std::int64_t> keyframes() const;
     // the file's chapters (Kainote): first frame and title, by frame
@@ -210,6 +218,9 @@ private:
     qint64 m_frames = 0, m_frame = 0;
     qint64 m_scriptAt = -2; // frame of a one-frame script; -1 the whole script; -2 out of date
     std::vector<std::int64_t> m_timecodes, m_keyframes;
+    // the open video's own timecodes and pixel aspect, kept so going back to them needs no lock
+    std::vector<std::int64_t> m_videoTimecodes;
+    int m_videoSarNum = 0, m_videoSarDen = 0;
     std::vector<std::pair<qint64, QString>> m_chapters;
     double m_dummyFps = 0;
     QString m_dummySpec;

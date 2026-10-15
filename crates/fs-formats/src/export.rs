@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use encoding_rs::{Encoding, ISO_8859_5, ISO_8859_6, ISO_8859_7, ISO_8859_8};
-use fs_core::model::{EventKind, ssa_to_numpad};
+use fs_core::model::{EventKind, legacy_tag_align};
 use fs_core::tags::{self, Block, Line};
 use fs_core::vfr::{Framerate, TimeType};
 use fs_core::{Document, Time};
@@ -484,13 +484,18 @@ fn ebu_rows(
                         "i" => i = flag(style_i),
                         "r" => (u, i) = (style_u, style_i),
                         "an" => {
-                            if let Some(v) = tag.arg_f64(0) {
-                                align = v as u8;
+                            if let Some(v) = tag
+                                .arg_f64(0)
+                                .map(|v| v as u8)
+                                .filter(|v| (1..=9).contains(v))
+                            {
+                                align = v;
                             }
                         }
                         "a" => {
-                            if let Some(v) = tag.arg_f64(0) {
-                                align = ssa_to_numpad(v as i32);
+                            if let Some(v) = tag.arg_f64(0).and_then(|v| legacy_tag_align(v as i32))
+                            {
+                                align = v;
                             }
                         }
                         _ => {}

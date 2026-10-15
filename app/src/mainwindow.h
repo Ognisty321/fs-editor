@@ -39,8 +39,9 @@ public:
     TabPanel *newTab();
     // Opens subtitles, video, audio or keyframes by extension.
     void openFile(const QString &path, const QString &encoding = {});
-    // Copies modified tabs to autosaveDir(); true if any file was written.
-    bool autosaveTabs();
+    // Copies modified tabs to autosaveDir(); true if any file was written. With !wait the files
+    // are written on a worker and true means one was started.
+    bool autosaveTabs(bool wait = true);
 
     QAction *action(const QString &id) const { return m_actions.value(id); }
     // The panel command the key is bound to, nullptr if none: a numpad key's own first ("Num+4"),

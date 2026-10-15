@@ -1386,11 +1386,11 @@ pub fn resample(doc: &mut Document, r: &Resample) {
                 }
                 "clip" | "iclip" => {
                     let (scale, d) = if t.args.len() == 2 {
-                        (t.arg_f64(0).unwrap_or(1.0).max(1.0), t.args[1].clone())
+                        (t.arg_f64(0).unwrap_or(1.0), t.args[1].clone())
                     } else {
                         (1.0, t.args.first().cloned().unwrap_or_default())
                     };
-                    let f = 2f64.powf(scale - 1.0);
+                    let f = tags::drawing_divisor(scale);
                     let mut cmds = tags::parse_drawing(&d);
                     tags::transform_drawing(&mut cmds, |x, y| (px(x / f) * f, py(y / f) * f));
                     let mut a = t.args.clone();
@@ -1443,19 +1443,21 @@ pub fn resample(doc: &mut Document, r: &Resample) {
             }
         }
         let new_text = changed.then(|| line.to_text());
-        let ev = doc.event_mut(i).unwrap();
-        if let Some(t) = new_text {
-            ev.text = t;
-        }
-        for (m, k) in [
-            (&mut ev.margin_l, 0),
-            (&mut ev.margin_r, 1),
-            (&mut ev.margin_v, 2),
-            (&mut ev.margin_b, 3),
-        ] {
+        let ev = doc.event(i).unwrap();
+        let old = [ev.margin_l, ev.margin_r, ev.margin_v, ev.margin_b];
+        let mut margins = old;
+        for (k, m) in margins.iter_mut().enumerate() {
             if *m != 0 {
                 *m = scale_margin(*m, k);
             }
+        }
+        // a line that stays the same is not copied: the undo history keeps sharing it
+        if new_text.is_some() || margins != old {
+            let ev = doc.event_mut(i).unwrap();
+            if let Some(t) = new_text {
+                ev.text = t;
+            }
+            [ev.margin_l, ev.margin_r, ev.margin_v, ev.margin_b] = margins;
         }
     }
     doc.set_info("PlayResX", &dx.to_string());
@@ -1526,12 +1528,11 @@ pub fn translate_positions(doc: &mut Document, rows: &Rows, dx: f64, dy: f64, wh
                     t.set_args(a)
                 }
                 "clip" | "iclip" => {
-                    let scale = if t.args.len() == 2 {
-                        t.arg_f64(0).unwrap_or(1.0).max(1.0)
+                    let f = tags::drawing_divisor(if t.args.len() == 2 {
+                        t.arg_f64(0).unwrap_or(1.0)
                     } else {
                         1.0
-                    };
-                    let f = 2f64.powf(scale - 1.0);
+                    });
                     let mut cmds =
                         tags::parse_drawing(t.args.last().map(String::as_str).unwrap_or(""));
                     tags::transform_drawing(&mut cmds, |x, y| (x + dx * f, y + dy * f));
@@ -1547,7 +1548,7 @@ pub fn translate_positions(doc: &mut Document, rows: &Rows, dx: f64, dy: f64, wh
         if what.drawing {
             for b in &mut line.blocks {
                 if let Block::Drawing { scale, commands } = b {
-                    let f = 2f64.powi(scale.saturating_sub(1) as i32);
+                    let f = tags::drawing_divisor(f64::from(*scale));
                     let mut cmds = tags::parse_drawing(commands);
                     tags::transform_drawing(&mut cmds, |x, y| (x + dx * f, y + dy * f));
                     *commands = tags::write_drawing(&cmds);

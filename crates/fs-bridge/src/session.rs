@@ -31,9 +31,10 @@ pub struct Session {
     disk_format: Format,
     encoding: &'static Encoding,
     bom: bool,
-    /// Events as loaded / as last saved, for the grid's number-cell state.
-    loaded: HashMap<EventId, Arc<EventEntry>>,
-    saved: HashMap<EventId, Arc<EventEntry>>,
+    /// Content hashes of the events as loaded / as last saved, for the grid's number-cell state
+    /// (hashes, so the old lines are not kept alive).
+    loaded: HashMap<EventId, u64>,
+    saved: HashMap<EventId, u64>,
     rows: Vec<TlRow>,
     tl: bool,
     generation: u64,
@@ -41,6 +42,8 @@ pub struct Session {
     /// leaves the column fields alone.
     col_info: Option<ColumnInfo>,
     pub(crate) video_size: Option<(i32, i32)>,
+    /// The video's own pixel aspect (`0/0` unknown), for aegisub.video_size's ratio.
+    pub(crate) video_sar: (i32, i32),
     pub(crate) framerate: Option<Framerate>,
     /// The rate a file in frames (MicroDVD) was read in, to write it in the same.
     subs_fps: Option<Framerate>,
@@ -63,6 +66,7 @@ impl Default for Session {
             generation: 0,
             col_info: None,
             video_size: None,
+            video_sar: (0, 0),
             framerate: None,
             subs_fps: None,
             keyframes: Vec::new(),
@@ -75,9 +79,16 @@ impl Default for Session {
     }
 }
 
-/// The entries shared with the document, not copied: an unchanged line is the same Arc.
-fn events_by_id(doc: &Document) -> HashMap<EventId, Arc<EventEntry>> {
-    doc.events().iter().map(|e| (e.id, e.clone())).collect()
+fn event_hash(ev: &fs_core::Event) -> u64 {
+    use std::hash::{BuildHasher, BuildHasherDefault};
+    BuildHasherDefault::<std::collections::hash_map::DefaultHasher>::default().hash_one(ev)
+}
+
+fn events_by_id(doc: &Document) -> HashMap<EventId, u64> {
+    doc.events()
+        .iter()
+        .map(|e| (e.id, event_hash(&e.event)))
+        .collect()
 }
 
 fn field_of(code: u8) -> Field {
@@ -227,7 +238,53 @@ fn column_key(ev: &Event) -> (bool, bool, bool, bool, &str, &str, &str) {
 }
 
 /// The text libass gets: without the uuencoded attachments, whose fonts the renderer
-/// registers once (`Renderer::sync_fonts`) instead of decoding them on every edit.
+/// registers once (`Renderer::load_subs`) instead of decoding them on every edit.
+/// What `Session::render_subs` hands to the render thread.
+pub struct RenderSubs {
+    pub(crate) doc: Document,
+    tl_only: bool,
+    at_ms: i64,
+}
+
+/// A copy of the subtitles to autosave off the GUI thread: O(1), the lines are shared.
+pub struct Backup(Document);
+
+impl Backup {
+    /// Write it as ASS (Aegisub's `.AUTOSAVE.ass`).
+    pub fn write(&self, path: &str) -> Result<(), String> {
+        fs_formats::save_file(
+            &self.0,
+            Path::new(path),
+            Format::Ass,
+            &SaveOptions::default(),
+        )
+        .map(drop)
+        .map_err(|e| format!("{path}: {e}"))
+    }
+}
+
+impl RenderSubs {
+    /// The script for libass. `at_ms >= 0` keeps only the lines shown at that
+    /// time: Aegisub sends just those after an edit, and the whole file once
+    /// another frame is wanted.
+    pub(crate) fn script(&self) -> String {
+        let mut doc = if self.tl_only {
+            tlmode::translation_only(&self.doc)
+        } else {
+            self.doc.clone() // sections are shared, only the kept lines are copied
+        };
+        if self.at_ms >= 0 {
+            // libass reads centiseconds: keep lines within 10 ms of the frame time
+            let (t, slack) = (Time(self.at_ms), Time(10));
+            doc.event_entries_mut().retain(|e| {
+                let e = &e.event;
+                !e.is_comment() && e.start <= t + slack && e.end + slack > t
+            });
+        }
+        render_script(doc)
+    }
+}
+
 pub(crate) fn render_script(mut doc: Document) -> String {
     (doc.sections).retain(|s| !matches!(s.kind, SectionKind::Fonts | SectionKind::Graphics));
     doc.to_ass_string()
@@ -492,14 +549,12 @@ impl Session {
     /// Write a backup copy as ASS (Aegisub's `.AUTOSAVE.ass`); path, format
     /// and the modified state stay as they are.
     pub fn autosave(&self, path: &str) -> Result<(), String> {
-        fs_formats::save_file(
-            &self.ed.doc,
-            Path::new(path),
-            Format::Ass,
-            &SaveOptions::default(),
-        )
-        .map(drop)
-        .map_err(|e| format!("{path}: {e}"))
+        self.backup().write(path)
+    }
+
+    /// The subtitles as they are now, for an autosave written on another thread.
+    pub fn backup(&self) -> Box<Backup> {
+        Box::new(Backup(self.ed.doc.clone()))
     }
 
     pub fn save_translation(&self, path: &str) -> Result<(), String> {
@@ -757,10 +812,8 @@ impl Session {
         let entry: &Arc<EventEntry> = &doc.events()[r.main()];
         let ev = &entry.event;
         let (markers, actor) = tlmode::split_actor(&ev.actor);
-        let same = |m: &HashMap<EventId, Arc<EventEntry>>| {
-            m.get(&entry.id)
-                .is_some_and(|e| Arc::ptr_eq(e, entry) || e.event == *ev)
-        };
+        let hash = event_hash(ev);
+        let same = |m: &HashMap<EventId, u64>| m.get(&entry.id) == Some(&hash);
         let state = if same(&self.loaded) {
             0
         } else if same(&self.saved) {
@@ -2331,24 +2384,18 @@ impl Session {
 
     /// The script libass renders: in TL mode with "hide original" only the
     /// translations are shown.
-    /// The script for libass. `at_ms >= 0` keeps only the lines shown at that
-    /// time: Aegisub sends just those after an edit, and the whole file once
-    /// another frame is wanted.
+    /// The subtitles for the video, taken in O(1) (the sections are shared); the render
+    /// thread turns them into libass's script, so an edit never waits for a frame.
+    pub fn render_subs(&self, hide_original: bool, at_ms: i64) -> Box<RenderSubs> {
+        Box::new(RenderSubs {
+            doc: self.ed.doc.clone(),
+            tl_only: self.tl && hide_original,
+            at_ms,
+        })
+    }
+
     pub fn script_for_render(&self, hide_original: bool, at_ms: i64) -> String {
-        let mut doc = if self.tl && hide_original {
-            tlmode::translation_only(&self.ed.doc)
-        } else {
-            self.ed.doc.clone() // sections are shared, only the kept lines are copied
-        };
-        if at_ms >= 0 {
-            // libass reads centiseconds: keep lines within 10 ms of the frame time
-            let (t, slack) = (Time(at_ms), Time(10));
-            doc.event_entries_mut().retain(|e| {
-                let e = &e.event;
-                !e.is_comment() && e.start <= t + slack && e.end + slack > t
-            });
-        }
-        render_script(doc)
+        self.render_subs(hide_original, at_ms).script()
     }
 
     // ---- translation mode -------------------------------------------------
@@ -2650,8 +2697,17 @@ impl Session {
         });
     }
 
-    pub fn set_video_context(&mut self, w: i32, h: i32, timecodes: &[i64], keyframes: &[i64]) {
+    pub fn set_video_context(
+        &mut self,
+        w: i32,
+        h: i32,
+        sar_num: i32,
+        sar_den: i32,
+        timecodes: &[i64],
+        keyframes: &[i64],
+    ) {
         self.video_size = (w > 0 && h > 0).then_some((w, h));
+        self.video_sar = (sar_num, sar_den);
         self.framerate = Framerate::from_timecodes(timecodes.to_vec()).ok();
         self.keyframes = keyframes.to_vec();
     }
@@ -3527,7 +3583,7 @@ mod tests {
         // none named: the video's
         std::fs::write(&p, "{25}{50}a\n").unwrap();
         let mut s = Session::default();
-        s.set_video_context(640, 480, &[0, 100, 200, 300], &[]);
+        s.set_video_context(640, 480, 1, 1, &[0, 100, 200, 300], &[]);
         s.open(path).unwrap();
         assert_eq!(s.row(0).start, 2450); // frame 25 at 10 fps
         std::fs::remove_file(p).ok();

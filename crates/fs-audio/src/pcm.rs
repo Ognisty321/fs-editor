@@ -100,7 +100,10 @@ impl PcmBuffer {
             return Ok(Self::new(1, Vec::new()));
         };
         let total = first.num_frames().max(0);
-        let mut out = vec![0i16; total as usize];
+        // decoded into the shared buffer itself: a Vec made into Arc<[i16]> is copied, which
+        // needed the track's memory twice at once
+        let mut samples: Arc<[i16]> = std::iter::repeat_n(0i16, total as usize).collect();
+        let out = Arc::get_mut(&mut samples).expect("not shared yet");
         let part = (total as usize).div_ceil(srcs.len()).max(1);
         let done = AtomicI64::new(0);
         let cancel = AtomicBool::new(false);
@@ -120,7 +123,10 @@ impl PcmBuffer {
         if cancel.load(Ordering::Relaxed) {
             return Err(Cancelled);
         }
-        Ok(Self::new(first.sample_rate(), out))
+        Ok(Self {
+            rate: first.sample_rate().max(1),
+            samples,
+        })
     }
 
     pub fn rate(&self) -> u32 {

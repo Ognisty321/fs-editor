@@ -15,7 +15,7 @@ use fs_core::Document;
 use crate::Session;
 use crate::ffi::{
     AutomationHost, DialogControlData, DialogData, ExportSpec, MacroContext, MacroItem,
-    MacroResult, ScriptItem,
+    MacroResult, MacroState, ScriptItem,
 };
 use crate::media::{Renderer, Video};
 
@@ -161,10 +161,14 @@ fn control_value(d: &DialogControlData) -> Option<DialogValue> {
 
 impl Host for GuiHost {
     fn log(&self, text: &str) {
-        self.log
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push_str(text);
+        // the GUI shows it as it comes (in the progress window during a run); kept for
+        // take_log without one
+        if self.with(|h| h.log(text)).is_none() {
+            self.log
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push_str(text);
+        }
     }
     fn progress(&self, percent: f64) {
         self.with(|h| h.progress(percent));
@@ -530,9 +534,27 @@ impl Automation {
             subtitle_file: session.path.clone(),
             video_file: file("Video File"),
             audio_file: file("Audio File"),
-            video_size: session
-                .video_size
-                .map(|(w, h)| (w, h, w as f64 / h as f64, 0)),
+            video_size: session.video_size.map(|(w, h)| {
+                // Aegisub's aspect ratio value and type; a video with non-square pixels opens
+                // as a custom ratio of its display aspect
+                let (sn, sd) = session.video_sar;
+                let (wf, hf) = (f64::from(w), f64::from(h));
+                let mode = session.project_value("Video AR Mode").trim().parse::<i32>();
+                let (ar, mode) = match mode.unwrap_or(0) {
+                    1 => (4.0 / 3.0, 1),
+                    2 => (16.0 / 9.0, 2),
+                    3 => (2.35, 3),
+                    4 => {
+                        let v = session.project_value("Video AR Value");
+                        (v.trim().parse().unwrap_or(wf / hf), 4)
+                    }
+                    _ if sn > 0 && sd > 0 && sn != sd => {
+                        (wf * f64::from(sn) / (hf * f64::from(sd)), 4)
+                    }
+                    _ => (wf / hf, 0),
+                };
+                (w, h, ar, mode)
+            }),
             framerate: session.framerate.clone(),
             keyframes: session.keyframes.clone(),
             modified: session.ed.is_modified(),
@@ -549,14 +571,26 @@ impl Automation {
         (sel, act)
     }
 
-    pub fn macro_enabled(&self, id: usize, session: &Session, rows: &[usize], active: i64) -> bool {
-        let Some(&(s, m)) = self.macros.get(id) else {
-            return false;
-        };
+    /// What the Automation menu shows for every macro, by id (Aegisub's validate and
+    /// is_active): the selection and the project are read once for all of them.
+    pub fn macro_states(&self, session: &Session, rows: &[usize], active: i64) -> Vec<MacroState> {
         let (sel, act) = Self::selection(session, rows, active);
-        self.scripts[s]
-            .validate_macro(m, &session.ed.doc, &sel, act, &Self::context(session))
-            .0
+        let ctx = Self::context(session);
+        let doc = &session.ed.doc;
+        self.macros
+            .iter()
+            .map(|&(s, m)| {
+                let script = &self.scripts[s];
+                let (enabled, help) = script.validate_macro(m, doc, &sel, act, &ctx);
+                let checked = script.macro_is_active(m, doc, &sel, act, &ctx);
+                MacroState {
+                    enabled,
+                    toggle: checked.is_some(),
+                    checked: checked.unwrap_or(false),
+                    help: help.unwrap_or_default(),
+                }
+            })
+            .collect()
     }
 
     /// Prepares a macro run on a copy of the document (GUI thread).
@@ -657,6 +691,42 @@ mod tests {
         a.finish_macro(job, s).unwrap()
     }
 
+    /// The menu's view of the macros: validate's help text, a toggle's check mark, and
+    /// video_size as Aegisub reports an anamorphic video (a custom ratio of its display aspect).
+    #[test]
+    fn menu_states_and_video_size() {
+        let dir = std::env::temp_dir().join(format!("fsb-menu-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("menu.lua");
+        std::fs::write(
+            &script,
+            r#"script_name="Menu"
+aegisub.register_macro("Plain", "", function() end)
+aegisub.register_macro("Toggle", "desc", function() end,
+  function(subs, sel) return #sel > 0, "help for " .. #sel end, function() return true end)
+aegisub.register_macro("Size", "", function() end, function()
+  local w, h, ar, t = aegisub.video_size()
+  return t == 4 and math.abs(ar - 16 / 9) < 1e-9
+end)"#,
+        )
+        .unwrap();
+        let data = concat!(env!("CARGO_MANIFEST_DIR"), "/../fs-automation");
+        let mut a = Automation::new(data, dir.join("user").to_str().unwrap());
+        a.load_script(script.to_str().unwrap()).unwrap();
+        let mut s = Session::default();
+        let st = a.macro_states(&s, &[0], 0);
+        assert!(st[0].enabled && !st[0].toggle && st[0].help.is_empty());
+        assert!(st[1].enabled && st[1].toggle && st[1].checked);
+        assert_eq!(st[1].help, "help for 1");
+        assert!(!st[2].enabled, "no video");
+        s.set_video_context(720, 480, 32, 27, &[], &[]);
+        assert!(a.macro_states(&s, &[0], 0)[2].enabled);
+        // a ratio set by hand is Aegisub's type and value
+        s.set_project_value("Video AR Mode", "1");
+        assert!(!a.macro_states(&s, &[0], 0)[2].enabled);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn runs_a_macro_as_undo_step() {
         let dir = std::env::temp_dir().join(format!("fsb-auto-{}", std::process::id()));
@@ -679,7 +749,7 @@ end)"#,
         let mut r = s.row(0);
         r.text = "abc".into();
         s.set_row(0, &r, "");
-        assert!(a.macro_enabled(0, &s, &[0], 0));
+        assert!(a.macro_states(&s, &[0], 0)[0].enabled);
         let res = run(&a, 0, &mut s, &[0]);
         assert!(res.changed);
         assert_eq!(res.selection, vec![0]);
@@ -799,7 +869,7 @@ end)"#,
         s.set_project_value("Video File", video);
         let v = Video::open(video, dir.join("cache").to_str().unwrap(), |_, _| true).unwrap();
         let i = v.info();
-        s.set_video_context(i.width, i.height, &v.timecodes(), &[]);
+        s.set_video_context(i.width, i.height, i.sar_num, i.sar_den, &v.timecodes(), &[]);
         // a full-screen white box from 0 s, so the subtitle frame's corner differs
         let mut r = s.row(0);
         r.text =

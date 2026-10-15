@@ -94,10 +94,11 @@ impl Renderer {
         (self.0).add_fonts(fonts.iter().map(|(n, d)| (n.as_str(), d.as_slice())));
     }
 
-    /// Register the subtitles' embedded fonts, which `script_for_render` leaves out; decoded
-    /// again only when the `[Fonts]` section changed.
-    pub fn sync_fonts(&mut self, session: &crate::Session) {
-        self.add_script_fonts(&session.ed.doc);
+    /// The subtitles' script and embedded fonts (which the script leaves out; decoded again
+    /// only when the `[Fonts]` section changed). Runs on the render thread.
+    pub fn load_subs(&mut self, subs: &crate::session::RenderSubs) -> Result<(), String> {
+        self.add_script_fonts(&subs.doc);
+        self.set_script(&subs.script())
     }
 
     // shortcut: a font taken out of [Fonts] stays registered until the renderer is recreated
@@ -202,12 +203,13 @@ impl Audio {
         Ok(Self::from_pcm(pcm))
     }
 
-    /// Silent audio for timing without a sound track (Kainote "dummy audio").
+    /// Silent audio for timing without a sound track (Kainote "dummy audio"). At 1 kHz every
+    /// millisecond is a sample and Aegisub's 2h30m takes 18 MB (800 at 44.1 kHz); the player
+    /// resamples for the device. A day at most: a wild length must not abort on the allocation.
     pub fn blank(ms: i64) -> Self {
-        let rate = 44100u32;
         Self::from_pcm(PcmBuffer::new(
-            rate,
-            vec![0; (ms.max(0) * rate as i64 / 1000) as usize],
+            1000,
+            vec![0; ms.clamp(0, 24 * 3600 * 1000) as usize],
         ))
     }
 

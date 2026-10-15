@@ -15,7 +15,7 @@ use fs_core::tags::set_cps_ignore;
 pub use kanji::KanjiTimer;
 use kanji::new_kanji_timer;
 pub use media::{Audio, Renderer, Video};
-pub use session::{FontUses, Session};
+pub use session::{Backup, FontUses, RenderSubs, Session};
 use session::{collect_fonts, parse_style_lines, style_lines, syllables_of};
 pub use spell::{Speller, Thesaurus};
 use spell::{new_speller, new_thesaurus, text_words, thesaurus_word};
@@ -366,6 +366,17 @@ pub mod ffi {
         description: String,
     }
 
+    /// What the Automation menu shows for a macro (Aegisub's validate and is_active).
+    #[derive(Debug, Clone, Default)]
+    struct MacroState {
+        enabled: bool,
+        /// It has an is_active function: drawn as a check item.
+        toggle: bool,
+        checked: bool,
+        /// validate's replacement for the description; empty keeps it.
+        help: String,
+    }
+
     /// A loaded automation script, for the Automation Manager.
     #[derive(Debug, Clone, Default)]
     struct ScriptItem {
@@ -478,6 +489,7 @@ pub mod ffi {
         fn title(self: &AutomationHost, text: &str);
         fn is_cancelled(self: &AutomationHost) -> bool;
         fn status_text(self: &AutomationHost, text: &str);
+        fn log(self: &AutomationHost, text: &str);
         /// Empty when the clipboard holds no text.
         fn clipboard_get(self: &AutomationHost) -> String;
         fn clipboard_set(self: &AutomationHost, text: &str) -> bool;
@@ -528,6 +540,11 @@ pub mod ffi {
         fn export_copy(self: &Session, path: &str, spec: &ExportSpec, video: &[i64]) -> Result<()>;
         fn save_translation(self: &Session, path: &str) -> Result<()>;
         fn autosave(self: &Session, path: &str) -> Result<()>;
+        /// The subtitles as they are now (O(1)), for `Backup::write` on another thread.
+        fn backup(self: &Session) -> Box<Backup>;
+        type Backup;
+        /// Write the copy as ASS (Aegisub's `.AUTOSAVE.ass`).
+        fn write(self: &Backup, path: &str) -> Result<()>;
         fn convert(self: &mut Session, format: &str) -> Result<()>;
         /// Whether the format was converted since the file was read or saved: Save asks for a name.
         fn converted(self: &Session) -> bool;
@@ -691,7 +708,9 @@ pub mod ffi {
         /// Add the styles, replacing ones with the same name, in one undo step.
         fn add_styles(self: &mut Session, styles: &[StyleData]);
         fn start_with_styles(self: &mut Session, styles: &[StyleData]);
-        fn script_for_render(self: &Session, hide_original: bool, at_ms: i64) -> String;
+        /// The subtitles for `Renderer::load_subs`, taken in O(1): `at_ms >= 0` keeps only the
+        /// lines shown then (Aegisub's after an edit).
+        fn render_subs(self: &Session, hide_original: bool, at_ms: i64) -> Box<RenderSubs>;
 
         fn tl_enable(self: &mut Session, on: bool);
         fn set_doubtful(self: &mut Session, rows: &[usize], on: bool);
@@ -741,10 +760,13 @@ pub mod ffi {
         );
         fn kara_set_times(self: &mut Session, row: usize, start: i64, end: i64, amend: &str);
 
+        /// The open video for scripts and frame timing; `sar` is the video's own pixel aspect.
         fn set_video_context(
             self: &mut Session,
             w: i32,
             h: i32,
+            sar_num: i32,
+            sar_den: i32,
             timecodes: &[i64],
             keyframes: &[i64],
         );
@@ -781,8 +803,9 @@ pub mod ffi {
         type Renderer;
         fn new_renderer() -> Result<Box<Renderer>>;
         fn load_attached_fonts(self: &mut Renderer, media_path: &str);
-        /// The subtitles' embedded fonts, registered once (`script_for_render` leaves them out).
-        fn sync_fonts(self: &mut Renderer, session: &Session);
+        type RenderSubs;
+        /// Builds the script and registers the embedded fonts (the render thread's work).
+        fn load_subs(self: &mut Renderer, subs: &RenderSubs) -> Result<()>;
         fn set_script(self: &mut Renderer, ass: &str) -> Result<()>;
         fn blend(
             self: &mut Renderer,
@@ -882,13 +905,13 @@ pub mod ffi {
             spec: &ExportSpec,
             video: &[i64],
         ) -> Result<bool>;
-        fn macro_enabled(
+        /// Every macro's state, by id, for the Automation menu as it opens.
+        fn macro_states(
             self: &Automation,
-            id: usize,
             session: &Session,
             rows: &[usize],
             active: i64,
-        ) -> bool;
+        ) -> Vec<MacroState>;
         /// A script run in three steps (Aegisub's BackgroundScriptRunner): prepared and applied
         /// on the GUI thread, run on a worker while the host brings dialogs and progress back.
         type ScriptJob;
@@ -908,7 +931,6 @@ pub mod ffi {
         ) -> Result<MacroResult>;
         /// Stops the running job's script at once (the progress window's second Cancel).
         fn stop_script(self: &Automation);
-        fn take_log(self: &Automation) -> String;
     }
 }
 

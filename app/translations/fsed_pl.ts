@@ -2899,6 +2899,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Anuluj</translation>
     </message>
     <message>
+        <source>Close</source>
+        <translation>Zamknij</translation>
+    </message>
+    <message>
         <source>Stop script</source>
         <translation>Zatrzymaj skrypt</translation>
     </message>

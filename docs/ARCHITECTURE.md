@@ -110,7 +110,7 @@ Tokenizer bloków `{…}` daje `Text | Override(Vec<Tag>) | Comment | Drawing`. 
 
 ### 3.5 Undo
 
-Undo opiera się na transakcjach: `doc.edit("Opis", |tx| { … })`. Transakcja zbiera listę zmian odwracalnych (`InsertEvent`, `RemoveEvent`, `ModifyEvent{old,new}`, analogicznie dla stylów, `ScriptInfo` i całych sekcji). Historia ma dwa stosy i limit pamięci. „Amend” scala kolejne zmiany tego samego typu, np. pisanie w jednym polu. Każda transakcja zwraca `ChangeSet` (zakres dotkniętych wierszy), więc GUI odświeża tylko to, co trzeba. Undo stack jest per dokument (per karta).
+Undo opiera się na transakcjach: `doc.edit("Opis", |tx| { … })`. Transakcja zbiera listę zmian odwracalnych (`InsertEvent`, `RemoveEvent`, `ModifyEvent{old,new}`, analogicznie dla stylów, `ScriptInfo` i całych sekcji). Historia ma dwa stosy, limit kroków i budżet pamięci (512 MB). Krok kosztuje tylko linie, których nie współdzieli ze stanem po nim (dokument to `Arc`-owane linie kopiowane przy zapisie), więc sortowanie 50 000 linii jest prawie darmowe, a zmiana każdej linii kosztuje cały plik. Najstarsze kroki odpadają ponad budżet, ale 20 ostatnich zostaje zawsze. „Amend” scala kolejne zmiany tego samego typu, np. pisanie w jednym polu. Każda transakcja zwraca `ChangeSet` (zakres dotkniętych wierszy), więc GUI odświeża tylko to, co trzeba. Undo stack jest per dokument (per karta).
 
 ### 3.6 Operacje (`fs-core::ops`)
 
@@ -154,10 +154,10 @@ Kodowanie: UTF-8/UTF-16 z BOM jest rozpoznawane deterministycznie, w pozostałyc
 * **`fs-media` (C++ + cxx)**
   * `VideoSource`: BestSource `BestVideoSource`, z klatką RGBA dla dokładnego numeru klatki, tablicą timestampów (VFR), keyframes i rozdzielczością/SAR.
   * `AudioSource`: `BestAudioSource`, z próbkami PCM `f32`/`i16` dla zakresu próbek.
-  * `SubtitleRenderer`: libass (`ass_read_memory` z aktualnego dokumentu), `render(time) → Vec<AssImage>`. Kompozycja odbywa się w shaderze (bitmapy alfa + kolor).
+  * `SubtitleRenderer`: libass (`ass_read_memory` z aktualnego dokumentu), `render(time) → Vec<AssImage>`. Kompozycja odbywa się w shaderze (bitmapy alfa + kolor). GUI przekazuje wątkowi renderu kopię dokumentu w O(1) (`RenderSubs`). Zapis skryptu dla libass i rejestracja czcionek z `[Fonts]` odbywają się w tym wątku, nie w GUI.
 * **`fs-audio` (Rust)**
-  * cache szczytów min/max per piksel w kilku poziomach zoomu (waveform);
-  * spektrogram: STFT przez `realfft` (okno Hanna, rozmiar 2^n zależny od zoomu), wynik w dB jako tekstury kolumnowe;
+  * cache szczytów min/max per piksel w kilku poziomach zoomu (waveform). Sumy |x| poziomu są dzielone przez 4^poziom, więc mieszczą się w `u32` na każdym poziomie. Dekodowane PCM trafia od razu do współdzielonego `Arc<[i16]>`, bez drugiej kopii ścieżki. Puste audio (2h30m jak w Aegisub) ma 1 kHz: 18 MB zamiast 800;
+  * spektrogram: STFT przez `realfft` (okno Hanna, rozmiar 2^n zależny od zoomu), wynik w dB jako tekstury kolumnowe. Próbkowane kolumny leżą na wielokrotnościach jednego kroku dla całego widoku, więc przewinięty widok czyta kolumny z cache. Brakujące liczą się na wszystkich rdzeniach, a cache (64 MB) usuwa najdawniej czytane;
   * odtwarzanie: `cpal` (WASAPI, ALSA/Pulse/PipeWire, CoreAudio), ring buffer, pozycja playheadu raportowana do GUI, resampling do częstotliwości urządzenia.
 * **GUI**: `VideoWidget` i `AudioWidget` dziedziczą po `QRhiWidget`. Działa to na D3D11/D3D12, Vulkan i Metal, a OpenGL jest fallbackiem.
 
@@ -168,6 +168,9 @@ Kodowanie: UTF-8/UTF-16 z BOM jest rozpoznawane deterministycznie, w pozostałyc
 * Obiekt `subtitles` jako userdata z indeksowaniem 1..n po wszystkich liniach (info, style, eventy, format), `insert`, `append`, `delete`, `deleterange` i `[0]=`. Mapowanie na transakcję undo dokumentu.
 * Pliki include z Aegisub (karaskel, utils, unicode, cleantags, `aegisub.re`/`aegisub.unicode`/`aegisub.util` itd.), redystrybuowane zgodnie z ich licencjami (BSD/ISC), opisane w `THIRD_PARTY.md`.
 * Eksport symboli C wymaganych przez moduły FFI (regex, clipboard) i moduł `lfs`.
+* Okno postępu działa jak `DialogProgress` z Aegisub: `aegisub.debug.out` i błędy skryptu pojawiają się w nim na bieżąco, a jeśli skrypt coś napisał, okno zostaje otwarte z przyciskiem „Zamknij”. Tekst spoza uruchomienia (np. błąd funkcji `validate`) trafia od razu do okna logu.
+* Menu Automatyzacji przy otwarciu pobiera stan wszystkich makr jednym wywołaniem: zaznaczenie i kontekst projektu liczą się raz. `validate` może zastąpić opis w pasku stanu, a makro z `is_active` jest pozycją z zaznaczeniem (COMMAND_TOGGLE z Aegisub).
+* `aegisub.video_size` zwraca proporcje i ich tryb jak Aegisub (Video AR Mode/Value projektu; wideo z niekwadratowymi pikselami to tryb własny). `text_extents` trzyma DC i czcionki w wątku zamiast tworzyć je przy każdym wywołaniu.
 * Makra i filtry eksportu działają w wątku roboczym; okno postępu przenosi dialogi do GUI. Pierwsze „Anuluj” ustawia `is_cancelled` (jak w Aegisub), drugie („Zatrzymaj skrypt”) przerywa skrypt hookiem LuaJIT nawet wtedy, gdy nie sprawdza anulowania. Pętli w całości skompilowanej przez JIT, bez wywołań, hook nie przerwie.
 * MoonScript: dołączony kompilator `moonscript` (Lua), który wymaga `lpeg`.
 * DependencyControl: ścieżki `?user/automation/include`, `?user/automation/autoload`, `lfs`, `ffi`, `json`.
@@ -181,7 +184,8 @@ Szczegóły są w `docs/research/kainote-ui.md`. W skrócie:
 * karta zawiera wideo (lewa góra) i obok edytor linii; audio jest nad edytorem, a grid na dole;
 * tryb tłumaczenia z dwoma polami tekstu w edytorze (oryginał i tłumaczenie) oraz kolumną oryginału w gridzie;
 * przesuwanie czasów w gridzie, panel przesuwania czasów i filtrowanie linii;
-* zoom wideo i tryb odtwarzacza (samo wideo bez edycji, pełny ekran).
+* zoom wideo i tryb odtwarzacza (samo wideo bez edycji, pełny ekran);
+* autozapis co N sekund (Aegisub): kopia dokumentu w O(1) w GUI, a zapis ASS na dysk w wątku roboczym. Przy awarii i wylogowaniu zapis odbywa się synchronicznie.
 
 ## 8. Etapy
 

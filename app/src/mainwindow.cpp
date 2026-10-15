@@ -298,7 +298,7 @@ MainWindow::MainWindow() {
     connect(autosave, &QTimer::timeout, this, [this, autosave] {
         const int secs = QSettings().value("main/autosaveSeconds", 60).toInt();
         autosave->setInterval(std::max(secs, 10) * 1000);
-        if (secs > 0) autosaveTabs();
+        if (secs > 0) autosaveTabs(false);
     });
     autosave->start(std::max(QSettings().value("main/autosaveSeconds", 60).toInt(), 10) * 1000);
     qApp->installEventFilter(this);
@@ -309,6 +309,7 @@ MainWindow::MainWindow() {
     m_host = new GuiAutomationHost(this);
     m_host->onStatus = [this](const QString &text) { status(text); };
     m_host->onStop = [this] { (*m_automation)->stop_script(); };
+    m_host->onLog = [this](const QString &text) { log(text); };
     (*m_automation)->set_host(std::unique_ptr<fsb::AutomationHost>(m_host));
     (*m_automation)->set_cache_dir(fs::Utf8(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex"));
     for (const auto &e : (*m_automation)->load_autoload()) status(fs::q(e));
@@ -716,7 +717,6 @@ void MainWindow::buildMenus() {
                 runScript(*job);
                 done = (*m_automation)->finish_export(std::move(job), t->s(), fs::Utf8(p), spec, {tc.data(), tc.size()});
             }
-            log(fs::q((*m_automation)->take_log()));
             if (done) status(tr("Exported %1").arg(QFileInfo(p).fileName()));
         } catch (const std::exception &e) {
             QMessageBox::warning(this, tr("Export"), QString::fromUtf8(e.what()));
@@ -1564,13 +1564,21 @@ void MainWindow::buildMenus() {
     add("runLastScript", tr("Run the last loaded script"), {}, nullptr, [this] {
         if (m_lastMacro >= 0 && size_t(m_lastMacro) < (*m_automation)->macros().size()) runMacro(size_t(m_lastMacro));
     });
+    // Aegisub's validate (enabled, and a help text for the status bar in place of the
+    // description) and is_active (a toggle macro's check mark), as the menu opens
     connect(m_automationMenu, &QMenu::aboutToShow, this, [this] {
         auto *tab = current();
         const auto rows = tab->selection();
-        for (auto *a : m_actions)
-            if (a->property("macroId").isValid())
-                a->setEnabled((*m_automation)->macro_enabled(size_t(a->property("macroId").toULongLong()), tab->s(),
-                                                              fs::slice(rows), tab->active()));
+        const auto states = (*m_automation)->macro_states(tab->s(), fs::slice(rows), tab->active());
+        for (auto *a : m_actions) {
+            const QVariant id = a->property("macroId");
+            if (!id.isValid() || id.toULongLong() >= states.size()) continue;
+            const auto &st = states[size_t(id.toULongLong())];
+            a->setEnabled(st.enabled);
+            a->setCheckable(st.toggle);
+            a->setChecked(st.checked);
+            a->setStatusTip(st.help.empty() ? a->toolTip() : fs::q(st.help));
+        }
     });
 
     // Help
@@ -1632,7 +1640,7 @@ void MainWindow::checkDisk(TabPanel *t) {
     updateActions();
 }
 
-bool MainWindow::autosaveTabs() {
+bool MainWindow::autosaveTabs(bool wait) {
     QDir().mkpath(autosaveDir());
     const QString stamp = QDateTime::currentDateTime().toString("yyyy-MM-dd-HH-mm-ss");
     QSet<QString> used; // two untitled tabs in the same second must not share a file
@@ -1647,8 +1655,34 @@ bool MainWindow::autosaveTabs() {
         QString name = base;
         for (int k = 2; used.contains(name); ++k) name = QString("%1 (%2)").arg(base).arg(k);
         used.insert(name);
+        const QString path = autosaveDir() + "/" + name + "." + stamp + ".AUTOSAVE.ass";
+        if (!wait) {
+            // the timer's: serialised and written on a worker so a big file does not stall typing;
+            // marked now so the next tick skips it, unmarked if the write fails
+            const QVariant was = t->property("autosaved");
+            t->setProperty("autosaved", gen);
+            auto backup = std::make_shared<rust::Box<fsb::Backup>>(t->s().backup());
+            auto *watch = new QFutureWatcher<QString>(this);
+            connect(watch, &QFutureWatcher<QString>::finished, this, [this, watch, tab = QPointer(t), gen, was] {
+                watch->deleteLater();
+                const QString err = watch->result();
+                if (err.isEmpty()) return;
+                if (tab && tab->property("autosaved").toULongLong() == gen) tab->setProperty("autosaved", was);
+                status(err);
+            });
+            watch->setFuture(QtConcurrent::run([backup, path]() -> QString {
+                try {
+                    (*backup)->write(fs::Utf8(path));
+                    return {};
+                } catch (const rust::Error &e) {
+                    return QString::fromUtf8(e.what());
+                }
+            }));
+            any = true;
+            continue;
+        }
         try {
-            t->s().autosave(fs::Utf8(autosaveDir() + "/" + name + "." + stamp + ".AUTOSAVE.ass"));
+            t->s().autosave(fs::Utf8(path));
             t->setProperty("autosaved", gen);
             any = true;
         } catch (const rust::Error &e) {
@@ -2166,6 +2200,8 @@ bool MainWindow::eventFilter(QObject *o, QEvent *e) {
 }
 
 const char *MainWindow::panelCommand(const QKeyEvent *e, std::span<const PanelKey> keys) const {
+    // composed text (a dead key, Alt+numpad) has no key: its empty sequence would match every unbound command
+    if (e->key() == 0 || e->key() == Qt::Key_unknown) return nullptr;
     const auto key = Qt::Key(e->key() == Qt::Key_Enter ? Qt::Key_Return : e->key());
     for (const auto mods : {e->modifiers(), e->modifiers() & ~Qt::KeypadModifier}) {
         const QKeySequence pressed(QKeyCombination(mods, key));
@@ -2470,9 +2506,7 @@ void MainWindow::runMacro(size_t id) {
     } catch (const rust::Error &e) {
         err = QString::fromUtf8(e.what());
     }
-    QString text = fs::q((*m_automation)->take_log());
-    if (!err.isEmpty()) text += (text.isEmpty() ? "" : "\n") + err;
-    log(text);
+    log(err); // what the script wrote was in its progress window
     if (r.changed) tab->changed();
     // a macro may only return a new selection (e.g. Select overlaps)
     const auto sel = fs::vec(r.selection);

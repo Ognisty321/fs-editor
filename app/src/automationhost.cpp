@@ -16,13 +16,81 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
-#include <QProgressDialog>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QThread>
+#include <QVBoxLayout>
 
 #include <algorithm>
 #include <climits>
+
+// Aegisub's DialogProgress: the task, a bar, what the script writes (aegisub.debug.out, its errors)
+// as it writes it, and Cancel. Cancel only asks the script to stop, so the window stays until it
+// does; Esc and the window's close button press it. A run that wrote anything leaves the window
+// open, Close in place of Cancel, until its text has been read.
+class ScriptProgress : public QDialog {
+public:
+    explicit ScriptProgress(QWidget *parent) : QDialog(parent) {
+        setWindowModality(Qt::ApplicationModal); // the script works on a copy: nothing may edit meanwhile
+        setMinimumWidth(420);
+        m_bar->setRange(0, 1000);
+        m_bar->setValue(0);
+        m_log->setReadOnly(true);
+        m_log->hide();
+        auto *buttons = new QHBoxLayout;
+        buttons->addStretch();
+        buttons->addWidget(m_button);
+        auto *l = new QVBoxLayout(this);
+        l->addWidget(m_label);
+        l->addWidget(m_bar);
+        l->addWidget(m_log, 1);
+        l->addLayout(buttons);
+        connect(m_button, &QPushButton::clicked, this, [this] { press(); });
+    }
+
+    std::function<void()> onCancel;
+
+    void setValue(int v) { m_bar->setValue(v); }
+    void setLabelText(const QString &t) { m_label->setText(t); }
+    void setCancelButtonText(const QString &t) { m_button->setText(t); }
+    void appendLog(const QString &t) {
+        if (m_log->isHidden()) {
+            m_log->show();
+            resize(width(), std::max(height(), 360));
+        }
+        m_log->moveCursor(QTextCursor::End);
+        m_log->insertPlainText(t);
+        m_log->ensureCursorVisible();
+    }
+    // The script has ended: with text written, wait here for Close.
+    void ended() {
+        if (m_log->isHidden()) return;
+        m_closing = true;
+        m_bar->setValue(m_bar->maximum());
+        m_button->setText(QObject::tr("Close"));
+        exec();
+    }
+
+protected:
+    void reject() override { press(); }
+    void closeEvent(QCloseEvent *e) override {
+        e->ignore();
+        press();
+    }
+
+private:
+    void press() {
+        if (m_closing) accept();
+        else if (onCancel) onCancel();
+    }
+
+    QLabel *m_label = new QLabel(this);
+    QProgressBar *m_bar = new QProgressBar(this);
+    QPlainTextEdit *m_log = new QPlainTextEdit(this);
+    QPushButton *m_button = new QPushButton(QObject::tr("Cancel"), this);
+    bool m_closing = false;
+};
 
 GuiAutomationHost::~GuiAutomationHost() { finish(); }
 
@@ -45,29 +113,13 @@ template <class F> void post(F f) {
 }
 
 // f's result with the progress window out of the way: a modal dialog must not sit under it
-template <class F> auto aboveProgress(QPointer<QProgressDialog> &p, F f) {
+template <class F> auto aboveProgress(QPointer<ScriptProgress> &p, F f) {
     const bool shown = p && p->isVisible();
     if (shown) p->hide();
     auto r = f();
     if (shown && p) p->show();
     return r;
 }
-
-// Cancel only asks the script to stop (Aegisub), so the window stays until it does. Esc and the
-// window's close button press Cancel.
-class ScriptProgress : public QProgressDialog {
-public:
-    explicit ScriptProgress(QWidget *parent) : QProgressDialog(parent) {
-        disconnect(this, SIGNAL(canceled()), this, SLOT(cancel()));
-    }
-    void reject() override { emit canceled(); }
-
-protected:
-    void closeEvent(QCloseEvent *e) override {
-        e->ignore();
-        emit canceled();
-    }
-};
 
 // Aegisub wildcards ("Text files (*.txt)|*.txt|All|*.*") to a Qt filter.
 QString qtFilter(const QString &w) {
@@ -265,22 +317,17 @@ rust::String GuiAutomationHost::save_file(rust::Str title, rust::Str dir, rust::
     }));
 }
 
-QProgressDialog *GuiAutomationHost::bar() const {
+ScriptProgress *GuiAutomationHost::bar() const {
     if (!m_progress) {
         m_progress = new ScriptProgress(m_parent);
-        m_progress->setWindowModality(Qt::ApplicationModal); // the script works on a copy: nothing may edit meanwhile
-        m_progress->setRange(0, 1000);
-        m_progress->setMinimumDuration(300);
-        m_progress->setAutoClose(false);
-        m_progress->setAutoReset(false);
-        QObject::connect(m_progress, &QProgressDialog::canceled, m_progress, [this] {
+        m_progress->onCancel = [this] {
             if (!m_cancelled.exchange(true)) {
                 // a script that never asks is_cancelled runs on: a second press stops it
                 m_progress->setCancelButtonText(QObject::tr("Stop script"));
             } else if (onStop) {
                 onStop();
             }
-        });
+        };
     }
     return m_progress;
 }
@@ -301,11 +348,17 @@ void GuiAutomationHost::flush() const {
         std::lock_guard lock(m_mx);
         p = std::exchange(m_pending, {});
     }
-    if (!m_running) return; // came after the run: no window to show it in
-    QProgressDialog *b = bar();
+    if (!m_running) {
+        // after the run, or with none (a validate function's error): the log window has it
+        if (!p.log.isEmpty() && onLog) onLog(p.log);
+        return;
+    }
+    if (p.value < 0 && !p.task && !p.title && p.log.isEmpty()) return;
+    ScriptProgress *b = bar();
     if (p.value >= 0) b->setValue(p.value);
     if (p.task) b->setLabelText(*p.task);
     if (p.title) b->setWindowTitle(*p.title);
+    if (!p.log.isEmpty()) b->appendLog(p.log);
 }
 
 void GuiAutomationHost::progress(double percent) const {
@@ -323,6 +376,10 @@ void GuiAutomationHost::title(rust::Str text) const {
 bool GuiAutomationHost::is_cancelled() const {
     if (onGuiThread()) QApplication::processEvents(); // a validate function runs here
     return m_cancelled;
+}
+
+void GuiAutomationHost::log(rust::Str text) const {
+    queue([t = fs::q(text)](Pending &p) { p.log += t; });
 }
 
 void GuiAutomationHost::status_text(rust::Str text) const {
@@ -350,8 +407,10 @@ void GuiAutomationHost::begin() const {
 void GuiAutomationHost::showProgress() const { bar()->show(); }
 
 void GuiAutomationHost::finish() const {
+    flush(); // what the script wrote last, into its window
     m_running = false;
     if (m_progress) {
+        m_progress->ended();
         m_progress->hide();
         m_progress->deleteLater();
         m_progress = nullptr;

@@ -1337,7 +1337,8 @@ impl Script {
         }
     }
 
-    /// Run `is_active` (checked state of a toggle macro).
+    /// Run `is_active`: the checked state of a toggle macro, `None` for a macro without the
+    /// function (Aegisub's COMMAND_TOGGLE). Errors are logged and leave it unchecked.
     pub fn macro_is_active(
         &self,
         i: usize,
@@ -1345,13 +1346,13 @@ impl Script {
         selection: &[usize],
         active: Option<usize>,
         ctx: &Context,
-    ) -> bool {
+    ) -> Option<bool> {
         match self.read_only_call(i, "is_active", doc, selection, active, ctx) {
-            Ok(Some((_, v))) => v.first().is_some_and(truthy),
-            Ok(None) => false,
+            Ok(Some((_, v))) => Some(v.first().is_some_and(truthy)),
+            Ok(None) => None,
             Err(e) => {
                 self.log_failure("Runtime error in Lua macro is_active function", e);
-                false
+                Some(false)
             }
         }
     }

@@ -221,15 +221,14 @@ impl Line {
         self.tags().find(|t| t.name == name)
     }
 
-    /// Mutable access to every tag with the given name (marks blocks dirty).
+    /// Mutable access to every tag (not those nested inside `\t`). A tag changed through its
+    /// setters, or replaced by a new one, has no source text; its block then loses its own (a
+    /// copy of each block to compare against was made for every call).
     pub fn for_each_tag_mut(&mut self, mut f: impl FnMut(&mut Tag)) {
         for b in &mut self.blocks {
             if let Block::Override { tags, raw } = b {
-                let before = tags.clone();
-                for t in tags.iter_mut() {
-                    f(t);
-                }
-                if *tags != before {
+                tags.iter_mut().for_each(&mut f);
+                if tags.iter().any(|t| t.raw.is_none()) {
                     *raw = None;
                 }
             }
@@ -705,42 +704,42 @@ pub enum DrawCmd {
     Close,
 }
 
-/// Parse vector drawing commands (`m 0 0 l 100 0 100 100 b ...`).
+/// What a `\p` or `\clip` drawing's coordinates are divided by at `scale`: libass's
+/// `1 << (scale - 1)` on the scale as the integer it reads (`\clip(2.5,…)` is 2), within 1..=31
+/// where libass defines it (below 1 is 1, as the visual tools take it).
+pub fn drawing_divisor(scale: f64) -> f64 {
+    f64::from(1u32 << ((scale as i32).clamp(1, 31) - 1))
+}
+
+/// Parse vector drawing commands (`m 0 0 l 100 0 100 100 b ...`). Nothing is allocated per
+/// token: a `\p1` drawing can have tens of thousands.
 pub fn parse_drawing(s: &str) -> Vec<DrawCmd> {
-    let toks: Vec<&str> = s.split_whitespace().collect();
     let mut out = Vec::new();
-    let mut cmd = 'm';
+    let mut cmd = b'm';
     let mut nums: Vec<f64> = Vec::new();
-    let flush = |cmd: char, nums: &mut Vec<f64>, out: &mut Vec<DrawCmd>| {
-        let pairs: Vec<(f64, f64)> = nums
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|c| (c[0], c[1]))
-            .collect();
-        match cmd {
-            'm' => out.extend(pairs.iter().map(|&(x, y)| DrawCmd::Move(x, y))),
-            'n' => out.extend(pairs.iter().map(|&(x, y)| DrawCmd::MoveNoClose(x, y))),
-            'l' => out.extend(pairs.iter().map(|&(x, y)| DrawCmd::Line(x, y))),
-            'b' => out.extend(
-                pairs
-                    .as_chunks::<3>()
-                    .0
-                    .iter()
-                    .map(|c| DrawCmd::Bezier([c[0], c[1], c[2]])),
-            ),
-            's' => out.extend(pairs.iter().map(|&(x, y)| DrawCmd::Spline(x, y))),
-            'p' => out.extend(pairs.iter().map(|&(x, y)| DrawCmd::Extend(x, y))),
-            _ => {}
-        }
-        nums.clear();
-    };
-    for t in toks {
-        let lower = t.to_ascii_lowercase();
-        if lower.len() == 1 && "mnlbspc".contains(lower.as_str()) {
+    let flush =
+        |cmd: u8, nums: &mut Vec<f64>, out: &mut Vec<DrawCmd>| {
+            let pairs = nums.as_chunks::<2>().0.iter().map(|&[x, y]| (x, y));
+            match cmd {
+                b'm' => out.extend(pairs.map(|(x, y)| DrawCmd::Move(x, y))),
+                b'n' => out.extend(pairs.map(|(x, y)| DrawCmd::MoveNoClose(x, y))),
+                b'l' => out.extend(pairs.map(|(x, y)| DrawCmd::Line(x, y))),
+                b'b' => out.extend(nums.as_chunks::<6>().0.iter().map(
+                    |&[x1, y1, x2, y2, x3, y3]| DrawCmd::Bezier([(x1, y1), (x2, y2), (x3, y3)]),
+                )),
+                b's' => out.extend(pairs.map(|(x, y)| DrawCmd::Spline(x, y))),
+                b'p' => out.extend(pairs.map(|(x, y)| DrawCmd::Extend(x, y))),
+                _ => {}
+            }
+            nums.clear();
+        };
+    for t in s.split_whitespace() {
+        if let &[c] = t.as_bytes()
+            && b"mnlbspc".contains(&c.to_ascii_lowercase())
+        {
             flush(cmd, &mut nums, &mut out);
-            cmd = lower.chars().next().unwrap();
-            if cmd == 'c' {
+            cmd = c.to_ascii_lowercase();
+            if cmd == b'c' {
                 out.push(DrawCmd::Close);
             }
         } else if let Ok(v) = t.parse::<f64>() {

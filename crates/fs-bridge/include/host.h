@@ -23,6 +23,8 @@ public:
     virtual void title(rust::Str text) const = 0;
     virtual bool is_cancelled() const = 0;
     virtual void status_text(rust::Str text) const = 0;
+    // aegisub.debug.out and the script's errors, as they are written (any thread).
+    virtual void log(rust::Str text) const = 0;
     // Empty = no text on the clipboard.
     virtual rust::String clipboard_get() const = 0;
     virtual bool clipboard_set(rust::Str text) const = 0;

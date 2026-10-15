@@ -2,14 +2,17 @@
 //!
 //! The history stores complete document snapshots. Because sections and
 //! individual styles/events are reference-counted (`Arc`) and copied on
-//! write, a snapshot only costs one pointer per event of the section that
-//! changed, so even scripts with tens of thousands of lines can keep a deep
-//! history. The same model works for edits coming from the GUI, the CLI and
-//! Lua automation (which may change anything).
+//! write, a snapshot shares every line an edit did not touch: it costs one
+//! pointer per event plus the old versions of the lines that changed. The
+//! history is limited by the memory those take (a "shift all" on 50k lines
+//! keeps 50k old lines), with Aegisub's default of 20 steps always kept. The
+//! same model works for edits coming from the GUI, the CLI and Lua
+//! automation (which may change anything).
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::ass::{Document, EventId};
+use crate::ass::{Document, EventEntry, EventId, Section, SectionBody};
 
 /// Grid selection to restore after undo/redo.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -26,6 +29,8 @@ struct State {
     /// Edits with the same amend key are merged into one undo step (typing
     /// in the edit box, dragging a time in the grid).
     amend_key: Option<String>,
+    /// Memory only this snapshot keeps alive (`snapshot_bytes`).
+    bytes: usize,
 }
 
 /// How rows changed between two document states (for incremental GUI
@@ -58,12 +63,74 @@ pub fn diff_events(old: &Document, new: &Document) -> EventDiff {
     }
 }
 
-/// Steps kept for a document of `events` lines. Every step holds its own list of event
-/// pointers, so a huge file keeps fewer (100k lines: 250 steps, ~200 MB of lists), but
-/// never fewer than Aegisub's default of 50.
-fn undo_steps(limit: usize, events: usize) -> usize {
-    const POINTERS: usize = 25_000_000;
-    limit.min((POINTERS / events.max(1)).max(50))
+/// Undo steps kept whatever memory they take (Aegisub's default undo levels).
+const MIN_STEPS: usize = 20;
+
+fn entry_bytes(e: &EventEntry, shares_orig: bool) -> usize {
+    let ev = &e.event;
+    let strings = ev.text.capacity() + ev.style.capacity() + ev.actor.capacity();
+    let extra: usize = ev
+        .extra
+        .iter()
+        .map(|(k, v)| k.capacity() + v.capacity() + 48)
+        .sum();
+    let leading: usize = e.leading.iter().map(|l| l.text.capacity() + 32).sum();
+    let orig = if shares_orig {
+        0
+    } else {
+        e.orig.as_ref().map_or(0, |o| o.len() + 16)
+    };
+    // the Arc's counts and the entry itself
+    16 + size_of::<EventEntry>() + strings + ev.effect.capacity() + extra + leading + orig
+}
+
+/// What a section of `before` holds that `after` does not share.
+fn section_bytes(s: &Section, after: &Document) -> usize {
+    match &s.body {
+        SectionBody::Events(sec) => {
+            let new = after.events();
+            // pointers of `after`, gathered only when lines moved (sort, insert, delete)
+            let mut moved: Option<HashSet<*const EventEntry>> = None;
+            let mut bytes = size_of::<Arc<EventEntry>>() * sec.entries.len();
+            for (i, e) in sec.entries.iter().enumerate() {
+                match new.get(i) {
+                    Some(n) if Arc::ptr_eq(e, n) => {}
+                    Some(n) if n.id == e.id => {
+                        let shares = match (&e.orig, &n.orig) {
+                            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                            _ => false,
+                        };
+                        bytes += entry_bytes(e, shares);
+                    }
+                    _ => {
+                        let set =
+                            moved.get_or_insert_with(|| new.iter().map(Arc::as_ptr).collect());
+                        if !set.contains(&Arc::as_ptr(e)) {
+                            bytes += entry_bytes(e, false);
+                        }
+                    }
+                }
+            }
+            bytes
+        }
+        SectionBody::Styles(sec) => sec
+            .entries
+            .iter()
+            .map(|e| 16 + size_of_val(&**e) + e.style.name.len() + e.style.font.len())
+            .sum(),
+        SectionBody::Info(sec) => (sec.entries.iter())
+            .map(|e| 64 + e.key.len() + e.value.len())
+            .sum(),
+        SectionBody::Raw(lines) => lines.iter().map(|l| l.text.capacity() + 32).sum(),
+    }
+}
+
+/// Memory the snapshot `before` keeps alive on its own once the document is `after`.
+fn snapshot_bytes(before: &Document, after: &Document) -> usize {
+    (before.sections.iter())
+        .filter(|s| !after.sections.iter().any(|t| Arc::ptr_eq(s, t)))
+        .map(|s| section_bytes(s, after))
+        .sum()
 }
 
 /// A document together with its undo history — one per editor tab.
@@ -75,6 +142,10 @@ pub struct Editor {
     redo: Vec<State>,
     /// Maximum number of undo steps kept.
     pub limit: usize,
+    /// Memory the undo steps may keep beyond the document, in bytes (`MIN_STEPS` are kept anyway).
+    pub budget: usize,
+    /// Memory the undo steps keep now.
+    undo_bytes: usize,
     generation: u64,
     saved_generation: u64,
     /// Generation number for each undo state, parallel to `undo`.
@@ -91,6 +162,8 @@ impl Editor {
             undo: Vec::new(),
             redo: Vec::new(),
             limit: 500,
+            budget: 512 << 20,
+            undo_bytes: 0,
             generation: 0,
             saved_generation: 0,
             undo_gen: Vec::new(),
@@ -145,22 +218,52 @@ impl Editor {
         }
         self.redo.clear();
         self.redo_gen.clear();
-        self.undo.push(State {
+        let bytes = snapshot_bytes(&before, &self.doc);
+        self.push_undo(State {
             description: description.to_string(),
             doc: before,
             selection: self.selection.clone(),
             amend_key: amend.map(str::to_string),
+            bytes,
         });
         self.undo_gen.push(self.generation);
-        let keep = undo_steps(self.limit, self.doc.event_count());
-        if self.undo.len() > keep {
-            let n = self.undo.len() - keep;
-            self.undo.drain(..n);
-            self.undo_gen.drain(..n);
-        }
+        self.trim();
         self.generation = self.next_generation;
         self.next_generation += 1;
         r
+    }
+
+    fn push_undo(&mut self, st: State) {
+        self.undo_bytes += st.bytes;
+        self.undo.push(st);
+    }
+
+    fn pop_undo(&mut self) -> Option<State> {
+        let st = self.undo.pop()?;
+        self.undo_bytes -= st.bytes;
+        Some(st)
+    }
+
+    /// Drops the oldest steps over the step limit or the memory budget.
+    fn trim(&mut self) {
+        let mut n = 0;
+        let mut bytes = self.undo_bytes;
+        while self.undo.len() - n > self.limit
+            || (self.undo.len() - n > MIN_STEPS && bytes > self.budget)
+        {
+            bytes -= self.undo[n].bytes;
+            n += 1;
+        }
+        if n > 0 {
+            self.undo.drain(..n);
+            self.undo_gen.drain(..n);
+            self.undo_bytes = bytes;
+        }
+    }
+
+    /// Memory the undo steps keep alive besides the document, in bytes.
+    pub fn undo_memory(&self) -> usize {
+        self.undo_bytes
     }
 
     pub fn can_undo(&self) -> bool {
@@ -185,7 +288,7 @@ impl Editor {
     }
 
     pub fn undo(&mut self) -> Option<EventDiff> {
-        let st = self.undo.pop()?;
+        let st = self.pop_undo()?;
         let g = self.undo_gen.pop().unwrap();
         let diff = diff_events(&self.doc, &st.doc);
         let cur_doc = std::mem::replace(&mut self.doc, st.doc);
@@ -195,6 +298,7 @@ impl Editor {
             doc: cur_doc,
             selection: cur_sel,
             amend_key: None,
+            bytes: st.bytes, // the other side of the same change
         });
         self.redo_gen.push(self.generation);
         self.generation = g;
@@ -207,11 +311,12 @@ impl Editor {
         let diff = diff_events(&self.doc, &st.doc);
         let cur_doc = std::mem::replace(&mut self.doc, st.doc);
         let cur_sel = std::mem::replace(&mut self.selection, st.selection);
-        self.undo.push(State {
+        self.push_undo(State {
             description: st.description,
             doc: cur_doc,
             selection: cur_sel,
             amend_key: None,
+            bytes: st.bytes,
         });
         self.undo_gen.push(self.generation);
         self.generation = g;
@@ -276,10 +381,58 @@ mod tests {
     }
 
     #[test]
-    fn huge_documents_keep_fewer_undo_steps() {
-        assert_eq!(undo_steps(500, 2_000), 500);
-        assert_eq!(undo_steps(500, 100_000), 250);
-        assert_eq!(undo_steps(500, 10_000_000), 50);
+    fn history_is_limited_by_memory() {
+        let mut text = String::from(
+            "[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n",
+        );
+        for i in 0..2_000 {
+            text += &format!(
+                "Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{}\n",
+                "x".repeat(400 + i % 7)
+            );
+        }
+        let mut e = Editor::new(Document::parse(&text));
+        e.budget = 40 << 20;
+        let shift_all = |d: &mut Document| {
+            for i in 0..d.event_count() {
+                d.event_mut(i).unwrap().start.0 += 10;
+            }
+        };
+        e.edit("shift", shift_all);
+        // the old lines and the pointers, the shared original text not counted twice
+        let one = e.undo_memory();
+        assert!((2_000 * 500..2_000 * 1_000).contains(&one), "{one}");
+        for _ in 0..60 {
+            e.edit("shift", shift_all);
+        }
+        let n = e.undo.len();
+        assert!(
+            e.undo_memory() <= e.budget && n > MIN_STEPS && n < 61,
+            "{n}"
+        );
+        // a one-line edit costs about one line
+        e.edit("one", |d| d.event_mut(5).unwrap().text.push('!'));
+        let last = e.undo.last().unwrap().bytes;
+        assert!(last < 2_000 * 8 + 2_000, "{last}");
+        // Aegisub's 20 steps stay, however large
+        e.budget = 0;
+        e.edit("shift", shift_all);
+        assert_eq!(e.undo.len(), MIN_STEPS);
+        // undo and redo carry their share
+        let before = e.undo_memory();
+        e.undo();
+        e.redo();
+        assert_eq!(e.undo_memory(), before);
+    }
+
+    #[test]
+    fn sorting_shares_every_line() {
+        let mut e = editor();
+        e.edit("reverse", |d| {
+            let sec = d.ensure_events();
+            sec.entries.reverse();
+        });
+        assert_eq!(e.undo_memory(), 2 * size_of::<Arc<EventEntry>>());
     }
 
     #[test]

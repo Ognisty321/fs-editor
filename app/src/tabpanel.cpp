@@ -499,7 +499,9 @@ void TabPanel::setKeyframes(std::vector<std::int64_t> kf) {
 void TabPanel::updateVideoContext() {
     const auto info = m_video->info();
     const auto tc = m_video->timecodes();
-    s().set_video_context(info.width, info.height, {tc.data(), tc.size()}, {m_keyframes.data(), m_keyframes.size()});
+    const auto [sarNum, sarDen] = m_video->videoSar();
+    s().set_video_context(info.width, info.height, sarNum, sarDen, {tc.data(), tc.size()},
+                          {m_keyframes.data(), m_keyframes.size()});
 }
 
 qint64 TabPanel::videoTime() const {

@@ -83,7 +83,7 @@ pub fn ass_to_runs(text: &str) -> (Vec<Run>, Option<u8>) {
                         "a" => {
                             an = t
                                 .arg_f64(0)
-                                .map(|v| fs_core::model::ssa_to_numpad(v as i32))
+                                .and_then(|v| fs_core::model::legacy_tag_align(v as i32))
                         }
                         _ => {}
                     }

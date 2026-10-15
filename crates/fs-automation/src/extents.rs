@@ -14,6 +14,40 @@ pub fn text_extents(style: &Style, text: &str) -> (f64, f64, f64, f64) {
     (sx * w / 64.0, sy * h / 64.0, sy * d / 64.0, sy * e / 64.0)
 }
 
+/// The memory DC and the fonts made for it on one thread. A karaoke template asks for tens of
+/// thousands of extents in a handful of styles; Aegisub made a DC and a font for every one.
+#[cfg(windows)]
+struct Gdi {
+    dc: windows_sys::Win32::Graphics::Gdi::HDC,
+    /// Most recently made last; a font is only ever selected while it is measured.
+    fonts: Vec<(FontKey, windows_sys::Win32::Graphics::Gdi::HFONT)>,
+}
+
+/// The LOGFONTW fields `measure` sets: height, weight, italic/underline/strikeout/charset, face.
+#[cfg(windows)]
+type FontKey = (i32, i32, [u8; 4], [u16; 32]);
+
+#[cfg(windows)]
+const MAX_FONTS: usize = 16;
+
+#[cfg(windows)]
+impl Drop for Gdi {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Graphics::Gdi::{DeleteDC, DeleteObject};
+        unsafe {
+            for &(_, f) in &self.fonts {
+                DeleteObject(f as _);
+            }
+            DeleteDC(self.dc);
+        }
+    }
+}
+
+#[cfg(windows)]
+thread_local! {
+    static GDI: std::cell::RefCell<Option<Gdi>> = const { std::cell::RefCell::new(None) };
+}
+
 #[cfg(windows)]
 fn measure(style: &Style, text: &str) -> (f64, f64, f64, f64) {
     use windows_sys::Win32::Foundation::SIZE;
@@ -21,12 +55,20 @@ fn measure(style: &Style, text: &str) -> (f64, f64, f64, f64) {
 
     let size = style.size * 64.0;
     let spacing = style.spacing * 64.0;
-    unsafe {
-        let dc = CreateCompatibleDC(std::ptr::null_mut());
-        if dc.is_null() {
-            return (0.0, 0.0, 0.0, 0.0);
+    GDI.with_borrow_mut(|gdi| unsafe {
+        if gdi.is_none() {
+            let dc = CreateCompatibleDC(std::ptr::null_mut());
+            if dc.is_null() {
+                return (0.0, 0.0, 0.0, 0.0);
+            }
+            SetMapMode(dc, MM_TEXT);
+            *gdi = Some(Gdi {
+                dc,
+                fonts: Vec::new(),
+            });
         }
-        SetMapMode(dc, MM_TEXT);
+        let gdi = gdi.as_mut().expect("made above");
+        let dc = gdi.dc;
         let mut lf: LOGFONTW = std::mem::zeroed();
         lf.lfHeight = size as i32;
         lf.lfWeight = if style.is_bold() { 700 } else { 400 };
@@ -45,7 +87,23 @@ fn measure(style: &Style, text: &str) -> (f64, f64, f64, f64) {
         {
             *dst = src;
         }
-        let font = CreateFontIndirectW(&lf);
+        let key: FontKey = (
+            lf.lfHeight,
+            lf.lfWeight,
+            [lf.lfItalic, lf.lfUnderline, lf.lfStrikeOut, lf.lfCharSet],
+            lf.lfFaceName,
+        );
+        let font = match gdi.fonts.iter().find(|(k, _)| *k == key) {
+            Some(&(_, f)) => f,
+            None => {
+                if gdi.fonts.len() == MAX_FONTS {
+                    DeleteObject(gdi.fonts.remove(0).1 as _);
+                }
+                let f = CreateFontIndirectW(&lf);
+                gdi.fonts.push((key, f));
+                f
+            }
+        };
         let old = SelectObject(dc, font as _);
 
         let wide: Vec<u16> = text.encode_utf16().collect();
@@ -66,15 +124,13 @@ fn measure(style: &Style, text: &str) -> (f64, f64, f64, f64) {
         GetTextMetricsW(dc, &mut tm);
 
         SelectObject(dc, old);
-        DeleteObject(font as _);
-        DeleteDC(dc);
         (
             width,
             height,
             tm.tmDescent as f64,
             tm.tmExternalLeading as f64,
         )
-    }
+    })
 }
 
 #[cfg(not(windows))]

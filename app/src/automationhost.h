@@ -14,7 +14,7 @@
 #include <optional>
 
 class QWidget;
-class QProgressDialog;
+class ScriptProgress;
 
 class GuiAutomationHost : public fsb::AutomationHost {
 public:
@@ -31,11 +31,12 @@ public:
     void title(rust::Str text) const override;
     bool is_cancelled() const override;
     void status_text(rust::Str text) const override;
+    void log(rust::Str text) const override;
     rust::String clipboard_get() const override;
     bool clipboard_set(rust::Str text) const override;
 
     // Around a script run: begin() clears the cancel flag, showProgress() puts the window up for a
-    // run that takes a while, finish() closes it.
+    // run that takes a while, finish() closes it, after the user has read what the script wrote.
     void begin() const;
     void showProgress() const;
     void finish() const;
@@ -44,20 +45,23 @@ public:
     std::function<void(const QString &)> onStatus;
     // The progress window's second Cancel: stop a script that never checks for it.
     std::function<void()> onStop;
+    // Script text outside a run (a validate function's error), on the GUI thread.
+    std::function<void(const QString &)> onLog;
 
 private:
     // What the script last set, shown by one queued update however often it is set.
     struct Pending {
         int value = -1;
         std::optional<QString> task, title;
+        QString log; // all of it, in order
         bool queued = false;
     };
     template <class F> void queue(F set) const;
     void flush() const;
-    QProgressDialog *bar() const;
+    ScriptProgress *bar() const;
 
     QWidget *m_parent;
-    mutable QPointer<QProgressDialog> m_progress;
+    mutable QPointer<ScriptProgress> m_progress;
     mutable std::atomic<bool> m_cancelled{false};
     mutable bool m_running = false; // GUI thread: between begin() and finish()
     mutable std::mutex m_mx;

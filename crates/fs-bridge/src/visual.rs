@@ -6,16 +6,6 @@ use fs_core::{Document, Event};
 
 use crate::ffi::Visual;
 
-/// Legacy `\a` (1-3 bottom, +4 top, +8 middle) to numpad `\an`.
-fn legacy_align(a: i32) -> i32 {
-    let h = (a - 1) % 4 + 1;
-    match a {
-        5..=7 => h + 6,
-        9..=11 => h + 3,
-        _ => h,
-    }
-}
-
 /// Position of a line without `\pos`/`\move`, as Aegisub computes it.
 fn default_pos(doc: &Document, ev: &Event, align: i32) -> (f64, f64) {
     let (sw, sh) = doc.play_res();
@@ -49,7 +39,9 @@ pub fn of_event(doc: &Document, ev: &Event) -> Visual {
     let f = |name: &str, i: usize| line.first_tag(name).and_then(|t| t.arg_f64(i));
     let align = f("an", 0)
         .map(|a| a as i32)
-        .or_else(|| f("a", 0).map(|a| legacy_align(a as i32)))
+        .or_else(|| {
+            f("a", 0).and_then(|a| fs_core::model::legacy_tag_align(a as i32).map(i32::from))
+        })
         .filter(|a| (1..=9).contains(a))
         .unwrap_or_else(|| style.map_or(2, |s| s.alignment as i32));
 
@@ -127,14 +119,6 @@ pub fn of_event(doc: &Document, ev: &Event) -> Visual {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn legacy() {
-        assert_eq!(
-            [1, 2, 3, 5, 6, 7, 9, 10, 11].map(super::legacy_align),
-            [1, 2, 3, 7, 8, 9, 4, 5, 6]
-        );
-    }
-
     #[test]
     fn drawing_and_clip() {
         let mut doc = fs_core::Document::new();

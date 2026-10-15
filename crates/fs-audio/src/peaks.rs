@@ -28,7 +28,9 @@ impl Peak {
 struct Block {
     min: i16,
     max: i16,
-    /// Sum of |x| over the block.
+    /// Sum of |x| over the block, divided by 4 for each level above the first (by the 64-sample
+    /// blocks it covers): at most 64 × 32768 at every level, where the plain sum overflowed u32
+    /// from the 2^18-sample blocks up (loud audio read zoomed out at half its level).
     sum_abs: u32,
 }
 
@@ -60,7 +62,8 @@ impl PeakCache {
                 .map(|c| Block {
                     min: c.iter().map(|b| b.min).min().unwrap(),
                     max: c.iter().map(|b| b.max).max().unwrap(),
-                    sum_abs: c.iter().map(|b| b.sum_abs).fold(0u32, u32::saturating_add),
+                    sum_abs: (c.iter().map(|b| u64::from(b.sum_abs)).sum::<u64>() >> LEVEL_SHIFT)
+                        as u32,
                 })
                 .collect();
             levels.push(next);
@@ -111,7 +114,7 @@ impl PeakCache {
                 for b in &self.levels[lvl][first as usize..last as usize] {
                     mn = mn.min(b.min);
                     mx = mx.max(b.max);
-                    sum += b.sum_abs as u64;
+                    sum += u64::from(b.sum_abs) << (lvl as u32 * LEVEL_SHIFT);
                 }
                 raw(last << shift, e, &mut mn, &mut mx, &mut sum);
             }
@@ -184,5 +187,12 @@ mod tests {
                 .all(|c| (c.max - 0.5).abs() < 0.01 || c.max > 0.99)
         );
         assert_eq!(cols.iter().filter(|c| c.max > 0.99).count(), 1);
+    }
+
+    #[test]
+    fn loud_audio_zoomed_out_keeps_its_level() {
+        let n = 4 << 20;
+        let p = PeakCache::new(PcmBuffer::new(48000, vec![30000; n])).range(0, n as i64);
+        assert!((p.avg - 30000.0 / 32768.0).abs() < 1e-3, "{}", p.avg);
     }
 }

@@ -10,6 +10,7 @@
 #include "rhiquad.h"
 
 #include <QRhiWidget>
+#include <QSettings>
 #include <QWidget>
 #include <atomic>
 #include <memory>
@@ -147,6 +148,8 @@ private:
     QString m_autoText; // the automatic split shown, not written until edited or committed
     mutable std::vector<std::pair<qint64, qint64>> m_inactive;
     mutable std::tuple<quint64, int, int> m_inactiveKey{~quint64(0), -1, -1};
+    // read on every overlay repaint and snap; values set anywhere in the app show here at once
+    QSettings m_settings;
 
     AudioView *m_view;
     QScrollBar *m_scroll;
