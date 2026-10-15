@@ -291,17 +291,30 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
     m.addAction(mw->action("openSubs"));
     m.addAction(m_box->m_seek->isVisible() ? tr("Hide progress bar") : tr("Show progress bar"), m_box,
                 [this] { m_box->m_seek->setVisible(!m_box->m_seek->isVisible()); });
-    m.addAction(tr("Change aspect ratio"), m_box, [this] {
-        bool ok;
-        const QRectF r = displayRect();
-        const double ar = QInputDialog::getDouble(this, tr("Aspect ratio"), tr("Display aspect ratio (width / height)"),
-                                                  r.width() / std::max(1.0, r.height()), 0.5, 5, 4, &ok);
-        if (!ok) return;
-        m_box->setAspect(ar);
-        // Aegisub's Custom mode, so reopening the script keeps it
-        m_box->tab()->s().set_project_value("Video AR Mode", "4");
-        m_box->tab()->s().set_project_value("Video AR Value", fs::Utf8(QString::number(ar)));
-    });
+    // Aegisub's aspect ratio modes, kept in the script's Video AR Mode/Value
+    auto *arMenu = m.addMenu(tr("Change aspect ratio"));
+    const auto setMode = [this](int mode, double custom) {
+        m_box->setAspect(VideoBox::aspectOfMode(mode, custom));
+        m_box->tab()->s().set_project_value("Video AR Mode", fs::Utf8(mode ? QString::number(mode) : QString()));
+        m_box->tab()->s().set_project_value("Video AR Value",
+                                            fs::Utf8(mode == 4 ? QString::number(custom) : QString()));
+    };
+    const int cur = fs::q(m_box->tab()->s().project_value("Video AR Mode")).toInt();
+    const char *modes[] = {QT_TR_NOOP("Default"), QT_TR_NOOP("Full screen (4:3)"), QT_TR_NOOP("Widescreen (16:9)"),
+                           QT_TR_NOOP("Cinematic (2.35)"), QT_TR_NOOP("Custom...")};
+    for (int i = 0; i < 5; ++i) {
+        auto *a = arMenu->addAction(tr(modes[i]), m_box, [this, setMode, i] {
+            if (i < 4) return setMode(i, 0);
+            bool ok;
+            const QRectF r = displayRect();
+            const double ar =
+                QInputDialog::getDouble(this, tr("Aspect ratio"), tr("Display aspect ratio (width / height)"),
+                                        r.width() / std::max(1.0, r.height()), 0.5, 5, 4, &ok);
+            if (ok) setMode(4, ar);
+        });
+        a->setCheckable(true);
+        a->setChecked(i == cur);
+    }
     m.addSeparator();
     auto saveFrame = [this](bool subs) {
         const QString f = QFileDialog::getSaveFileName(this, tr("Save frame"), {}, "PNG (*.png)");
@@ -510,9 +523,21 @@ void VideoBox::open(const QString &path, qint64 frame, double ar) {
 }
 
 void VideoBox::setAspect(double ar) {
-    m_info.sar_num = int(ar * m_info.height * 1000);
-    m_info.sar_den = std::max(1, m_info.width * 1000);
+    if (ar > 0) {
+        m_info.sar_num = int(ar * m_info.height * 1000);
+        m_info.sar_den = std::max(1, m_info.width * 1000);
+    } else {
+        std::lock_guard g(m_media->m);
+        const auto own = m_media->video ? (*m_media->video)->info() : fsb::VideoInfo{};
+        m_info.sar_num = own.sar_num;
+        m_info.sar_den = own.sar_den;
+    }
     m_view->updateOverlay();
+}
+
+double VideoBox::aspectOfMode(int mode, double custom) {
+    const double ar[] = {0, 4.0 / 3, 16.0 / 9, 2.35, std::clamp(custom, 0.0, 5.0)};
+    return mode > 0 && mode < 5 ? ar[mode] : 0;
 }
 
 void VideoBox::openDummy(int w, int h, double fps, qint64 ms) {

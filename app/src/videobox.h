@@ -110,7 +110,9 @@ public:
     std::vector<std::int64_t> timecodes() const; // int64_t = cxx i64 (qint64 is long long, int64_t is long on Linux)
     std::vector<std::int64_t> keyframes() const;
     void setTimecodes(std::vector<std::int64_t> tc); // empty: the video's own
-    void setAspect(double ar); // display width / height, expressed as the sample aspect ratio
+    void setAspect(double ar); // display width / height, expressed as the sample aspect ratio; 0: the file's own
+    // Aegisub's Video AR Mode: 1 4:3, 2 16:9, 3 2.35, 4 the custom value, else 0 (the file's own)
+    static double aspectOfMode(int mode, double custom);
 
     qint64 frameAt(qint64 ms) const;      // frame shown at ms
     qint64 frameAtStart(qint64 ms) const; // first frame a line starting at ms is visible on (Aegisub START)

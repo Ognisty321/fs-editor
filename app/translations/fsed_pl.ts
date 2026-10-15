@@ -2758,6 +2758,26 @@ do czasu audio</translation>
         <translation>Zmień proporcje wideo</translation>
     </message>
     <message>
+        <source>Default</source>
+        <translation>Domyślne</translation>
+    </message>
+    <message>
+        <source>Full screen (4:3)</source>
+        <translation>Pełny ekran (4:3)</translation>
+    </message>
+    <message>
+        <source>Widescreen (16:9)</source>
+        <translation>Panoramiczne (16:9)</translation>
+    </message>
+    <message>
+        <source>Cinematic (2.35)</source>
+        <translation>Kinowe (2.35)</translation>
+    </message>
+    <message>
+        <source>Custom...</source>
+        <translation>Własne...</translation>
+    </message>
+    <message>
         <source>Aspect ratio</source>
         <translation>Proporcje obrazu</translation>
     </message>

@@ -121,14 +121,9 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
     };
     if (QSettings().value("video/openWithSubs", true).toBool()) {
         if (const QString v = resolve("Video File"); !v.isEmpty()) {
-            // Aegisub's AR modes: 1 4:3, 2 16:9, 3 2.35, 4 custom
-            const int mode = fs::q(s().project_value("Video AR Mode")).toInt();
-            const double ar = mode == 1   ? 4.0 / 3
-                              : mode == 2 ? 16.0 / 9
-                              : mode == 3 ? 2.35
-                              : mode == 4 ? fs::q(s().project_value("Video AR Value")).toDouble()
-                                          : 0;
-            openVideo(v, fs::q(s().project_value("Video Position")).toLongLong(), std::clamp(ar, 0.0, 5.0));
+            const double ar = VideoBox::aspectOfMode(fs::q(s().project_value("Video AR Mode")).toInt(),
+                                                     fs::q(s().project_value("Video AR Value")).toDouble());
+            openVideo(v, fs::q(s().project_value("Video Position")).toLongLong(), ar);
         }
         if (const QString a = resolve("Audio File"); !a.isEmpty() && a != resolve("Video File")) openAudio(a);
         if (const QString k = resolve("Keyframes File"); !k.isEmpty()) openKeyframes(k);
