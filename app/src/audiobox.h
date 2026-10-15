@@ -134,6 +134,7 @@ private:
     // other lines' starts and ends on the marker a Ctrl+drag took along (Aegisub), and which marker
     std::vector<size_t> m_linkStarts, m_linkEnds;
     int m_linkMarker = 0;
+    int m_multi = 0; // what the other selected lines take on the commit: 1 the start, 2 the end, 4 the move
     std::vector<fsb::Syllable> m_syl;
     int m_activeSyl = 0;
     QString m_autoText; // the automatic split shown, not written until edited or committed

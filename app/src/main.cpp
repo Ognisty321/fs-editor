@@ -1,3 +1,4 @@
+#include "audiobox.h"
 #include "dialogs.h"
 #include "editbox.h"
 #include "mainwindow.h"
@@ -232,6 +233,22 @@ int main(int argc, char **argv) {
                     QWheelEvent e(at, text->viewport()->mapToGlobal(at), {}, QPoint(0, 120 * wh[1].toInt()),
                                   Qt::NoButton, Qt::ShiftModifier, Qt::NoScrollPhase, false);
                     QApplication::sendEvent(text->viewport(), &e);
+                }
+                // FSED_SMOKE_AUDIO="x1,x2,b[,m]": a press at x1 dragged to x2 in the audio, in view
+                // fractions; b: l, r or m button; m: a (Alt) or c (Ctrl)
+                if (const QStringList a = qEnvironmentVariable("FSED_SMOKE_AUDIO").split(','); a.size() >= 3) {
+                    auto *view = w.current()->audio()->findChild<AudioView *>();
+                    const auto button = a[2] == "r" ? Qt::RightButton : a[2] == "m" ? Qt::MiddleButton : Qt::LeftButton;
+                    const auto mods = a.value(3) == "a" ? Qt::AltModifier : a.value(3) == "c" ? Qt::ControlModifier : Qt::NoModifier;
+                    const auto at = [&](double f) { return QPointF(f * view->width(), view->height() * 0.6); };
+                    auto send = [&](QEvent::Type t, QPointF p, Qt::MouseButtons held) {
+                        QMouseEvent e(t, p, view->mapToGlobal(p), button, held, mods);
+                        QApplication::sendEvent(view, &e);
+                    };
+                    const double x1 = a[0].toDouble(), x2 = a[1].toDouble();
+                    send(QEvent::MouseButtonPress, at(x1), button);
+                    for (int k = 1; k <= 4; ++k) send(QEvent::MouseMove, at(x1 + (x2 - x1) * k / 4), button);
+                    send(QEvent::MouseButtonRelease, at(x2), Qt::NoButton);
                 }
                 // FSED_SMOKE_DRAG="x1,y1,x2,y2": a left-button drag on the video, in view fractions 0..1
                 const QStringList d = qEnvironmentVariable("FSED_SMOKE_DRAG").split(',');

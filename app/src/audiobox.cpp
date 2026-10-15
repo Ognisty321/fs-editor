@@ -284,6 +284,7 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
         m_drag = 5;
         m_pressT = t;
         m_moveFrom = {b.m_selStart, b.m_selEnd};
+        b.m_multi |= 4;
         return;
     }
     if (b.m_karaoke && !b.m_syl.empty()) {
@@ -331,9 +332,11 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
         // (Aegisub's drag timing, Kainote)
         m_drag = 4;
         m_pressT = b.snap(t, snapToggle);
+        b.m_multi |= 1;
         b.setSelection(m_pressT, std::max(b.m_selEnd, m_pressT), true);
     } else if (e->button() == Qt::RightButton) {
         m_drag = 2;
+        b.m_multi |= 2;
         b.setSelection(b.m_selStart, std::max(b.m_selStart, b.snap(t, snapToggle)), true);
     }
     overlayChanged();
@@ -362,6 +365,7 @@ void AudioView::mouseMoveEvent(QMouseEvent *e) {
         b.setSelection(b.m_selStart, std::max(b.snap(t, snapToggle), b.m_selStart), true);
     } else if (m_drag == 4) {
         if (std::abs(x - m_pressX) > 3) {
+            b.m_multi |= 2;
             const qint64 u = b.snap(t, snapToggle);
             b.setSelection(std::min(m_pressT, u), std::max(m_pressT, u), true);
         }
@@ -779,6 +783,7 @@ void AudioBox::commit() {
     auto r = m_tab->s().row(size_t(row));
     if (r.start != m_selStart || r.end != m_selEnd) {
         const auto amend = fs::Utf8(QString("audio-%1").arg(m_dragId));
+        const qint64 shift = m_selStart - r.start; // of a line moved whole
         // karaoke: the outer syllables take the change, the others keep their place (Aegisub); a
         // line moved whole keeps its syllables as they are
         if (m_karaoke && m_selEnd - m_selStart != r.end - r.start) {
@@ -805,8 +810,26 @@ void AudioBox::commit() {
             }
             m_tab->s().set_rows_values(fs::slice(rows), "times", {values.data(), values.size()}, amend);
         }
+        // the other selected lines (Aegisub): a click away from the markers gave them its start, the
+        // drag on from it or a right click its end, Alt+drag moved them along
+        if (const auto sel = m_tab->selection(); m_multi && sel.size() > 1) {
+            const auto spans = m_tab->s().row_spans();
+            const qint64 by = m_multi & 4 ? shift : 0;
+            std::vector<size_t> rows;
+            std::vector<rust::String> values;
+            for (size_t i : sel) {
+                if (int(i) == row || i >= spans.size()) continue;
+                qint64 s = spans[i].start + by, e = spans[i].end + by;
+                if (m_multi & 1) s = m_selStart;
+                if (m_multi & 2) e = m_selEnd;
+                rows.push_back(i);
+                values.push_back(fs::rs(QString("%1,%2").arg(std::max<qint64>(0, std::min(s, e))).arg(std::max(s, e))));
+            }
+            m_tab->s().set_rows_values(fs::slice(rows), "times", {values.data(), values.size()}, amend);
+        }
         m_tab->changed(TabPanel::FromAudio);
     }
+    m_multi = 0;
     m_linkMarker = 0;
     m_selModified = false;
     m_view->overlayChanged();
@@ -844,7 +867,7 @@ bool AudioBox::followLine() {
 void AudioBox::lineChanged() {
     ++m_dragId; // a new line never merges into the last one's undo step
     m_selModified = false;
-    m_linkMarker = 0;
+    m_linkMarker = m_multi = 0;
     if (followLine() && m_autoScroll && m_audio) ensureVisible(m_selStart, m_selEnd);
     m_activeSyl = 0;
     karaokeChanged();
