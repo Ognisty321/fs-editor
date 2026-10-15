@@ -524,8 +524,10 @@ VideoBox::VideoBox(TabPanel *tab) : QWidget(tab), m_tab(tab), m_media(std::make_
     connect(m_worker, &FrameWorker::ready, this, [this](quint64, qint64, QImage img) {
         m_view->setFrame(img);
         // a tool's handles come and go with the line's frames (Aegisub redraws them on each frame);
-        // the move tool marks where the line is on each
-        if (const bool shown = m_tools->shown(); shown != m_toolsShown || (shown && m_tools->tool() == VisualTools::Move)) {
+        // the move tool marks where the line is on each, the position tool the other selected lines on it
+        const int tool = m_tools->tool();
+        if (const bool shown = m_tools->shown();
+            shown != m_toolsShown || tool == VisualTools::Pos || (shown && tool == VisualTools::Move)) {
             m_toolsShown = shown;
             m_view->updateOverlay();
         }

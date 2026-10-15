@@ -435,6 +435,18 @@ void VisualTools::reload() {
     }
 }
 
+std::vector<std::pair<size_t, QPointF>> VisualTools::others() const {
+    std::vector<std::pair<size_t, QPointF>> out;
+    auto *tab = m_box->tab();
+    if (m_tool != Pos || !m_box->hasVideo()) return out;
+    for (size_t r : tab->s().rows_at(m_box->time()))
+        if (int(r) != tab->active() && tab->isSelected(r)) {
+            const auto v = tab->s().visual(r);
+            out.emplace_back(r, w({v.x, v.y}));
+        }
+    return out;
+}
+
 bool VisualTools::shown() const {
     return m_valid && m_box->frame() >= m_first && m_box->frame() <= m_last;
 }
@@ -621,6 +633,8 @@ void VisualTools::paint(QPainter &p) {
         p.drawText(m + QPointF(8, -8), t);
         return;
     }
+    // the other selected lines on this frame (Kainote), a click makes one the active line (Aegisub)
+    for (const auto &o : others()) handle(p, o.second, true, kLine);
     if (!shown()) return;
     p.setClipRect(d);
     const QPointF pos = w({m_v.x, m_v.y});
@@ -641,6 +655,7 @@ void VisualTools::paint(QPainter &p) {
             p.setPen(Qt::NoPen);
             p.setBrush(kAccent);
             p.drawEllipse(pos + (end - pos) * k, 3, 3);
+            p.setBrush(Qt::NoBrush);
         }
         break;
     }
@@ -786,6 +801,12 @@ bool VisualTools::press(QMouseEvent *e) {
         }
         return true;
     }
+    if (m_tool == Pos && e->button() == Qt::LeftButton && !(shown() && near(w({m_v.x, m_v.y}), e->position())))
+        for (const auto &[r, at] : others())
+            if (near(at, e->position())) {
+                tab->setActive(int(r), false, false); // reloads m_v; the video stays on this frame
+                break;
+            }
     if (!shown()) return false;
     m_button = e->button();
     m_pressW = e->position();

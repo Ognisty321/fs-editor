@@ -89,6 +89,8 @@ private:
     qint64 m_first = 0, m_last = -1; // the frames the active line is shown on
     std::vector<size_t> m_rows;      // the lines a drag moves, and how they were
     std::vector<fsb::Visual> m_starts;
+    // the other selected lines on the frame and where they are on the widget (the position tool)
+    std::vector<std::pair<size_t, QPointF>> others() const;
     Drawing m_vec;            // vector clip or drawing being edited
     QPointF m_drawOrigin, m_drawScale{1, 1};
     // drag state

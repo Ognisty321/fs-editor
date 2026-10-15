@@ -256,7 +256,7 @@ void TabPanel::clearSubs() {
     setActive(0);
 }
 
-void TabPanel::setActive(int row, bool select) {
+void TabPanel::setActive(int row, bool select, bool follow) {
     const int n = int(s().row_count());
     if (n == 0) {
         m_active = -1;
@@ -275,7 +275,7 @@ void TabPanel::setActive(int row, bool select) {
     m_edit->load(m_active);
     m_audio->lineChanged();
     m_video->lineChanged();
-    if (m_active >= 0 && m_video->hasVideo()) {
+    if (follow && m_active >= 0 && m_video->hasVideo()) {
         const auto r = s().row(size_t(m_active));
         const int seek = m_video->seekOn();
         const bool paused = !m_video->playing();

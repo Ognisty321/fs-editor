@@ -56,7 +56,8 @@ public:
     int active() const { return m_active; }
     std::vector<size_t> selection() const { return {m_sel.begin(), m_sel.end()}; }
     bool isSelected(size_t r) const { return m_sel.contains(r); }
-    void setActive(int row, bool select = true);
+    // follow: seek or play the video as its settings say (a line picked on the video does not)
+    void setActive(int row, bool select = true, bool follow = true);
     void setSelection(const std::vector<size_t> &rows, int active);
     void toggleSelected(size_t r);
 
