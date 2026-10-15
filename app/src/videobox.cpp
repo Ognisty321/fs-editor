@@ -23,6 +23,7 @@
 #include <QMenu>
 #include <QPainter>
 #include <QPainterPath>
+#include <QScreen>
 #include <QSettings>
 #include <QSlider>
 #include <QSplitter>
@@ -251,6 +252,12 @@ void VideoView::keyPressEvent(QKeyEvent *e) {
         updateOverlay();
         return;
     }
+    // Kainote's volume keys: Num . louder, Num 0 quieter
+    const int k = e->key();
+    if (e->modifiers() & Qt::KeypadModifier && (k == Qt::Key_Period || k == Qt::Key_Comma || k == Qt::Key_0)) {
+        m_box->m_volume->setValue(m_box->m_volume->value() + (k == Qt::Key_0 ? -5 : 5));
+        return;
+    }
     switch (e->key()) {
     case Qt::Key_Space: m_box->togglePlay(); return;
     case Qt::Key_L: m_box->seekMs(m_box->time() + 5000); return;
@@ -288,6 +295,11 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
     });
     m.addAction(m_box->isFullScreen() ? tr("Exit full screen") : tr("Full screen"), m_box,
                 [this] { m_box->setFullscreen(!m_box->isFullScreen()); });
+    if (const auto screens = QGuiApplication::screens(); screens.size() > 1)
+        for (int i = 0; i < screens.size(); ++i)
+            m.addAction(tr("Full screen on monitor %1").arg(i + 1), m_box,
+                        [this, s = screens[i]] { m_box->setFullscreen(true, s); })
+                ->setEnabled(m_box->hasVideo() && !(m_box->isFullScreen() && m_box->screen() == screens[i]));
     m.addAction(m_box->detached() ? tr("Attach video") : tr("Detach video"), m_box,
                 [this] { m_box->setDetached(!m_box->detached()); });
     if (m_box->tab()->playerMode())
@@ -820,13 +832,21 @@ void VideoBox::dock() {
     show();
 }
 
-void VideoBox::setFullscreen(bool on) {
-    if (on == isFullScreen()) return;
+void VideoBox::setFullscreen(bool on, QScreen *on_screen) {
     if (on) {
-        if (!m_detached) undock();
-        m_toolRow->hide();
+        QScreen *target = on_screen ? on_screen : screen(); // still the main window's while docked
+        if (isFullScreen() && target == screen()) return;
+        if (isFullScreen()) {
+            showNormal(); // to another monitor (Kainote)
+        } else {
+            if (!m_detached) undock();
+            m_toolRow->hide();
+        }
+        // Qt fills the screen the window is on; an undocked box's old position means nothing
+        if (!m_detached || target != screen()) move(target->geometry().topLeft());
         showFullScreen();
     } else {
+        if (!isFullScreen()) return;
         showNormal();
         if (!m_detached) dock();
         m_toolRow->setVisible(!m_tab->playerMode());

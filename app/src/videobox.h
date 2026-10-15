@@ -23,6 +23,7 @@ class QComboBox;
 class QToolButton;
 class QTimer;
 class QStackedWidget;
+class QScreen;
 
 // Decoder state shared with the worker thread.
 struct VideoMedia {
@@ -146,7 +147,7 @@ public:
     void subsChanged();
     void lineChanged();
     void setPlayerMode(bool on);
-    void setFullscreen(bool on);
+    void setFullscreen(bool on, QScreen *on_screen = nullptr); // default: the screen the box is on
     // Aegisub's detached video: the box in a window of its own; closing that window docks it back
     void setDetached(bool on);
     bool detached() const { return m_detached; }

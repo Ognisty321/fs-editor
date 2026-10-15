@@ -3288,6 +3288,10 @@ do czasu audio</translation>
         <translation>Pełny ekran</translation>
     </message>
     <message>
+        <source>Full screen on monitor %1</source>
+        <translation>Pełny ekran na monitorze %1</translation>
+    </message>
+    <message>
         <source>Attach video</source>
         <translation>Przyłącz wideo</translation>
     </message>
