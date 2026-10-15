@@ -990,7 +990,7 @@ void AudioBox::modifyLength(int steps, bool shiftFollowing) {
 }
 
 // Kainote's audio hotkeys and defaults: a second key is a command of its own ("alternative")
-static const AudioKey kAudioKeys[] = {
+static const PanelKey kAudioKeys[] = {
     {"audioCommit", QT_TRANSLATE_NOOP("AudioBox", "Commit"), "Return"},
     {"audioCommitAlt", QT_TRANSLATE_NOOP("AudioBox", "Commit (alternative)"), "G"},
     {"audioCommitDefault", QT_TRANSLATE_NOOP("AudioBox", "Commit and use default timing for next line"), "Shift+G"},
@@ -1032,7 +1032,7 @@ static const AudioKey kAudioKeys[] = {
     {"audioLongerShift", QT_TRANSLATE_NOOP("AudioBox", "End 10 ms later, the following syllables too"), "Shift+Num++"},
 };
 
-std::span<const AudioKey> AudioBox::keys() { return kAudioKeys; }
+std::span<const PanelKey> AudioBox::keys() { return kAudioKeys; }
 
 void AudioBox::runCommand(const QString &id) {
     const qint64 span = qint64(m_view->width() * m_msPerPx);
@@ -1086,13 +1086,6 @@ void AudioBox::runCommand(const QString &id) {
 }
 
 void AudioBox::keyPressEvent(QKeyEvent *e) {
-    // the keys the hotkey editor gives the audio commands: a numpad key's own first ("Num+4"), else
-    // the same key of the main keyboard; the numpad's Enter is Enter
-    const auto key = Qt::Key(e->key() == Qt::Key_Enter ? Qt::Key_Return : e->key());
-    for (const auto mods : {e->modifiers(), e->modifiers() & ~Qt::KeypadModifier}) {
-        const QKeySequence pressed(QKeyCombination(mods, key));
-        for (const auto &k : kAudioKeys)
-            if (auto *a = m_tab->main()->action(k.id); a && a->shortcut() == pressed) return runCommand(k.id);
-    }
+    if (const char *id = m_tab->main()->panelCommand(e, kAudioKeys)) return runCommand(id);
     QWidget::keyPressEvent(e);
 }

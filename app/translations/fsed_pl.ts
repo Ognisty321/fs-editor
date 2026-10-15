@@ -1812,6 +1812,10 @@ Dekoder: BestSource</translation>
         <translation>Wyłącz powiększenie wideo</translation>
     </message>
     <message>
+        <source>Video keys</source>
+        <translation>Klawisze wideo</translation>
+    </message>
+    <message>
         <source>Detach video</source>
         <translation>Odłącz wideo</translation>
     </message>
@@ -3841,6 +3845,54 @@ Dopasować rozdzielczość napisów do wideo?</translation>
     <message>
         <source>Next file</source>
         <translation>Następny plik</translation>
+    </message>
+    <message>
+        <source>5 seconds forward</source>
+        <translation>5 sekund do przodu</translation>
+    </message>
+    <message>
+        <source>5 seconds back</source>
+        <translation>5 sekund do tyłu</translation>
+    </message>
+    <message>
+        <source>A minute forward</source>
+        <translation>Minuta do przodu</translation>
+    </message>
+    <message>
+        <source>A minute back</source>
+        <translation>Minuta do tyłu</translation>
+    </message>
+    <message>
+        <source>Volume up</source>
+        <translation>Dźwięk głośniej</translation>
+    </message>
+    <message>
+        <source>Volume up (alternative)</source>
+        <translation>Dźwięk głośniej (zastępczo)</translation>
+    </message>
+    <message>
+        <source>Volume down</source>
+        <translation>Dźwięk ciszej</translation>
+    </message>
+    <message>
+        <source>Next chapter</source>
+        <translation>Następny rozdział</translation>
+    </message>
+    <message>
+        <source>Previous chapter</source>
+        <translation>Poprzedni rozdział</translation>
+    </message>
+    <message>
+        <source>Full screen on or off</source>
+        <translation>Pełny ekran: włącz lub wyłącz</translation>
+    </message>
+    <message>
+        <source>Leave full screen and minimize</source>
+        <translation>Wyjdź z pełnego ekranu i zminimalizuj</translation>
+    </message>
+    <message>
+        <source>Copy the coordinates under the mouse</source>
+        <translation>Kopiuj współrzędne pod kursorem</translation>
     </message>
     <message>
         <source>Volume</source>

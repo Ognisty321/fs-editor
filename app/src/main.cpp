@@ -252,12 +252,15 @@ int main(int argc, char **argv) {
                     for (int k = 1; k <= 4; ++k) send(QEvent::MouseMove, at(x1 + (x2 - x1) * k / 4), button);
                     send(QEvent::MouseButtonRelease, at(x2), Qt::NoButton);
                 }
-                // FSED_SMOKE_AUDIOKEY="Shift+G": that key pressed in the audio
-                if (const QKeySequence k(qEnvironmentVariable("FSED_SMOKE_AUDIOKEY")); !k.isEmpty()) {
-                    auto *view = w.current()->audio()->findChild<AudioView *>();
-                    QKeyEvent e(QEvent::KeyPress, k[0].key(), k[0].keyboardModifiers());
-                    QApplication::sendEvent(view, &e);
-                }
+                // FSED_SMOKE_AUDIOKEY="Shift+G" / FSED_SMOKE_VIDEOKEY="L": that key pressed in the audio / video
+                const std::pair<const char *, QWidget *> keyTargets[] = {
+                    {"FSED_SMOKE_AUDIOKEY", w.current()->audio()->findChild<AudioView *>()},
+                    {"FSED_SMOKE_VIDEOKEY", w.current()->video()->view()}};
+                for (const auto &[var, view] : keyTargets)
+                    if (const QKeySequence k(qEnvironmentVariable(var)); !k.isEmpty()) {
+                        QKeyEvent e(QEvent::KeyPress, k[0].key(), k[0].keyboardModifiers());
+                        QApplication::sendEvent(view, &e);
+                    }
                 // FSED_SMOKE_DRAG="x1,y1,x2,y2": a left-button drag on the video, in view fractions 0..1;
                 // "x1,y1,x2,y2,z" zooms in a step first; "...;x1,y1,x2,y2" drags again
                 for (const QString &drag : qEnvironmentVariable("FSED_SMOKE_DRAG").split(';')) {

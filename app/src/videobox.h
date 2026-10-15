@@ -4,6 +4,7 @@
 #pragma once
 
 #include "bridge.h"
+#include "mainwindow.h"
 #include "rhiquad.h"
 
 #include <QElapsedTimer>
@@ -171,6 +172,8 @@ public:
     int playOn() const;
     VisualTools *tools() const { return m_tools; }
     VideoView *view() const { return m_view; }
+    static std::span<const PanelKey> keys(); // the video's own keys
+    void runCommand(const QString &id);
     enum Grab { Raw, WithSubs, SubsOnly }; // SubsOnly: on a transparent picture (Aegisub)
     QImage grabFrame(Grab mode);
     void saveFrame(Grab mode); // beside the video, <name>_NNN_<frame>.png (Aegisub, Kainote)

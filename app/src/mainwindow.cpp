@@ -872,6 +872,19 @@ void MainWindow::buildMenus() {
     add("prevTab", tr("Previous tab"), QKeySequence("Ctrl+PgUp"), nullptr,
         [this] { m_tabs->setCurrentIndex((m_tabs->currentIndex() + m_tabs->count() - 1) % m_tabs->count()); });
 
+    // a panel's own keys, which work while it has the keyboard (Kainote's audio and video hotkeys):
+    // listed in its menu and in the hotkey editor, where they take other keys
+    const auto panelKeys = [this](QMenu *m, std::span<const PanelKey> keys, const char *context,
+                                  const std::function<void(const char *)> &run) {
+        for (const auto &k : keys) {
+            auto *a = add(k.id, QCoreApplication::translate(context, k.name), QKeySequence(k.key), m,
+                          [=] { run(k.id); });
+            a->setShortcutContext(Qt::WidgetShortcut); // not the window's: G and the arrows are typed elsewhere
+            removeAction(a);
+            a->setProperty("context", context); // the hotkey editor's conflicts are within one panel
+        }
+    };
+
     // Video
     auto *video = menu(tr("&Video"));
     add("openVideo", tr("Open video"), QKeySequence("Ctrl+Shift+O"), video, [=, this] {
@@ -1125,6 +1138,8 @@ void MainWindow::buildMenus() {
         add(VisualTools::tools()[t].id, QCoreApplication::translate("VisualTools", VisualTools::tools()[t].name), {},
             visualTools, [=] { tab()->video()->tools()->setTool(t); });
     add("resetZoom", tr("Turn off video zoom"), QKeySequence("Ctrl+Shift+Z"), video, [=] { tab()->video()->resetZoom(); });
+    panelKeys(sub(video, tr("Video keys")), VideoBox::keys(), "VideoBox",
+              [=](const char *id) { tab()->video()->runCommand(id); });
     auto *detach = add("detachVideo", tr("Detach video"), {}, video, [=] {
         tab()->video()->setDetached(!tab()->video()->detached());
     });
@@ -1145,16 +1160,8 @@ void MainWindow::buildMenus() {
     });
     add("blankAudio", tr("Open blank 2h30m audio"), {}, audio, [=] { tab()->openBlankAudio(150LL * 60 * 1000); });
     add("closeAudio", tr("Close audio"), {}, audio, [=] { tab()->closeAudio(); });
-    // the audio's own keys, which work while it has the keyboard (Kainote's audio hotkeys): listed
-    // here and in the hotkey editor, where they take other keys
-    auto *timingKeys = sub(audio, tr("Timing keys"));
-    for (const auto &k : AudioBox::keys()) {
-        auto *a = add(k.id, QCoreApplication::translate("AudioBox", k.name), QKeySequence(k.key), timingKeys,
-                      [=] { tab()->audio()->runCommand(k.id); });
-        a->setShortcutContext(Qt::WidgetShortcut); // not the window's: G and the arrows are typed elsewhere
-        removeAction(a);
-        a->setProperty("context", "audio");
-    }
+    panelKeys(sub(audio, tr("Timing keys")), AudioBox::keys(), "AudioBox",
+              [=](const char *id) { tab()->audio()->runCommand(id); });
     // Aegisub's audio/save/clip: from the earliest start to the latest end of the selected lines
     add("saveAudioClip", tr("Save audio clip..."), {}, audio, [=, this] {
         auto *a = tab()->audio()->source();
@@ -1990,11 +1997,12 @@ bool MainWindow::eventFilter(QObject *o, QEvent *e) {
         const auto mods = ke->modifiers() & ~Qt::KeypadModifier;
         const int k = ke->key();
         bool wanted = false;
-        if (dynamic_cast<VideoView *>(o) || dynamic_cast<AudioView *>(o)) {
-            wanted = !(mods & Qt::ControlModifier) && !(mods & Qt::AltModifier) && k < Qt::Key_F1;
+        if (auto *vv = dynamic_cast<VideoView *>(o); vv || dynamic_cast<AudioView *>(o)) {
+            // the panel's own commands take their keys even with Ctrl or Alt
+            wanted = (!(mods & Qt::ControlModifier) && !(mods & Qt::AltModifier) && k < Qt::Key_F1) ||
+                     panelCommand(ke, vv ? VideoBox::keys() : AudioBox::keys());
             // Ctrl+A picks every point of a vector clip or drawing
-            if (const int t = current()->video()->tools()->tool();
-                dynamic_cast<VideoView *>(o) && (t == VisualTools::VClip || t == VisualTools::Draw))
+            if (const int t = current()->video()->tools()->tool(); vv && (t == VisualTools::VClip || t == VisualTools::Draw))
                 wanted = wanted || ke->matches(QKeySequence::SelectAll);
         } else if (dynamic_cast<Grid *>(o)) {
             wanted = (!(mods & Qt::ControlModifier) &&
@@ -2014,6 +2022,16 @@ bool MainWindow::eventFilter(QObject *o, QEvent *e) {
         }
     }
     return QMainWindow::eventFilter(o, e);
+}
+
+const char *MainWindow::panelCommand(const QKeyEvent *e, std::span<const PanelKey> keys) const {
+    const auto key = Qt::Key(e->key() == Qt::Key_Enter ? Qt::Key_Return : e->key());
+    for (const auto mods : {e->modifiers(), e->modifiers() & ~Qt::KeypadModifier}) {
+        const QKeySequence pressed(QKeyCombination(mods, key));
+        for (const auto &k : keys)
+            if (auto *a = action(k.id); a && a->shortcut() == pressed) return k.id;
+    }
+    return nullptr;
 }
 
 // ---- automation ---------------------------------------------------------------

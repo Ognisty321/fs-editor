@@ -307,37 +307,57 @@ void VideoView::keyPressEvent(QKeyEvent *e) {
         updateOverlay();
         return;
     }
-    if (e->matches(QKeySequence::Copy)) { // Aegisub's "copy coordinates": the script point under the mouse
-        const QPointF p = toScript(mapFromGlobal(QCursor::pos()).toPointF());
-        QApplication::clipboard()->setText(QString("%1,%2").arg(qRound(p.x())).arg(qRound(p.y())));
-        return;
-    }
-    // Kainote's volume keys: Num . louder, Num 0 quieter
-    const int k = e->key();
-    if (e->modifiers() & Qt::KeypadModifier && (k == Qt::Key_Period || k == Qt::Key_Comma || k == Qt::Key_0)) {
-        m_box->m_volume->setValue(m_box->m_volume->value() + (k == Qt::Key_0 ? -5 : 5));
-        return;
-    }
-    switch (e->key()) {
-    case Qt::Key_Space: m_box->togglePlay(); return;
-    case Qt::Key_L: m_box->seekMs(m_box->time() + 5000); return;
-    case Qt::Key_Semicolon: m_box->seekMs(m_box->time() - 5000); return;
-    case Qt::Key_Up: m_box->seekMs(m_box->time() + 60000); return;
-    case Qt::Key_Down: m_box->seekMs(m_box->time() - 60000); return;
+    if (const char *id = m_box->tab()->main()->panelCommand(e, VideoBox::keys())) return m_box->runCommand(id);
+    switch (e->key()) { // the frame steps are the window's Left/Right too
     case Qt::Key_Left: m_box->stepFrames(-1); return;
     case Qt::Key_Right: m_box->stepFrames(1); return;
-    case Qt::Key_Period: m_box->openSibling(1); return;
-    case Qt::Key_Comma: m_box->openSibling(-1); return;
-    case Qt::Key_N: m_box->stepChapter(-1); return; // Kainote's chapter keys
-    case Qt::Key_M: m_box->stepChapter(1); return;
-    case Qt::Key_F: m_box->setFullscreen(!m_box->isFullScreen()); return;
     case Qt::Key_Escape: m_box->setFullscreen(false); return;
-    case Qt::Key_B:
-        m_box->setFullscreen(false);
-        window()->showMinimized();
-        return;
     }
     QRhiWidget::keyPressEvent(e);
+}
+
+// Kainote's video hotkeys and defaults; Num , is Num . where the numpad types a decimal comma
+static const PanelKey kVideoKeys[] = {
+    {"videoPlay", QT_TRANSLATE_NOOP("VideoBox", "Play / Pause"), "Space"},
+    {"video5Forward", QT_TRANSLATE_NOOP("VideoBox", "5 seconds forward"), "L"},
+    {"video5Back", QT_TRANSLATE_NOOP("VideoBox", "5 seconds back"), ";"},
+    {"videoMinuteForward", QT_TRANSLATE_NOOP("VideoBox", "A minute forward"), "Up"},
+    {"videoMinuteBack", QT_TRANSLATE_NOOP("VideoBox", "A minute back"), "Down"},
+    {"videoNextFile", QT_TRANSLATE_NOOP("VideoBox", "Next file"), "."},
+    {"videoPrevFile", QT_TRANSLATE_NOOP("VideoBox", "Previous file"), ","},
+    {"videoVolumeUp", QT_TRANSLATE_NOOP("VideoBox", "Volume up"), "Num+."},
+    {"videoVolumeUpAlt", QT_TRANSLATE_NOOP("VideoBox", "Volume up (alternative)"), "Num+,"},
+    {"videoVolumeDown", QT_TRANSLATE_NOOP("VideoBox", "Volume down"), "Num+0"},
+    {"videoNextChapter", QT_TRANSLATE_NOOP("VideoBox", "Next chapter"), "M"},
+    {"videoPrevChapter", QT_TRANSLATE_NOOP("VideoBox", "Previous chapter"), "N"},
+    {"videoFullscreen", QT_TRANSLATE_NOOP("VideoBox", "Full screen on or off"), "F"},
+    {"videoMinimize", QT_TRANSLATE_NOOP("VideoBox", "Leave full screen and minimize"), "B"},
+    // Aegisub's "copy coordinates": the script point under the mouse
+    {"videoCopyCoords", QT_TRANSLATE_NOOP("VideoBox", "Copy the coordinates under the mouse"), "Ctrl+C"},
+};
+
+std::span<const PanelKey> VideoBox::keys() { return kVideoKeys; }
+
+void VideoBox::runCommand(const QString &id) {
+    if (id == "videoPlay") togglePlay();
+    else if (id == "video5Forward") seekMs(time() + 5000);
+    else if (id == "video5Back") seekMs(time() - 5000);
+    else if (id == "videoMinuteForward") seekMs(time() + 60000);
+    else if (id == "videoMinuteBack") seekMs(time() - 60000);
+    else if (id == "videoNextFile") openSibling(1);
+    else if (id == "videoPrevFile") openSibling(-1);
+    else if (id == "videoVolumeUp" || id == "videoVolumeUpAlt") m_volume->setValue(m_volume->value() + 5);
+    else if (id == "videoVolumeDown") m_volume->setValue(m_volume->value() - 5);
+    else if (id == "videoNextChapter") stepChapter(1);
+    else if (id == "videoPrevChapter") stepChapter(-1);
+    else if (id == "videoFullscreen") setFullscreen(!isFullScreen());
+    else if (id == "videoMinimize") {
+        setFullscreen(false);
+        window()->showMinimized();
+    } else if (id == "videoCopyCoords") {
+        const QPointF p = m_view->toScript(m_view->mapFromGlobal(QCursor::pos()).toPointF());
+        QApplication::clipboard()->setText(QString("%1,%2").arg(qRound(p.x())).arg(qRound(p.y())));
+    }
 }
 
 void VideoView::contextMenuEvent(QContextMenuEvent *e) {

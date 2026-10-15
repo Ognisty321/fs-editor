@@ -9,6 +9,7 @@
 #include <QMainWindow>
 #include <QPointer>
 #include <QMap>
+#include <span>
 
 class TabPanel;
 class QSplitter;
@@ -18,6 +19,13 @@ class QLabel;
 class FindDialog;
 class StyleManager;
 class GuiAutomationHost;
+class QKeyEvent;
+
+// A command of a panel's own keys (Kainote's audio and video hotkeys): the hotkey editor lists them,
+// and they run while that panel has the keyboard
+struct PanelKey {
+    const char *id, *name, *key; // name: translated in the panel's own context
+};
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -35,6 +43,9 @@ public:
     bool autosaveTabs();
 
     QAction *action(const QString &id) const { return m_actions.value(id); }
+    // The panel command the key is bound to, nullptr if none: a numpad key's own first ("Num+4"),
+    // else the same key of the main keyboard; the numpad's Enter is Enter
+    const char *panelCommand(const QKeyEvent *e, std::span<const PanelKey> keys) const;
     QMenu *recentMenu(const QString &kind);
     void addRecent(const QString &kind, const QString &path);
 
