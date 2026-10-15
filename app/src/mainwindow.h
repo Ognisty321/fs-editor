@@ -70,6 +70,7 @@ private:
     bool maybeSave(TabPanel *tab);
     int pickEmbeddedTrack(const rust::Vec<fsb::SubTrack> &tracks, const QString &question); // -1: cancelled
     bool saveAs(TabPanel *tab);
+    bool saveTab(TabPanel *tab);
     void convert(const QString &format);
     void runMacro(size_t id);
     void automationManager();

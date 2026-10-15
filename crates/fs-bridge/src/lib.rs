@@ -461,6 +461,8 @@ pub mod ffi {
         ) -> Result<()>;
         fn open_embedded(self: &mut Session, video: &str, index: i32) -> Result<()>;
         fn save(self: &mut Session, path: &str) -> Result<()>;
+        /// Whether the file's format holds all of the subtitles; Save asks for an ASS name if not.
+        fn lossless(self: &Session) -> bool;
         fn export_copy(
             self: &Session,
             path: &str,

@@ -1908,6 +1908,10 @@ Tłumaczenie: wklejony tekst, który przejmuje timing oryginału.</translation>
         <translation>Wklejone linijki: %1</translation>
     </message>
     <message>
+        <source>Its format cannot hold everything in these subtitles: save them as ASS</source>
+        <translation>Ten format nie pomieści wszystkiego, co jest w napisach: zapisz je jako ASS</translation>
+    </message>
+    <message>
         <source>Save subtitles as</source>
         <translation>Zapisz napisy jako</translation>
     </message>

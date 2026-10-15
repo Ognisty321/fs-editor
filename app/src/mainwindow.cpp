@@ -527,13 +527,10 @@ void MainWindow::buildMenus() {
                                                   0, true, &ok);
         if (ok) openFile(f, enc);
     });
-    add("save", tr("Save"), QKeySequence("Ctrl+S"), file, [=, this] {
-        if (tab()->path().isEmpty() || !tab()->save()) saveAs(tab());
-        else addRecent("subs", tab()->path());
-    });
+    add("save", tr("Save"), QKeySequence("Ctrl+S"), file, [=, this] { saveTab(tab()); });
     add("saveAll", tr("Save all"), {}, file, [this] {
         for (auto *t : tabs())
-            if (t->modified() && (t->path().isEmpty() || !t->save())) saveAs(t);
+            if (t->modified()) saveTab(t);
     });
     add("saveAs", tr("Save as..."), QKeySequence("Ctrl+Shift+S"), file, [=, this] { saveAs(tab()); });
     // Kainote's "Load subtitles from MKV": a track of the open video replaces the subtitles
@@ -1487,6 +1484,12 @@ void MainWindow::pasteTranslation() {
 
 bool MainWindow::saveAs(TabPanel *tab) {
     QString start = tab->path();
+    if (!start.isEmpty() && !tab->s().lossless()) {
+        // Aegisub's: to an ASS name when the file's format cannot hold it all
+        status(tr("Its format cannot hold everything in these subtitles: save them as ASS"));
+        const QFileInfo fi(start);
+        start = fi.dir().filePath(fi.completeBaseName() + ".ass");
+    }
     if (QSettings().value("main/saveWithVideoName").toBool() && !tab->video()->path().isEmpty()) {
         const QFileInfo vf(tab->video()->path());
         start = vf.dir().filePath(vf.completeBaseName() + "." +
@@ -1499,6 +1502,13 @@ bool MainWindow::saveAs(TabPanel *tab) {
     return true;
 }
 
+// a file in a format that cannot hold the subtitles goes to Save as (Aegisub)
+bool MainWindow::saveTab(TabPanel *tab) {
+    if (tab->path().isEmpty() || !tab->s().lossless() || !tab->save()) return saveAs(tab);
+    addRecent("subs", tab->path());
+    return true;
+}
+
 bool MainWindow::maybeSave(TabPanel *tab) {
     if (!tab->modified()) return true;
     m_tabs->setCurrentIndex(indexOfPanel(tab));
@@ -1507,7 +1517,7 @@ bool MainWindow::maybeSave(TabPanel *tab) {
                                          QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
     if (r == QMessageBox::Cancel) return false;
     if (r == QMessageBox::Discard) return true;
-    return tab->path().isEmpty() ? saveAs(tab) : tab->save();
+    return saveTab(tab);
 }
 
 bool MainWindow::closeTab(int index) {

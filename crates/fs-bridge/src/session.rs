@@ -409,16 +409,7 @@ impl Session {
                 .and_then(Format::from_name)
                 .unwrap_or(self.format),
         };
-        let opts = SaveOptions {
-            encoding: self.encoding,
-            bom: self.bom,
-            fps: self
-                .framerate
-                .clone()
-                .unwrap_or_else(|| Framerate::from_rational(24000, 1001, false).unwrap()),
-            ..Default::default()
-        };
-        fs_formats::save_file(&self.ed.doc, &p, format, &opts)
+        fs_formats::save_file(&self.ed.doc, &p, format, &self.save_options())
             .map_err(|e| format!("{path}: {e}"))?;
         self.path = Some(p);
         self.format = format;
@@ -426,6 +417,23 @@ impl Session {
         self.saved = events_by_id(&self.ed.doc);
         self.generation += 1;
         Ok(())
+    }
+
+    fn save_options(&self) -> SaveOptions {
+        SaveOptions {
+            encoding: self.encoding,
+            bom: self.bom,
+            fps: self
+                .framerate
+                .clone()
+                .unwrap_or_else(|| Framerate::from_rational(24000, 1001, false).unwrap()),
+            ..Default::default()
+        }
+    }
+
+    /// Whether the file's format holds all of the subtitles (Aegisub's CanSave).
+    pub fn lossless(&self) -> bool {
+        fs_formats::lossless(&self.ed.doc, self.format, &self.save_options())
     }
 
     /// Write a backup copy as ASS (Aegisub's `.AUTOSAVE.ass`); path, format

@@ -87,17 +87,14 @@ pub fn detect_format(text: &str, ext: Option<&str>) -> Option<Format> {
     let ext = ext.map(|e| e.to_ascii_lowercase());
     let sample: Vec<&str> = text
         .lines()
-        .map(str::trim)
+        .map(|l| l.trim().trim_start_matches('\u{feff}'))
         .filter(|l| !l.is_empty())
         .take(20)
         .collect();
-    let first = sample
-        .first()
-        .copied()
-        .unwrap_or("")
-        .trim_start_matches('\u{feff}');
-    if first.eq_ignore_ascii_case("[script info]")
-        || sample.iter().any(|l| l.eq_ignore_ascii_case("[events]"))
+    // a comment may come before [Script Info]
+    if sample
+        .iter()
+        .any(|l| l.eq_ignore_ascii_case("[script info]") || l.eq_ignore_ascii_case("[events]"))
     {
         let ssa = sample.iter().any(|l| l.eq_ignore_ascii_case("[v4 styles]"))
             || text
@@ -134,6 +131,11 @@ pub fn detect_format(text: &str, ext: Option<&str>) -> Option<Format> {
         .max_by_key(|x| x.0)?;
     if best.0 > 0 {
         return Some(best.1);
+    }
+    // the name alone only for an empty file: text in none of the formats is not opened as one, to
+    // be emptied by the next save
+    if !sample.is_empty() {
+        return None;
     }
     match ext.as_deref() {
         Some("ass") => Some(Format::Ass),
@@ -230,6 +232,13 @@ pub fn load_bytes(bytes: &[u8], ext: Option<&str>, opts: &LoadOptions) -> Result
             Vec::new(),
         ),
     };
+    // lines that looked like the format but none read: an empty grid would empty the file on save
+    if !format.is_ass()
+        && doc.event_count() == 0
+        && !text.trim_start_matches('\u{feff}').trim().is_empty()
+    {
+        return Err(Error::Empty);
+    }
     Ok(Loaded {
         doc,
         format,
@@ -328,13 +337,16 @@ pub fn from_subs(subs: Vec<Sub>) -> Document {
 }
 
 /// Dialogue lines of a document as simple subtitles, sorted by start time
-/// (comments and empty lines are skipped).
+/// (comments and lines of only tags or drawings are skipped; empty ones, timed before they are
+/// typed, are kept as Aegisub keeps them).
 pub fn to_subs(doc: &Document) -> Vec<Sub> {
     let mut v: Vec<Sub> = doc
         .events()
         .iter()
         .map(|e| &e.event)
-        .filter(|e| e.kind == EventKind::Dialogue && has_visible_text(&e.text))
+        .filter(|e| {
+            e.kind == EventKind::Dialogue && (e.text.is_empty() || has_visible_text(&e.text))
+        })
         .map(|e| Sub {
             start: e.start,
             end: e.end,
@@ -377,7 +389,11 @@ impl Default for SaveOptions {
 
 /// Serialise a document in the given format.
 pub fn save_bytes(doc: &Document, format: Format, opts: &SaveOptions) -> Vec<u8> {
-    let text = match format {
+    encoding::encode(&save_text(doc, format, opts), opts.encoding, opts.bom)
+}
+
+fn save_text(doc: &Document, format: Format, opts: &SaveOptions) -> String {
+    match format {
         Format::Ass => doc.to_ass_string(),
         Format::Ssa => to_ssa(doc).to_ass_string(),
         Format::Srt => simple::write_srt(&to_subs(doc)),
@@ -386,8 +402,55 @@ pub fn save_bytes(doc: &Document, format: Format, opts: &SaveOptions) -> Vec<u8>
             simple::write_microdvd(&to_subs(doc), &opts.fps, opts.microdvd_fps_header)
         }
         Format::Tmp => simple::write_tmp(&to_subs(doc)),
+    }
+}
+
+/// Whether `format` holds all of `doc` (Aegisub's CanSave): lines of the one style with no
+/// actor, effect, margins or layer, tags the format can say, no attachments, and the text it
+/// writes reads back the same. Save goes to an ASS name otherwise.
+pub fn lossless(doc: &Document, format: Format, opts: &SaveOptions) -> bool {
+    use fs_core::tags::{Block, Line};
+    if matches!(format, Format::Ass | Format::Ssa) {
+        return true;
+    }
+    // the ones `markup` converts
+    const KNOWN: [&str; 10] = ["i", "b", "u", "s", "c", "1c", "an", "a", "fn", "fs"];
+    let plain = |e: &Event| {
+        e.kind == EventKind::Dialogue
+            && e.style == "Default"
+            && e.actor.is_empty()
+            && e.effect.is_empty()
+            && (e.layer, e.margin_l, e.margin_r, e.margin_v) == (0, 0, 0, 0)
+            && Line::parse(&e.text).blocks.iter().all(|b| match b {
+                Block::Override { tags, .. } => {
+                    tags.iter().all(|t| KNOWN.contains(&t.name.as_str()))
+                }
+                Block::Text(_) => true,
+                Block::Drawing { .. } | Block::Comment(_) => false,
+            })
     };
-    encoding::encode(&text, opts.encoding, opts.bom)
+    let mut evs: Vec<&Event> = doc.events().iter().map(|e| &e.event).collect();
+    if !doc.attachments().is_empty() || !evs.iter().all(|e| plain(e)) {
+        return false;
+    }
+    // what the format cannot say (italics in part of an MPL2 line …) does not come back
+    let text = save_text(doc, format, opts);
+    let back = match format {
+        Format::Srt => simple::parse_srt(&text),
+        Format::Mpl2 => simple::parse_mpl2(&text),
+        Format::MicroDvd => simple::parse_microdvd(&text, &opts.fps).0,
+        _ => simple::parse_tmp(&text, LoadOptions::default().tmp_max_duration),
+    };
+    let canon = |t: &str| {
+        let (runs, an) = markup::ass_to_runs(t);
+        markup::runs_to_ass(&runs, an)
+    };
+    evs.sort_by_key(|e| e.start);
+    evs.len() == back.len()
+        && evs
+            .iter()
+            .zip(&back)
+            .all(|(e, b)| canon(&e.text) == canon(&b.text))
 }
 
 pub fn save_file(
@@ -526,6 +589,41 @@ mod tests {
     }
 
     #[test]
+    fn lossless_formats() {
+        let opts = SaveOptions::default();
+        let doc = |lines: &[&str]| {
+            from_subs(
+                lines
+                    .iter()
+                    .enumerate()
+                    .map(|(k, t)| Sub {
+                        start: Time(k as i64 * 1000),
+                        end: Time(k as i64 * 1000 + 500),
+                        text: t.to_string(),
+                    })
+                    .collect(),
+            )
+        };
+        let srt = |lines: &[&str]| lossless(&doc(lines), Format::Srt, &opts);
+        assert!(srt(&[r"{\an8}{\i1}a{\i0}\Nb", "", r"{\c&H0000FF&}red"]));
+        assert!(!srt(&[r"{\pos(1,2)}a"]));
+        assert!(!srt(&[r"a{note}"]));
+        assert!(!srt(&[r"{\p1}m 0 0 l 1 1{\p0}"]));
+        let mut d = doc(&["a", "b"]);
+        d.event_mut(1).unwrap().actor = "Ann".into();
+        assert!(!lossless(&d, Format::Srt, &opts));
+        d.event_mut(1).unwrap().actor.clear();
+        d.event_mut(1).unwrap().kind = EventKind::Comment;
+        assert!(!lossless(&d, Format::Srt, &opts));
+        assert!(lossless(&d, Format::Ass, &opts));
+        // italics: of whole lines in MPL2, anywhere in SRT
+        let part = doc(&[r"a {\i1}b"]);
+        assert!(!lossless(&part, Format::Mpl2, &opts));
+        assert!(lossless(&part, Format::Srt, &opts));
+        assert!(lossless(&doc(&[r"{\i1}a\N{\i0}b"]), Format::Mpl2, &opts));
+    }
+
+    #[test]
     fn detection() {
         assert_eq!(
             detect_format("[Script Info]\nTitle: x\n", None),
@@ -549,6 +647,29 @@ mod tests {
             Some(Format::Tmp)
         );
         assert_eq!(detect_format("hello", None), None);
+        assert_eq!(
+            detect_format("; made by hand\n\u{feff}[Script Info]\n", Some("txt")),
+            Some(Format::Ass)
+        );
+        // the name only for an empty file
+        assert_eq!(detect_format("hello", Some("srt")), None);
+        assert_eq!(detect_format("\u{feff}\n", Some("srt")), Some(Format::Srt));
+        let opts = LoadOptions::default();
+        assert!(matches!(
+            load_bytes(b"1\n00:00:01 --> later\nx\n", Some("srt"), &opts),
+            Err(Error::Empty)
+        ));
+        assert!(matches!(
+            load_bytes(b"hello", Some("ass"), &opts),
+            Err(Error::UnknownFormat)
+        ));
+        assert_eq!(
+            load_bytes(b"", Some("srt"), &opts)
+                .unwrap()
+                .doc
+                .event_count(),
+            0
+        );
     }
 
     #[test]
