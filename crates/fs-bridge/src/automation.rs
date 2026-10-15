@@ -11,7 +11,9 @@ use fs_automation::{
 };
 
 use crate::Session;
-use crate::ffi::{AutomationHost, DialogControlData, DialogData, MacroItem, MacroResult};
+use crate::ffi::{
+    AutomationHost, DialogControlData, DialogData, MacroItem, MacroResult, ScriptItem,
+};
 use crate::media::{Renderer, Video};
 
 struct CppHost(UniquePtr<AutomationHost>);
@@ -284,17 +286,56 @@ impl Automation {
         self.add(Path::new(path))
     }
 
-    pub fn scripts(&self) -> Vec<String> {
+    pub fn scripts(&self) -> Vec<ScriptItem> {
+        let autoload = fs_automation::autoload_files(&self.env.paths);
         self.scripts
             .iter()
-            .map(|s| s.path.to_string_lossy().into_owned())
+            .map(|s| ScriptItem {
+                path: s.path.to_string_lossy().into_owned(),
+                name: s.name.clone(),
+                description: s.description.clone(),
+                author: s.author.clone(),
+                version: s.version.clone(),
+                error: s.error.clone().unwrap_or_default(),
+                autoload: autoload.contains(&s.path),
+                macros: s.macros.len(),
+                filters: s.filters.len(),
+            })
             .collect()
     }
 
-    /// Reload every loaded script from disk.
+    /// Reload every loaded script from disk and load new files in the
+    /// autoload dirs (Aegisub's "Reload all scripts" with its rescan).
     pub fn reload(&mut self) -> Vec<String> {
-        let paths: Vec<PathBuf> = self.scripts.drain(..).map(|s| s.path).collect();
+        let mut paths: Vec<PathBuf> = self.scripts.drain(..).map(|s| s.path).collect();
+        for p in fs_automation::autoload_files(&self.env.paths) {
+            if !paths.contains(&p) {
+                paths.push(p);
+            }
+        }
         paths.iter().filter_map(|p| self.add(p).err()).collect()
+    }
+
+    /// Reload one script, keeping its place in the macro menu.
+    pub fn reload_script(&mut self, index: usize) -> Result<(), String> {
+        let Some(old) = self.scripts.get(index) else {
+            return Ok(());
+        };
+        let s = Script::load(&old.path, &self.env);
+        let err = s
+            .error
+            .as_ref()
+            .map(|e| format!("{}: {e}", s.path.display()));
+        self.scripts[index] = s;
+        self.index();
+        err.map_or(Ok(()), Err)
+    }
+
+    pub fn remove_script(&mut self, index: usize) {
+        if index < self.scripts.len() {
+            self.scripts.remove(index);
+            self.index();
+        }
     }
 
     pub fn macros(&self) -> Vec<MacroItem> {
@@ -485,6 +526,46 @@ end)"#,
         assert_eq!(s.row(0).text, "ABC");
         assert!(s.undo());
         assert_eq!(s.row(0).text, "abc");
+    }
+
+    #[test]
+    fn manage_scripts() {
+        let dir = std::env::temp_dir().join(format!("fsb-manage-{}", std::process::id()));
+        let autoload = dir.join("user/automation/autoload");
+        std::fs::create_dir_all(&autoload).unwrap();
+        let macro_lua = |name: &str| {
+            format!(r#"script_name="{name}" aegisub.register_macro("{name}", "", function() end)"#)
+        };
+        let a_lua = dir.join("a.lua");
+        std::fs::write(&a_lua, macro_lua("A")).unwrap();
+        std::fs::write(dir.join("b.lua"), macro_lua("B")).unwrap();
+        let data = concat!(env!("CARGO_MANIFEST_DIR"), "/../fs-automation");
+        let mut a = Automation::new(data, dir.join("user").to_str().unwrap());
+        a.load_script(a_lua.to_str().unwrap()).unwrap();
+        a.load_script(dir.join("b.lua").to_str().unwrap()).unwrap();
+        let names = |a: &Automation| a.macros().into_iter().map(|m| m.name).collect::<Vec<_>>();
+        assert_eq!(names(&a), ["A", "B"]);
+        // reloading one keeps its place; a broken one keeps its entry with the error
+        std::fs::write(&a_lua, macro_lua("A2")).unwrap();
+        a.reload_script(0).unwrap();
+        assert_eq!(names(&a), ["A2", "B"]);
+        std::fs::write(&a_lua, "syntax error(").unwrap();
+        assert!(a.reload_script(0).is_err());
+        assert!(!a.scripts()[0].error.is_empty());
+        a.remove_script(0);
+        assert_eq!(names(&a), ["B"]);
+        // reload all picks up a new autoload script (and the bundled ones)
+        std::fs::write(autoload.join("c.lua"), macro_lua("C")).unwrap();
+        let errors = a.reload();
+        assert!(errors.iter().all(|e| !e.contains("c.lua")), "{errors:?}");
+        let n = names(&a);
+        assert!(n[0] == "B" && n.contains(&"C".to_owned()), "{n:?}");
+        let s = a.scripts();
+        assert!(
+            s.iter()
+                .any(|s| s.name == "C" && s.autoload && s.macros == 1)
+        );
+        assert!(s.iter().any(|s| s.name == "B" && !s.autoload));
     }
 
     #[test]

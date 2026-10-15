@@ -39,6 +39,7 @@ public:
     bool confirm(const QString &msg);
     void status(const QString &msg);
     void error(const QString &msg);
+    void log(const QString &text); // the log window, shown when text is not blank
     void editStyle(const QString &name);
     void pasteTranslation();
     void updateStatus();
@@ -66,6 +67,7 @@ private:
     bool saveAs(TabPanel *tab);
     void convert(const QString &format);
     void runMacro(size_t id);
+    void automationManager();
     void updateActions();
     void withRow(const std::function<void(TabPanel *, fsb::Row &)> &fn);
 

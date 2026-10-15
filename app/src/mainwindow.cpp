@@ -28,6 +28,8 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QHBoxLayout>
+#include <QHeaderView>
 #include <QInputDialog>
 #include <QKeySequenceEdit>
 #include <QKeyEvent>
@@ -52,6 +54,7 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QTreeWidget>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -77,6 +80,7 @@ const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"saveAs", {"file-export", kBlue}}, {"exportAs", {"file-arrow-right", kBlue}}, {"saveTranslation", {"language", kBlue}}, {"removeSubs", {"file-x", kRed}},
     {"saveWithVideoName", {"file-symlink", kBlue}}, {"removeTemp", {"trash", kRed}}, {"openAutosave", {"restore", kAmber}}, {"showLog", {"terminal-2", {}}},
     {"loadSession", {"restore", {}}}, {"fontCollector", {"typography", kPurple}}, {"settings", {"settings", {}}},
+    {"automationManager", {"list-check", kAmber}},
     {"exit", {"logout", kRed}}, {"undo", {"arrow-back-up", {}}}, {"undoToSave", {"arrow-back-up-double", {}}},
     {"redo", {"arrow-forward-up", {}}}, {"history", {"history", {}}}, {"findReplace", {"replace", kOrange}},
     {"find", {"search", kOrange}}, {"findNext", {"search", kOrange}}, {"selectLines", {"list-check", kGreen}},
@@ -505,11 +509,7 @@ void MainWindow::buildMenus() {
                 done = (*m_automation)->export_filtered(fs::slice(ids), t->s(), fs::Utf8(p), fix->isChecked(),
                                                         fs::Utf8(value(from)), fs::Utf8(fpsTo), {tc.data(), tc.size()},
                                                         fs::Utf8(enc->currentText()));
-            if (const QString log = fs::q((*m_automation)->take_log()); !log.trimmed().isEmpty()) {
-                auto *edit = findChild<QPlainTextEdit *>("log");
-                edit->appendPlainText(log);
-                edit->parentWidget()->show();
-            }
+            log(fs::q((*m_automation)->take_log()));
             if (done) status(tr("Exported %1").arg(QFileInfo(p).fileName()));
         } catch (const std::exception &e) {
             QMessageBox::warning(this, tr("Export"), QString::fromUtf8(e.what()));
@@ -1017,6 +1017,7 @@ void MainWindow::buildMenus() {
 
     // Automation
     m_automationMenu = menu(tr("Au&tomation"));
+    add("automationManager", tr("Automation manager..."), {}, nullptr, [this] { automationManager(); });
     connect(m_automationMenu, &QMenu::aboutToShow, this, [this] {
         auto *tab = current();
         const auto rows = tab->selection();
@@ -1214,6 +1215,13 @@ void MainWindow::status(const QString &msg) {
 }
 
 void MainWindow::error(const QString &msg) { QMessageBox::warning(this, tr("Error"), msg); }
+
+void MainWindow::log(const QString &text) {
+    if (text.trimmed().isEmpty()) return;
+    auto *edit = findChild<QPlainTextEdit *>("log");
+    edit->appendPlainText(text);
+    edit->parentWidget()->show();
+}
 
 bool MainWindow::confirm(const QString &msg) {
     return QMessageBox::question(this, tr("Confirm"), msg) == QMessageBox::Yes;
@@ -1436,13 +1444,7 @@ void MainWindow::buildAutomationMenu() {
             ++it;
         }
     }
-    auto log = [this](const QString &text) {
-        if (text.isEmpty()) return;
-        auto *edit = findChild<QPlainTextEdit *>("log");
-        edit->appendPlainText(text);
-        edit->parentWidget()->show();
-    };
-    m->addAction(icon("script", kAmber), tr("Load script"), this, [=, this] {
+    m->addAction(icon("script", kAmber), tr("Load script"), this, [this] {
         const QString f = QFileDialog::getOpenFileName(this, tr("Load script"), {},
                                                        tr("Automation scripts (*.lua *.moon);;All files (*)"));
         if (f.isEmpty()) return;
@@ -1455,10 +1457,11 @@ void MainWindow::buildAutomationMenu() {
         }
         buildAutomationMenu();
     });
-    m->addAction(icon("refresh", kGreen), tr("Refresh autoload scripts"), this, [=, this] {
+    m->addAction(icon("refresh", kGreen), tr("Reload all scripts"), this, [this] {
         for (const auto &e : (*m_automation)->reload()) log(fs::q(e));
         buildAutomationMenu();
     });
+    m->addAction(m_actions.value("automationManager"));
     m->addAction(icon("player-play-filled", kGreen), tr("Run the last loaded script"), this, [this] {
         if (m_lastMacro >= 0 && size_t(m_lastMacro) < (*m_automation)->macros().size()) runMacro(size_t(m_lastMacro));
     });
@@ -1486,6 +1489,95 @@ void MainWindow::buildAutomationMenu() {
     }
 }
 
+// Aegisub's Automation Manager: G(lobal, autoload) / L(oaded by hand) scripts, failed ones in red.
+void MainWindow::automationManager() {
+    QDialog d(this);
+    d.setWindowTitle(tr("Automation manager"));
+    d.resize(720, 380);
+    auto *v = new QVBoxLayout(&d);
+    auto *list = new QTreeWidget(&d);
+    list->setHeaderLabels({"", tr("Name"), tr("File name"), tr("Description")});
+    list->setRootIsDecorated(false);
+    list->header()->setSectionResizeMode(3, QHeaderView::Stretch);
+    v->addWidget(list);
+    auto *h = new QHBoxLayout;
+    v->addLayout(h);
+    rust::Vec<fsb::ScriptItem> scripts;
+    QPushButton *remove = nullptr, *reload = nullptr, *info = nullptr;
+    const auto row = [list] { return list->currentIndex().row(); };
+    const auto enable = [&] {
+        const int r = row();
+        const bool any = r >= 0 && size_t(r) < scripts.size();
+        remove->setEnabled(any && !scripts[size_t(r)].autoload);
+        reload->setEnabled(any);
+        info->setEnabled(any);
+    };
+    auto refresh = [&, this](int select) {
+        buildAutomationMenu();
+        scripts = (*m_automation)->scripts();
+        list->clear();
+        for (const auto &s : scripts) {
+            const bool ok = s.error.empty();
+            auto *it = new QTreeWidgetItem(list, {s.autoload ? "G" : "L", fs::q(s.name),
+                                                  QFileInfo(fs::q(s.path)).fileName(),
+                                                  fs::q(ok ? s.description : s.error)});
+            if (!ok)
+                for (int c = 0; c < 4; ++c) it->setForeground(c, QColor(255, 128, 128));
+        }
+        for (int c = 0; c < 3; ++c) list->resizeColumnToContents(c);
+        list->setCurrentItem(list->topLevelItem(std::max(0, std::min(select, list->topLevelItemCount() - 1))));
+        enable();
+    };
+    auto button = [&](const QString &text, auto fn) {
+        auto *b = new QPushButton(text, &d);
+        connect(b, &QPushButton::clicked, &d, fn);
+        h->addWidget(b);
+        return b;
+    };
+    button(tr("Add"), [&, this] {
+        const QString f = QFileDialog::getOpenFileName(&d, tr("Load script"), {},
+                                                       tr("Automation scripts (*.lua *.moon);;All files (*)"));
+        if (f.isEmpty()) return;
+        try {
+            (*m_automation)->load_script(fs::Utf8(f));
+        } catch (const rust::Error &e) {
+            log(QString::fromUtf8(e.what()));
+        }
+        refresh(int(scripts.size()));
+    });
+    remove = button(tr("Remove"), [&, this] {
+        (*m_automation)->remove_script(size_t(row()));
+        refresh(row());
+    });
+    reload = button(tr("Reload"), [&, this] {
+        try {
+            (*m_automation)->reload_script(size_t(row()));
+        } catch (const rust::Error &e) {
+            log(QString::fromUtf8(e.what()));
+        }
+        refresh(row());
+    });
+    info = button(tr("Show info"), [&] {
+        const auto &s = scripts[size_t(row())];
+        QMessageBox::information(
+            &d, tr("Automation script info"),
+            tr("Name: %1\nDescription: %2\nAuthor: %3\nVersion: %4\nFull path: %5\nState: %6\nMacros: %7\n"
+               "Export filters: %8")
+                .arg(fs::q(s.name), fs::q(s.description), fs::q(s.author), fs::q(s.version), fs::q(s.path),
+                     s.error.empty() ? tr("Correctly loaded") : tr("Failed to load: %1").arg(fs::q(s.error)),
+                     QString::number(s.macros), QString::number(s.filters)));
+    });
+    button(tr("Reload all"), [&, this] {
+        for (const auto &e : (*m_automation)->reload()) log(fs::q(e));
+        refresh(row());
+    });
+    h->addStretch();
+    button(tr("Close"), [&] { d.accept(); });
+    connect(list, &QTreeWidget::currentItemChanged, &d, enable);
+    refresh(0);
+    d.exec();
+}
+
 void MainWindow::runMacro(size_t id) {
     auto *tab = current();
     const auto rows = tab->selection();
@@ -1497,13 +1589,9 @@ void MainWindow::runMacro(size_t id) {
         err = QString::fromUtf8(e.what());
     }
     m_host->finish();
-    QString log = fs::q((*m_automation)->take_log());
-    if (!err.isEmpty()) log += (log.isEmpty() ? "" : "\n") + err;
-    if (!log.isEmpty()) {
-        auto *edit = findChild<QPlainTextEdit *>("log");
-        edit->appendPlainText(log);
-        edit->parentWidget()->show();
-    }
+    QString text = fs::q((*m_automation)->take_log());
+    if (!err.isEmpty()) text += (text.isEmpty() ? "" : "\n") + err;
+    log(text);
     if (r.changed) tab->changed();
     // a macro may only return a new selection (e.g. Select overlaps)
     const auto sel = fs::vec(r.selection);

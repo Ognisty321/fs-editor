@@ -260,6 +260,22 @@ pub mod ffi {
         description: String,
     }
 
+    /// A loaded automation script, for the Automation Manager.
+    #[derive(Debug, Clone, Default)]
+    struct ScriptItem {
+        path: String,
+        name: String,
+        description: String,
+        author: String,
+        version: String,
+        /// Load error; empty when it loaded.
+        error: String,
+        /// Found in an autoload dir (reloading brings it back, so it is not removable).
+        autoload: bool,
+        macros: usize,
+        filters: usize,
+    }
+
     /// The editor state handed to the C++ side after a macro ran.
     #[derive(Debug, Clone, Default)]
     struct MacroResult {
@@ -583,10 +599,14 @@ pub mod ffi {
         /// Without a host, dialogs are answered with their defaults.
         fn set_host(self: &mut Automation, host: UniquePtr<AutomationHost>);
         fn set_cache_dir(self: &mut Automation, dir: &str);
-        fn scripts(self: &Automation) -> Vec<String>;
+        fn scripts(self: &Automation) -> Vec<ScriptItem>;
+        /// Reload every script and load new files in the autoload dirs; returns the load errors.
         fn reload(self: &mut Automation) -> Vec<String>;
         fn load_autoload(self: &mut Automation) -> Vec<String>;
         fn load_script(self: &mut Automation, path: &str) -> Result<()>;
+        /// Reload script `index` (of `scripts()`) in place.
+        fn reload_script(self: &mut Automation, index: usize) -> Result<()>;
+        fn remove_script(self: &mut Automation, index: usize);
         fn macros(self: &Automation) -> Vec<MacroItem>;
         fn filters(self: &Automation) -> Vec<MacroItem>;
         /// False when the user cancelled a filter's settings.

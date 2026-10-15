@@ -1512,6 +1512,10 @@ Dekoder: BestSource</translation>
         <translation>Au&amp;tomatyzacja</translation>
     </message>
     <message>
+        <source>Automation manager...</source>
+        <translation>Menedżer automatyzacji...</translation>
+    </message>
+    <message>
         <source>&amp;Help</source>
         <translation>Pomo&amp;c</translation>
     </message>
@@ -1672,8 +1676,78 @@ Dekoder: BestSource</translation>
         <translation>Skrypty automatyzacji (*.lua *.moon);;Wszystkie pliki (*)</translation>
     </message>
     <message>
-        <source>Refresh autoload scripts</source>
-        <translation>Odśwież skrypty autoload</translation>
+        <source>Reload all scripts</source>
+        <translation>Przeładuj wszystkie skrypty</translation>
+    </message>
+    <message>
+        <source>Automation manager</source>
+        <translation>Menedżer automatyzacji</translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation>Nazwa</translation>
+    </message>
+    <message>
+        <source>File name</source>
+        <translation>Nazwa pliku</translation>
+    </message>
+    <message>
+        <source>Description</source>
+        <translation>Opis</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Dodaj</translation>
+    </message>
+    <message>
+        <source>Remove</source>
+        <translation>Usuń</translation>
+    </message>
+    <message>
+        <source>Reload</source>
+        <translation>Przeładuj</translation>
+    </message>
+    <message>
+        <source>Show info</source>
+        <translation>Pokaż informacje</translation>
+    </message>
+    <message>
+        <source>Automation script info</source>
+        <translation>Informacje o skrypcie automatyzacji</translation>
+    </message>
+    <message>
+        <source>Name: %1
+Description: %2
+Author: %3
+Version: %4
+Full path: %5
+State: %6
+Macros: %7
+Export filters: %8</source>
+        <translation>Nazwa: %1
+Opis: %2
+Autor: %3
+Wersja: %4
+Pełna ścieżka: %5
+Stan: %6
+Makra: %7
+Filtry eksportu: %8</translation>
+    </message>
+    <message>
+        <source>Correctly loaded</source>
+        <translation>Wczytany poprawnie</translation>
+    </message>
+    <message>
+        <source>Failed to load: %1</source>
+        <translation>Nie udało się wczytać: %1</translation>
+    </message>
+    <message>
+        <source>Reload all</source>
+        <translation>Przeładuj wszystkie</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>Zamknij</translation>
     </message>
     <message>
         <source>Run the last loaded script</source>
