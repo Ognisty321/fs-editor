@@ -40,15 +40,28 @@ class FindDialog : public QDialog {
     Q_OBJECT
 public:
     explicit FindDialog(MainWindow *main);
-    void showTab(int tab); // 0 find, 1 replace
+    void showTab(int tab); // 0 find, 1 replace, 2 find in files
     void findNext();
 private:
     fsb::FindSpec spec() const;
+    // Kainote's Find all: the matching lines of the tabs, or of the files in a folder, in a results window
+    void findAll(const QList<TabPanel *> &tabs);
+    void findInFiles();
+    void clearResults();
+    void addResults(TabPanel *tab, const QString &title, const QString &path, const fsb::Session &s,
+                    const rust::Vec<size_t> &rows);
+    void showResults(const QString &summary);
+    void goToResult(class QTreeWidgetItem *item);
     MainWindow *m_main;
     QTabWidget *m_tabs;
     QComboBox *m_find, *m_replace;
-    QCheckBox *m_case, *m_regex, *m_comments, *m_skipTags;
+    QCheckBox *m_case, *m_regex, *m_comments, *m_skipTags, *m_subdirs;
     QRadioButton *m_field[4], *m_lines[3];
+    QLineEdit *m_dir, *m_filter;
+    QDialog *m_results = nullptr;
+    QTreeWidget *m_tree = nullptr;
+    QLabel *m_summary = nullptr;
+    QList<QPointer<TabPanel>> m_resultTabs; // per file in the results; null: not open (yet)
 };
 
 class SelectLinesDialog : public QDialog {

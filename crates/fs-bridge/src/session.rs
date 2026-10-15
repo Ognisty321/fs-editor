@@ -1218,23 +1218,41 @@ impl Session {
         Ok(m)
     }
 
+    /// Whether row `r`'s field matches (either text of a translation row).
+    fn row_hit(&self, m: &TextMatcher, spec: &FindSpec, r: usize) -> bool {
+        let row = self.rows[r];
+        std::iter::once(row.main())
+            .chain(self.tl.then_some(row.original))
+            .filter_map(|e| self.ed.doc.event(e))
+            .any(|ev| (spec.include_comments || !ev.is_comment()) && m.is_match(ev))
+    }
+
     /// Next row after `from` (wrapping) whose field matches; -1 if none.
     pub fn find(&self, spec: &FindSpec, from: usize) -> Result<i64, String> {
         let m = Self::matcher(spec)?;
         let n = self.rows.len();
-        let doc = &self.ed.doc;
         for k in 1..=n {
             let r = (from + k) % n;
-            let row = self.rows[r];
-            let hit = std::iter::once(row.main())
-                .chain(self.tl.then_some(row.original))
-                .filter_map(|e| doc.event(e))
-                .any(|ev| (spec.include_comments || !ev.is_comment()) && m.is_match(ev));
-            if hit && (spec.rows.is_empty() || spec.rows.contains(&r)) {
+            if (spec.rows.is_empty() || spec.rows.contains(&r)) && self.row_hit(&m, spec, r) {
                 return Ok(r as i64);
             }
         }
         Ok(-1)
+    }
+
+    /// Every row whose field matches, in order (Kainote's Find all).
+    pub fn find_all(&self, spec: &FindSpec) -> Result<Vec<usize>, String> {
+        let m = Self::matcher(spec)?;
+        let n = self.rows.len();
+        Ok(if spec.rows.is_empty() {
+            (0..n).filter(|&r| self.row_hit(&m, spec, r)).collect()
+        } else {
+            let mut rows: Vec<usize> = spec.rows.iter().copied().filter(|&r| r < n).collect();
+            rows.sort_unstable();
+            rows.dedup();
+            rows.retain(|&r| self.row_hit(&m, spec, r));
+            rows
+        })
     }
 
     /// The events `spec` replaces in and how.
@@ -2155,6 +2173,19 @@ mod tests {
         assert_eq!(s.row(1).text, "two");
         assert_eq!(s.move_rows(&[2], -2), vec![0]);
         assert_eq!(s.row(0).text, "three");
+    }
+
+    #[test]
+    fn find_all_rows() {
+        let s = session(ASS);
+        let spec = |pattern: &str, rows: Vec<usize>| FindSpec {
+            pattern: pattern.into(),
+            rows,
+            ..Default::default()
+        };
+        assert_eq!(s.find_all(&spec("o", vec![])), Ok(vec![0, 1]));
+        assert_eq!(s.find_all(&spec("e", vec![2, 0, 2, 9])), Ok(vec![0, 2]));
+        assert_eq!(s.find_all(&spec("x", vec![])), Ok(vec![]));
     }
 
     #[test]

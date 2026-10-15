@@ -470,6 +470,8 @@ pub mod ffi {
         ) -> Vec<usize>;
         fn filter(self: &Session, spec: &FilterSpec) -> Vec<usize>;
         fn find(self: &Session, spec: &FindSpec, from: usize) -> Result<i64>;
+        /// Every matching row, in order (Kainote's Find all).
+        fn find_all(self: &Session, spec: &FindSpec) -> Result<Vec<usize>>;
         fn replace_all(self: &mut Session, spec: &FindSpec) -> Result<usize>;
         fn replace_rules(self: &mut Session, specs: &[FindSpec]) -> Result<usize>;
         fn overlapping(self: &Session, row: usize) -> Vec<usize>;

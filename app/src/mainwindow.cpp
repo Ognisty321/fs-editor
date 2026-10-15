@@ -315,6 +315,10 @@ void MainWindow::compareTabs(bool on) {
     m_second->grid()->setCompare(diff(m_second, current()));
 }
 
+void MainWindow::showPanel(TabPanel *t) {
+    if (const int i = indexOfPanel(t); i >= 0) m_tabs->setCurrentIndex(i);
+}
+
 QList<TabPanel *> MainWindow::tabs() const {
     QList<TabPanel *> out;
     for (int i = 0; i < m_tabs->count(); ++i) out << panel(i);

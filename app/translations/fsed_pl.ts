@@ -423,12 +423,28 @@
         <translation>Znajdź</translation>
     </message>
     <message>
+        <source>Find in files</source>
+        <translation>Znajdź w plikach</translation>
+    </message>
+    <message>
         <source>Search text</source>
         <translation>Szukany tekst</translation>
     </message>
     <message>
         <source>Replace with</source>
         <translation>Zamień na</translation>
+    </message>
+    <message>
+        <source>Folder</source>
+        <translation>Folder</translation>
+    </message>
+    <message>
+        <source>Files</source>
+        <translation>Pliki</translation>
+    </message>
+    <message>
+        <source>Include subfolders</source>
+        <translation>Uwzględnij podfoldery</translation>
     </message>
     <message>
         <source>Match case</source>
@@ -483,6 +499,14 @@
         <translation>Od zaznaczonej</translation>
     </message>
     <message>
+        <source>Find all</source>
+        <translation>Znajdź wszystko</translation>
+    </message>
+    <message>
+        <source>Find in all open subtitles</source>
+        <translation>Znajdź we wszystkich otwartych napisach</translation>
+    </message>
+    <message>
         <source>Replace next</source>
         <translation>Zamień następne</translation>
     </message>
@@ -501,6 +525,22 @@
     <message>
         <source>Replacements: %1</source>
         <translation>Zamiany: %1</translation>
+    </message>
+    <message>
+        <source>Lines found: %1, in files: %2</source>
+        <translation>Znalezione linijki: %1, w plikach: %2</translation>
+    </message>
+    <message>
+        <source>Lines found: %1, in files: %2 (searched: %3)</source>
+        <translation>Znalezione linijki: %1, w plikach: %2 (przeszukane: %3)</translation>
+    </message>
+    <message>
+        <source>Search results</source>
+        <translation>Wyniki wyszukiwania</translation>
+    </message>
+    <message>
+        <source>Line</source>
+        <translation>Linijka</translation>
     </message>
     <message>
         <source>Nothing found</source>

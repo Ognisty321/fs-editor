@@ -16,6 +16,8 @@
 #include <QComboBox>
 #include <QCompleter>
 #include <QDialogButtonBox>
+#include <QDirIterator>
+#include <QRegularExpression>
 #include <QDoubleSpinBox>
 #include <QDateTime>
 #include <QDir>
@@ -83,6 +85,7 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
     m_tabs = new QTabWidget(this);
     m_tabs->addTab(new QWidget, tr("Find"));
     m_tabs->addTab(new QWidget, tr("Find and replace"));
+    m_tabs->addTab(new QWidget, tr("Find in files"));
     v->addWidget(m_tabs);
     auto *f = new QFormLayout;
     m_find = new QComboBox(this);
@@ -96,6 +99,26 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
     auto *replLabel = new QLabel(tr("Replace with"), this);
     f->addRow(replLabel, m_replace);
     v->addLayout(f);
+    auto *filesBox = new QWidget(this);
+    auto *ff = new QFormLayout(filesBox);
+    ff->setContentsMargins(0, 0, 0, 0);
+    auto *dirRow = new QHBoxLayout;
+    m_dir = new QLineEdit(st.value("find/dir").toString(), filesBox);
+    auto *browse = new QToolButton(filesBox);
+    browse->setText("...");
+    connect(browse, &QToolButton::clicked, this, [this] {
+        const QString d = QFileDialog::getExistingDirectory(this, tr("Folder"), m_dir->text());
+        if (!d.isEmpty()) m_dir->setText(QDir::toNativeSeparators(d));
+    });
+    dirRow->addWidget(m_dir, 1);
+    dirRow->addWidget(browse);
+    ff->addRow(tr("Folder"), dirRow);
+    m_filter = new QLineEdit(st.value("find/filter", "*.ass *.ssa *.srt").toString(), filesBox);
+    ff->addRow(tr("Files"), m_filter);
+    m_subdirs = new QCheckBox(tr("Include subfolders"), filesBox);
+    m_subdirs->setChecked(st.value("find/subdirs", true).toBool());
+    ff->addRow(m_subdirs);
+    v->addWidget(filesBox);
     auto *checks = new QHBoxLayout;
     m_case = new QCheckBox(tr("Match case"), this);
     m_regex = new QCheckBox(tr("Regular expressions"), this);
@@ -119,14 +142,19 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
     v->addLayout(groups);
     auto *bb = new QHBoxLayout;
     auto *find = new QPushButton(tr("Find"), this);
+    auto *findAll = new QPushButton(tr("Find all"), this);
+    auto *findOpen = new QPushButton(tr("Find in all open subtitles"), this);
+    auto *findFiles = new QPushButton(tr("Find in files"), this);
     auto *replNext = new QPushButton(tr("Replace next"), this);
     auto *replAll = new QPushButton(tr("Replace all"), this);
     auto *replOpen = new QPushButton(tr("Replace in all open subtitles"), this);
     auto *close = new QPushButton(tr("Close"), this);
-    find->setDefault(true);
-    for (auto *b : {find, replNext, replAll, replOpen, close}) bb->addWidget(b);
+    for (auto *b : {find, findAll, findOpen, findFiles, replNext, replAll, replOpen, close}) bb->addWidget(b);
     v->addLayout(bb);
     connect(find, &QPushButton::clicked, this, &FindDialog::findNext);
+    connect(findAll, &QPushButton::clicked, this, [this] { this->findAll({m_main->current()}); });
+    connect(findOpen, &QPushButton::clicked, this, [this] { this->findAll(m_main->tabs()); });
+    connect(findFiles, &QPushButton::clicked, this, &FindDialog::findInFiles);
     connect(close, &QPushButton::clicked, this, &QDialog::hide);
     auto remember = [this] {
         QSettings st;
@@ -182,6 +210,9 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
     connect(m_tabs, &QTabWidget::currentChanged, this, [=, this](int i) {
         for (QWidget *w : std::initializer_list<QWidget *>{replLabel, m_replace, replNext, replAll, replOpen})
             w->setVisible(i == 1);
+        for (QWidget *w : std::initializer_list<QWidget *>{find, findAll, findOpen, lg}) w->setVisible(i < 2);
+        for (QWidget *w : std::initializer_list<QWidget *>{filesBox, findFiles}) w->setVisible(i == 2);
+        (i < 2 ? find : findFiles)->setDefault(true);
         adjustSize();
     });
     showTab(0);
@@ -213,6 +244,129 @@ fsb::FindSpec FindDialog::spec() const {
         for (size_t r = tab->selection().empty() ? 0 : tab->selection().front(); r < tab->s().row_count(); ++r)
             s.rows.push_back(r);
     return s;
+}
+
+void FindDialog::findAll(const QList<TabPanel *> &tabs) {
+    if (m_find->currentText().isEmpty()) return;
+    clearResults();
+    size_t lines = 0;
+    int files = 0;
+    for (auto *tab : tabs) {
+        auto s = spec(); // "Selected" and "From selected" are the current tab's rows
+        if (tab != m_main->current()) s.rows.clear();
+        try {
+            const auto rows = tab->s().find_all(s);
+            if (rows.empty()) continue;
+            addResults(tab, tab->title(), tab->path(), tab->s(), rows);
+            lines += rows.size();
+            ++files;
+        } catch (const rust::Error &e) {
+            return m_main->error(QString::fromUtf8(e.what()));
+        }
+    }
+    showResults(tr("Lines found: %1, in files: %2").arg(lines).arg(files));
+}
+
+// shortcut: reads the files on the GUI thread; move it to a worker if people search big folders
+void FindDialog::findInFiles() {
+    const QString dir = m_dir->text().trimmed();
+    if (m_find->currentText().isEmpty() || !QFileInfo(dir).isDir()) return;
+    QSettings st;
+    st.setValue("find/dir", dir);
+    st.setValue("find/filter", m_filter->text());
+    st.setValue("find/subdirs", m_subdirs->isChecked());
+    auto s = spec();
+    s.rows.clear();
+    try {
+        (void)fsb::new_session()->find_all(s); // a bad regex fails here once, not for every file
+    } catch (const rust::Error &e) {
+        return m_main->error(QString::fromUtf8(e.what()));
+    }
+    clearResults();
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    size_t lines = 0;
+    int files = 0, searched = 0;
+    QDirIterator it(dir, m_filter->text().split(QRegularExpression("[;,\\s]+"), Qt::SkipEmptyParts), QDir::Files,
+                    m_subdirs->isChecked() ? QDirIterator::Subdirectories : QDirIterator::NoIteratorFlags);
+    while (it.hasNext()) {
+        const QString path = it.next();
+        auto file = fsb::new_session();
+        try {
+            file->open(fs::Utf8(path));
+        } catch (const rust::Error &) {
+            continue; // not subtitles after all
+        }
+        ++searched;
+        const auto rows = file->find_all(s);
+        if (rows.empty()) continue;
+        addResults(nullptr, QDir(dir).relativeFilePath(path), path, *file, rows);
+        lines += rows.size();
+        ++files;
+    }
+    QApplication::restoreOverrideCursor();
+    showResults(tr("Lines found: %1, in files: %2 (searched: %3)").arg(lines).arg(files).arg(searched));
+}
+
+void FindDialog::clearResults() {
+    if (!m_results) {
+        m_results = new QDialog(m_main);
+        m_results->setWindowTitle(tr("Search results"));
+        auto *v = new QVBoxLayout(m_results);
+        m_tree = new QTreeWidget(m_results);
+        m_tree->setHeaderLabels({tr("Line"), tr("Text")});
+        m_tree->setRootIsDecorated(true);
+        m_tree->setUniformRowHeights(true);
+        m_tree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+        v->addWidget(m_tree);
+        m_summary = new QLabel(m_results);
+        v->addWidget(m_summary);
+        connect(m_tree, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem *it) { goToResult(it); });
+        m_results->resize(700, 400);
+    }
+    m_tree->clear();
+    m_resultTabs.clear();
+}
+
+void FindDialog::addResults(TabPanel *tab, const QString &title, const QString &path, const fsb::Session &s,
+                            const rust::Vec<size_t> &rows) {
+    auto *file = new QTreeWidgetItem(m_tree, {title});
+    file->setFirstColumnSpanned(true);
+    file->setData(0, Qt::UserRole, int(m_resultTabs.size()));
+    file->setData(0, Qt::UserRole + 1, path);
+    file->setToolTip(0, path);
+    m_resultTabs.append(tab);
+    for (size_t r : rows) {
+        auto *it = new QTreeWidgetItem(file, {QString::number(r + 1), fs::q(s.row(r).text)});
+        it->setData(0, Qt::UserRole, qulonglong(r));
+    }
+    file->setExpanded(true);
+}
+
+void FindDialog::showResults(const QString &summary) {
+    m_summary->setText(summary);
+    m_results->show();
+    m_results->raise();
+    m_main->status(m_tree->topLevelItemCount() ? summary : tr("Nothing found"));
+}
+
+void FindDialog::goToResult(QTreeWidgetItem *item) {
+    auto *file = item->parent();
+    if (!file) return;
+    const int k = file->data(0, Qt::UserRole).toInt();
+    QPointer<TabPanel> &tab = m_resultTabs[k];
+    if (!tab) { // a file from the folder, or a tab closed since: open it, once
+        const QString path = file->data(0, Qt::UserRole + 1).toString();
+        if (path.isEmpty()) return;
+        for (auto *t : m_main->tabs())
+            if (!t->path().isEmpty() && QFileInfo(t->path()) == QFileInfo(path)) tab = t;
+        if (!tab) {
+            m_main->openFile(path);
+            if (QFileInfo(m_main->current()->path()) == QFileInfo(path)) tab = m_main->current();
+        }
+        if (!tab) return;
+    }
+    m_main->showPanel(tab);
+    tab->setActive(int(item->data(0, Qt::UserRole).toULongLong()));
 }
 
 void FindDialog::findNext() {
