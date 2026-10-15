@@ -50,6 +50,8 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QStyle>
+#include <QProxyStyle>
+#include <QStyleOptionToolButton>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTimer>
@@ -130,6 +132,27 @@ bool isKeyframesFile(const QString &path) {
     const QByteArray head = f.read(64).toLower();
     return head.contains("keyframe format") || head.startsWith("# xvid") || head.startsWith("# ffindex");
 }
+
+// A toolbar button with a menu: the native style takes the arrow's room from the icon, which
+// then sits left of the others; here the icon is drawn centred and the arrow in the corner.
+class MenuButtonStyle final : public QProxyStyle {
+public:
+    void drawComplexControl(ComplexControl cc, const QStyleOptionComplex *opt, QPainter *p,
+                            const QWidget *w) const override {
+        const auto *tb = qstyleoption_cast<const QStyleOptionToolButton *>(opt);
+        if (cc != CC_ToolButton || !tb || (tb->features & QStyleOptionToolButton::MenuButtonPopup) ||
+            !(tb->features & QStyleOptionToolButton::HasMenu))
+            return QProxyStyle::drawComplexControl(cc, opt, p, w);
+        QStyleOptionToolButton o = *tb;
+        o.features &= ~QStyleOptionToolButton::HasMenu;
+        QProxyStyle::drawComplexControl(cc, &o, p, w);
+        // QCommonStyle's corner arrow
+        const int mbi = pixelMetric(PM_MenuButtonIndicator, tb, w);
+        const QRect r = tb->rect;
+        o.rect = visualRect(tb->direction, r, QRect(r.right() + 5 - mbi, r.bottom() + 5 - mbi, mbi - 6, mbi - 6));
+        drawPrimitive(PE_IndicatorArrowDown, &o, p, w);
+    }
+};
 } // namespace
 
 MainWindow::MainWindow() {
@@ -319,7 +342,6 @@ TabPanel *MainWindow::newTab() {
     connect(tab, &TabPanel::statusChanged, this, [this, tab] {
         if (tab == current()) updateStatus();
     });
-    tab->grid()->setHideTags(action("hideTags")->isChecked());
     m_tabs->setCurrentIndex(i);
     refreshTitle();
     return tab;
@@ -1010,12 +1032,24 @@ void MainWindow::buildMenus() {
         QSettings().setValue("spell/enabled", on);
         spell::reload();
     });
-    auto *hide = add("hideTags", tr("Hide tags"), {}, subs, {});
-    hide->setCheckable(true);
-    hide->setChecked(QSettings().value("grid/hideTags").toBool());
-    connect(hide, &QAction::toggled, this, [this](bool on) {
-        QSettings().setValue("grid/hideTags", on);
-        for (auto *t : tabs()) t->grid()->setHideTags(on);
+    // Aegisub's tag hiding modes in the grid; the toolbar's "hideTags" cycles them
+    auto *tagModes = new QActionGroup(this);
+    const std::pair<const char *, QString> tagNames[] = {
+        {"tagsShow", tr("Show tags")}, {"tagsSimplify", tr("Simplify tags")}, {"tagsHide", tr("Hide tags")}};
+    for (int k = 0; k < 3; ++k) {
+        auto *a = add(tagNames[k].first, tagNames[k].second, {}, subs, [this, k] {
+            QSettings().setValue("grid/tagMode", k);
+            for (auto *t : tabs()) t->grid()->setTagMode(k);
+        });
+        a->setCheckable(true);
+        a->setChecked(k == QSettings().value("grid/tagMode").toInt());
+        tagModes->addAction(a);
+    }
+    add("hideTags", tr("Cycle tag hiding mode"), {}, subs, [this, tagModes] {
+        const auto modes = tagModes->actions();
+        QAction *next = modes[(modes.indexOf(tagModes->checkedAction()) + 1) % modes.size()];
+        next->trigger();
+        status(next->text());
     });
 
     // Automation
@@ -1115,20 +1149,25 @@ void MainWindow::buildToolbar() {
     m_toolbar->setIconSize(QSize(22, 22));
     static const Qt::ToolBarArea areas[] = {Qt::LeftToolBarArea, Qt::TopToolBarArea, Qt::RightToolBarArea,
                                             Qt::BottomToolBarArea};
-    auto rebuild = [this] {
+    auto *menuStyle = new MenuButtonStyle;
+    menuStyle->setParent(m_toolbar);
+    auto rebuild = [this, menuStyle] {
         m_toolbar->clear();
         for (const QString &id : QSettings().value("toolbar/ids", kToolbarDefault).toStringList()) {
             auto *a = action(id);
             if (!a) continue;
             m_toolbar->addAction(a);
-            if (auto *b = qobject_cast<QToolButton *>(m_toolbar->widgetForAction(a)); b && a->menu())
+            if (auto *b = qobject_cast<QToolButton *>(m_toolbar->widgetForAction(a)); b && a->menu()) {
                 b->setPopupMode(QToolButton::InstantPopup);
+                b->setStyle(menuStyle);
+            }
         }
         // trailing customisation arrow
         auto *more = new QToolButton(m_toolbar);
-        more->setText("»");
+        more->setIcon(icon("chevrons-right", {}));
         more->setToolTip(tr("Choose toolbar icons"));
         more->setPopupMode(QToolButton::InstantPopup);
+        more->setStyle(menuStyle);
         auto *menu = new QMenu(more);
         more->setMenu(menu);
         connect(menu, &QMenu::aboutToShow, this, [this, menu] {

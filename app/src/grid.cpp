@@ -35,7 +35,7 @@ Grid::Grid(TabPanel *tab) : QAbstractScrollArea(tab), m_tab(tab) {
     QSettings st;
     setFont(st.value("grid/font", QFont("Tahoma", 10)).value<QFont>());
     for (const auto &v : st.value("grid/hiddenColumns").toList()) m_userHidden.insert(v.toInt());
-    m_hideTags = st.value("grid/hideTags", false).toBool();
+    m_tagMode = st.value("grid/tagMode").toInt();
 }
 
 QString Grid::colName(int c) {
@@ -56,9 +56,8 @@ void Grid::setColumnHidden(int c, bool hidden) {
     viewport()->update();
 }
 
-void Grid::setHideTags(bool on) {
-    m_hideTags = on;
-    QSettings().setValue("grid/hideTags", on);
+void Grid::setTagMode(int mode) {
+    m_tagMode = mode;
     viewport()->update();
 }
 
@@ -187,17 +186,17 @@ int Grid::colAt(int x) const {
 }
 
 QString Grid::cell(const fsb::Row &r, int col, size_t index) const {
-    // Aegisub's text column: hidden tag blocks become ☀, and at most 512 characters are kept, so a long
+    // Aegisub's text column: tag blocks simplified to ☀ or hidden, and at most 512 characters kept, so a long
     // drawing is not converted and shaped in full on every paint
     auto text = [&](const rust::String &t) {
         constexpr qsizetype Cap = 512;
         const std::string_view v(t.data(), t.size());
         QString s;
         for (size_t at = 0; at < v.size() && s.size() <= Cap;) {
-            const size_t end = std::min(m_hideTags ? v.find('{', at) : v.npos, v.size());
+            const size_t end = std::min(m_tagMode ? v.find('{', at) : v.npos, v.size());
             s += QString::fromUtf8(v.data() + at, qsizetype(std::min<size_t>(end - at, 4 * Cap)));
             if (end == v.size()) break;
-            s += QChar(0x2600);
+            if (m_tagMode == 1) s += QChar(0x2600);
             const size_t close = v.find('}', end);
             at = close == v.npos ? v.size() : close + 1;
         }

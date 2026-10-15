@@ -1512,6 +1512,18 @@ Dekoder: BestSource</translation>
         <translation>Ukryj tagi</translation>
     </message>
     <message>
+        <source>Show tags</source>
+        <translation>Pokaż tagi</translation>
+    </message>
+    <message>
+        <source>Simplify tags</source>
+        <translation>Uprość tagi</translation>
+    </message>
+    <message>
+        <source>Cycle tag hiding mode</source>
+        <translation>Przełącz tryb ukrywania tagów</translation>
+    </message>
+    <message>
         <source>Au&amp;tomation</source>
         <translation>Au&amp;tomatyzacja</translation>
     </message>

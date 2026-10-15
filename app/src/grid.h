@@ -22,8 +22,7 @@ public:
     void setVideoTime(qint64 ms);
     // rows that differ from the compared tab (Kainote subtitle comparison)
     void setCompare(std::set<size_t> rows);
-    void setHideTags(bool on);
-    bool hideTags() const { return m_hideTags; }
+    void setTagMode(int mode); // Aegisub's: 0 show tags, 1 simplify them to ☀, 2 hide them
     static QString colName(int c);
     void setColumnHidden(int c, bool hidden);
     bool columnHidden(int c) const { return m_userHidden.contains(c); }
@@ -78,7 +77,7 @@ private:
     std::set<size_t> m_collisions, m_onVideo, m_compare;
     quint64 m_gen = ~0ull;
     qint64 m_videoMs = -1;
-    bool m_hideTags = false;
+    int m_tagMode = 0;
     int m_marker = -1;
     int m_anchor = 0;
     int m_dragFrom = -1;         // Alt+drag moving rows
