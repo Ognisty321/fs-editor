@@ -662,14 +662,37 @@ void Grid::insertRow(bool after, int timeMode) {
     m_tab->setActive(int(row));
 }
 
+void Grid::swapRows() {
+    const auto sel = m_tab->selection();
+    if (sel.size() != 2) return m_tab->main()->status(tr("Select two lines to swap them"));
+    m_tab->s().swap_rows(sel[0], sel[1]);
+    m_tab->changed();
+}
+
+// mode: 0 the texts joined, 1 the first kept, 2 the last kept, 3 as karaoke
+void Grid::joinRows(int mode) {
+    const auto sel = m_tab->selection();
+    if (m_tab->s().file_info().tl_mode) return m_tab->main()->status(tr("Lines are not joined in translation mode"));
+    if (sel.size() < 2 || sel.size() > 20) return m_tab->main()->status(tr("Select from 2 to 20 lines to join them"));
+    const auto r = m_tab->s().join_rows(fs::slice(sel), uint8_t(mode));
+    m_tab->changed();
+    if (r >= 0) m_tab->setActive(int(r));
+}
+
+void Grid::makeContinuous(bool next) {
+    m_tab->s().make_continuous(fs::slice(m_tab->selection()), next);
+    m_tab->changed();
+}
+
 void Grid::selectVisibleOnVideo() {
     const auto rows = fs::vec(m_tab->s().rows_at(m_tab->videoTime()));
     if (!rows.empty()) m_tab->setSelection(rows, int(rows.front()));
 }
 
-// how: 0 at video time, 1 into frames, 2 characters, 3 words, 4 wraps
+// how: 0 before the video frame, 1 into frames, 2 characters, 3 words, 4 wraps, 5 after the frame
 void Grid::splitRows(int how) {
     auto &s = m_tab->s();
+    if (s.file_info().tl_mode) return m_tab->main()->status(tr("Lines are not split in translation mode"));
     // every line's parts, split in one go
     std::vector<size_t> rows, counts;
     QStringList all;
@@ -679,12 +702,20 @@ void Grid::splitRows(int how) {
         QStringList parts;
         std::vector<std::int64_t> st, en;
         const QString text = fs::q(r.text);
-        if (how == 0) {
-            const qint64 t = m_tab->videoStartTime();
-            if (t <= r.start || t >= r.end) continue;
+        if (how == 0 || how == 5) {
+            // Aegisub's: the first part ends before (on) the frame shown, the second starts on (after)
+            // it; a line not on the frame gets a copy on just that frame
+            const qint64 a = m_tab->videoStartTime(), b = m_tab->videoEndTime(), t = how == 0 ? a : b;
             parts = {text, text};
-            st = {r.start, t};
-            en = {t, r.end};
+            if (b <= r.start || a >= r.end) {
+                st = {r.start, a};
+                en = {r.end, b};
+            } else if (t <= r.start || t >= r.end) {
+                continue;
+            } else {
+                st = {r.start, t};
+                en = {t, r.end};
+            }
         } else if (how == 1) {
             auto *v = m_tab->video();
             if (!v->hasVideo()) return;
@@ -744,44 +775,26 @@ void Grid::contextMenu(const QPoint &global) {
     const auto sel = m_tab->selection();
     const bool tl = s.file_info().tl_mode;
     QMenu m(this);
+    // the window's actions, so they take hotkeys (Aegisub, Kainote); the menu greys what the
+    // selection cannot do, and they check it themselves when a hotkey runs them
+    const bool canJoin = sel.size() >= 2 && sel.size() <= 20 && !tl, video = m_tab->video()->hasVideo();
+    const std::pair<const char *, bool> state[] = {
+        {"swapLines", sel.size() == 2}, {"joinLines", canJoin},          {"joinKeepFirst", canJoin},
+        {"joinKeepLast", canJoin},      {"joinKaraoke", canJoin},        {"splitBefore", !tl && video},
+        {"splitAfter", !tl && video},   {"splitFrames", !tl && video},   {"splitChars", !tl},
+        {"splitWords", !tl},            {"splitWraps", !tl}};
+    for (auto [id, on] : state) mw->action(id)->setEnabled(on);
     auto *ins = m.addMenu(tr("Insert lines"));
-    ins->addAction(tr("Insert before"), this, [this] { insertRow(false, 0); });
-    ins->addAction(tr("Insert after"), this, [this] { insertRow(true, 0); });
-    ins->addAction(tr("Insert before with video time"), this, [this] { insertRow(false, 1); });
-    ins->addAction(tr("Insert after with video time"), this, [this] { insertRow(true, 1); });
-    ins->addAction(tr("Insert before with video frame time"), this, [this] { insertRow(false, 2); });
-    ins->addAction(tr("Insert after with video frame time"), this, [this] { insertRow(true, 2); });
-    m.addAction(mw->action("duplicate"));
-    m.addAction(tr("Swap lines"), this, [this, sel] {
-        m_tab->s().swap_rows(sel[0], sel[1]);
-        m_tab->changed();
-    })->setEnabled(sel.size() == 2);
-    const bool canJoin = sel.size() >= 2 && sel.size() <= 20 && !tl;
-    auto join = [this](uint8_t mode) {
-        const auto r = m_tab->s().join_rows(fs::slice(m_tab->selection()), mode);
-        m_tab->changed();
-        if (r >= 0) m_tab->setActive(int(r));
-    };
-    m.addAction(tr("Join lines"), this, [join] { join(0); })->setEnabled(canJoin);
-    m.addAction(tr("Join and keep first"), this, [join] { join(1); })->setEnabled(canJoin);
-    m.addAction(tr("Join and keep last"), this, [join] { join(2); })->setEnabled(canJoin);
-    m.addAction(tr("Join as karaoke"), this, [join] { join(3); })->setEnabled(canJoin);
-    m.addAction(tr("Set times as continuous (previous line)"), this, [this] {
-        m_tab->s().make_continuous(fs::slice(m_tab->selection()), false);
-        m_tab->changed();
-    });
-    m.addAction(tr("Set times as continuous (next line)"), this, [this] {
-        m_tab->s().make_continuous(fs::slice(m_tab->selection()), true);
-        m_tab->changed();
-    });
+    for (const char *id : {"insertBefore", "insertAfter", "insertBeforeVideo", "insertAfterVideo", "insertBeforeFrame",
+                           "insertAfterFrame"})
+        ins->addAction(mw->action(id));
+    for (const char *id : {"duplicate", "swapLines", "joinLines", "joinKeepFirst", "joinKeepLast", "joinKaraoke",
+                           "continuousPrev", "continuousNext"})
+        m.addAction(mw->action(id));
     auto *split = m.addMenu(tr("Split lines"));
-    split->setEnabled(!tl);
-    split->addAction(tr("at video time"), this, [this] { splitRows(0); });
-    split->addAction(tr("into frames"), this, [this] { splitRows(1); });
-    split->addAction(tr("into characters"), this, [this] { splitRows(2); });
-    split->addAction(tr("into words"), this, [this] { splitRows(3); });
-    split->addAction(tr("by wraps (\\N)"), this, [this] { splitRows(4); });
-    m.addAction(tr("Select all lines visible on video"), this, [this] { selectVisibleOnVideo(); });
+    for (const char *id : {"splitBefore", "splitAfter", "splitFrames", "splitChars", "splitWords", "splitWraps"})
+        split->addAction(mw->action(id));
+    m.addAction(mw->action("selectOnVideo"));
     m.addSeparator();
     m.addAction(tr("Copy"), QKeySequence::Copy, this, [this] { copy(); });
     m.addAction(tr("Cut"), QKeySequence::Cut, this, [this] { cut(); });
@@ -875,4 +888,5 @@ void Grid::contextMenu(const QPoint &global) {
     m.addAction(mw->action("deleteText"));
     m.addAction(mw->action("deleteLines"));
     m.exec(global);
+    for (auto [id, on] : state) mw->action(id)->setEnabled(true);
 }

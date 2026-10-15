@@ -55,6 +55,9 @@ public:
     void moveSelection(int delta);
     void selectVisibleOnVideo();
     void splitRows(int how);
+    void swapRows();
+    void joinRows(int mode);
+    void makeContinuous(bool next);
     void contextMenu(const QPoint &global);
 
 protected:

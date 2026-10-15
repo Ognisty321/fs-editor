@@ -739,6 +739,37 @@ void MainWindow::buildMenus() {
     // Line commands from the Kainote global hotkey table.
     auto *lines = sub(edit, tr("Lines"));
     add("duplicate", tr("Duplicate lines"), QKeySequence("Ctrl+D"), lines, [=] { tab()->grid()->duplicate(); });
+    // the grid's context menu commands (Aegisub's subtitle/insert, grid/swap, edit/line/join, …)
+    auto *insert = sub(lines, tr("Insert lines"));
+    const char *insertNames[] = {QT_TR_NOOP("Insert before"),
+                                 QT_TR_NOOP("Insert after"),
+                                 QT_TR_NOOP("Insert before with video time"),
+                                 QT_TR_NOOP("Insert after with video time"),
+                                 QT_TR_NOOP("Insert before with video frame time"),
+                                 QT_TR_NOOP("Insert after with video frame time")};
+    const char *insertIds[] = {"insertBefore",     "insertAfter",       "insertBeforeVideo",
+                               "insertAfterVideo", "insertBeforeFrame", "insertAfterFrame"};
+    for (int k = 0; k < 6; ++k)
+        add(insertIds[k], tr(insertNames[k]), {}, insert, [=] { tab()->grid()->insertRow(k % 2, k / 2); });
+    add("swapLines", tr("Swap lines"), {}, lines, [=] { tab()->grid()->swapRows(); });
+    const char *joinNames[] = {QT_TR_NOOP("Join lines"), QT_TR_NOOP("Join and keep first"),
+                               QT_TR_NOOP("Join and keep last"), QT_TR_NOOP("Join as karaoke")};
+    const char *joinIds[] = {"joinLines", "joinKeepFirst", "joinKeepLast", "joinKaraoke"};
+    for (int k = 0; k < 4; ++k) add(joinIds[k], tr(joinNames[k]), {}, lines, [=] { tab()->grid()->joinRows(k); });
+    add("continuousPrev", tr("Set times as continuous (previous line)"), {}, lines,
+        [=] { tab()->grid()->makeContinuous(false); });
+    add("continuousNext", tr("Set times as continuous (next line)"), {}, lines,
+        [=] { tab()->grid()->makeContinuous(true); });
+    auto *splitMenu = sub(lines, tr("Split lines"));
+    const char *splitNames[] = {QT_TR_NOOP("Split lines before current frame"), QT_TR_NOOP("Split lines after current frame"),
+                                QT_TR_NOOP("Split lines into frames"), QT_TR_NOOP("Split lines into characters"),
+                                QT_TR_NOOP("Split lines into words"), QT_TR_NOOP("Split lines by wraps (\\N)")};
+    const std::pair<const char *, int> splitIds[] = {{"splitBefore", 0}, {"splitAfter", 5}, {"splitFrames", 1},
+                                                     {"splitChars", 2},  {"splitWords", 3}, {"splitWraps", 4}};
+    for (int k = 0; k < 6; ++k)
+        add(splitIds[k].first, tr(splitNames[k]), {}, splitMenu, [=] { tab()->grid()->splitRows(splitIds[k].second); });
+    add("selectOnVideo", tr("Select all lines visible on video"), {}, lines,
+        [=] { tab()->grid()->selectVisibleOnVideo(); });
     add("deleteText", tr("Delete text"), QKeySequence("Alt+Del"), lines, [=] { tab()->grid()->deleteText(); });
     add("deleteLines", tr("Delete lines"), QKeySequence("Shift+Del"), lines, [=] { tab()->grid()->deleteRows(); });
     // Aegisub edit/line/paste/over: onto the selection, or downwards from the active line

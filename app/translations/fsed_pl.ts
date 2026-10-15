@@ -737,88 +737,28 @@
         <translation>Usuń drzewko</translation>
     </message>
     <message>
+        <source>Select two lines to swap them</source>
+        <translation>Zaznacz dwie linijki, żeby je zamienić</translation>
+    </message>
+    <message>
+        <source>Lines are not joined in translation mode</source>
+        <translation>W trybie tłumacza linijek się nie łączy</translation>
+    </message>
+    <message>
+        <source>Select from 2 to 20 lines to join them</source>
+        <translation>Zaznacz od 2 do 20 linijek, żeby je złączyć</translation>
+    </message>
+    <message>
+        <source>Lines are not split in translation mode</source>
+        <translation>W trybie tłumacza linijek się nie dzieli</translation>
+    </message>
+    <message>
         <source>Insert lines</source>
         <translation>Wstaw linijki</translation>
     </message>
     <message>
-        <source>Insert before</source>
-        <translation>Wstaw przed</translation>
-    </message>
-    <message>
-        <source>Insert after</source>
-        <translation>Wstaw po</translation>
-    </message>
-    <message>
-        <source>Insert before with video time</source>
-        <translation>Wstaw przed z czasem wideo</translation>
-    </message>
-    <message>
-        <source>Insert after with video time</source>
-        <translation>Wstaw po z czasem wideo</translation>
-    </message>
-    <message>
-        <source>Insert before with video frame time</source>
-        <translation>Wstaw przed z czasem klatki wideo</translation>
-    </message>
-    <message>
-        <source>Insert after with video frame time</source>
-        <translation>Wstaw po z czasem klatki wideo</translation>
-    </message>
-    <message>
-        <source>Swap lines</source>
-        <translation>Zamień linijki miejscami</translation>
-    </message>
-    <message>
-        <source>Join lines</source>
-        <translation>Złącz linijki</translation>
-    </message>
-    <message>
-        <source>Join and keep first</source>
-        <translation>Złącz, zachowaj pierwszą</translation>
-    </message>
-    <message>
-        <source>Join and keep last</source>
-        <translation>Złącz, zachowaj ostatnią</translation>
-    </message>
-    <message>
-        <source>Join as karaoke</source>
-        <translation>Złącz jako karaoke</translation>
-    </message>
-    <message>
-        <source>Set times as continuous (previous line)</source>
-        <translation>Ustaw czasy jako ciągłe (poprzednia linijka)</translation>
-    </message>
-    <message>
-        <source>Set times as continuous (next line)</source>
-        <translation>Ustaw czasy jako ciągłe (następna linijka)</translation>
-    </message>
-    <message>
         <source>Split lines</source>
         <translation>Podziel linijki</translation>
-    </message>
-    <message>
-        <source>at video time</source>
-        <translation>w czasie wideo</translation>
-    </message>
-    <message>
-        <source>into frames</source>
-        <translation>na klatki</translation>
-    </message>
-    <message>
-        <source>into characters</source>
-        <translation>na znaki</translation>
-    </message>
-    <message>
-        <source>into words</source>
-        <translation>na słowa</translation>
-    </message>
-    <message>
-        <source>by wraps (\N)</source>
-        <translation>według łamań (\N)</translation>
-    </message>
-    <message>
-        <source>Select all lines visible on video</source>
-        <translation>Zaznacz wszystkie linijki widoczne na wideo</translation>
     </message>
     <message>
         <source>Copy</source>
@@ -1276,6 +1216,90 @@ Backspace: rozłącz ostatnią grupę</translation>
     <message>
         <source>Duplicate lines</source>
         <translation>Duplikuj linijki</translation>
+    </message>
+    <message>
+        <source>Insert lines</source>
+        <translation>Wstaw linijki</translation>
+    </message>
+    <message>
+        <source>Insert before</source>
+        <translation>Wstaw przed</translation>
+    </message>
+    <message>
+        <source>Insert after</source>
+        <translation>Wstaw po</translation>
+    </message>
+    <message>
+        <source>Insert before with video time</source>
+        <translation>Wstaw przed z czasem wideo</translation>
+    </message>
+    <message>
+        <source>Insert after with video time</source>
+        <translation>Wstaw po z czasem wideo</translation>
+    </message>
+    <message>
+        <source>Insert before with video frame time</source>
+        <translation>Wstaw przed z czasem klatki wideo</translation>
+    </message>
+    <message>
+        <source>Insert after with video frame time</source>
+        <translation>Wstaw po z czasem klatki wideo</translation>
+    </message>
+    <message>
+        <source>Swap lines</source>
+        <translation>Zamień linijki miejscami</translation>
+    </message>
+    <message>
+        <source>Join and keep first</source>
+        <translation>Złącz, zachowaj pierwszą</translation>
+    </message>
+    <message>
+        <source>Join and keep last</source>
+        <translation>Złącz, zachowaj ostatnią</translation>
+    </message>
+    <message>
+        <source>Join as karaoke</source>
+        <translation>Złącz jako karaoke</translation>
+    </message>
+    <message>
+        <source>Set times as continuous (previous line)</source>
+        <translation>Ustaw czasy jako ciągłe (poprzednia linijka)</translation>
+    </message>
+    <message>
+        <source>Set times as continuous (next line)</source>
+        <translation>Ustaw czasy jako ciągłe (następna linijka)</translation>
+    </message>
+    <message>
+        <source>Split lines</source>
+        <translation>Podziel linijki</translation>
+    </message>
+    <message>
+        <source>Split lines before current frame</source>
+        <translation>Podziel linijki przed bieżącą klatką</translation>
+    </message>
+    <message>
+        <source>Split lines after current frame</source>
+        <translation>Podziel linijki za bieżącą klatką</translation>
+    </message>
+    <message>
+        <source>Split lines into frames</source>
+        <translation>Podziel linijki na klatki</translation>
+    </message>
+    <message>
+        <source>Split lines into characters</source>
+        <translation>Podziel linijki na znaki</translation>
+    </message>
+    <message>
+        <source>Split lines into words</source>
+        <translation>Podziel linijki na słowa</translation>
+    </message>
+    <message>
+        <source>Split lines by wraps (\N)</source>
+        <translation>Podziel linijki według łamań (\N)</translation>
+    </message>
+    <message>
+        <source>Select all lines visible on video</source>
+        <translation>Zaznacz wszystkie linijki widoczne na wideo</translation>
     </message>
     <message>
         <source>Delete text</source>
