@@ -138,6 +138,7 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
         checks->addWidget(c, i / 4, i % 4);
         ++i;
     }
+    for (auto [c, key] : options()) c->setChecked(st.value(key).toBool());
     connect(m_skipTags, &QCheckBox::toggled, m_skipText, [this](bool on) { if (on) m_skipText->setChecked(false); });
     connect(m_skipText, &QCheckBox::toggled, m_skipTags, [this](bool on) { if (on) m_skipTags->setChecked(false); });
     v->addLayout(checks);
@@ -146,12 +147,12 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
     auto *fl = new QVBoxLayout(fg);
     const char *fields[] = {QT_TR_NOOP("Text"), QT_TR_NOOP("Styles"), QT_TR_NOOP("Actor"), QT_TR_NOOP("Effect")};
     for (int k = 0; k < 4; ++k) fl->addWidget(m_field[k] = new QRadioButton(tr(fields[k]), fg));
-    m_field[0]->setChecked(true);
+    m_field[std::clamp(st.value("find/field").toInt(), 0, 3)]->setChecked(true);
     auto *lg = new QGroupBox(tr("Lines"), this);
     auto *ll = new QVBoxLayout(lg);
     const char *lines[] = {QT_TR_NOOP("All"), QT_TR_NOOP("Selected"), QT_TR_NOOP("From selected")};
     for (int k = 0; k < 3; ++k) ll->addWidget(m_lines[k] = new QRadioButton(tr(lines[k]), lg));
-    m_lines[0]->setChecked(true);
+    m_lines[std::clamp(st.value("find/lines").toInt(), 0, 2)]->setChecked(true);
     groups->addWidget(fg);
     groups->addWidget(lg);
     v->addLayout(groups);
@@ -171,54 +172,53 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
     connect(findOpen, &QPushButton::clicked, this, [this] { this->findAll(m_main->tabs()); });
     connect(findFiles, &QPushButton::clicked, this, &FindDialog::findInFiles);
     connect(close, &QPushButton::clicked, this, &QDialog::hide);
-    auto remember = [this] {
-        QSettings st;
-        for (auto [box, key] : {std::pair{m_find, "find/recent"}, std::pair{m_replace, "find/recentReplace"}}) {
-            QStringList l = st.value(key).toStringList();
-            l.removeAll(box->currentText());
-            l.prepend(box->currentText());
-            st.setValue(key, l.mid(0, 20));
-        }
-    };
-    connect(replNext, &QPushButton::clicked, this, [this, remember] {
-        remember();
+    connect(replNext, &QPushButton::clicked, this, [this] {
         auto *tab = m_main->current();
-        auto spec = this->spec();
-        const int act = tab->active();
-        // replace in the active line if it matches, then move to the next match
-        spec.rows = {size_t(act)};
-        try {
-            if (tab->s().replace_all(spec)) tab->changed();
-        } catch (const rust::Error &e) {
-            m_main->error(QString::fromUtf8(e.what()));
-            return;
+        if (!tab || !ready()) return;
+        remember(true);
+        const auto s = spec(tab);
+        // Aegisub: the match shown last is replaced while it is still selected, then the next one shown
+        const auto sel = tab->edit()->textSelection(m_hit.original);
+        if (m_hitTab == tab && m_hit.row == tab->active() &&
+            (s.field != 0 || sel == std::pair{int(m_hit.start), int(m_hit.end)})) {
+            try {
+                const auto end = tab->s().replace_hit(s, m_hit);
+                if (end >= 0) {
+                    tab->changed();
+                    m_hit.end = size_t(end);
+                    if (s.field == 0) tab->edit()->selectText(int(end), 0, m_hit.original);
+                }
+            } catch (const rust::Error &e) {
+                return m_main->error(QString::fromUtf8(e.what()));
+            }
         }
         findNext();
     });
-    connect(replAll, &QPushButton::clicked, this, [this, remember] {
-        remember();
+    connect(replAll, &QPushButton::clicked, this, [this] {
         auto *tab = m_main->current();
+        if (!tab || !ready()) return;
+        remember(true);
         try {
-            const size_t n = tab->s().replace_all(spec());
-            tab->changed();
+            const size_t n = tab->s().replace_all(spec(tab));
+            if (n) tab->changed();
             m_main->status(tr("Replacements: %1").arg(n));
         } catch (const rust::Error &e) {
             m_main->error(QString::fromUtf8(e.what()));
         }
     });
-    connect(replOpen, &QPushButton::clicked, this, [this, remember] {
-        remember();
+    connect(replOpen, &QPushButton::clicked, this, [this] {
+        if (!ready()) return;
+        remember(true);
         size_t n = 0;
         for (auto *tab : m_main->tabs()) {
-            auto s = spec();
-            s.rows.clear();
             try {
-                n += tab->s().replace_all(s);
+                const size_t k = tab->s().replace_all(spec(tab));
+                if (k) tab->changed();
+                n += k;
             } catch (const rust::Error &e) {
                 m_main->error(QString::fromUtf8(e.what()));
                 return;
             }
-            tab->changed();
         }
         m_main->status(tr("Replacements: %1").arg(n));
     });
@@ -242,7 +242,41 @@ void FindDialog::showTab(int tab) {
     m_find->lineEdit()->selectAll();
 }
 
-fsb::FindSpec FindDialog::spec() const {
+std::array<std::pair<QCheckBox *, const char *>, 7> FindDialog::options() const {
+    return {{{m_case, "find/case"},
+             {m_regex, "find/regex"},
+             {m_comments, "find/comments"},
+             {m_skipTags, "find/skipTags"},
+             {m_skipText, "find/skipText"},
+             {m_atStart, "find/atStart"},
+             {m_atEnd, "find/atEnd"}}};
+}
+
+bool FindDialog::ready() const {
+    return !m_find->currentText().isEmpty() || m_atStart->isChecked() || m_atEnd->isChecked();
+}
+
+void FindDialog::remember(bool replace) {
+    QSettings st;
+    for (auto [box, key] : {std::pair{m_find, "find/recent"}, std::pair{m_replace, "find/recentReplace"}}) {
+        const QString t = box->currentText();
+        if ((box == m_replace && !replace) || t.isEmpty() || box->itemText(0) == t) continue;
+        QStringList l = st.value(key).toStringList();
+        l.removeAll(t);
+        l.prepend(t);
+        l = l.mid(0, 20);
+        st.setValue(key, l);
+        box->clear(); // the list shows the new order at once
+        box->addItems(l);
+    }
+    for (auto [c, key] : options()) st.setValue(key, c->isChecked());
+    for (int k = 0; k < 4; ++k)
+        if (m_field[k]->isChecked()) st.setValue("find/field", k);
+    for (int k = 0; k < 3; ++k)
+        if (m_lines[k]->isChecked()) st.setValue("find/lines", k);
+}
+
+fsb::FindSpec FindDialog::spec(TabPanel *tab) const {
     fsb::FindSpec s;
     s.pattern = fs::rs(m_find->currentText());
     s.replacement = fs::rs(m_replace->currentText());
@@ -255,23 +289,28 @@ fsb::FindSpec FindDialog::spec() const {
     s.include_comments = m_comments->isChecked();
     s.at_start = m_atStart->isChecked();
     s.at_end = m_atEnd->isChecked();
-    auto *tab = m_main->current();
-    if (m_lines[1]->isChecked())
-        for (size_t r : tab->selection()) s.rows.push_back(r);
-    else if (m_lines[2]->isChecked())
-        for (size_t r = tab->selection().empty() ? 0 : tab->selection().front(); r < tab->s().row_count(); ++r)
-            s.rows.push_back(r);
+    if (!tab) return s;
+    // lines hidden by the filter or a folded tree are passed over (Kainote); "Selected" and "From
+    // selected" are the current tab's
+    const auto vis = tab->grid()->visibleRows();
+    const auto sel = tab->selection();
+    const int lines = tab != m_main->current() ? 0 : m_lines[1]->isChecked() ? 1 : m_lines[2]->isChecked() ? 2 : 0;
+    if (lines == 1)
+        for (size_t r : sel) s.rows.push_back(r);
+    else if (lines == 2 || vis.size() != tab->s().row_count())
+        for (size_t r : vis)
+            if (lines == 0 || sel.empty() || r >= sel.front()) s.rows.push_back(r);
     return s;
 }
 
 void FindDialog::findAll(const QList<TabPanel *> &tabs) {
-    if (m_find->currentText().isEmpty()) return;
+    if (!ready()) return;
+    remember(false);
     clearResults();
     size_t lines = 0;
     int files = 0;
     for (auto *tab : tabs) {
-        auto s = spec(); // "Selected" and "From selected" are the current tab's rows
-        if (tab != m_main->current()) s.rows.clear();
+        const auto s = spec(tab);
         try {
             const auto rows = tab->s().find_all(s);
             if (rows.empty()) continue;
@@ -289,13 +328,13 @@ void FindDialog::findAll(const QList<TabPanel *> &tabs) {
 
 void FindDialog::findInFiles() {
     const QString dir = m_dir->text().trimmed();
-    if (m_find->currentText().isEmpty() || !QFileInfo(dir).isDir()) return;
+    if (!ready() || !QFileInfo(dir).isDir()) return;
+    remember(false);
     QSettings st;
     st.setValue("find/dir", dir);
     st.setValue("find/filter", m_filter->text());
     st.setValue("find/subdirs", m_subdirs->isChecked());
-    auto s = spec();
-    s.rows.clear();
+    const auto s = spec(nullptr);
     try {
         (void)fsb::new_session()->find_all(s); // a bad regex fails here once, not for every file
     } catch (const rust::Error &e) {
@@ -406,13 +445,25 @@ void FindDialog::goToResult(QTreeWidgetItem *item) {
     tab->setActive(int(item->data(0, Qt::UserRole).toULongLong()));
 }
 
+// Aegisub's: match by match through the lines, each shown selected in the line's text
 void FindDialog::findNext() {
     auto *tab = m_main->current();
-    if (!tab || m_find->currentText().isEmpty()) return;
+    if (!tab || !ready()) return;
+    remember(false);
+    const auto s = spec(tab);
+    const int act = std::max(0, tab->active());
+    // on from the match shown last (or the cursor moved after it); a line not searched yet, from its start
+    const bool on = m_hitTab == tab && m_hit.row == act;
+    const bool orig = !on || m_hit.original;
+    const size_t pos = !on ? 0 : s.field == 0 ? size_t(tab->edit()->textSelection(orig).second) : m_hit.end;
     try {
-        const auto r = tab->s().find(spec(), size_t(std::max(0, tab->active())));
-        if (r < 0) m_main->status(tr("Nothing found"));
-        else tab->setActive(int(r));
+        const auto hit = tab->s().find_next(s, size_t(act), orig, pos);
+        if (hit.row < 0) return m_main->status(tr("Nothing found"));
+        m_hit = hit;
+        m_hitTab = tab;
+        // going through the selected lines leaves the selection as it is (Aegisub)
+        if (hit.row != tab->active()) tab->setActive(int(hit.row), !m_lines[1]->isChecked());
+        if (s.field == 0) tab->edit()->selectText(int(hit.start), int(hit.end - hit.start), hit.original);
     } catch (const rust::Error &e) {
         m_main->error(QString::fromUtf8(e.what()));
     }

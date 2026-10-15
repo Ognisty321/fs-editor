@@ -1012,11 +1012,17 @@ void EditBox::showTimes(const fsb::Row &r, const QString &skip) {
 
 void EditBox::focusText() { m_text->setFocus(); }
 
-void EditBox::selectText(int from, int length) {
-    QTextCursor c(m_text->document());
+void EditBox::selectText(int from, int length, bool original) {
+    auto *e = original ? m_original : m_text;
+    QTextCursor c(e->document());
     c.setPosition(from);
     c.setPosition(from + length, QTextCursor::KeepAnchor);
-    m_text->setTextCursor(c);
+    e->setTextCursor(c);
+}
+
+std::pair<int, int> EditBox::textSelection(bool original) const {
+    const auto c = (original ? m_original : m_text)->textCursor();
+    return {c.selectionStart(), c.selectionEnd()};
 }
 
 void EditBox::nextLine() {

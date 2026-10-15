@@ -86,7 +86,8 @@ public:
     void load(int row);
     void reload();
     void focusText();
-    void selectText(int from, int length); // UTF-16 positions in the line text
+    void selectText(int from, int length, bool original = false); // UTF-16 positions in the line text
+    std::pair<int, int> textSelection(bool original = false) const; // start, end
     int row() const { return m_row; }
     bool framesMode() const { return m_framesMode; } // the grid shows frames too (Aegisub)
 

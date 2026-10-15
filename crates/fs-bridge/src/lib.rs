@@ -179,6 +179,16 @@ pub mod ffi {
         at_end: bool,
     }
 
+    /// A match Find next shows: in row `row` (-1: none), in a translation row's original or in
+    /// the line's field, at UTF-16 `start..end` of it.
+    #[derive(Debug, Clone, Default, PartialEq)]
+    struct FindHit {
+        row: i64,
+        original: bool,
+        start: usize,
+        end: usize,
+    }
+
     #[derive(Debug, Clone, Default)]
     struct PostSpec {
         lead_in: i64,
@@ -532,7 +542,18 @@ pub mod ffi {
             styles: &[String],
         ) -> Vec<usize>;
         fn filter(self: &Session, spec: &FilterSpec) -> Vec<usize>;
-        fn find(self: &Session, spec: &FindSpec, from: usize) -> Result<i64>;
+        /// Aegisub's Find next, from UTF-16 `pos` of row `row`'s field (`original`: in a
+        /// translation row's original, which comes first).
+        fn find_next(
+            self: &Session,
+            spec: &FindSpec,
+            row: usize,
+            original: bool,
+            pos: usize,
+        ) -> Result<FindHit>;
+        /// Replace next: the match `hit` shows, if still there; the UTF-16 end of what replaced
+        /// it, or -1.
+        fn replace_hit(self: &mut Session, spec: &FindSpec, hit: &FindHit) -> Result<i64>;
         /// Every matching row, in order (Kainote's Find all).
         fn find_all(self: &Session, spec: &FindSpec) -> Result<Vec<usize>>;
         fn replace_all(self: &mut Session, spec: &FindSpec) -> Result<usize>;

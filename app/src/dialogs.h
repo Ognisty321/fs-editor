@@ -5,6 +5,7 @@
 #include "bridge.h"
 
 #include <QDialog>
+#include <array>
 #include <functional>
 #include <QPointer>
 #include <QSet>
@@ -44,7 +45,10 @@ public:
     void showTab(int tab); // 0 find, 1 replace, 2 find in files
     void findNext();
 private:
-    fsb::FindSpec spec() const;
+    fsb::FindSpec spec(TabPanel *tab) const;
+    bool ready() const; // something to look for: Kainote's start / end of text find empty fields
+    void remember(bool replace); // the recent searches and the options, as Aegisub keeps them
+    std::array<std::pair<QCheckBox *, const char *>, 7> options() const;
     // Kainote's Find all: the matching lines of the tabs, or of the files in a folder, in a results window
     void findAll(const QList<TabPanel *> &tabs);
     void findInFiles();
@@ -64,6 +68,8 @@ private:
     QTreeWidget *m_tree = nullptr;
     QLabel *m_summary = nullptr;
     QList<QPointer<TabPanel>> m_resultTabs; // per file in the results; null: not open (yet)
+    fsb::FindHit m_hit{-1, false, 0, 0}; // the match shown last, where Find and Replace next go on
+    QPointer<TabPanel> m_hitTab;
 };
 
 class SelectLinesDialog : public QDialog {

@@ -4,8 +4,9 @@
 //! [`crate::history::Editor::edit`] to make them undoable.
 
 use std::cmp::Ordering;
+use std::ops::Range;
 
-use regex::{Regex, RegexBuilder};
+use regex::{Captures, Regex, RegexBuilder};
 
 use crate::ass::Document;
 use crate::color::{Color, MatrixConversion};
@@ -341,14 +342,91 @@ impl TextMatcher {
         })
     }
 
+    /// The value of the field searched.
+    pub fn field_value<'a>(&self, ev: &'a Event) -> &'a str {
+        match self.field {
+            Field::Text => &ev.text,
+            Field::Style => &ev.style,
+            Field::Actor => &ev.actor,
+            Field::Effect => &ev.effect,
+        }
+    }
+
+    pub fn set_field(&self, ev: &mut Event, v: String) {
+        *match self.field {
+            Field::Text => &mut ev.text,
+            Field::Style => &mut ev.style,
+            Field::Actor => &mut ev.actor,
+            Field::Effect => &mut ev.effect,
+        } = v;
+    }
+
     fn haystack<'a>(&self, ev: &'a Event) -> std::borrow::Cow<'a, str> {
         match self.field {
             Field::Text if self.strip_tags => tags::strip_tags(&ev.text).into(),
-            Field::Text => (&ev.text).into(),
-            Field::Style => (&ev.style).into(),
-            Field::Actor => (&ev.actor).into(),
-            Field::Effect => (&ev.effect).into(),
+            _ => self.field_value(ev).into(),
         }
+    }
+
+    /// `f` for each match in `text`, a value of the field, from byte `from` on, as a range of
+    /// `text`, with the text matched and its groups when `groups`, until `f` says stop. With
+    /// `strip_tags` the text is searched without its `{...}` blocks (Aegisub's skip tags: a match
+    /// may span a block, `^` and `$` are the ends of what shows); with `only_tags`, inside each
+    /// block.
+    fn each_match(
+        &self,
+        text: &str,
+        from: usize,
+        groups: bool,
+        mut f: impl FnMut(Range<usize>, &str, Option<&Captures>) -> bool,
+    ) {
+        if self.field != Field::Text || !(self.strip_tags || self.only_tags) {
+            scan(&self.regex, text, from, groups, |m, c| {
+                f(m.clone(), &text[m], c)
+            });
+        } else if self.only_tags {
+            for b in tags::block_spans(text) {
+                let at = from.saturating_sub(b.start);
+                let block = &text[b.clone()];
+                if b.end >= from
+                    && !scan(&self.regex, block, at, groups, |m, c| {
+                        f(b.start + m.start..b.start + m.end, &block[m], c)
+                    })
+                {
+                    return;
+                }
+            }
+        } else {
+            let (hay, runs) = shown(text);
+            let at = runs
+                .iter()
+                .map(|&(_, t, n)| from.saturating_sub(t).min(n))
+                .sum();
+            // a match's start is in the run it starts, its end in the run it ends: tags at
+            // either edge stay outside
+            let back = |p: usize, end: bool| {
+                runs.iter()
+                    .find(|&&(h, _, n)| p < h + n || (end && p == h + n))
+                    .map_or_else(
+                        || runs.last().map_or(text.len(), |&(_, t, n)| t + n),
+                        |&(h, t, _)| t + p - h,
+                    )
+            };
+            scan(&self.regex, &hay, at, groups, |m, c| {
+                let s = back(m.start, false);
+                f(s..back(m.end, true).max(s), &hay[m], c)
+            });
+        }
+    }
+
+    /// The first match in `text`, a value of the field, from byte `from` on (Find next).
+    pub fn find_at(&self, text: &str, from: usize) -> Option<Range<usize>> {
+        let mut hit = None;
+        self.each_match(text, from, false, |m, _, _| {
+            hit = Some(m);
+            false
+        });
+        hit
     }
 
     pub fn is_match(&self, ev: &Event) -> bool {
@@ -430,6 +508,79 @@ pub fn anchored(pattern: &str, is_regex: bool, start: bool, end: bool) -> String
     )
 }
 
+/// `f` for each match of `re` in `hay` from byte `at` on, as `captures_iter` has them (no empty
+/// match where the one before ended), with its groups when `groups`; false when `f` stopped it.
+fn scan(
+    re: &Regex,
+    hay: &str,
+    mut at: usize,
+    groups: bool,
+    mut f: impl FnMut(Range<usize>, Option<&Captures>) -> bool,
+) -> bool {
+    let mut last = None;
+    while at <= hay.len() {
+        let Some(m) = re.find_at(hay, at) else {
+            break;
+        };
+        at = m.end();
+        if m.is_empty() {
+            at += hay[at..].chars().next().map_or(1, char::len_utf8);
+            if last == Some(m.start()) {
+                continue;
+            }
+        }
+        last = Some(m.end());
+        // the groups cost a second search, only where a replacement uses them
+        let c = groups.then(|| re.captures_at(hay, m.start())).flatten();
+        if !f(m.range(), c.as_ref()) {
+            return false;
+        }
+    }
+    true
+}
+
+/// `text` without its `{...}` blocks, as [`tags::strip_tags`] has it, and its runs: where each
+/// starts in the result and in `text`, and its length.
+fn shown(text: &str) -> (String, Vec<(usize, usize, usize)>) {
+    let (mut hay, mut runs, mut i) = (String::with_capacity(text.len()), Vec::new(), 0);
+    while i < text.len() {
+        let open = text[i..].find('{').map_or(text.len(), |k| i + k);
+        if open > i {
+            runs.push((hay.len(), i, open - i));
+            hay.push_str(&text[i..open]);
+        }
+        // an unclosed block hides the rest
+        i = text[open..].find('}').map_or(text.len(), |k| open + k + 1);
+    }
+    (hay, runs)
+}
+
+/// `rep` read as Aegisub (Perl) reads `$1a`: group 1, then "a"; the regex crate would look for
+/// a group named "1a".
+// shortcut: no `\1` for a group, which would take `\1c` and `\1a` tags; add it behind an option
+// if people ask
+fn perl_groups(rep: &str) -> String {
+    let (mut out, mut rest) = (String::with_capacity(rep.len()), rep);
+    while let Some(i) = rest.find('$') {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 1..];
+        let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+        if let Some(r) = after.strip_prefix('$') {
+            out.push_str("$$");
+            rest = r;
+        } else if digits > 0
+            && after[digits..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
+        {
+            out.push_str(&format!("${{{}}}", &after[..digits]));
+            rest = &after[digits..];
+        } else {
+            out.push('$');
+            rest = after;
+        }
+    }
+    out + rest
+}
+
 #[derive(Debug, Clone)]
 pub struct Replace {
     pub matcher: TextMatcher,
@@ -463,81 +614,81 @@ pub fn follow_case(matched: &str, rep: String) -> String {
     )
 }
 
-/// Replace in the given rows; returns number of replacements made. When
-/// matching with tags stripped is requested, replacements are applied to
-/// the plain-text blocks only, so override tags are never damaged.
+impl Replace {
+    /// The replacement as written for the regex crate.
+    fn rep(&self) -> String {
+        if self.matcher.is_regex {
+            perl_groups(&self.replacement)
+        } else {
+            self.replacement.clone()
+        }
+    }
+
+    /// What replaces the match `matched`, with groups `c` when the matcher is a user's regex.
+    fn expand(&self, rep: &str, matched: &str, c: Option<&Captures>) -> String {
+        let mut out = String::new();
+        match c {
+            Some(c) => c.expand(rep, &mut out),
+            None => out.push_str(rep),
+        }
+        if self.keep_case {
+            follow_case(matched, out)
+        } else {
+            out
+        }
+    }
+
+    /// `text` with the matches from byte `from` on replaced (the first one alone when `first`),
+    /// and how many; "" when none. Tags a skip-tags match spans stay, after its replacement.
+    fn apply(&self, rep: &str, text: &str, from: usize, first: bool) -> (String, usize) {
+        let m = &self.matcher;
+        let keep_tags = m.field == Field::Text && m.strip_tags && !m.only_tags;
+        let (mut out, mut last, mut n) = (String::new(), 0, 0);
+        m.each_match(text, from, m.is_regex, |at, matched, c| {
+            out.push_str(&text[last..at.start]);
+            out.push_str(&self.expand(rep, matched, c));
+            if keep_tags {
+                for b in tags::block_spans(&text[at.clone()]) {
+                    out.push('{');
+                    out.push_str(&text[at.start + b.start..at.start + b.end]);
+                    out.push('}');
+                }
+            }
+            (last, n) = (at.end, n + 1);
+            !first
+        });
+        if n > 0 {
+            out.push_str(&text[last..]);
+        }
+        (out, n)
+    }
+
+    /// Replace next: the match at `at` of `text`, a value of the field, if one is still exactly
+    /// there; the new text and where its replacement ends.
+    pub fn replace_one(&self, text: &str, at: Range<usize>) -> Option<(String, usize)> {
+        if self.matcher.find_at(text, at.start)? != at {
+            return None;
+        }
+        let (new, _) = self.apply(&self.rep(), text, at.start, true);
+        let end = new.len() - (text.len() - at.end);
+        Some((new, end))
+    }
+}
+
+/// Replace in the given rows; returns number of replacements made.
 pub fn replace(doc: &mut Document, rows: &Rows, r: &Replace) -> usize {
+    let rep = r.rep();
     let mut count = 0;
-    let literal = !r.matcher.is_regex || !r.replacement.contains('$');
     for i in rows.resolve(doc) {
-        let ev = doc.event(i).unwrap();
-        let apply = |s: &str, count: &mut usize| -> Option<String> {
-            let n = if r.first_only { 1 } else { 0 };
-            let found = r.matcher.regex.find_iter(s).count();
-            if found == 0 {
-                return None;
-            }
-            *count += if r.first_only { 1 } else { found };
-            let re = &r.matcher.regex;
-            Some(if r.keep_case {
-                re.replacen(s, n, |c: &regex::Captures| {
-                    let mut out = String::new();
-                    if literal {
-                        out.push_str(&r.replacement);
-                    } else {
-                        c.expand(&r.replacement, &mut out);
-                    }
-                    follow_case(&c[0], out)
-                })
-                .into_owned()
-            } else if literal {
-                re.replacen(s, n, regex::NoExpand(&r.replacement))
-                    .into_owned()
-            } else {
-                re.replacen(s, n, r.replacement.as_str()).into_owned()
-            })
-        };
-        let new: Option<String> = match r.matcher.field {
-            Field::Text if r.matcher.only_tags => {
-                let (mut out, mut last) = (String::new(), 0);
-                for b in tags::block_spans(&ev.text) {
-                    if let Some(n) = apply(&ev.text[b.clone()], &mut count) {
-                        out.push_str(&ev.text[last..b.start]);
-                        out.push_str(&n);
-                        last = b.end;
-                        if r.first_only {
-                            break;
-                        }
-                    }
-                }
-                (last > 0).then(|| out + &ev.text[last..])
-            }
-            Field::Text if r.matcher.strip_tags => {
-                let mut line = Line::parse(&ev.text);
-                let mut changed = false;
-                for b in &mut line.blocks {
-                    if let Block::Text(t) = b
-                        && let Some(n) = apply(t, &mut count)
-                    {
-                        *t = n;
-                        changed = true;
-                        if r.first_only {
-                            break;
-                        }
-                    }
-                }
-                changed.then(|| line.to_text())
-            }
-            _ => apply(&r.matcher.haystack(ev), &mut count),
-        };
-        if let Some(n) = new {
-            let ev = doc.event_mut(i).unwrap();
-            match r.matcher.field {
-                Field::Text => ev.text = n,
-                Field::Style => ev.style = n,
-                Field::Actor => ev.actor = n,
-                Field::Effect => ev.effect = n,
-            }
+        let (new, n) = r.apply(
+            &rep,
+            r.matcher.field_value(doc.event(i).unwrap()),
+            0,
+            r.first_only,
+        );
+        if n > 0 {
+            count += n;
+            r.matcher.set_field(doc.event_mut(i).unwrap(), new);
         }
     }
     count
@@ -1643,6 +1794,65 @@ mod tests {
         assert_eq!(replace(&mut d, &Rows::All, &r), 2);
         assert_eq!(d.event(0).unwrap().text, r"{\b1}$o$ is\N{\b0}$1");
         assert_eq!(tags::block_spans("a{b}c{d"), vec![2..3]);
+    }
+
+    #[test]
+    fn skip_tags_matches_what_shows() {
+        let rep = |text: &str, find: &str, regex: bool, with: &str| {
+            let mut m = TextMatcher::new(find, regex, true, Field::Text).unwrap();
+            m.strip_tags = true;
+            let r = Replace {
+                matcher: m,
+                replacement: with.into(),
+                first_only: false,
+                keep_case: false,
+            };
+            let (out, n) = r.apply(&r.rep(), text, 0, false);
+            if n == 0 { text.to_string() } else { out }
+        };
+        // a match may span a tag, which stays; ^ and $ are the ends of what shows
+        assert_eq!(rep(r"a{\i1}b c", "ab", false, "x"), r"x{\i1} c");
+        assert_eq!(
+            rep(r"{\an8}abc{\i0}", "^a|c$", true, "_"),
+            r"{\an8}_b_{\i0}"
+        );
+        assert_eq!(rep(r"{\an8}abc", "^", true, ">"), r"{\an8}>abc");
+        assert_eq!(rep(r"(a){b}", r"\((\w)\)", true, "[$1x]"), r"[ax]{b}");
+        assert_eq!(rep("ab{c", "b", false, "B"), "aB{c");
+        // where Find next starts and what it shows, as byte ranges of the text
+        let mut m = TextMatcher::new("o", false, true, Field::Text).unwrap();
+        m.strip_tags = true;
+        assert_eq!(m.find_at(r"{\pos(1,2)}bob {o}o", 0), Some(12..13));
+        assert_eq!(m.find_at(r"{\pos(1,2)}bob {o}o", 13), Some(18..19));
+        assert_eq!(m.find_at(r"{\pos(1,2)}bob {o}o", 19), None);
+        m.strip_tags = false;
+        assert_eq!(m.find_at(r"{\pos(1,2)}bob {o}o", 13), Some(16..17));
+        // one match alone, and only where it was shown
+        let r = Replace {
+            matcher: TextMatcher::new(r"(\w)o", true, true, Field::Text).unwrap(),
+            replacement: "$1$1".into(),
+            first_only: false,
+            keep_case: false,
+        };
+        assert_eq!(r.replace_one("bo go", 3..5), Some(("bo gg".into(), 5)));
+        assert_eq!(r.replace_one("bo go", 2..4), None);
+        // every match as the regex crate counts them, empty ones too
+        for (find, text) in [("a*", "baaac"), ("x?", "ąx"), (r"\b", "ab cd"), ("$", "a")] {
+            let m = TextMatcher::new(find, true, true, Field::Text).unwrap();
+            let r = Replace {
+                matcher: m.clone(),
+                replacement: "-".into(),
+                first_only: false,
+                keep_case: false,
+            };
+            let re = Regex::new(find).unwrap();
+            assert_eq!(r.apply("-", text, 0, false).0, re.replace_all(text, "-"));
+            assert_eq!(r.apply("-", text, 0, false).1, re.find_iter(text).count());
+        }
+        assert_eq!(
+            perl_groups("$1a $2 ${3}b $$1x $name $"),
+            "${1}a $2 ${3}b $$1x $name $"
+        );
     }
 
     #[test]
