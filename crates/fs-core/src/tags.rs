@@ -236,8 +236,11 @@ impl Line {
         }
     }
 
-    /// Insert or replace a tag in the first override block (creating one at
-    /// the start if needed). Used for `\pos`, `\an`, `\clip` etc.
+    /// Set a tag at the start of the line, as Aegisub's `SetOverride` does: in the first override
+    /// block (made if the line starts with text), where it takes the place of the first tag of
+    /// the same name or an alias and the others go, so no later one in that block wins. Tags
+    /// libass takes once for the whole line (`\pos`, `\org`, `\clip`, `\fad`, `\an`) leave the
+    /// later blocks too; others there, such as `\frz`, change the text from there on and stay.
     pub fn set_line_tag(&mut self, tag: Tag) {
         let aliases: &[&str] = match tag.name.as_str() {
             "pos" | "move" => &["pos", "move"],
@@ -247,32 +250,51 @@ impl Line {
             // Aegisub's SetOverride drops the legacy spelling too
             "frz" | "fr" => &["frz", "fr"],
             "1c" | "c" => &["1c", "c"],
-            n => std::slice::from_ref(match TAG_NAMES.iter().find(|x| **x == n) {
-                Some(x) => x,
-                None => &"",
-            }),
+            _ => &[],
         };
-        for b in &mut self.blocks {
-            if let Block::Override { tags, raw } = b
-                && let Some(t) = tags.iter_mut().find(|t| aliases.contains(&t.name.as_str()))
-            {
-                *t = tag;
-                *raw = None;
-                return;
+        let whole_line = matches!(
+            tag.name.as_str(),
+            "pos" | "move" | "org" | "clip" | "iclip" | "fad" | "fade" | "an" | "a"
+        );
+        let name = tag.name.clone();
+        let same = |t: &Tag| t.name == name || aliases.contains(&t.name.as_str());
+        let mut tag = Some(tag);
+        let mut first = true;
+        self.blocks.retain_mut(|b| {
+            let at_start = std::mem::replace(&mut first, false);
+            let Block::Override { tags, raw } = b else {
+                return true;
+            };
+            if !at_start && !whole_line {
+                return true;
             }
-        }
-        match self.blocks.first_mut() {
-            Some(Block::Override { tags, raw }) => {
-                tags.push(tag);
+            let n = tags.len();
+            let mut kept = Vec::with_capacity(n + 1);
+            for t in tags.drain(..) {
+                if !same(&t) {
+                    kept.push(t);
+                } else if at_start && let Some(new) = tag.take() {
+                    kept.push(new);
+                }
+            }
+            if at_start && let Some(new) = tag.take() {
+                kept.push(new);
+            }
+            if at_start || kept.len() != n {
                 *raw = None;
             }
-            _ => self.blocks.insert(
+            *tags = kept;
+            // a block left empty goes, one that was empty already stays
+            at_start || n == 0 || !tags.is_empty()
+        });
+        if let Some(t) = tag {
+            self.blocks.insert(
                 0,
                 Block::Override {
-                    tags: vec![tag],
+                    tags: vec![t],
                     raw: None,
                 },
-            ),
+            );
         }
     }
 
@@ -881,6 +903,18 @@ mod tests {
         l.set_line_tag(Tag::new("frz", vec!["20".into()]));
         l.set_line_tag(Tag::new("1c", vec!["&H00FF00&".into()]));
         assert_eq!(l.to_text(), r"{\frz20\1c&H00FF00&}x");
+    }
+
+    #[test]
+    fn set_at_the_start_as_aegisub() {
+        // a duplicate later in the first block can't win; a later block keeps its own rotation
+        let mut l = Line::parse(r"{\frz10\b1\frz20}a{\frz30}b");
+        l.set_line_tag(Tag::new("frz", vec!["5".into()]));
+        assert_eq!(l.to_text(), r"{\frz5\b1}a{\frz30}b");
+        // a line starting with text gets the block; whole-line tags leave the other blocks
+        let mut l = Line::parse(r"a{\pos(1,2)\i1}b{\move(1,2,3,4)}c{}");
+        l.set_line_tag(Tag::new("pos", vec!["5".into(), "6".into()]));
+        assert_eq!(l.to_text(), r"{\pos(5,6)}a{\i1}bc{}");
     }
 
     #[test]
