@@ -694,7 +694,11 @@ void VisualTools::paint(QPainter &p) {
         break;
     }
     case Scale: {
-        const QPointF ex = pos + QPointF(m_v.fscx, 0), ey = pos - QPointF(0, m_v.fscy);
+        // along the line's own axes, turned by rz (Aegisub)
+        // shortcut: rx and ry are left out, the axes stay flat; Aegisub turns them in 3D
+        const double a = qDegreesToRadians(m_v.frz);
+        const QPointF ax(std::cos(a), -std::sin(a)), ay(std::sin(a), std::cos(a));
+        const QPointF ex = pos + ax * m_v.fscx, ey = pos - ay * m_v.fscy;
         line(p, pos, ex);
         line(p, pos, ey);
         handle(p, ex);
@@ -1055,6 +1059,9 @@ bool VisualTools::move(QMouseEvent *e) {
     }
     case Scale: {
         double sx = m_start.fscx, sy = m_start.fscy;
+        // the move along the line's turned axes, as the handles are drawn
+        const double a = qDegreesToRadians(m_start.frz);
+        dw = {dw.x() * std::cos(a) - dw.y() * std::sin(a), dw.x() * std::sin(a) + dw.y() * std::cos(a)};
         if (m_button == Qt::LeftButton) {
             if (m_scaleWhat & 2) { // keep proportions: one factor from the larger move
                 const double d = std::abs(dw.x()) >= std::abs(dw.y()) ? dw.x() : -dw.y();
