@@ -161,6 +161,12 @@ public:
 
 MainWindow::MainWindow() {
     limits::reload(); // the counter options, before any row's characters per second
+    m_compareLater = new QTimer(this);
+    m_compareLater->setSingleShot(true);
+    m_compareLater->setInterval(150); // a comparison of 100k lines takes 34 ms: not every keystroke
+    connect(m_compareLater, &QTimer::timeout, this, [this] {
+        if (m_compareOn) compareTabs(true);
+    });
     setWindowTitle("FS Editor");
     setAcceptDrops(true);
     m_tabs = new QTabWidget(this);
@@ -386,7 +392,7 @@ TabPanel *MainWindow::newTab() {
     slot->setProperty("panel", QVariant::fromValue<QObject *>(tab));
     const int i = m_tabs->addTab(slot, tab->title());
     connect(tab, &TabPanel::docChanged, this, [this] {
-        if (m_compareOn) compareTabs(true);
+        if (m_compareOn) m_compareLater->start();
     });
     connect(tab, &TabPanel::activeChanged, this, [this, tab] {
         if (tab == current()) followActive();

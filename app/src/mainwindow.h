@@ -83,6 +83,7 @@ private:
     QWidget *m_right = nullptr;
     QPointer<TabPanel> m_second, m_prev;
     bool m_compareOn = false;
+    class QTimer *m_compareLater = nullptr; // edits rerun the comparison once typing pauses
     QToolBar *m_toolbar = nullptr;
     QMenu *m_automationMenu = nullptr;
     QMap<QString, QAction *> m_actions;
