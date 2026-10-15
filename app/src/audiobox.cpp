@@ -783,8 +783,40 @@ void AudioBox::stepSyllable(int dir) {
     m_view->overlayChanged();
 }
 
+// Aegisub's ModifyStart / ModifyLength: 10 ms steps of the active syllable in karaoke mode, else of the line.
+void AudioBox::modifyStart(int steps) {
+    if (!m_karaoke || m_syl.empty()) return setSelection(std::min(m_selStart + steps * 10, m_selEnd), m_selEnd, false);
+    if (m_activeSyl <= 0) return;
+    m_tab->s().kara_set_boundary(size_t(m_tab->active()), size_t(m_activeSyl), m_syl[m_activeSyl].start + steps * 10,
+                                 false);
+    m_tab->changed(TabPanel::FromAudio);
+    karaokeChanged();
+}
+
+void AudioBox::modifyLength(int steps, bool shiftFollowing) {
+    if (!m_karaoke || m_syl.empty()) return setSelection(m_selStart, m_selEnd + steps * 10, false);
+    const size_t next = size_t(m_activeSyl) + 1;
+    if (next >= m_syl.size()) return;
+    m_tab->s().kara_set_boundary(size_t(m_tab->active()), next, m_syl[next].start + steps * 10, shiftFollowing);
+    m_tab->changed(TabPanel::FromAudio);
+    karaokeChanged();
+}
+
 void AudioBox::keyPressEvent(QKeyEvent *e) {
     const qint64 span = qint64(m_view->width() * m_msPerPx);
+    if (e->modifiers() & Qt::KeypadModifier) {
+        // Aegisub's numpad: 4/6 move the start, 7/9 the end, -/+ the end (Shift: and the following syllables)
+        const bool shift = e->modifiers() & Qt::ShiftModifier;
+        switch (e->key()) {
+        case Qt::Key_4: return modifyStart(-1);
+        case Qt::Key_6: return modifyStart(1);
+        case Qt::Key_7: return modifyLength(-1, false);
+        case Qt::Key_9: return modifyLength(1, false);
+        case Qt::Key_Minus: return modifyLength(-1, shift);
+        case Qt::Key_Plus: return modifyLength(1, shift);
+        default: break;
+        }
+    }
     switch (e->key()) {
     case Qt::Key_Return:
     case Qt::Key_Enter:

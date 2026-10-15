@@ -1830,14 +1830,11 @@ impl Session {
     /// the following boundaries by the same amount (right-drag).
     pub fn kara_set_boundary(&mut self, row: usize, index: usize, ms: i64, shift_rest: bool) {
         self.kara_edit(row, "Karaoke timing", |k| {
-            let markers = k.markers();
-            let old = markers.get(index).copied().unwrap_or(Time(ms));
-            let got = k.set_marker(index, Time(ms));
-            if shift_rest {
-                let delta = got - old;
-                for (j, &m) in markers.iter().enumerate().skip(index + 1) {
-                    k.set_marker(j, m + delta);
-                }
+            if shift_rest && index > 0 && index < k.syls.len() {
+                let delta = Time(ms) - k.syl_start(index);
+                k.shift_markers(index, delta);
+            } else {
+                k.set_marker(index, Time(ms));
             }
         });
     }
@@ -2243,6 +2240,11 @@ mod tests {
         assert_eq!((syl[1].start, syl[1].end), (5500, 6000));
         s.kara_set_boundary(2, 1, 5300, false);
         assert_eq!(s.syllables(2)[0].end, 5300);
+        r.text = "{\\k20}a{\\k20}b{\\k60}c".into();
+        s.set_row(2, &r, "");
+        // shifting the rest keeps b's length (it used to move the wrong boundaries)
+        s.kara_set_boundary(2, 1, 5300, true);
+        assert_eq!(s.row(2).text, "{\\k30}a{\\k20}b{\\k50}c");
     }
 
     /// cargo test --release -p fs-bridge bench_large -- --ignored --nocapture

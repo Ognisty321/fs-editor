@@ -139,6 +139,17 @@ impl Karaoke {
         self.line_start + Time(rel)
     }
 
+    /// Move the boundaries before syllables `from..` by `delta`, each clamped
+    /// by its neighbours; moving later starts from the far end so every
+    /// boundary has room (Aegisub `ModifyLength` with shift_following).
+    pub fn shift_markers(&mut self, from: usize, delta: Time) {
+        let (from, n) = (from.max(1), self.syls.len());
+        for k in 0..n.saturating_sub(from) {
+            let i = if delta.ms() > 0 { n - 1 - k } else { from + k };
+            self.set_marker(i, self.syl_start(i) + delta);
+        }
+    }
+
     /// Change the line's start/end: the first syllable absorbs the start
     /// change and the last one the end change (durations never go negative).
     pub fn set_line_times(&mut self, start: Time, end: Time) {
@@ -261,6 +272,20 @@ mod tests {
         // split past the end gives an empty zero-length syllable
         k.split(0, 99);
         assert_eq!(k.text(), r"{\k100}abcd{\k0}");
+    }
+
+    #[test]
+    fn shift_markers_moves_the_following_boundaries() {
+        let mut k = Karaoke::from_event(&ev(r"{\k10}a{\k10}b{\k10}c{\k70}d", 0, 1000));
+        // later: from the far end, so b and c keep their lengths
+        k.shift_markers(1, Time(150));
+        assert_eq!(k.text(), r"{\k25}a{\k10}b{\k10}c{\k55}d");
+        // earlier: the first boundary is clamped at the line start, the rest move fully
+        k.shift_markers(1, Time(-300));
+        assert_eq!(k.text(), r"{\k0}a{\k5}b{\k10}c{\k85}d");
+        let mut k = Karaoke::from_event(&ev(r"{\k10}a{\k10}b", 0, 200));
+        k.shift_markers(0, Time(500)); // the last boundary stops at the line end
+        assert_eq!(k.text(), r"{\k20}a{\k0}b");
     }
 
     #[test]

@@ -101,6 +101,8 @@ private:
     void playSelection();
     void stepLine(int dir);
     void stepSyllable(int dir);
+    void modifyStart(int steps);
+    void modifyLength(int steps, bool shiftFollowing);
     void autoSplit();
     void karaokeChanged();
     QWidget *buttonRow();
