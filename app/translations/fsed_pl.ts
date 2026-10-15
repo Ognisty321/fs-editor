@@ -2640,6 +2640,10 @@ Filtry eksportu: %8</translation>
         <translation>Maksymalna liczba linii</translation>
     </message>
     <message>
+        <source>Default line duration</source>
+        <translation>Domyślny czas trwania linii</translation>
+    </message>
+    <message>
         <source>Grid font (applies to new tabs)</source>
         <translation>Czcionka siatki (dla nowych zakładek)</translation>
     </message>

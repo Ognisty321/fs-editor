@@ -454,6 +454,7 @@ void Grid::mousePressEvent(QMouseEvent *e) {
             return;
         }
         clickRow(vi, e->modifiers());
+        if (!(e->modifiers() & Qt::ControlModifier)) m_selectTo = vi;
         const auto r = m_tab->s().row(row);
         if (col == Num) m_tab->seekVideo(e->modifiers() & Qt::ShiftModifier ? r.end : r.start);
         else if (col == Start || col == End) m_tab->seekVideo(col == Start ? r.start : r.end);
@@ -467,6 +468,21 @@ void Grid::mousePressEvent(QMouseEvent *e) {
 }
 
 void Grid::mouseMoveEvent(QMouseEvent *e) {
+    if (m_selectTo >= 0 && (e->buttons() & Qt::LeftButton)) {
+        // a drag selects the lines it passes, the grid scrolling on past its edges (Aegisub)
+        // shortcut: one line per mouse move out there, a timer if a still mouse should scroll too
+        auto *sb = verticalScrollBar();
+        const int y = int(e->position().y());
+        if (y < rowHeight()) sb->setValue(sb->value() - 1);
+        else if (y >= viewport()->height()) sb->setValue(sb->value() + 1);
+        int vi = rowAt(std::clamp(y, rowHeight(), viewport()->height() - 1));
+        if (vi < 0) vi = int(m_vis.size()) - 1;
+        if (vi >= 0 && vi != m_selectTo) {
+            m_selectTo = vi;
+            clickRow(vi, Qt::ShiftModifier);
+        }
+        return;
+    }
     if (m_dragFrom < 0 || !(e->buttons() & Qt::LeftButton)) return;
     const int vi = rowAt(int(e->position().y()));
     if (vi < 0 || vi == m_dragFrom) return;
@@ -477,7 +493,7 @@ void Grid::mouseMoveEvent(QMouseEvent *e) {
     if (!rows.empty()) m_tab->setSelection(rows, int(rows.front()));
 }
 
-void Grid::mouseReleaseEvent(QMouseEvent *) { m_dragFrom = -1; }
+void Grid::mouseReleaseEvent(QMouseEvent *) { m_dragFrom = m_selectTo = -1; }
 
 void Grid::mouseDoubleClickEvent(QMouseEvent *e) {
     const int vi = rowAt(int(e->position().y()));
@@ -626,25 +642,22 @@ void Grid::deleteText() {
 // timeMode: 0 from neighbours, 1 video time, 2 video frame
 void Grid::insertRow(bool after, int timeMode) {
     auto &s = m_tab->s();
-    const int act = std::max(0, m_tab->active());
-    const bool empty = s.row_count() == 0;
-    const fsb::Row r = empty ? fsb::Row{} : s.row(size_t(act));
-    qint64 start, end;
-    if (timeMode == 1) {
-        start = m_tab->videoStartTime();
-        end = start + 5000;
-    } else if (timeMode == 2) {
-        start = m_tab->videoStartTime();
-        end = m_tab->videoEndTime();
-    } else if (after) {
-        start = r.end;
-        end = start + 5000;
+    const int act = m_tab->active();
+    // Aegisub's Timing/Default Duration
+    const qint64 dur = QSettings().value("subs/defaultDuration", 3000).toLongLong();
+    const qint64 start = timeMode ? m_tab->videoStartTime() : 0;
+    const qint64 end = timeMode == 2 ? m_tab->videoEndTime() : start + dur;
+    size_t row;
+    if (act < 0 || s.row_count() == 0) {
+        row = s.insert_row(0, start, end);
+    } else if (timeMode) {
+        row = s.insert_beside(size_t(act), after, start, end, false);
     } else {
-        end = r.start;
-        start = std::max<qint64>(0, end - 5000);
+        // next to the line, in the time the others leave free (Aegisub)
+        const fsb::Row r = s.row(size_t(act));
+        row = after ? s.insert_beside(size_t(act), true, r.end, r.end + dur, true)
+                    : s.insert_beside(size_t(act), false, r.start - dur, r.start, true);
     }
-    const size_t at = empty ? 0 : size_t(act + (after ? 1 : 0));
-    const size_t row = s.insert_row(at, start, end);
     m_tab->changed();
     m_tab->setActive(int(row));
 }

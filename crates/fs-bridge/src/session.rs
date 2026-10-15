@@ -932,12 +932,41 @@ impl Session {
     /// Insert an empty line before row `at` (`at == row_count` appends).
     pub fn insert_row(&mut self, at: usize, start: i64, end: i64) -> usize {
         let style = self.style_or_default(at.saturating_sub(1));
+        self.insert_styled(at, start, end, &style)
+    }
+
+    /// A new empty line before row `row` (after it with `after`) in its style (Aegisub's
+    /// subtitle/insert), timed `start`..`end`; `fit` cuts that to the time the other lines leave.
+    pub fn insert_beside(
+        &mut self,
+        row: usize,
+        after: bool,
+        start: i64,
+        end: i64,
+        fit: bool,
+    ) -> usize {
+        let (mut start, mut end) = (start.max(0), end.max(0));
+        if fit {
+            for e in self.ed.doc.events().iter().map(|e| &e.event) {
+                if after && e.start.0 >= start {
+                    end = end.min(e.start.0);
+                }
+                if !after && e.end.0 <= end {
+                    start = start.max(e.end.0);
+                }
+            }
+        }
+        let style = self.style_or_default(row);
+        self.insert_styled(row + usize::from(after), start, end, &style)
+    }
+
+    fn insert_styled(&mut self, at: usize, start: i64, end: i64, style: &str) -> usize {
         let ev_at = self
             .tl_row(at)
             .map(|r| r.original)
             .unwrap_or(self.ed.doc.event_count());
         self.edit("Insert line", |d| {
-            d.insert_event(ev_at, Event::dialogue(Time(start), Time(end), &style, ""));
+            d.insert_event(ev_at, Event::dialogue(Time(start), Time(end), style, ""));
         });
         self.row_of_event(ev_at).unwrap_or(0)
     }
@@ -950,7 +979,13 @@ impl Session {
 
     pub fn delete_rows(&mut self, rows: &[usize]) {
         let evs = self.all_events(rows);
-        self.edit("Delete lines", |d| ops::delete_rows(d, &evs));
+        self.edit("Delete lines", |d| {
+            ops::delete_rows(d, &evs);
+            // none left: a new empty one to type into (Aegisub)
+            if d.event_count() == 0 {
+                d.push_event(Event::dialogue(Time(0), Time(5000), "Default", ""));
+            }
+        });
     }
 
     // shortcut: trees are off in translator mode, where a row pairs two events; add them there if
@@ -2837,6 +2872,18 @@ mod tests {
         assert_eq!((s.selected_rows(), s.selected_active()), (vec![1, 2], 2));
         s.redo();
         assert_eq!((s.selected_rows(), s.selected_active()), (vec![0], 0));
+    }
+
+    #[test]
+    fn inserted_lines_fit_between_their_neighbours() {
+        let mut s = session(ASS);
+        // after "one" (1-2 s), cut at "two" (3 s); before "two", from where "one" ends
+        let r = s.insert_beside(0, true, 2000, 5000, true);
+        assert_eq!((r, s.row(1).start, s.row(1).end), (1, 2000, 3000));
+        let r = s.insert_beside(3, false, 0, 5000, true);
+        assert_eq!((r, s.row(3).start, s.row(3).end), (3, 4000, 5000));
+        s.delete_rows(&(0..s.row_count()).collect::<Vec<_>>());
+        assert_eq!((s.row_count(), s.row(0).text.as_str()), (1, ""));
     }
 
     #[test]

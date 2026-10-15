@@ -321,14 +321,14 @@ void TabPanel::changed(int source) {
 
 // the lines the step was made on come back selected (Aegisub)
 void TabPanel::undo() {
-    if (s().undo()) restoreSelection();
+    if (s().undo()) reselect();
 }
 
 void TabPanel::redo() {
-    if (s().redo()) restoreSelection();
+    if (s().redo()) reselect();
 }
 
-void TabPanel::restoreSelection() {
+void TabPanel::reselect() {
     const auto rows = s().selected_rows();
     const int active = int(s().selected_active());
     changed();

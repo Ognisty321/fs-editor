@@ -108,6 +108,7 @@ private:
     int m_marker = -1;
     int m_anchor = 0;
     int m_dragFrom = -1;         // Alt+drag moving rows
+    int m_selectTo = -1;         // the row a left-button drag selects to
     QHash<QString, std::vector<size_t>> m_misspelled; // by line text: (start, length) pairs
     int m_spellGen = -1;
 };

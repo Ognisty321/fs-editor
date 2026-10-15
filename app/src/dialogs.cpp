@@ -1408,7 +1408,7 @@ HistoryDialog::HistoryDialog(TabPanel *tab) : QDialog(tab) {
         const int steps = list->row(it);
         if (steps <= 0) return;
         tab->s().undo_to(size_t(steps));
-        tab->changed();
+        tab->reselect();
         accept();
     });
     resize(360, 420);
@@ -1791,6 +1791,13 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         subs->addRow(tr(limitLabels[k]), s);
         spins.emplace_back(limitKeys[k].first, s);
     }
+    auto *duration = new QSpinBox(this); // of an inserted line (Aegisub's Timing/Default Duration)
+    duration->setRange(0, 60000);
+    duration->setSingleStep(500);
+    duration->setSuffix(" ms");
+    duration->setValue(st.value("subs/defaultDuration", 3000).toInt());
+    subs->addRow(tr("Default line duration"), duration);
+    spins.emplace_back("subs/defaultDuration", duration);
     const auto fontName = [](const QFont &f) { return QString("%1, %2 pt").arg(f.family()).arg(f.pointSize()); };
     auto *font = new QPushButton(fontName(st.value("grid/font", QFont("Tahoma", 10)).value<QFont>()), this);
     connect(font, &QPushButton::clicked, this, [font, fontName] {

@@ -65,6 +65,9 @@ public:
     // undo/redo keep the selection when possible
     void undo();
     void redo();
+    // after a change that moved lines or brought others back (undo, sort): the lines the session
+    // holds as selected, selected again
+    void reselect();
 
     // media
     void openVideo(const QString &path, qint64 frame = 0, double ar = 0);
@@ -111,8 +114,7 @@ protected:
 
 private:
     void applyLayout();
-    void syncSelection();    // to the session, for the undo steps
-    void restoreSelection(); // the one undo or redo brought back
+    void syncSelection(); // to the session, for the undo steps
     void matchResolution();
 
     MainWindow *m_main;

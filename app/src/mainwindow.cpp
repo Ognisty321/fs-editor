@@ -708,7 +708,7 @@ void MainWindow::buildMenus() {
     add("undo", tr("Undo"), QKeySequence("Ctrl+Z"), edit, [=] { tab()->undo(); });
     add("undoToSave", tr("Undo to last save"), {}, edit, [=] {
         for (int guard = 0; tab()->modified() && tab()->s().can_undo() && guard < 100000; ++guard) tab()->s().undo();
-        tab()->changed();
+        tab()->reselect();
     });
     add("redo", tr("Redo"), QKeySequence("Ctrl+Y"), edit, [=] { tab()->redo(); });
     add("history", tr("History"), QKeySequence("Ctrl+Shift+H"), edit, [=] { HistoryDialog(tab()).exec(); });
@@ -731,7 +731,7 @@ void MainWindow::buildMenus() {
         for (int k = 0; k < 6; ++k)
             add(QString("sort%1%2").arg(selected ? "Sel" : "All").arg(k), sortNames[k], {}, sm, [=] {
                 tab()->s().sort_rows(uint8_t(k), selected, fs::slice(tab()->selection()));
-                tab()->changed();
+                tab()->reselect(); // the same lines, where the sort put them
             });
     }
     add("selectLines", tr("Select lines"), {}, edit, [this] { SelectLinesDialog(this).exec(); });

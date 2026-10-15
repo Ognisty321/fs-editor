@@ -478,6 +478,15 @@ pub mod ffi {
         fn converted(self: &Session) -> bool;
         /// Forget the file (a recovered autosave): Save asks for a name, modified until then.
         fn detach(self: &mut Session);
+        /// A new line before (after) `row` in its style; `fit` cuts the times to the free time.
+        fn insert_beside(
+            self: &mut Session,
+            row: usize,
+            after: bool,
+            start: i64,
+            end: i64,
+            fit: bool,
+        ) -> usize;
         /// The grid's selection, kept with each undo step: undo and redo bring theirs back.
         fn set_selection(self: &mut Session, rows: &[usize], active: i64);
         fn selected_rows(self: &Session) -> Vec<usize>;
