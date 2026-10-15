@@ -9,7 +9,8 @@ mod session;
 mod spell;
 mod visual;
 
-pub use automation::Automation;
+use automation::run_macro_job;
+pub use automation::{Automation, MacroJob};
 use fs_core::tags::set_cps_ignore;
 pub use kanji::KanjiTimer;
 use kanji::new_kanji_timer;
@@ -723,12 +724,21 @@ pub mod ffi {
             rows: &[usize],
             active: i64,
         ) -> bool;
-        fn run_macro(
-            self: &mut Automation,
+        /// A macro run in three steps (Aegisub's BackgroundScriptRunner): prepared and applied on
+        /// the GUI thread, run on a worker while the host brings dialogs and progress back.
+        type MacroJob;
+        fn start_macro(
+            self: &Automation,
             id: usize,
-            session: &mut Session,
+            session: &Session,
             rows: &[usize],
             active: i64,
+        ) -> Result<Box<MacroJob>>;
+        fn run_macro_job(job: &mut MacroJob);
+        fn finish_macro(
+            self: &Automation,
+            job: Box<MacroJob>,
+            session: &mut Session,
         ) -> Result<MacroResult>;
         fn take_log(self: &Automation) -> String;
     }

@@ -25,9 +25,11 @@
 #include <numeric>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QEventLoop>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QFutureWatcher>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -55,6 +57,7 @@
 #include <QStyleOptionToolButton>
 #include <QTabBar>
 #include <QTabWidget>
+#include <QtConcurrentRun>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -2045,7 +2048,23 @@ void MainWindow::runMacro(size_t id) {
     fsb::MacroResult r;
     QString err;
     try {
-        r = (*m_automation)->run_macro(id, tab->s(), fs::slice(rows), tab->active());
+        auto job = (*m_automation)->start_macro(id, tab->s(), fs::slice(rows), tab->active());
+        // Aegisub's BackgroundScriptRunner: the script runs on a worker and m_host brings its dialogs
+        // and progress back here. Input waits for the first 300 ms, then the progress window holds it.
+        m_host->begin();
+        QFutureWatcher<void> watch;
+        QEventLoop loop;
+        connect(&watch, &QFutureWatcher<void>::finished, &loop, &QEventLoop::quit);
+        watch.setFuture(QtConcurrent::run([&job] { fsb::run_macro_job(*job); }));
+        QTimer::singleShot(300, &loop, &QEventLoop::quit);
+        if (!watch.isFinished()) loop.exec(QEventLoop::ExcludeUserInputEvents);
+        if (!watch.isFinished()) {
+            m_host->showProgress();
+            loop.exec();
+        }
+        // quitting the application ends the loops early, but the worker holds the job until it returns
+        while (!watch.isFinished()) QCoreApplication::processEvents(QEventLoop::WaitForMoreEvents);
+        r = (*m_automation)->finish_macro(std::move(job), tab->s());
     } catch (const rust::Error &e) {
         err = QString::fromUtf8(e.what());
     }

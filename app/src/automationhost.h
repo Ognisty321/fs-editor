@@ -1,10 +1,12 @@
-// Qt side of Automation 4: aegisub.dialog.display/open/save and the
-// progress window, called synchronously from Lua on the GUI thread.
+// Qt side of Automation 4: aegisub.dialog.display/open/save and the progress window. A macro
+// calls it from its worker thread; every Qt call is taken over to the GUI thread.
 #pragma once
 
 #include "bridge.h"
 
 #include <QPointer>
+
+#include <atomic>
 
 class QWidget;
 class QProgressDialog;
@@ -24,11 +26,15 @@ public:
     void title(rust::Str text) const override;
     bool is_cancelled() const override;
 
-    // Close the progress window after a macro finished.
+    // Around a macro run: begin() clears the cancel flag, showProgress() puts the window up for a
+    // run that takes a while, finish() closes it.
+    void begin() const;
+    void showProgress() const;
     void finish() const;
 
 private:
     QProgressDialog *bar() const;
     QWidget *m_parent;
     mutable QPointer<QProgressDialog> m_progress;
+    mutable std::atomic<bool> m_cancelled{false};
 };

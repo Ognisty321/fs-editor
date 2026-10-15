@@ -2264,7 +2264,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let one = (1, 1, vec![], vec![old.encode_utf16().count(), 1]);
-        assert_eq!(pairs(true), [one.clone()]);
+        assert_eq!(pairs(true), std::slice::from_ref(&one));
         // without times the third lines pair up too; their texts are the same
         assert_eq!(pairs(false), [one]);
         // only the given rows: line 0 against line 1

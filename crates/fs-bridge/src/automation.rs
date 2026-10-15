@@ -6,9 +6,10 @@ use std::sync::{Arc, Mutex};
 
 use cxx::UniquePtr;
 use fs_automation::{
-    Context, Dialog, DialogControl, DialogResult, DialogValue, Env, Host, Paths, RunError, Script,
-    VideoFrame,
+    Context, Dialog, DialogControl, DialogResult, DialogValue, Env, Host, MacroOutcome, Paths,
+    RunError, Script, VideoFrame,
 };
+use fs_core::Document;
 
 use crate::Session;
 use crate::ffi::{
@@ -17,8 +18,8 @@ use crate::ffi::{
 use crate::media::{Renderer, Video};
 
 struct CppHost(UniquePtr<AutomationHost>);
-// SAFETY: scripts run synchronously on the GUI thread (see `run_macro`), the
-// only thread that ever calls into the host.
+// SAFETY: a macro calls the host from its worker thread (`run_macro_job`); the C++ host takes
+// every Qt call over to the GUI thread itself.
 unsafe impl Send for CppHost {}
 unsafe impl Sync for CppHost {}
 
@@ -212,10 +213,34 @@ impl Host for GuiHost {
     }
 }
 
+/// A macro between `start_macro` and `finish_macro`; `run_macro_job` runs it on a worker thread.
+pub struct MacroJob {
+    script: Arc<Script>,
+    index: usize,
+    doc: Document,
+    sel: Vec<usize>,
+    active: Option<usize>,
+    ctx: Context,
+    out: Option<Result<MacroOutcome, RunError>>,
+}
+
+// the job crosses to the worker thread
+const _: fn() = || {
+    fn send<T: Send>() {}
+    send::<MacroJob>();
+};
+
+pub fn run_macro_job(job: &mut MacroJob) {
+    let r = job
+        .script
+        .run_macro(job.index, &job.doc, &job.sel, job.active, &job.ctx);
+    job.out = Some(r);
+}
+
 pub struct Automation {
     env: Env,
     host: Arc<GuiHost>,
-    scripts: Vec<Script>,
+    scripts: Vec<Arc<Script>>,
     /// Flat macro list: (script index, macro index).
     macros: Vec<(usize, usize)>,
     /// Flat export filter list, highest priority first like Aegisub's.
@@ -269,7 +294,7 @@ impl Automation {
         let s = Script::load(path, &self.env);
         let err = s.error.clone();
         self.scripts.retain(|o| o.path != s.path);
-        self.scripts.push(s);
+        self.scripts.push(Arc::new(s));
         self.index();
         err.map_or(Ok(()), |e| Err(format!("{}: {e}", path.display())))
     }
@@ -307,7 +332,7 @@ impl Automation {
     /// Reload every loaded script from disk and load new files in the
     /// autoload dirs (Aegisub's "Reload all scripts" with its rescan).
     pub fn reload(&mut self) -> Vec<String> {
-        let mut paths: Vec<PathBuf> = self.scripts.drain(..).map(|s| s.path).collect();
+        let mut paths: Vec<PathBuf> = self.scripts.drain(..).map(|s| s.path.clone()).collect();
         for p in fs_automation::autoload_files(&self.env.paths) {
             if !paths.contains(&p) {
                 paths.push(p);
@@ -326,7 +351,7 @@ impl Automation {
             .error
             .as_ref()
             .map(|e| format!("{}: {e}", s.path.display()));
-        self.scripts[index] = s;
+        self.scripts[index] = Arc::new(s);
         self.index();
         err.map_or(Ok(()), Err)
     }
@@ -444,15 +469,14 @@ impl Automation {
             .0
     }
 
-    /// Runs on the calling (GUI) thread so dialogs can be modal.
-    // shortcut: the UI is blocked while a script runs (no live progress repaint); move to a worker thread with a marshalling host if long scripts need it.
-    pub fn run_macro(
-        &mut self,
+    /// Prepares a macro run on a copy of the document (GUI thread).
+    pub fn start_macro(
+        &self,
         id: usize,
-        session: &mut Session,
+        session: &Session,
         rows: &[usize],
         active: i64,
-    ) -> Result<MacroResult, String> {
+    ) -> Result<Box<MacroJob>, String> {
         let &(s, m) = self.macros.get(id).ok_or("no such macro")?;
         let (sel, act) = Self::selection(session, rows, active);
         let ctx = Self::context(session);
@@ -466,7 +490,24 @@ impl Automation {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .set(video, session.script_for_render(false, -1));
-        let out = match self.scripts[s].run_macro(m, &session.ed.doc, &sel, act, &ctx) {
+        Ok(Box::new(MacroJob {
+            script: self.scripts[s].clone(),
+            index: m,
+            doc: session.ed.doc.clone(),
+            sel,
+            active: act,
+            ctx,
+            out: None,
+        }))
+    }
+
+    /// Applies a finished run: each script undo point becomes an undo step (GUI thread).
+    pub fn finish_macro(
+        &self,
+        job: Box<MacroJob>,
+        session: &mut Session,
+    ) -> Result<MacroResult, String> {
+        let out = match job.out.unwrap_or(Err(RunError::Cancelled)) {
             Ok(o) => o,
             Err(RunError::Cancelled) => return Ok(MacroResult::default()),
             Err(e) => return Err(e.to_string()),
@@ -497,6 +538,12 @@ impl Automation {
 mod tests {
     use super::*;
 
+    fn run(a: &Automation, id: usize, s: &mut Session, rows: &[usize]) -> MacroResult {
+        let mut job = a.start_macro(id, s, rows, 0).unwrap();
+        run_macro_job(&mut job);
+        a.finish_macro(job, s).unwrap()
+    }
+
     #[test]
     fn runs_a_macro_as_undo_step() {
         let dir = std::env::temp_dir().join(format!("fsb-auto-{}", std::process::id()));
@@ -520,7 +567,7 @@ end)"#,
         r.text = "abc".into();
         s.set_row(0, &r, "");
         assert!(a.macro_enabled(0, &s, &[0], 0));
-        let res = a.run_macro(0, &mut s, &[0], 0).unwrap();
+        let res = run(&a, 0, &mut s, &[0]);
         assert!(res.changed);
         assert_eq!(res.selection, vec![0]);
         assert_eq!(s.row(0).text, "ABC");
@@ -631,7 +678,7 @@ end)"#,
             r"{\an7\pos(0,0)\p1\1c&HFFFFFF&\bord0\shad0}m 0 0 l 4000 0 4000 4000 0 4000".into();
         r.end = 10_000;
         s.set_row(0, &r, "");
-        a.run_macro(0, &mut s, &[0], 0).unwrap();
+        run(&a, 0, &mut s, &[0]);
         let t = s.row(0).text;
         let parts: Vec<&str> = t.split(' ').collect();
         assert!(parts[0].contains('x') && parts[1] == "true", "{t}");
