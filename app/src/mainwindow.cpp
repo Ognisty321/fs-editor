@@ -621,7 +621,7 @@ void MainWindow::buildMenus() {
     add("pasteOver", tr("Paste lines over..."), QKeySequence("Ctrl+Shift+V"), lines, [=, this] {
         const QString text = QApplication::clipboard()->text();
         if (text.isEmpty() || tab()->active() < 0) return;
-        const int fields = pasteOverFields(this);
+        const int fields = chooseFields(this);
         if (fields <= 0) return;
         std::vector<size_t> rows = tab()->selection();
         if (rows.size() < 2) {
@@ -632,6 +632,27 @@ void MainWindow::buildMenus() {
         const auto done = fs::vec(tab()->s().paste_over(fs::slice(rows), fs::Utf8(text), uint16_t(fields)));
         tab()->changed();
         if (!done.empty()) tab()->setSelection(done, int(done.front()));
+    });
+    // Kainote's copy columns: the chosen fields of the selected lines, comma separated, text last
+    add("copyColumns", tr("Copy columns..."), QKeySequence("Ctrl+Shift+C"), lines, [=, this] {
+        const int f = chooseFields(this, true);
+        if (f <= 0) return;
+        QStringList out;
+        for (size_t i : tab()->selection()) {
+            const auto r = tab()->s().row(i);
+            QStringList l;
+            const std::pair<int, QString> fields[] = {
+                {1, r.comment ? "Comment" : "Dialogue"}, {2, QString::number(r.layer)},
+                {4, fs::fmtTime(r.start)}, {8, fs::fmtTime(r.end)}, {16, fs::q(r.style)}, {32, fs::q(r.actor)},
+                {64, QString::number(r.margin_l)}, {128, QString::number(r.margin_r)},
+                {256, QString::number(r.margin_v)}, {512, fs::q(r.effect)}};
+            for (const auto &[bit, value] : fields)
+                if (f & bit) l << value;
+            if (f & 2048) l << fs::q(fsb::strip_tags(r.text));
+            else if (f & 1024) l << fs::q(r.text);
+            out << l.join(',');
+        }
+        QApplication::clipboard()->setText(out.join('\n'));
     });
     add("prevLine", tr("Previous line"), QKeySequence("Ctrl+Up"), lines, [=] { tab()->setActive(tab()->active() - 1); });
     add("nextLine", tr("Next line"), QKeySequence("Ctrl+Down"), lines, [=] { tab()->setActive(tab()->active() + 1); });
@@ -760,6 +781,29 @@ void MainWindow::buildMenus() {
             r.end = t->video()->hasVideo() ? t->video()->nextFrameTime() : t->videoTime();
         });
     });
+    // Kainote's snap: the active line's start (end) to the nearest keyframe or start/end of the line
+    // before or after it, within 5 s and never past the line's other end
+    auto snap = [this](bool start) {
+        withRow([start](TabPanel *t, fsb::Row &r) {
+            const qint64 at = start ? r.start : r.end, other = start ? r.end : r.start;
+            std::vector<qint64> near;
+            if (t->video()->hasVideo())
+                for (auto f : t->keyframes()) near.push_back(t->video()->timeAt(f));
+            for (int n : {t->active() - 1, t->active() + 1})
+                if (n >= 0 && size_t(n) < t->s().row_count()) {
+                    const auto o = t->s().row(size_t(n));
+                    near.insert(near.end(), {o.start, o.end});
+                }
+            qint64 best = at;
+            for (qint64 c : near)
+                if (c != at && std::abs(c - at) < 5000 && (start ? c < other : c > other) &&
+                    (best == at || std::abs(c - at) < std::abs(best - at)))
+                    best = c;
+            (start ? r.start : r.end) = best;
+        });
+    };
+    add("snapStart", tr("Snap start to keyframe"), QKeySequence("Shift+Left"), video, [=] { snap(true); });
+    add("snapEnd", tr("Snap end to keyframe"), QKeySequence("Shift+Right"), video, [=] { snap(false); });
     add("prevFrame", tr("Previous frame"), QKeySequence("Left"), video, [=] { tab()->video()->stepFrames(-1); });
     add("nextFrame", tr("Next frame"), QKeySequence("Right"), video, [=] { tab()->video()->stepFrames(1); });
     // Aegisub's video/frame/*/large with its default Fast Jump Step of 10

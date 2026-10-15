@@ -610,6 +610,8 @@ void Grid::contextMenu(const QPoint &global) {
     m.addAction(tr("Copy"), QKeySequence::Copy, this, [this] { copy(); });
     m.addAction(tr("Cut"), QKeySequence::Cut, this, [this] { cut(); });
     m.addAction(tr("Paste"), QKeySequence::Paste, this, [this] { paste(); });
+    m.addAction(mw->action("copyColumns"));
+    m.addAction(mw->action("pasteOver"));
     m.addSeparator();
     auto *cols = m.addMenu(tr("Hide columns"));
     for (int c : {Layer, Start, End, Actor, Style, MarginL, MarginR, MarginV, Effect, Cps, Wraps}) {

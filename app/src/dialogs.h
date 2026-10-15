@@ -180,7 +180,8 @@ private:
 };
 
 // Aegisub's "Select fields to paste over": the Session::paste_over bits, or -1 when cancelled.
-int pasteOverFields(QWidget *parent);
+// Fields of a line as bits 1 comment .. 1024 text; `copy` (Kainote's copy columns) adds 2048 text without tags.
+int chooseFields(QWidget *parent, bool copy = false);
 
 // Aegisub's attachment manager: fonts and graphics embedded in the script.
 class AttachmentsDialog : public QDialog {

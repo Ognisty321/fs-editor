@@ -1126,6 +1126,10 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Wklej linijki na...</translation>
     </message>
     <message>
+        <source>Copy columns...</source>
+        <translation>Kopiuj kolumny...</translation>
+    </message>
+    <message>
         <source>Previous line</source>
         <translation>Poprzednia linijka</translation>
     </message>
@@ -1264,6 +1268,14 @@ Backspace: rozłącz ostatnią grupę</translation>
     <message>
         <source>Insert end time from video</source>
         <translation>Wstaw czas końcowy z wideo</translation>
+    </message>
+    <message>
+        <source>Snap start to keyframe</source>
+        <translation>Przyciągnij początek do klatki kluczowej</translation>
+    </message>
+    <message>
+        <source>Snap end to keyframe</source>
+        <translation>Przyciągnij koniec do klatki kluczowej</translation>
     </message>
     <message>
         <source>Previous frame</source>
@@ -1952,6 +1964,14 @@ Filtry eksportu: %8</translation>
         <translation>Wybierz pola do wklejenia</translation>
     </message>
     <message>
+        <source>Select fields to copy</source>
+        <translation>Wybierz pola do skopiowania</translation>
+    </message>
+    <message>
+        <source>Please select the fields that you want to copy:</source>
+        <translation>Wybierz pola, które chcesz skopiować:</translation>
+    </message>
+    <message>
         <source>Please select the fields that you want to paste over:</source>
         <translation>Wybierz pola, które chcesz wkleić:</translation>
     </message>
@@ -1998,6 +2018,10 @@ Filtry eksportu: %8</translation>
     <message>
         <source>Text</source>
         <translation>Tekst</translation>
+    </message>
+    <message>
+        <source>Text without tags</source>
+        <translation>Tekst bez tagów</translation>
     </message>
     <message>
         <source>All</source>

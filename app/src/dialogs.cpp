@@ -1382,13 +1382,16 @@ void SpellCheckDialog::replace(bool all) {
 
 // ---- paste over ----------------------------------------------------------------
 
-int pasteOverFields(QWidget *parent) {
+int chooseFields(QWidget *parent, bool copy) {
     QDialog d(parent);
-    d.setWindowTitle(QDialog::tr("Select fields to paste over"));
+    d.setWindowTitle(copy ? QDialog::tr("Select fields to copy") : QDialog::tr("Select fields to paste over"));
     auto *v = new QVBoxLayout(&d);
-    v->addWidget(new QLabel(QDialog::tr("Please select the fields that you want to paste over:"), &d));
+    v->addWidget(new QLabel(copy ? QDialog::tr("Please select the fields that you want to copy:")
+                                 : QDialog::tr("Please select the fields that you want to paste over:"),
+                            &d));
     auto *list = new QListWidget(&d);
-    const int saved = QSettings().value("edit/pasteOverFields", 1024).toInt();
+    const QString key = copy ? "edit/copyColumnsFields" : "edit/pasteOverFields";
+    const int saved = QSettings().value(key, 1024).toInt();
     for (const char *f : {QT_TRANSLATE_NOOP("QDialog", "Comment"), QT_TRANSLATE_NOOP("QDialog", "Layer"),
                           QT_TRANSLATE_NOOP("QDialog", "Start time"), QT_TRANSLATE_NOOP("QDialog", "End time"),
                           QT_TRANSLATE_NOOP("QDialog", "Style"), QT_TRANSLATE_NOOP("QDialog", "Actor"),
@@ -1398,6 +1401,11 @@ int pasteOverFields(QWidget *parent) {
         auto *it = new QListWidgetItem(QDialog::tr(f), list);
         it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
         it->setCheckState(saved & (1 << (list->count() - 1)) ? Qt::Checked : Qt::Unchecked);
+    }
+    if (copy) {
+        auto *it = new QListWidgetItem(QDialog::tr("Text without tags"), list);
+        it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
+        it->setCheckState(saved & 2048 ? Qt::Checked : Qt::Unchecked);
     }
     v->addWidget(list);
     auto *quick = new QHBoxLayout;
@@ -1422,7 +1430,7 @@ int pasteOverFields(QWidget *parent) {
     int bits = 0;
     for (int k = 0; k < list->count(); ++k)
         if (list->item(k)->checkState() == Qt::Checked) bits |= 1 << k;
-    QSettings().setValue("edit/pasteOverFields", bits);
+    QSettings().setValue(key, bits);
     return bits;
 }
 
