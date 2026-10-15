@@ -1845,7 +1845,33 @@ impl Session {
             org: what & 32 != 0,
         };
         self.edit_amend(amend, "Shift positions", move |d| {
-            ops::translate_positions(d, &Rows::Selected(evs), dx, dy, what)
+            let rest = ops::MoveTargets {
+                drawing: false,
+                ..what
+            };
+            ops::translate_positions(d, &Rows::Selected(evs.clone()), dx, dy, rest);
+            if !what.drawing {
+                return;
+            }
+            // drawing points are in the line's units: the screen step unturned by \frz, unscaled
+            let only = ops::MoveTargets {
+                pos: false,
+                move_start: false,
+                move_end: false,
+                clip: false,
+                drawing: true,
+                org: false,
+            };
+            for e in evs {
+                let v = crate::visual::of_event(d, d.event(e).unwrap());
+                if v.fscx == 0.0 || v.fscy == 0.0 {
+                    continue; // nothing is shown
+                }
+                let (s, c) = v.frz.to_radians().sin_cos();
+                let (x, y) = (dx * c - dy * s, dx * s + dy * c);
+                let (x, y) = (x * 100.0 / v.fscx, y * 100.0 / v.fscy);
+                ops::translate_positions(d, &Rows::Selected(vec![e]), x, y, only);
+            }
         });
     }
 
@@ -2223,6 +2249,19 @@ mod tests {
         // only the given rows: line 0 against line 1
         let p = a.compare(&b, &[0], &[1], false, false);
         assert_eq!((p.len(), p[0].row, p[0].other), (1, 0, 1));
+    }
+
+    #[test]
+    fn shifted_drawings_follow_the_screen_step() {
+        let mut s = session(ASS);
+        let text = r"{\pos(0,0)\fscx200\frz90\p1}m 0 0 l 10 0 10 10";
+        s.set_texts(&[0], &[text.to_string()], "edit");
+        s.shift_positions(&[0], 10.0, 0.0, 16 | 1, "");
+        // right on screen is down in a drawing turned by 90°; \pos moves as asked
+        assert_eq!(
+            s.row(0).text,
+            r"{\pos(10,0)\fscx200\frz90\p1}m 0 10 l 10 10 10 20"
+        );
     }
 
     #[test]
