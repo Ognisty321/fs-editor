@@ -1147,12 +1147,8 @@ impl Session {
             match spec.end_fix {
                 1 => fix_overlaps(d, &evs),
                 2 => {
-                    // shortcut: Kainote's "new times" heuristic approximated as 0.5 s + 50 ms per character.
-                    for &e in &evs {
-                        let ev = d.event_mut(e).unwrap();
-                        let chars = tags::char_count(&ev.text, true, false) as i64;
-                        ev.end = ev.start + Time((500 + 50 * chars).max(1000));
-                    }
+                    new_end_times(d, &evs);
+                    fix_overlaps(d, &evs);
                 }
                 _ => {}
             }
@@ -1935,6 +1931,24 @@ fn shift_tag_times(ev: &mut Event, delta: i64) {
     ev.text = line.to_text();
 }
 
+/// Kainote's "new times": a line that does not run into the next shifted one (nor ends with
+/// it) lasts 110 ms per shown character, at least a second.
+fn new_end_times(d: &mut Document, evs: &[usize]) {
+    let mut order = evs.to_vec();
+    order.sort_by_key(|&e| {
+        let ev = d.event(e).unwrap();
+        (ev.start, ev.end)
+    });
+    for w in order.windows(2) {
+        let (next_start, next_end) = d.event(w[1]).map(|n| (n.start, n.end)).unwrap();
+        let ev = d.event_mut(w[0]).unwrap();
+        if ev.end <= next_start && ev.end != next_end {
+            let chars = tags::char_count(&ev.text, true, false) as i64;
+            ev.end = ev.start + Time((110 * chars).max(1000));
+        }
+    }
+}
+
 /// End each line no later than the next line of the same style starts.
 fn fix_overlaps(d: &mut Document, evs: &[usize]) {
     for &e in evs {
@@ -2209,6 +2223,18 @@ mod tests {
         // only the given rows: line 0 against line 1
         let p = a.compare(&b, &[0], &[1], false, false);
         assert_eq!((p.len(), p[0].row, p[0].other), (1, 0, 1));
+    }
+
+    #[test]
+    fn new_end_times_follow_the_text() {
+        let mut s = session(ASS);
+        s.set_texts(&[1], &["a long line of text here".to_string()], "edit");
+        let d = &mut s.ed.doc;
+        new_end_times(d, &[0, 1, 2]);
+        fix_overlaps(d, &[0, 1, 2]);
+        let ends: Vec<i64> = (0..3).map(|i| d.event(i).unwrap().end.ms()).collect();
+        // a second at least; 19 characters run into the next line; the last line stays
+        assert_eq!(ends, [2000, 5000, 6000]);
     }
 
     #[test]
