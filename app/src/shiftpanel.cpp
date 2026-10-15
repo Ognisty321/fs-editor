@@ -323,7 +323,9 @@ void ShiftPanel::postProcess() {
     spec.kf_after_end = m_kfAe->value();
     for (size_t r : rows(m_ppLines->currentIndex(), m_ppStyles->text())) spec.rows.push_back(r);
     if (spec.rows.empty()) return;
-    const auto kf = m_tab->keyframes();
+    auto kf = m_tab->keyframes();
+    // as Aegisub: the video's last frame snaps like a keyframe, so ends can meet the video's end
+    if (m_tab->video()->hasVideo() && !kf.empty()) kf.push_back(m_tab->video()->info().frames - 1);
     const auto tc = m_tab->video()->timecodes();
     m_tab->s().post_process(spec, {kf.data(), kf.size()}, {tc.data(), tc.size()});
     m_tab->changed();
