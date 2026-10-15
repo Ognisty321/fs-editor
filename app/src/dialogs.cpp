@@ -494,6 +494,9 @@ SelectLinesDialog::SelectLinesDialog(MainWindow *main) : QDialog(main), m_main(m
     m_case->setChecked(st.value("select/case", false).toBool());
     m_regex->setChecked(st.value("select/regex", false).toBool());
     f->addRow(m_case, m_regex);
+    m_exact = new QCheckBox(tr("Exact match"), this); // the whole field (Aegisub); empty: the empty ones
+    m_exact->setChecked(st.value("select/exact", false).toBool());
+    f->addRow(m_exact);
     m_dialogue = new QCheckBox(tr("Dialogue"), this);
     m_comments = new QCheckBox(tr("Comments"), this);
     m_dialogue->setChecked(st.value("select/dialogue", true).toBool());
@@ -532,12 +535,14 @@ void SelectLinesDialog::apply() {
     spec.match_case = m_case->isChecked();
     spec.field = uint8_t(m_field->currentIndex());
     spec.include_comments = true;
+    spec.at_start = spec.at_end = m_exact->isChecked();
     QSettings st;
     st.setValue("select/text", m_find->text());
     st.setValue("select/with", m_with->isChecked());
     st.setValue("select/field", m_field->currentIndex());
     st.setValue("select/case", m_case->isChecked());
     st.setValue("select/regex", m_regex->isChecked());
+    st.setValue("select/exact", m_exact->isChecked());
     st.setValue("select/dialogue", m_dialogue->isChecked());
     st.setValue("select/comments", m_comments->isChecked());
     st.setValue("select/mode", m_mode->checkedId());
@@ -553,9 +558,14 @@ void SelectLinesDialog::apply() {
     const auto spans = s.row_spans();
     std::vector<bool> hit(spans.size());
     for (size_t r : found) hit[r] = true;
+    // lines hidden by the filter or a folded tree are left alone (Kainote): no action reaches what is not shown
+    const auto vis = tab->grid()->visibleRows();
+    std::vector<bool> shown(spans.size(), vis.size() == spans.size());
+    for (size_t r : vis)
+        if (r < shown.size()) shown[r] = true;
     std::vector<bool> match(spans.size());
     for (size_t i = 0; i < spans.size(); ++i)
-        match[i] = (spans[i].comment ? m_comments : m_dialogue)->isChecked() && hit[i] == m_with->isChecked();
+        match[i] = shown[i] && (spans[i].comment ? m_comments : m_dialogue)->isChecked() && hit[i] == m_with->isChecked();
     const auto cur = tab->selection();
     std::vector<size_t> v;
     if (m_mode->checkedId() == 0 || m_mode->checkedId() == 1) {

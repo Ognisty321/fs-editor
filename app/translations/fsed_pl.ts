@@ -2429,6 +2429,10 @@ Filtry eksportu: %8</translation>
         <translation>Wyrażenia regularne</translation>
     </message>
     <message>
+        <source>Exact match</source>
+        <translation>Dokładne dopasowanie</translation>
+    </message>
+    <message>
         <source>Dialogue</source>
         <translation>Dialogi</translation>
     </message>

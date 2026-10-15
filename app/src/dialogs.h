@@ -81,7 +81,7 @@ private:
     MainWindow *m_main;
     QLineEdit *m_find;
     QRadioButton *m_with, *m_without;
-    QCheckBox *m_case, *m_regex, *m_dialogue, *m_comments;
+    QCheckBox *m_case, *m_regex, *m_exact, *m_dialogue, *m_comments;
     QButtonGroup *m_mode; // 0 set, 1 add, 2 subtract, 3 intersect (Aegisub)
     QComboBox *m_field, *m_action;
 };
