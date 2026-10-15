@@ -496,30 +496,36 @@ impl Session {
     /// Kainote's comparison: walks `rows` and `other_rows` in order and pairs each line with
     /// the next one on the other side, which must have the same times and/or style when
     /// asked (comments are skipped); returns the pairs whose texts differ.
-    pub fn compare(
-        &self,
-        other: &Session,
+    pub fn compare<'a>(
+        &'a self,
+        other: &'a Session,
         rows: &[usize],
         other_rows: &[usize],
         by_times: bool,
         by_styles: bool,
     ) -> Vec<ComparePair> {
+        // Kainote walks the other rows from the last pair on, which rescans the rest for every
+        // line without a partner; the positions by pairing key find the same partner in log time.
+        let key = |c: &(Time, Time, &'a str, &'a str)| {
+            (by_times.then_some((c.0, c.1)), by_styles.then_some(c.2))
+        };
+        let mut at: HashMap<_, Vec<usize>> = HashMap::new();
+        for (k, &j) in other_rows.iter().enumerate() {
+            if let Some(b) = other.compared(j) {
+                at.entry(key(&b)).or_default().push(k);
+            }
+        }
         let mut out = Vec::new();
         let mut next = 0;
         for &i in rows {
             let Some(a) = self.compared(i) else { continue };
-            let Some((k, b)) = other_rows[next..].iter().enumerate().find_map(|(k, &j)| {
-                other
-                    .compared(j)
-                    .filter(|b| {
-                        (!by_times || (a.0, a.1) == (b.0, b.1)) && (!by_styles || a.2 == b.2)
-                    })
-                    .map(|b| (k, b))
-            }) else {
+            let Some(ks) = at.get(&key(&a)) else { continue };
+            let Some(&k) = ks.get(ks.partition_point(|&k| k < next)) else {
                 continue;
             };
-            let j = other_rows[next + k];
-            next += k + 1;
+            let j = other_rows[k];
+            let b = other.compared(j).expect("indexed above");
+            next = k + 1;
             if a.3 != b.3 {
                 let (spans, other_spans) = diff_spans(a.3, b.3);
                 out.push(ComparePair {
@@ -2270,6 +2276,17 @@ mod tests {
         // only the given rows: line 0 against line 1
         let p = a.compare(&b, &[0], &[1], false, false);
         assert_eq!((p.len(), p[0].row, p[0].other), (1, 0, 1));
+        // a line without a partner is skipped and the next ones still pair; a partner before
+        // the last pair is not taken, the order holds
+        let mut c = session(ASS);
+        c.set_rows_field(&[0], "start", "7000");
+        c.set_texts(&[1, 2], &["x".into(), "y".into()], "edit");
+        let rows = |p: Vec<ComparePair>| p.iter().map(|p| (p.row, p.other)).collect::<Vec<_>>();
+        assert_eq!(
+            rows(a.compare(&c, &all, &all, true, false)),
+            [(1, 1), (2, 2)]
+        );
+        assert_eq!(rows(a.compare(&c, &[2, 1], &all, true, false)), [(2, 2)]);
     }
 
     #[test]
@@ -2712,6 +2729,17 @@ mod tests {
         });
         time("rows_at", &mut |s| {
             drop(std::hint::black_box(s.rows_at(100_000_000)))
+        });
+        let retimed = session(&text.replace(".50,Default", ".60,Default"));
+        time("compare, no pairs by times", &mut |s| {
+            drop(std::hint::black_box(
+                s.compare(&retimed, &all, &all, true, false),
+            ))
+        });
+        time("compare, every line pairs", &mut |s| {
+            drop(std::hint::black_box(
+                s.compare(&retimed, &all, &all, false, false),
+            ))
         });
         let find = |pattern: &str, regex: bool| FindSpec {
             pattern: pattern.into(),
