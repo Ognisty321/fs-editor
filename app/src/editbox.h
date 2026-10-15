@@ -72,6 +72,7 @@ signals:
 protected:
     void keyPressEvent(QKeyEvent *) override;
     void contextMenuEvent(QContextMenuEvent *) override;
+    void wheelEvent(QWheelEvent *) override;
 private:
     std::pair<int, int> blockAt(int pos) const;
     QCompleter *m_completer;

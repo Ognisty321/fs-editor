@@ -35,6 +35,8 @@
 #include <QWheelEvent>
 
 #include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <optional>
 
 // ---- TimeEdit ---------------------------------------------------------------
@@ -256,7 +258,37 @@ void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
     m->addAction(tr("Split at cursor (at video frame)"), this, [this] { emit splitRequested(0); });
     m->addAction(tr("Revert"), this, [this] { emit revertRequested(); });
     m->addAction(tr("Insert original"), this, [this] { emit insertOriginalRequested(); });
+    m->addSeparator();
+    auto *quotes = m->addAction(tr("Automatically change quotes"));
+    quotes->setCheckable(true);
+    quotes->setChecked(QSettings().value("edit/changeQuotes", false).toBool());
+    connect(quotes, &QAction::toggled, this, [](bool on) { QSettings().setValue("edit/changeQuotes", on); });
     m->exec(e->globalPos());
+}
+
+// Kainote: Shift+wheel over a number (a tag's value) steps it by 1, or by 0.1 right of its point.
+void SubsTextEdit::wheelEvent(QWheelEvent *e) {
+    const int delta = e->angleDelta().y() ? e->angleDelta().y() : e->angleDelta().x(); // Shift may turn it
+    if (e->modifiers() != Qt::ShiftModifier || !delta) return QPlainTextEdit::wheelEvent(e);
+    const QString t = toPlainText();
+    const int at = cursorForPosition(e->position().toPoint()).position();
+    const auto numeric = [&t](int i) { return t[i].isDigit() || t[i] == '.' || t[i] == '-'; };
+    int s = at, end = at;
+    while (s > 0 && numeric(s - 1)) --s;
+    while (end < t.size() && numeric(end)) ++end;
+    // not the digits of a colour or alpha (&H0000FF&)
+    int hex = s;
+    while (hex > 0 && isxdigit(t[hex - 1].toLatin1())) --hex;
+    bool ok = s < end && !(hex >= 2 && t.mid(hex - 2, 2).compare("&H", Qt::CaseInsensitive) == 0);
+    const double v = ok ? t.mid(s, end - s).toDouble(&ok) : 0;
+    if (!ok) return e->accept();
+    const int dot = int(t.indexOf('.', s));
+    const double step = (dot >= 0 && dot < at && dot < end ? 0.1 : 1) * (delta > 0 ? 1 : -1);
+    QTextCursor c(document());
+    c.setPosition(s);
+    c.setPosition(end, QTextCursor::KeepAnchor);
+    c.insertText(QString::number(std::round((v + step) * 1000) / 1000 + 0.0, 'g', 12)); // + 0.0: no "-0"
+    e->accept();
 }
 
 SubsTextEdit::SubsTextEdit(QWidget *parent) : QPlainTextEdit(parent) {
@@ -365,6 +397,12 @@ void SubsTextEdit::keyPressEvent(QKeyEvent *e) {
          e->key() == Qt::Key_Escape)) {
         e->ignore();
         return;
+    }
+    // Kainote's quote changing: " opens with „ and closes an open one with ”
+    if (e->text() == "\"" && QSettings().value("edit/changeQuotes", false).toBool()) {
+        const QString before = toPlainText().left(textCursor().position());
+        return insertPlainText(before.lastIndexOf(QChar(0x201E)) > before.lastIndexOf(QChar(0x201D)) ? QChar(0x201D)
+                                                                                                     : QChar(0x201E));
     }
     const auto mods = e->modifiers();
     const bool ctrl = mods & Qt::ControlModifier;

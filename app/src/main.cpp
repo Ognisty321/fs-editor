@@ -1,4 +1,5 @@
 #include "dialogs.h"
+#include "editbox.h"
 #include "mainwindow.h"
 #include "tabpanel.h"
 #include "videobox.h"
@@ -158,6 +159,27 @@ int main(int argc, char **argv) {
                 // FSED_SMOKE_TOOL=n picks a visual tool (VisualTools::Tool order)
                 if (qEnvironmentVariableIsSet("FSED_SMOKE_TOOL"))
                     w.current()->video()->tools()->setTool(qEnvironmentVariableIntValue("FSED_SMOKE_TOOL"));
+                // FSED_SMOKE_TYPE="ab" types at the end of the line's text; FSED_SMOKE_WHEEL="n,steps"
+                // turns the wheel with Shift over its character n
+                SubsTextEdit *text = nullptr;
+                for (auto *te : w.findChildren<SubsTextEdit *>())
+                    if (te->isVisible()) text = te;
+                if (text && qEnvironmentVariableIsSet("FSED_SMOKE_TYPE")) {
+                    text->setFocus();
+                    text->moveCursor(QTextCursor::End);
+                    for (const QChar ch : qEnvironmentVariable("FSED_SMOKE_TYPE")) {
+                        QKeyEvent e(QEvent::KeyPress, 0, Qt::NoModifier, QString(ch));
+                        QApplication::sendEvent(text, &e);
+                    }
+                }
+                if (const QStringList wh = qEnvironmentVariable("FSED_SMOKE_WHEEL").split(','); text && wh.size() == 2) {
+                    QTextCursor c(text->document());
+                    c.setPosition(wh[0].toInt());
+                    const QPointF at = text->cursorRect(c).center() + QPointF(1, 0);
+                    QWheelEvent e(at, text->viewport()->mapToGlobal(at), {}, QPoint(0, 120 * wh[1].toInt()),
+                                  Qt::NoButton, Qt::ShiftModifier, Qt::NoScrollPhase, false);
+                    QApplication::sendEvent(text->viewport(), &e);
+                }
                 // FSED_SMOKE_DRAG="x1,y1,x2,y2": a left-button drag on the video, in view fractions 0..1
                 const QStringList d = qEnvironmentVariable("FSED_SMOKE_DRAG").split(',');
                 if (d.size() != 4) return;

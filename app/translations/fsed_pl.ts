@@ -2931,6 +2931,10 @@ do czasu audio</translation>
         <source>Insert original</source>
         <translation>Wstaw oryginał</translation>
     </message>
+    <message>
+        <source>Automatically change quotes</source>
+        <translation>Automatycznie zamieniaj cudzysłów</translation>
+    </message>
 </context>
 <context>
     <name>TabPanel</name>
