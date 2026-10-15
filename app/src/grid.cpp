@@ -66,6 +66,8 @@ void Grid::refresh() {
     if (s.generation() != m_gen) {
         m_gen = s.generation();
         m_colInfo = s.column_info();
+        if (s.row_count() != m_rowCount) m_expanded.clear();
+        m_rowCount = s.row_count();
         applyFilter();
         layoutColumns();
     }
@@ -85,7 +87,13 @@ void Grid::applyFilter() {
     m_vis.clear();
     if (filterOn) {
         m_vis = fs::vec(m_tab->s().filter(filterSpec));
+        if (!m_expanded.empty()) {
+            std::vector<size_t> all;
+            std::ranges::set_union(m_vis, m_expanded, std::back_inserter(all));
+            m_vis = std::move(all);
+        }
     } else {
+        m_expanded.clear();
         m_vis.resize(m_tab->s().row_count());
         std::iota(m_vis.begin(), m_vis.end(), size_t(0));
     }
@@ -296,8 +304,8 @@ void Grid::paintEvent(QPaintEvent *) {
         p.fillRect(0, y, w, rh, r.comment ? T.comment : T.dialogue);
         if (m_onVideo.contains(i)) p.fillRect(0, y, w, rh, T.onVideo);
         if (m_compare.contains(i)) p.fillRect(0, y, w, rh, T.compare);
-        // a gap in the visible rows marks a filtered block
-        const bool gapBefore = vi > 0 ? m_vis[vi - 1] + 1 != i : i != 0;
+        // a gap in the visible rows marks a filtered block, "+" to expand; "-" folds it again
+        const char *fold = !filterOn ? nullptr : gapBefore(vi) ? "+" : expandedStart(i) ? "-" : nullptr;
         x = 0;
         for (size_t k = 0; k < m_cols.size(); ++k) {
             const int c = m_cols[k];
@@ -308,10 +316,10 @@ void Grid::paintEvent(QPaintEvent *) {
                           : r.state == 2 ? T.labelSaved
                                          : T.labelNormal;
                 p.fillRect(cr, lc);
-                if (gapBefore && filterOn) {
+                if (fold) {
                     p.fillRect(cr.left(), cr.top() + 2, 8, 8, T.text);
                     p.setPen(T.background);
-                    p.drawText(QRect(cr.left(), cr.top() + 2, 8, 8), Qt::AlignCenter, "+");
+                    p.drawText(QRect(cr.left(), cr.top() + 2, 8, 8), Qt::AlignCenter, fold);
                 }
                 if (int(i) == m_marker) p.fillRect(cr.right() - 4, cr.top(), 4, rh, T.collision);
             } else if ((c == Cps && int(r.cps + 0.5) > limits::cps()) ||
@@ -373,10 +381,11 @@ void Grid::mousePressEvent(QMouseEvent *e) {
     if (vi < 0) return;
     const size_t row = m_vis[vi];
     if (e->button() == Qt::LeftButton) {
-        if (col == Num && e->position().x() < 10 && filterOn &&
-            (vi > 0 ? m_vis[vi - 1] + 1 != row : row != 0)) {
-            // shortcut: the "+" strip turns filtering off instead of expanding just that block; add per-block expansion when asked.
-            filterOn = false;
+        if (col == Num && e->position().x() < 10 && filterOn && (gapBefore(vi) || expandedStart(row))) {
+            if (gapBefore(vi))
+                for (size_t r = vi > 0 ? m_vis[vi - 1] + 1 : 0; r < row; ++r) m_expanded.insert(r);
+            else
+                for (size_t r = row; m_expanded.erase(r); ++r) {}
             applyFilter();
             return;
         }
@@ -669,6 +678,7 @@ void Grid::contextMenu(const QPoint &global) {
         filterSpec.hide_rows.clear();
         for (size_t r : sel) filterSpec.hide_rows.push_back(r);
         filterOn = true;
+        m_expanded.clear();
         applyFilter();
     });
     auto *flt = m.addMenu(tr("Filtering"));
@@ -704,6 +714,7 @@ void Grid::contextMenu(const QPoint &global) {
     flt->addSeparator();
     flt->addAction(tr("Filter"), this, [this] {
         filterOn = true;
+        m_expanded.clear();
         applyFilter();
     });
     flt->addAction(tr("Turn off filtering"), this, [this] {

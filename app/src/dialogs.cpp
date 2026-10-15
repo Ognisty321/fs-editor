@@ -126,10 +126,9 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
     m_skipTags = new QCheckBox(tr("Skip tags"), this);
     m_atStart = new QCheckBox(tr("Start of text"), this);
     m_atEnd = new QCheckBox(tr("End of text"), this);
-    int k = 0;
-    for (auto *c : {m_case, m_regex, m_comments, m_skipTags, m_atStart, m_atEnd}) {
-        checks->addWidget(c, k / 3, k % 3);
-        ++k;
+    for (int i = 0; auto *c : {m_case, m_regex, m_comments, m_skipTags, m_atStart, m_atEnd}) {
+        checks->addWidget(c, i / 3, i % 3);
+        ++i;
     }
     v->addLayout(checks);
     auto *groups = new QHBoxLayout;

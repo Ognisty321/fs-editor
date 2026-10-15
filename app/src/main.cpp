@@ -12,10 +12,10 @@
 #include <QDropEvent>
 #include <QLibraryInfo>
 #include <QListWidget>
-#include <QTabBar>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QSettings>
+#include <QTabBar>
 #include <QTextEdit>
 #include <QTimer>
 #include <QTranslator>

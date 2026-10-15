@@ -73,6 +73,12 @@ private:
     TabPanel *m_tab;
     fsb::ColumnInfo m_colInfo{}; // rows are fetched when painted, not copied (100k lines took 400 ms a change)
     std::vector<size_t> m_vis;
+    // filtered-out blocks the user expanded with "+" (Kainote), until the filter changes or rows
+    // are added or removed (their numbers would point elsewhere)
+    std::set<size_t> m_expanded;
+    size_t m_rowCount = 0;
+    bool gapBefore(int vi) const { return vi > 0 ? m_vis[vi - 1] + 1 != m_vis[vi] : m_vis[vi] != 0; }
+    bool expandedStart(size_t row) const { return m_expanded.contains(row) && !(row && m_expanded.contains(row - 1)); }
     std::vector<int> m_cols;     // visible columns in order
     std::vector<int> m_widths;
     std::set<int> m_userHidden;
