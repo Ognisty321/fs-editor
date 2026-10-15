@@ -1443,7 +1443,7 @@ impl Session {
         let first = selected.iter().copied().min();
         match lines {
             1 => selected.to_vec(),
-            2 => (first.unwrap_or(0)..n).collect(),
+            2 => (first.unwrap_or(active)..n).collect(),
             3 => {
                 let t = start_of(first.unwrap_or(active));
                 (0..n).filter(|&r| start_of(r) >= t).collect()
@@ -1548,7 +1548,7 @@ impl Session {
                 lead_in: opt(spec.lead_in),
                 lead_out: opt(spec.lead_out),
                 adjacent_threshold: opt(spec.adjacent),
-                adjacent_overlap: None, // Kainote's thresholds close gaps, never overlaps
+                adjacent_overlap: opt(spec.overlap),
                 adjacent_bias: spec.bias,
                 keyframes: match (&fr, spec.snap_keyframes && !kf.is_empty()) {
                     (Some(f), true) => Some((kf.as_slice(), f)),

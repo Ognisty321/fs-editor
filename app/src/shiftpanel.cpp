@@ -146,6 +146,7 @@ ShiftPanel::ShiftPanel(TabPanel *tab) : QScrollArea(tab), m_tab(tab) {
     grid(eb)->addWidget(m_endFix, 0, 0);
     m_stack->addWidget(page);
     connect(go, &QPushButton::clicked, this, &ShiftPanel::shift);
+    connect(m_time, &QLineEdit::returnPressed, this, &ShiftPanel::shift);
 
     // profiles live under shiftTimes/profiles/<name>
     auto refreshProfiles = [this] {
@@ -204,13 +205,17 @@ ShiftPanel::ShiftPanel(TabPanel *tab) : QScrollArea(tab), m_tab(tab) {
     m_contOn = new QCheckBox(tr("Enable"), ct);
     m_contStart = msSpin(ct, 0);
     m_contEnd = msSpin(ct, 0);
+    m_contOverlap = msSpin(ct, 0);
     m_contStart->setToolTip(tr("Gaps up to this move the next line's start back"));
     m_contEnd->setToolTip(tr("Gaps up to this move the previous line's end forward"));
+    m_contOverlap->setToolTip(tr("Lines overlapping by up to this meet too (Aegisub)"));
     grid(ct)->addWidget(m_contOn, 0, 0, 1, 2);
     grid(ct)->addWidget(new QLabel(tr("Start time threshold"), ct), 1, 0);
     grid(ct)->addWidget(m_contStart, 1, 1);
     grid(ct)->addWidget(new QLabel(tr("End time threshold"), ct), 2, 0);
     grid(ct)->addWidget(m_contEnd, 2, 1);
+    grid(ct)->addWidget(new QLabel(tr("Overlap threshold"), ct), 3, 0);
+    grid(ct)->addWidget(m_contOverlap, 3, 1);
     auto *kf = group(tr("Snap to keyframes"), pp, ppv);
     m_kfOn = new QCheckBox(tr("Enable"), kf);
     m_kfBs = msSpin(kf, 0);
@@ -262,6 +267,7 @@ void ShiftPanel::updateEnabled() {
 }
 
 std::vector<size_t> ShiftPanel::rows(int which, const QString &styles) const {
+    if (which == 5 && styles.trimmed().isEmpty()) m_tab->main()->status(tr("Pick the styles first"));
     rust::Vec<rust::String> st;
     for (const auto &s : styles.split(',', Qt::SkipEmptyParts)) st.push_back(fs::rs(s.trimmed()));
     const auto sel = m_tab->selection();
@@ -275,6 +281,8 @@ std::vector<size_t> ShiftPanel::rows(int which, const QString &styles) const {
     }
     return out;
 }
+
+void ShiftPanel::run() { m_stack->currentIndex() ? postProcess() : shift(); }
 
 void ShiftPanel::shift() {
     auto &s = m_tab->s();
@@ -292,8 +300,12 @@ void ShiftPanel::shift() {
                               : m_byEnd->isChecked() ? m_tab->videoEndTime()
                                                      : m_tab->videoStartTime();
         if (target < 0) return;
-        amount = target - (m_byEnd->isChecked() ? r.end : r.start);
-        spec.frames = false;
+        // the typed time is added on top, in ms or frames (Kainote: video time +- shift time)
+        const qint64 ref = m_byEnd->isChecked() ? r.end : r.start;
+        const VideoBox *v = m_tab->video();
+        amount += !spec.frames ? target - ref
+                  : m_byEnd->isChecked() ? v->frameAtEnd(target) - v->frameAtEnd(ref)
+                                         : v->frameAtStart(target) - v->frameAtStart(ref);
     }
     spec.amount = amount;
     spec.which = uint8_t(m_which->currentIndex());
@@ -316,6 +328,7 @@ void ShiftPanel::postProcess() {
     const int sum = m_contStart->value() + m_contEnd->value();
     spec.adjacent = m_contOn->isChecked() ? sum : 0;
     spec.bias = sum > 0 ? double(m_contEnd->value()) / sum : 0.5;
+    spec.overlap = m_contOn->isChecked() ? m_contOverlap->value() : 0;
     spec.snap_keyframes = m_kfOn->isEnabled() && m_kfOn->isChecked();
     spec.kf_before_start = m_kfBs->value();
     spec.kf_after_start = m_kfAs->value();
@@ -372,6 +385,7 @@ void ShiftPanel::save() const {
     st.setValue("continuous", m_contOn->isChecked());
     st.setValue("contStart", m_contStart->value());
     st.setValue("contEnd", m_contEnd->value());
+    st.setValue("contOverlap", m_contOverlap->value());
     st.setValue("keyframes", m_kfOn->isChecked());
     st.setValue("kf", QList<QVariant>{m_kfBs->value(), m_kfAs->value(), m_kfBe->value(), m_kfAe->value()});
 }
@@ -391,6 +405,7 @@ void ShiftPanel::load() {
     m_contOn->setChecked(st.value("continuous").toBool());
     m_contStart->setValue(st.value("contStart", 0).toInt());
     m_contEnd->setValue(st.value("contEnd", 0).toInt());
+    m_contOverlap->setValue(st.value("contOverlap", 0).toInt());
     m_kfOn->setChecked(st.value("keyframes").toBool());
     const auto kf = st.value("kf").toList();
     QSpinBox *spins[] = {m_kfBs, m_kfAs, m_kfBe, m_kfAe};

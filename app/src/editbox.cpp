@@ -215,6 +215,15 @@ void spell::addWord(const QString &word) {
     reload(); // reload applies the user list
 }
 
+QStringList spell::userWords() { return QSettings().value("spell/user/" + g_spellLang).toStringList(); }
+
+void spell::removeWord(const QString &word) {
+    QStringList words = userWords();
+    if (!words.removeAll(word)) return;
+    QSettings().setValue("spell/user/" + g_spellLang, words);
+    reload(); // a speller can't forget a word, so it is built again without it
+}
+
 // MyThes thesauri (th_<lang>.idx + .dat) in the dictionary folder, as Aegisub finds them.
 namespace {
 namespace thesaurus {

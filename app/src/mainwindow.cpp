@@ -6,6 +6,7 @@
 #include "editbox.h"
 #include "icons.h"
 #include "grid.h"
+#include "shiftpanel.h"
 #include "tabpanel.h"
 #include "videobox.h"
 #include "visualtools.h"
@@ -112,7 +113,7 @@ const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"openAudio", {"music", kTeal}}, {"audioFromVideo", {"file-music", kTeal}}, {"blankAudio", {"wave-square", kTeal}},
     {"closeAudio", {"music-off", kRed}}, {"splitView", {"layout-columns", {}}}, {"compareTabs", {"git-compare", {}}},
     {"editor", {"edit", kBlue}}, {"properties", {"file-info", kPurple}}, {"styleManager", {"palette", kPurple}},
-    {"shiftTimes", {"clock-edit", kBlue}}, {"changeFps", {"clock-play", kPurple}}, {"spellChecker", {"text-spellcheck", kGreen}}, {"attachments", {"paperclip", kAmber}}, {"stylingAssistant", {"palette", kPurple}}, {"kanjiTimer", {"language-hiragana", kRed}},
+    {"shiftTimes", {"clock-edit", kBlue}}, {"runShift", {"clock-edit", kGreen}}, {"changeFps", {"clock-play", kPurple}}, {"spellChecker", {"text-spellcheck", kGreen}}, {"attachments", {"paperclip", kAmber}}, {"stylingAssistant", {"palette", kPurple}}, {"kanjiTimer", {"language-hiragana", kRed}},
     {"resample", {"aspect-ratio", kPurple}}, {"hideTags", {"code-off", kOrange}}, {"help", {"help", kBlue}},
     {"about", {"info-circle", kBlue}}};
 
@@ -1203,6 +1204,8 @@ void MainWindow::buildMenus() {
     connect(shift, &QAction::triggered, this, [this](bool on) {
         for (auto *t : tabs()) t->showShiftPanel(on);
     });
+    // Kainote's: runs the panel's page shown, hidden or not
+    add("runShift", tr("Shift times / run post processor"), {}, subs, [=] { tab()->shift()->run(); });
     // Kainote "Set new FPS" / Aegisub "Transform Framerate": keep every line on its frames
     add("changeFps", tr("Change frame rate..."), {}, subs, [=, this] {
         auto *t = tab();

@@ -21,6 +21,7 @@ public:
     explicit ShiftPanel(TabPanel *tab);
     void shift();
     void postProcess();
+    void run(); // the page shown: shift, or post-process (Kainote's one command for both)
 
 protected:
     void enterEvent(QEnterEvent *) override;
@@ -49,5 +50,5 @@ private:
     QComboBox *m_ppLines;
     QLineEdit *m_ppStyles;
     QCheckBox *m_leadInOn, *m_leadOutOn, *m_contOn, *m_kfOn;
-    QSpinBox *m_leadIn, *m_leadOut, *m_contStart, *m_contEnd, *m_kfBs, *m_kfAs, *m_kfBe, *m_kfAe;
+    QSpinBox *m_leadIn, *m_leadOut, *m_contStart, *m_contEnd, *m_contOverlap, *m_kfBs, *m_kfAs, *m_kfBe, *m_kfAe;
 };

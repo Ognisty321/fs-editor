@@ -214,6 +214,7 @@ private:
     QPointer<TabPanel> m_tab;
     QLineEdit *m_word, *m_with;
     QListWidget *m_suggest;
+    QPushButton *m_remove;
     QCheckBox *m_skipComments, *m_skipUpper;
     QSet<QString> m_ignored;
     int m_row = 0, m_pos = 0, m_start = 0, m_startRow = 0;

@@ -2314,8 +2314,11 @@ SpellCheckDialog::SpellCheckDialog(MainWindow *main, TabPanel *tab) : QDialog(ma
     m_with = new QLineEdit(this);
     m_suggest = new QListWidget(this);
     auto *lang = new QComboBox(this);
-    lang->addItems(spell::languages());
-    lang->setCurrentText(QSettings().value("spell/lang", "pl_PL").toString());
+    for (const QString &code : spell::languages()) { // "polski (pl_PL)"
+        const QLocale l(code);
+        lang->addItem(l.language() == QLocale::C ? code : QString("%1 (%2)").arg(l.nativeLanguageName(), code), code);
+    }
+    lang->setCurrentIndex(std::max(0, lang->findData(QSettings().value("spell/lang", "pl_PL").toString())));
     m_skipComments = new QCheckBox(tr("Skip comments"), this);
     m_skipUpper = new QCheckBox(tr("Ignore UPPERCASE words"), this);
     m_skipComments->setChecked(QSettings().value("spell/skipComments", true).toBool());
@@ -2351,14 +2354,22 @@ SpellCheckDialog::SpellCheckDialog(MainWindow *main, TabPanel *tab) : QDialog(ma
         spell::addWord(m_word->text());
         findNext();
     });
+    // Aegisub: the word in "Replace with", when the user dictionary has it
+    m_remove = button(tr("Remove from dictionary"), [this] {
+        spell::removeWord(m_with->text());
+        showWord(m_row, m_start, m_word->text());
+        m_remove->setEnabled(false);
+    });
+    m_remove->setEnabled(false);
+    connect(m_with, &QLineEdit::textChanged, this, [this](const QString &w) { m_remove->setEnabled(spell::userWords().contains(w)); });
     buttons->addStretch();
     button(tr("Close"), [this] { close(); });
     g->addLayout(buttons, 0, 2, 6, 1);
 
     connect(m_suggest, &QListWidget::currentTextChanged, m_with, &QLineEdit::setText);
     connect(m_suggest, &QListWidget::itemDoubleClicked, this, [this] { replace(false); });
-    connect(lang, &QComboBox::currentTextChanged, this, [this](const QString &l) {
-        QSettings().setValue("spell/lang", l);
+    connect(lang, &QComboBox::currentIndexChanged, this, [this, lang] {
+        QSettings().setValue("spell/lang", lang->currentData());
         spell::reload();
         m_pos = m_start; // re-check the current word with the new dictionary
         findNext();
@@ -2375,6 +2386,12 @@ bool SpellCheckDialog::findNext() {
         QMessageBox::information(this, windowTitle(), tr("No dictionary is loaded. Pick one in the settings."));
         close();
         return false;
+    }
+    // Aegisub: a line picked in the grid meanwhile is where the check goes on, and round to
+    if (const int a = m_tab->active(); a >= 0 && a != m_row) {
+        m_row = m_startRow = a;
+        m_pos = 0;
+        m_wrapped = false;
     }
     auto &s = m_tab->s();
     const int n = int(s.row_count());
@@ -2441,7 +2458,7 @@ void SpellCheckDialog::replace(bool all) {
         fsb::FindSpec f{};
         f.pattern = fs::rs(word);
         f.match_case = true;
-        f.include_comments = true;
+        f.include_comments = !m_skipComments->isChecked();
         for (size_t i : s.find_all(f)) fix(i, -1);
     } else {
         fix(size_t(m_row), m_start);
@@ -2600,6 +2617,7 @@ KanjiTimerDialog::KanjiTimerDialog(QWidget *parent, TabPanel *tab)
     : QDialog(parent), m_tab(tab), m_kt(fsb::new_kanji_timer()) {
     setWindowTitle(tr("Kanji timing"));
     setAttribute(Qt::WA_DeleteOnClose);
+    setModal(true); // it writes to rows it noted, so the grid stays as it is (Aegisub)
     setFocusPolicy(Qt::StrongFocus);
     auto *v = new QVBoxLayout(this);
     auto *textBox = new QGroupBox(tr("Text"), this);

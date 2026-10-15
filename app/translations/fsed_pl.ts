@@ -1812,6 +1812,10 @@ Dekoder: BestSource</translation>
         <translation>Przesuwanie czasów</translation>
     </message>
     <message>
+        <source>Shift times / run post processor</source>
+        <translation>Przesuń czasy / uruchom postprocesor</translation>
+    </message>
+    <message>
         <source>Change frame rate...</source>
         <translation>Zmień FPS...</translation>
     </message>
@@ -3055,12 +3059,20 @@ do czasu audio</translation>
         <translation>Przerwy do tej długości przesuwają w przód koniec poprzedniej linijki</translation>
     </message>
     <message>
+        <source>Lines overlapping by up to this meet too (Aegisub)</source>
+        <translation>Linijki nachodzące na siebie najwyżej o tyle też się stykają (Aegisub)</translation>
+    </message>
+    <message>
         <source>Start time threshold</source>
         <translation>Próg wydłużania czasu początkowego</translation>
     </message>
     <message>
         <source>End time threshold</source>
         <translation>Próg wydłużania czasu końcowego</translation>
+    </message>
+    <message>
+        <source>Overlap threshold</source>
+        <translation>Próg nachodzenia</translation>
     </message>
     <message>
         <source>Snap to keyframes</source>
@@ -3089,6 +3101,10 @@ do czasu audio</translation>
     <message>
         <source>Post processor</source>
         <translation>Postprocessor</translation>
+    </message>
+    <message>
+        <source>Pick the styles first</source>
+        <translation>Najpierw wybierz style</translation>
     </message>
     <message>
         <source>Shifted %1 lines</source>
@@ -3140,6 +3156,10 @@ do czasu audio</translation>
     <message>
         <source>Add to dictionary</source>
         <translation>Dodaj do słownika</translation>
+    </message>
+    <message>
+        <source>Remove from dictionary</source>
+        <translation>Usuń ze słownika</translation>
     </message>
     <message>
         <source>Close</source>

@@ -207,6 +207,8 @@ pub mod ffi {
         /// Gaps up to `adjacent` close at `bias` (0 previous end .. 1 next start).
         adjacent: i64,
         bias: f64,
+        /// Overlaps up to this close too (Aegisub's "Max overlap").
+        overlap: i64,
         kf_before_start: i64,
         kf_after_start: i64,
         kf_before_end: i64,
