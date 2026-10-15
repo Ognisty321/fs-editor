@@ -19,8 +19,8 @@ use fs_core::{Color, Document, Event, EventEntry, EventId, Time};
 use fs_formats::{Format, LoadOptions, SaveOptions, TextImport};
 
 use crate::ffi::{
-    ColumnInfo, ComparePair, FileInfo, FilterSpec, FindHit, FindSpec, PostSpec, ResampleSpec, Row,
-    RowSpan, ShiftSpec, StyleData, Syllable, Visual,
+    ColumnInfo, ComparePair, FileInfo, FilterSpec, FindHit, FindMatch, FindSpec, PostSpec,
+    ResampleSpec, Row, RowSpan, ShiftSpec, StyleData, Syllable, Visual,
 };
 
 pub struct Session {
@@ -1745,6 +1745,37 @@ impl Session {
         })
     }
 
+    pub fn find_matches(&self, spec: &FindSpec, max: usize) -> Result<Vec<FindMatch>, String> {
+        let m = Self::matcher(spec)?;
+        let mut out = Vec::new();
+        for r in self.find_all(spec)? {
+            for (e, original) in self.search_events(spec, r) {
+                let text = m.field_value(self.ed.doc.event(e).unwrap());
+                let mut from = 0;
+                while let Some(at) = m.find_at(text, from) {
+                    if out.len() == max {
+                        return Ok(out);
+                    }
+                    let start = utf16_len(&text[..at.start]);
+                    out.push(FindMatch {
+                        row: r,
+                        original,
+                        start,
+                        end: start + utf16_len(&text[at.clone()]),
+                        text: text.into(),
+                    });
+                    // an empty match (^, \b) is passed by a character
+                    from = match text[at.end..].chars().next() {
+                        Some(c) if at.is_empty() => at.end + c.len_utf8(),
+                        None if at.is_empty() => break,
+                        _ => at.end,
+                    };
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// The events `spec` replaces in and how.
     fn replace_job(
         &self,
@@ -3385,6 +3416,18 @@ mod tests {
         assert_eq!(s.find_all(&spec("o", vec![])), Ok(vec![0, 1]));
         assert_eq!(s.find_all(&spec("e", vec![2, 0, 2, 9])), Ok(vec![0, 2]));
         assert_eq!(s.find_all(&spec("x", vec![])), Ok(vec![]));
+        let at = |pattern: &str, regex, max| {
+            let spec = FindSpec {
+                regex,
+                ..spec(pattern, vec![])
+            };
+            (s.find_matches(&spec, max).unwrap().iter())
+                .map(|m| (m.row, m.start, m.end))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(at("e", false, 9), [(0, 2, 3), (2, 3, 4), (2, 4, 5)]);
+        assert_eq!(at("e", false, 2), [(0, 2, 3), (2, 3, 4)]);
+        assert_eq!(at("$", true, 9), [(0, 3, 3), (1, 3, 3), (2, 5, 5)]);
     }
 
     #[test]

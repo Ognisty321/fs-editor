@@ -38,6 +38,7 @@
 #include <QLocale>
 #include <QMessageBox>
 #include <QPainter>
+#include <QStyledItemDelegate>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRadioButton>
@@ -321,27 +322,30 @@ fsb::FindSpec FindDialog::spec(TabPanel *tab) const {
     return s;
 }
 
+// shortcut: a list longer than this would take long to build and longer to read; a model
+// instead of items if people need more
+constexpr size_t kMaxResults = 20000;
+
 void FindDialog::findAll(const QList<TabPanel *> &tabs) {
     if (!ready()) return;
     remember(false);
     clearResults();
-    size_t lines = 0;
+    size_t matches = 0;
     int files = 0;
     for (auto *tab : tabs) {
         const auto s = spec(tab);
         try {
-            const auto rows = tab->s().find_all(s);
-            if (rows.empty()) continue;
-            Lines found;
-            for (size_t r : rows) found.append({r, fs::q(tab->s().row(r).text)});
+            const auto found = tab->s().find_matches(s, kMaxResults - matches);
+            if (found.empty()) continue;
             addResults(tab, tab->title(), tab->path(), found);
-            lines += rows.size();
+            matches += found.size();
             ++files;
         } catch (const rust::Error &e) {
             return m_main->error(QString::fromUtf8(e.what()));
         }
+        if (matches == kMaxResults) break;
     }
-    showResults(tr("Lines found: %1, in files: %2").arg(lines).arg(files));
+    showResults(tr("Matches found: %1, in files: %2").arg(matches).arg(files));
 }
 
 void FindDialog::findInFiles() {
@@ -360,7 +364,7 @@ void FindDialog::findInFiles() {
     }
     // the files are read on a worker, each into its own session
     struct Found {
-        QList<std::pair<QString, Lines>> files; // path, matching lines
+        std::vector<std::pair<QString, rust::Vec<fsb::FindMatch>>> files; // path, its matches
         int searched = 0;
     };
     const QStringList filters = m_filter->text().split(QRegularExpression("[;,\\s]+"), Qt::SkipEmptyParts);
@@ -373,15 +377,16 @@ void FindDialog::findInFiles() {
         watch->deleteLater();
         m_findFiles->setEnabled(true);
         clearResults();
-        size_t lines = 0;
+        size_t matches = 0;
         for (const auto &[path, found] : f.files) {
             addResults(nullptr, QDir(dir).relativeFilePath(path), path, found);
-            lines += size_t(found.size());
+            matches += found.size();
         }
-        showResults(tr("Lines found: %1, in files: %2 (searched: %3)").arg(lines).arg(f.files.size()).arg(f.searched));
+        showResults(tr("Matches found: %1, in files: %2 (searched: %3)").arg(matches).arg(f.files.size()).arg(f.searched));
     });
     watch->setFuture(QtConcurrent::run([dir, filters, flags, s] {
         Found f;
+        size_t total = 0;
         QDirIterator it(dir, filters, QDir::Files, flags);
         while (it.hasNext()) {
             const QString path = it.next();
@@ -392,15 +397,36 @@ void FindDialog::findInFiles() {
                 continue; // not subtitles after all
             }
             ++f.searched;
-            const auto rows = file->find_all(s);
-            if (rows.empty()) continue;
-            Lines found;
-            for (size_t r : rows) found.append({r, fs::q(file->row(r).text)});
-            f.files.append({path, std::move(found)});
+            auto found = file->find_matches(s, kMaxResults - total);
+            if (found.empty()) continue;
+            total += found.size();
+            f.files.emplace_back(path, std::move(found));
+            if (total == kMaxResults) break;
         }
         return f;
     }));
 }
+
+namespace {
+// the match drawn over its line's text (Kainote's results)
+class MatchDelegate final : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    void paint(QPainter *p, const QStyleOptionViewItem &o, const QModelIndex &i) const override {
+        QStyledItemDelegate::paint(p, o, i);
+        const QPoint at = i.data(Qt::UserRole).toPoint();
+        if (at.y() <= at.x()) return;
+        const QString text = i.data().toString();
+        const QFontMetrics fm(o.font);
+        const int left = o.rect.x() + o.widget->style()->pixelMetric(QStyle::PM_FocusFrameHMargin, nullptr, o.widget) + 1;
+        const int x0 = left + fm.horizontalAdvance(text.left(at.x())), x1 = left + fm.horizontalAdvance(text.left(at.y()));
+        p->save();
+        p->setClipRect(o.rect);
+        p->fillRect(QRect(x0, o.rect.y() + 1, std::max(2, x1 - x0), o.rect.height() - 2), QColor(255, 190, 0, 90));
+        p->restore();
+    }
+};
+} // namespace
 
 void FindDialog::clearResults() {
     if (!m_results) {
@@ -415,6 +441,7 @@ void FindDialog::clearResults() {
         v->addWidget(m_tree);
         m_summary = new QLabel(m_results);
         v->addWidget(m_summary);
+        m_tree->setItemDelegateForColumn(1, new MatchDelegate(m_tree));
         connect(m_tree, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem *it) { goToResult(it); });
         m_results->resize(700, 400);
     }
@@ -422,16 +449,19 @@ void FindDialog::clearResults() {
     m_resultTabs.clear();
 }
 
-void FindDialog::addResults(TabPanel *tab, const QString &title, const QString &path, const Lines &lines) {
+void FindDialog::addResults(TabPanel *tab, const QString &title, const QString &path,
+                            const rust::Vec<fsb::FindMatch> &found) {
     auto *file = new QTreeWidgetItem(m_tree, {title});
     file->setFirstColumnSpanned(true);
     file->setData(0, Qt::UserRole, int(m_resultTabs.size()));
     file->setData(0, Qt::UserRole + 1, path);
     file->setToolTip(0, path);
     m_resultTabs.append(tab);
-    for (const auto &[r, text] : lines) {
-        auto *it = new QTreeWidgetItem(file, {QString::number(r + 1), text});
-        it->setData(0, Qt::UserRole, qulonglong(r));
+    for (const auto &m : found) {
+        auto *it = new QTreeWidgetItem(file, {QString::number(m.row + 1), fs::q(m.text)});
+        it->setData(0, Qt::UserRole, qulonglong(m.row));
+        it->setData(0, Qt::UserRole + 1, m.original);
+        it->setData(1, Qt::UserRole, QPoint(int(m.start), int(m.end)));
     }
     file->setExpanded(true);
 }
@@ -460,7 +490,14 @@ void FindDialog::goToResult(QTreeWidgetItem *item) {
         if (!tab) return;
     }
     m_main->showPanel(tab);
-    tab->setActive(int(item->data(0, Qt::UserRole).toULongLong()));
+    const auto row = item->data(0, Qt::UserRole).toULongLong();
+    if (row >= tab->s().row_count()) return; // the file changed since
+    tab->setActive(int(row));
+    // the match selected in the edit box, and Find next goes on from it (Kainote)
+    const QPoint at = item->data(1, Qt::UserRole).toPoint();
+    m_hit = {int64_t(row), item->data(0, Qt::UserRole + 1).toBool(), size_t(at.x()), size_t(at.y())};
+    m_hitTab = tab;
+    if (spec(nullptr).field == 0) tab->edit()->selectText(at.x(), at.y() - at.x(), m_hit.original);
 }
 
 // Aegisub's: match by match through the lines, each shown selected in the line's text

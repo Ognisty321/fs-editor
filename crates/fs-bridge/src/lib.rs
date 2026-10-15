@@ -179,6 +179,17 @@ pub mod ffi {
         at_end: bool,
     }
 
+    /// One match of Find all (Kainote's results list): where it is, as [`FindHit`], and the
+    /// field it is in.
+    #[derive(Debug, Clone, Default, PartialEq)]
+    struct FindMatch {
+        row: usize,
+        original: bool,
+        start: usize,
+        end: usize,
+        text: String,
+    }
+
     /// A match Find next shows: in row `row` (-1: none), in a translation row's original or in
     /// the line's field, at UTF-16 `start..end` of it.
     #[derive(Debug, Clone, Default, PartialEq)]
@@ -585,6 +596,8 @@ pub mod ffi {
         fn replace_hit(self: &mut Session, spec: &FindSpec, hit: &FindHit) -> Result<i64>;
         /// Every matching row, in order (Kainote's Find all).
         fn find_all(self: &Session, spec: &FindSpec) -> Result<Vec<usize>>;
+        /// Every match, in order, up to `max` of them.
+        fn find_matches(self: &Session, spec: &FindSpec, max: usize) -> Result<Vec<FindMatch>>;
         fn replace_all(self: &mut Session, spec: &FindSpec) -> Result<usize>;
         fn replace_rules(self: &mut Session, specs: &[FindSpec]) -> Result<usize>;
         fn overlapping(self: &Session, row: usize) -> Vec<usize>;

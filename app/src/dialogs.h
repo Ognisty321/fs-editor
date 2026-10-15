@@ -53,8 +53,7 @@ private:
     void findAll(const QList<TabPanel *> &tabs);
     void findInFiles();
     void clearResults();
-    using Lines = QList<std::pair<size_t, QString>>; // row, text
-    void addResults(TabPanel *tab, const QString &title, const QString &path, const Lines &lines);
+    void addResults(TabPanel *tab, const QString &title, const QString &path, const rust::Vec<fsb::FindMatch> &found);
     void showResults(const QString &summary);
     void goToResult(class QTreeWidgetItem *item);
     MainWindow *m_main;

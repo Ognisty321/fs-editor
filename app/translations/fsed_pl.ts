@@ -547,16 +547,16 @@
         <translation>Zamiany: %1</translation>
     </message>
     <message>
-        <source>Lines found: %1, in files: %2</source>
-        <translation>Znalezione linijki: %1, w plikach: %2</translation>
+        <source>Matches found: %1, in files: %2</source>
+        <translation>Znalezione dopasowania: %1, w plikach: %2</translation>
+    </message>
+    <message>
+        <source>Matches found: %1, in files: %2 (searched: %3)</source>
+        <translation>Znalezione dopasowania: %1, w plikach: %2 (przeszukane: %3)</translation>
     </message>
     <message>
         <source>Searching in %1...</source>
         <translation>Szukanie w %1...</translation>
-    </message>
-    <message>
-        <source>Lines found: %1, in files: %2 (searched: %3)</source>
-        <translation>Znalezione linijki: %1, w plikach: %2 (przeszukane: %3)</translation>
     </message>
     <message>
         <source>Search results</source>
