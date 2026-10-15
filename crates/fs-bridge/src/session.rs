@@ -409,8 +409,9 @@ impl Session {
                 .and_then(Format::from_name)
                 .unwrap_or(self.format),
         };
-        fs_formats::save_file(&self.ed.doc, &p, format, &self.save_options())
-            .map_err(|e| format!("{path}: {e}"))?;
+        (self.encoding, self.bom) =
+            fs_formats::save_file(&self.ed.doc, &p, format, &self.save_options())
+                .map_err(|e| format!("{path}: {e}"))?;
         self.path = Some(p);
         self.format = format;
         self.ed.mark_saved();
@@ -445,6 +446,7 @@ impl Session {
             Format::Ass,
             &SaveOptions::default(),
         )
+        .map(drop)
         .map_err(|e| format!("{path}: {e}"))
     }
 
@@ -456,6 +458,7 @@ impl Session {
             ..Default::default()
         };
         fs_formats::save_file(&doc, Path::new(path), Format::Ass, &opts)
+            .map(drop)
             .map_err(|e| format!("{path}: {e}"))
     }
 
@@ -1084,7 +1087,9 @@ impl Session {
             return std::fs::write(p, bytes).map_err(|e| format!("{path}: {e}"));
         }
         let format = Format::from_name(ext).unwrap_or(Format::Ass);
-        fs_formats::save_file(&doc, p, format, &opts).map_err(|e| format!("{path}: {e}"))
+        fs_formats::save_file(&doc, p, format, &opts)
+            .map(drop)
+            .map_err(|e| format!("{path}: {e}"))
     }
 
     /// Aegisub "Recombine Lines"; returns the rows left of the selection.

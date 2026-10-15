@@ -453,13 +453,21 @@ pub fn lossless(doc: &Document, format: Format, opts: &SaveOptions) -> bool {
             .all(|(e, b)| canon(&e.text) == canon(&b.text))
 }
 
+/// The encoding and BOM it was written with: UTF-8 with a BOM, the one Aegisub always saves in,
+/// when `opts.encoding` lacks a character of the text.
 pub fn save_file(
     doc: &Document,
     path: &Path,
     format: Format,
     opts: &SaveOptions,
-) -> Result<(), Error> {
-    let bytes = save_bytes(doc, format, opts);
+) -> Result<(&'static Encoding, bool), Error> {
+    let text = save_text(doc, format, opts);
+    let (enc, bom) = if encoding::holds(&text, opts.encoding) {
+        (opts.encoding, opts.bom)
+    } else {
+        (UTF_8, true)
+    };
+    let bytes = encoding::encode(&text, enc, bom);
     // write atomically: temp file + rename
     let tmp = path.with_extension(format!(
         "{}.fs-tmp",
@@ -467,7 +475,7 @@ pub fn save_file(
     ));
     std::fs::write(&tmp, &bytes)?;
     std::fs::rename(&tmp, path)?;
-    Ok(())
+    Ok((enc, bom))
 }
 
 /// Convert an ASS document to SSA v4 (styles section header, Format lines
@@ -586,6 +594,41 @@ mod tests {
             write_plain_text(d),
             "Anna: Hi there\r\nAnna: and more\r\n# : a note\r\nBob: Yes: sure\r\n"
         );
+    }
+
+    #[test]
+    fn save_switches_to_utf8_for_what_the_encoding_lacks() {
+        let dir = std::env::temp_dir().join(format!("fsed-enc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("a.srt");
+        let cp1250 = encoding::by_name("cp1250").unwrap();
+        let opts = SaveOptions {
+            encoding: cp1250,
+            bom: false,
+            ..Default::default()
+        };
+        let doc = |t: &str| {
+            from_subs(vec![Sub {
+                start: Time(0),
+                end: Time(1000),
+                text: t.into(),
+            }])
+        };
+        assert_eq!(
+            save_file(&doc("zażółć"), &p, Format::Srt, &opts).unwrap(),
+            (cp1250, false)
+        );
+        assert_eq!(
+            std::fs::read(&p).unwrap()[34..],
+            *b"za\xbf\xf3\xb3\xe6\r\n\r\n"
+        );
+        assert_eq!(
+            save_file(&doc("zażółć ★"), &p, Format::Srt, &opts).unwrap(),
+            (UTF_8, true)
+        );
+        let l = load_file(&p, &LoadOptions::default()).unwrap();
+        assert_eq!(l.doc.event(0).unwrap().text, "zażółć ★");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

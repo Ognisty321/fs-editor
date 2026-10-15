@@ -85,22 +85,24 @@ pub fn decode(bytes: &[u8], forced: Option<&'static Encoding>) -> (String, Decod
     (text.into_owned(), det)
 }
 
-/// Encode text; writes a BOM for UTF encodings when `bom` is set.
+/// Whether `encoding` has every character of `text` (else `encode` writes `&#NNNN;`).
+pub fn holds(text: &str, encoding: &'static Encoding) -> bool {
+    [UTF_8, UTF_16LE, UTF_16BE].contains(&encoding) || !encoding.encode(text).2
+}
+
+/// Encode text; writes a BOM for UTF-8 when `bom` is set, and always for UTF-16: few players
+/// read UTF-16 without one.
 pub fn encode(text: &str, encoding: &'static Encoding, bom: bool) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len() + 3);
     if encoding == UTF_16LE {
-        if bom {
-            out.extend_from_slice(&[0xFF, 0xFE]);
-        }
+        out.extend_from_slice(&[0xFF, 0xFE]);
         for u in text.encode_utf16() {
             out.extend_from_slice(&u.to_le_bytes());
         }
         return out;
     }
     if encoding == UTF_16BE {
-        if bom {
-            out.extend_from_slice(&[0xFE, 0xFF]);
-        }
+        out.extend_from_slice(&[0xFE, 0xFF]);
         for u in text.encode_utf16() {
             out.extend_from_slice(&u.to_be_bytes());
         }
@@ -141,7 +143,8 @@ mod tests {
                 let (t, d) = decode(&b, None);
                 assert_eq!(t, s, "{} bom={bom}", enc.name());
                 assert_eq!(d.encoding, enc);
-                assert_eq!(d.bom, bom);
+                // UTF-16 always has one
+                assert_eq!(d.bom, bom || enc != UTF_8);
             }
         }
     }
