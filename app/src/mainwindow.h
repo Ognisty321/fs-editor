@@ -58,6 +58,8 @@ private:
     void buildStatusBar();
     void buildAutomationMenu();
     void assignHotkey(QAction *a);
+    bool setHotkey(QAction *a, const QKeySequence &key);
+    void editHotkeys();
     bool closeTab(int index);
     TabPanel *panel(int index) const;
     int indexOfPanel(TabPanel *t) const;

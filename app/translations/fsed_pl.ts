@@ -1030,6 +1030,10 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Ustawienia</translation>
     </message>
     <message>
+        <source>Hotkeys...</source>
+        <translation>Skróty klawiszowe...</translation>
+    </message>
+    <message>
         <source>Exit</source>
         <translation>Wyjście</translation>
     </message>
@@ -1770,6 +1774,42 @@ Tłumaczenie: wklejony tekst, który przejmuje timing oryginału.</translation>
     <message>
         <source>%1 is used by &quot;%2&quot;. Take it over?</source>
         <translation>%1 jest używany przez „%2”. Przejąć go?</translation>
+    </message>
+    <message>
+        <source>Hotkeys</source>
+        <translation>Skróty klawiszowe</translation>
+    </message>
+    <message>
+        <source>Search</source>
+        <translation>Szukaj</translation>
+    </message>
+    <message>
+        <source>Command</source>
+        <translation>Polecenie</translation>
+    </message>
+    <message>
+        <source>Menu</source>
+        <translation>Menu</translation>
+    </message>
+    <message>
+        <source>Hotkey</source>
+        <translation>Skrót</translation>
+    </message>
+    <message>
+        <source>Change...</source>
+        <translation>Zmień...</translation>
+    </message>
+    <message>
+        <source>Default</source>
+        <translation>Domyślny</translation>
+    </message>
+    <message>
+        <source>All defaults</source>
+        <translation>Wszystkie domyślne</translation>
+    </message>
+    <message>
+        <source>Restore all hotkeys to their defaults?</source>
+        <translation>Przywrócić domyślne wszystkie skróty klawiszowe?</translation>
     </message>
     <message>
         <source>Load script</source>

@@ -389,14 +389,22 @@ void MainWindow::openFile(const QString &path, const QString &encoding) {
 
 // ---- actions ------------------------------------------------------------------
 
+namespace {
+void showHotkey(QAction *a) {
+    const QString key = a->shortcut().toString(QKeySequence::NativeText);
+    a->setToolTip(key.isEmpty() ? a->text() : QString("%1 (%2)").arg(a->text(), key));
+}
+} // namespace
+
 QAction *MainWindow::add(const QString &id, const QString &text, const QKeySequence &key, QMenu *menu,
                          std::function<void()> fn) {
     auto *a = new QAction(text, this);
     a->setObjectName(id);
     if (auto it = kIcons.constFind(id); it != kIcons.cend()) a->setIcon(icon(it->first, it->second));
+    a->setProperty("defaultKey", key);
     a->setShortcut(QKeySequence(QSettings().value("hotkeys/" + id, key.toString()).toString()));
     a->setShortcutContext(Qt::ApplicationShortcut);
-    a->setToolTip(a->shortcut().isEmpty() ? text : QString("%1 (%2)").arg(text, a->shortcut().toString(QKeySequence::NativeText)));
+    showHotkey(a);
     if (fn) connect(a, &QAction::triggered, this, [fn = std::move(fn)] { fn(); });
     if (menu) menu->addAction(a);
     addAction(a); // shortcuts work while the menu is closed
@@ -578,6 +586,7 @@ void MainWindow::buildMenus() {
     connect(ask, &QAction::toggled, this, [](bool on) { QSettings().setValue("main/askSession", on); });
     file->addSeparator();
     add("settings", tr("Settings"), {}, file, [this] { SettingsDialog(this).exec(); });
+    add("hotkeys", tr("Hotkeys..."), {}, file, [this] { editHotkeys(); });
     add("exit", tr("Exit"), QKeySequence("Alt+F4"), file, [this] { close(); });
 
     // Edit
@@ -1490,20 +1499,109 @@ void MainWindow::assignHotkey(QAction *a) {
     connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
     v->addWidget(bb);
     edit->setFocus();
-    if (d.exec() != QDialog::Accepted) return;
-    const QKeySequence key = edit->keySequence();
-    QSettings st;
-    if (!key.isEmpty()) {
-        for (auto *other : m_actions) {
+    if (d.exec() == QDialog::Accepted) setHotkey(a, edit->keySequence());
+}
+
+// Takes the key over from another command after asking; a default key is not stored, so a new
+// default applies.
+bool MainWindow::setHotkey(QAction *a, const QKeySequence &key) {
+    const auto store = [](QAction *x) {
+        QSettings st;
+        if (x->shortcut() == x->property("defaultKey").value<QKeySequence>()) st.remove("hotkeys/" + x->objectName());
+        else st.setValue("hotkeys/" + x->objectName(), x->shortcut().toString());
+        showHotkey(x);
+    };
+    if (!key.isEmpty())
+        for (auto *other : std::as_const(m_actions)) {
             if (other == a || other->shortcut() != key) continue;
             if (!confirm(tr("%1 is used by \"%2\". Take it over?").arg(key.toString(), QString(other->text()).remove('&'))))
-                return;
+                return false;
             other->setShortcut({});
-            st.setValue("hotkeys/" + other->objectName(), QString());
+            store(other);
         }
-    }
     a->setShortcut(key);
-    st.setValue("hotkeys/" + a->objectName(), key.toString());
+    store(a);
+    return true;
+}
+
+// Aegisub's and Kainote's hotkey list: every command, also those only reachable by a key (tabs);
+// a hotkey that differs from the default is bold.
+void MainWindow::editHotkeys() {
+    QDialog d(this);
+    d.setWindowTitle(tr("Hotkeys"));
+    d.resize(680, 600);
+    auto *v = new QVBoxLayout(&d);
+    auto *filter = new QLineEdit(&d);
+    filter->setPlaceholderText(tr("Search"));
+    filter->setClearButtonEnabled(true);
+    v->addWidget(filter);
+    auto *list = new QTreeWidget(&d);
+    list->setHeaderLabels({tr("Command"), tr("Menu"), tr("Hotkey")});
+    list->setRootIsDecorated(false);
+    list->setUniformRowHeights(true);
+    v->addWidget(list, 1);
+    const int side = style()->pixelMetric(QStyle::PM_SmallIconSize);
+    QPixmap blank(side, side); // keeps names without an icon in line
+    blank.fill(Qt::transparent);
+    for (QAction *a : std::as_const(m_actions)) {
+        if (a->menu()) continue; // a submenu (recent files) has nothing to run
+        QString menu;
+        for (QObject *o : a->associatedObjects())
+            if (auto *m = qobject_cast<QMenu *>(o)) {
+                menu = QString(m->title()).remove('&');
+                break;
+            }
+        auto *it = new QTreeWidgetItem(list, {QString(a->text()).remove('&'), menu});
+        it->setIcon(0, a->icon().isNull() ? QIcon(blank) : a->icon());
+        it->setData(0, Qt::UserRole, QVariant::fromValue(a));
+    }
+    list->sortItems(1, Qt::AscendingOrder);
+    const auto refresh = [list] {
+        for (int i = 0; i < list->topLevelItemCount(); ++i) {
+            auto *it = list->topLevelItem(i);
+            auto *a = it->data(0, Qt::UserRole).value<QAction *>();
+            it->setText(2, a->shortcut().toString(QKeySequence::NativeText));
+            QFont f = it->font(0);
+            f.setBold(a->shortcut() != a->property("defaultKey").value<QKeySequence>());
+            it->setFont(2, f);
+        }
+    };
+    refresh();
+    for (int c = 0; c < 3; ++c) list->resizeColumnToContents(c);
+    connect(filter, &QLineEdit::textChanged, &d, [list](const QString &s) {
+        for (int i = 0; i < list->topLevelItemCount(); ++i) {
+            auto *it = list->topLevelItem(i);
+            it->setHidden(!s.isEmpty() && !it->text(0).contains(s, Qt::CaseInsensitive) &&
+                          !it->text(2).contains(s, Qt::CaseInsensitive));
+        }
+    });
+    const auto current = [list] {
+        auto *it = list->currentItem();
+        return it ? it->data(0, Qt::UserRole).value<QAction *>() : nullptr;
+    };
+    const auto change = [=, this] {
+        if (auto *a = current()) assignHotkey(a);
+        refresh();
+    };
+    connect(list, &QTreeWidget::itemActivated, &d, change);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, &d);
+    connect(bb->addButton(tr("Change..."), QDialogButtonBox::ActionRole), &QPushButton::clicked, &d, change);
+    connect(bb->addButton(tr("Default"), QDialogButtonBox::ActionRole), &QPushButton::clicked, &d, [=, this] {
+        if (auto *a = current()) setHotkey(a, a->property("defaultKey").value<QKeySequence>());
+        refresh();
+    });
+    connect(bb->addButton(tr("All defaults"), QDialogButtonBox::ResetRole), &QPushButton::clicked, &d, [=, this] {
+        if (!confirm(tr("Restore all hotkeys to their defaults?"))) return;
+        QSettings().remove("hotkeys");
+        for (auto *a : std::as_const(m_actions)) {
+            a->setShortcut(a->property("defaultKey").value<QKeySequence>());
+            showHotkey(a);
+        }
+        refresh();
+    });
+    connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    v->addWidget(bb);
+    d.exec();
 }
 
 // Shift+click on a menu item assigns its hotkey; also routes keys to the
