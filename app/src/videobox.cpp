@@ -39,15 +39,31 @@
 
 // ---- worker -------------------------------------------------------------------
 
+namespace {
+// The frame's picture, without the subtitles; called with the media locked. Drawing on it detaches
+// it from the cached one.
+QImage decode(VideoMedia &m, qint64 frame) {
+    if (m.video && frame == m.cachedFrame) return m.cached;
+    QImage img(m.width, m.height, QImage::Format_RGBA8888);
+    if (!m.video) {
+        img.fill(QColor(0x30, 0x30, 0x30)); // dummy video
+        return img;
+    }
+    (*m.video)->frame(frame, rust::Slice<uint8_t>(img.bits(), size_t(img.sizeInBytes())));
+    m.cachedFrame = frame;
+    m.cached = img;
+    return img;
+}
+} // namespace
+
 void FrameWorker::render(quint64 id, qint64 frame, qint64 ms, bool subs) {
     if (id < latest.load()) return; // a newer request is queued
     std::lock_guard g(m_media->m);
-    QImage img(m_media->width, m_media->height, QImage::Format_RGBA8888);
-    const rust::Slice<uint8_t> px(img.bits(), size_t(img.sizeInBytes()));
+    QImage img;
     try {
-        if (m_media->video) (*m_media->video)->frame(frame, px);
-        else img.fill(QColor(0x30, 0x30, 0x30)); // dummy video
+        img = decode(*m_media, frame);
         if (subs && m_media->renderer) {
+            const rust::Slice<uint8_t> px(img.bits(), size_t(img.sizeInBytes()));
             if (m_media->scriptDirty) {
                 (*m_media->renderer)->set_script(m_media->script);
                 m_media->scriptDirty = false;
@@ -627,6 +643,7 @@ void VideoBox::open(const QString &path, qint64 frame, double ar) {
                 media->width = info.width;
                 media->height = info.height;
                 media->video.emplace(std::move(v));
+                media->cachedFrame = -1;
                 if (!media->renderer) media->renderer.emplace(fsb::new_renderer());
                 (*media->renderer)->load_attached_fonts(fs::Utf8(path));
                 for (const auto &c : fsb::chapters(fs::Utf8(path)))
@@ -692,6 +709,8 @@ void VideoBox::openDummy(int w, int h, double fps, qint64 ms) {
     {
         std::lock_guard g(m_media->m);
         m_media->video.reset();
+        m_media->cachedFrame = -1;
+        m_media->cached = QImage();
         m_media->width = w;
         m_media->height = h;
         if (!m_media->renderer) m_media->renderer.emplace(fsb::new_renderer());
@@ -722,6 +741,8 @@ void VideoBox::close() {
     {
         std::lock_guard g(m_media->m);
         m_media->video.reset();
+        m_media->cachedFrame = -1;
+        m_media->cached = QImage();
     }
     m_frames = 0;
     m_chapters.clear();
@@ -954,12 +975,11 @@ QImage VideoBox::grabFrame(bool withSubs) {
     if (!hasVideo()) return {};
     ensureScript();
     std::lock_guard g(m_media->m);
-    QImage img(m_media->width, m_media->height, QImage::Format_RGBA8888);
-    const rust::Slice<uint8_t> px(img.bits(), size_t(img.sizeInBytes()));
+    QImage img;
     try {
-        if (m_media->video) (*m_media->video)->frame(m_frame, px);
-        else img.fill(QColor(0x30, 0x30, 0x30));
+        img = decode(*m_media, m_frame);
         if (withSubs && m_media->renderer) {
+            const rust::Slice<uint8_t> px(img.bits(), size_t(img.sizeInBytes()));
             (*m_media->renderer)->set_script(m_media->script);
             m_media->scriptDirty = false;
             (*m_media->renderer)->blend(time(), size_t(img.width()), size_t(img.height()), size_t(img.width()),

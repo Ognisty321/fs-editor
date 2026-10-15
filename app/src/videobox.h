@@ -33,6 +33,10 @@ struct VideoMedia {
     int width = 640, height = 480;
     rust::String script;
     bool scriptDirty = false;
+    // the last frame decoded, without the subtitles: a visual tool's drag or a typed letter renders
+    // the same frame again (Aegisub's frame cache); -1 after the video changed
+    qint64 cachedFrame = -1;
+    QImage cached;
 };
 
 class FrameWorker : public QObject {
