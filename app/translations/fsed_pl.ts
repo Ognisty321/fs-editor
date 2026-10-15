@@ -2977,6 +2977,10 @@ do czasu audio</translation>
         <translation>Nieprzezroczyste tło</translation>
     </message>
     <message>
+        <source>Shadow box (libass)</source>
+        <translation>Ramka cienia (libass)</translation>
+    </message>
+    <message>
         <source>Outline:</source>
         <translation>Obwódka:</translation>
     </message>
@@ -3124,6 +3128,10 @@ do czasu audio</translation>
         <translation> - kopia</translation>
     </message>
     <message>
+        <source>Delete the selected styles?</source>
+        <translation>Usunąć zaznaczone style?</translation>
+    </message>
+    <message>
         <source>Every style is in use.</source>
         <translation>Wszystkie style są używane.</translation>
     </message>
@@ -3154,12 +3162,20 @@ do czasu audio</translation>
         <translation>Wybierz style do zaimportowania:</translation>
     </message>
     <message>
+        <source>Delete the catalog &quot;%1&quot;?</source>
+        <translation>Usunąć katalog „%1”?</translation>
+    </message>
+    <message>
         <source>Style name collision</source>
         <translation>Kolizja nazw stylów</translation>
     </message>
     <message>
-        <source>There is already a style with the name &quot;%1&quot; in the current script. Overwrite?</source>
-        <translation>Styl o nazwie „%1” już istnieje w tym pliku. Zastąpić?</translation>
+        <source>Update script?</source>
+        <translation>Zaktualizować napisy?</translation>
+    </message>
+    <message>
+        <source>Do you want to change all instances of this style in the script to this new name?</source>
+        <translation>Zmienić nazwę tego stylu we wszystkich liniach napisów?</translation>
     </message>
     <message>
         <source>Catalog</source>
@@ -3168,6 +3184,10 @@ do czasu audio</translation>
     <message>
         <source>Name</source>
         <translation>Nazwa</translation>
+    </message>
+    <message>
+        <source>A style named &quot;%1&quot; already exists. Replace it?</source>
+        <translation>Styl o nazwie „%1” już istnieje. Zastąpić go?</translation>
     </message>
     <message>
         <source>Style name conflict</source>

@@ -99,12 +99,12 @@ protected:
 private:
     void preview();
     QLineEdit *m_previewText;
-    QComboBox *m_encodingBox;
+    QComboBox *m_encodingBox, *m_border;
     fsb::StyleData m_style;
     QLineEdit *m_name;
     QComboBox *m_font;
     QDoubleSpinBox *m_size, *m_outline, *m_shadow, *m_scaleX, *m_scaleY, *m_angle, *m_spacing;
-    QCheckBox *m_bold, *m_italic, *m_underline, *m_strike, *m_box;
+    QCheckBox *m_bold, *m_italic, *m_underline, *m_strike;
     QString m_colors[4];
     class QToolButton *m_colorButtons[4];
     QSpinBox *m_alpha[4], *m_ml, *m_mr, *m_mv;
@@ -124,6 +124,8 @@ private:
     // Aegisub: the block from the first to the last selected style goes to the top (0), up (1),
     // down (2) or to the bottom (3)
     void moveStyles(bool storage, int type);
+    // Kainote: a style replaces one of the same name only when the user says so
+    std::vector<fsb::StyleData> askOverwrite(const std::vector<fsb::StyleData> &chosen, const QStringList &taken);
     void reload();
     void loadCatalog();
     void saveCatalog();

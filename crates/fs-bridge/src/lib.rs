@@ -584,8 +584,10 @@ pub mod ffi {
         fn remove_attachment(self: &mut Session, font: bool, name: &str);
         /// The file name an attachment extracts to (without SSA's `_0`).
         fn attachment_file_name(name: &str) -> String;
-        fn set_style(self: &mut Session, index: i64, style: &StyleData);
-        fn delete_style(self: &mut Session, index: usize);
+        /// `index` < 0 adds it; a rename moves the lines to the new name when `rename_lines`.
+        fn set_style(self: &mut Session, index: i64, style: &StyleData, rename_lines: bool);
+        /// One undo step for them all.
+        fn delete_styles(self: &mut Session, indices: &[usize]);
         fn clean_styles(self: &mut Session) -> Vec<String>;
         /// `order` lists the old style indices in their new order.
         fn reorder_styles(self: &mut Session, order: &[usize]);

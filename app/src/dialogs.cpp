@@ -612,6 +612,17 @@ QString styleLine(const fsb::StyleData &s) {
 QVariantMap toMap(const fsb::StyleData &s) {
     return {{"line", styleLine(s)}};
 }
+template <class List> QStringList namesOf(const List &styles) {
+    QStringList l;
+    for (const auto &s : styles) l << fs::q(s.name);
+    return l;
+}
+// Aegisub's unique_name: "X - copy", then "X - copy (2)"...
+QString uniqueName(const QString &first, const QStringList &taken) {
+    QString n = first;
+    for (int i = 2; taken.contains(n); ++i) n = QString("%1 (%2)").arg(first).arg(i);
+    return n;
+}
 } // namespace
 
 // Laid out like Kainote's style panel (two columns, colours with alpha under them, big preview);
@@ -636,9 +647,9 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
         s->setValue(v);
         return s;
     };
-    auto ispin = [this](int v, int hi) {
+    auto ispin = [this](int v) {
         auto *s = new QSpinBox(this);
-        s->setRange(0, hi);
+        s->setRange(-9999, 99999); // Aegisub's ranges, here and below
         s->setValue(v);
         return s;
     };
@@ -661,7 +672,7 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
     m_font->completer()->setFilterMode(Qt::MatchContains);
     m_font->setCurrentText(fs::q(style.font));
     if (!QFontDatabase::families().contains(m_font->currentText())) m_font->setToolTip(tr("Font is not installed"));
-    m_size = dspin(style.size, 1, 1000);
+    m_size = dspin(style.size, 0, 10000);
     fontL->addWidget(m_font, 0, 0, 1, 3);
     fontL->addWidget(m_size, 0, 3);
     m_bold = new QCheckBox(tr("Bold"), this);
@@ -719,20 +730,21 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
     connect(m_previewText, &QLineEdit::textChanged, this, &StyleEditor::preview);
 
     auto *borderL = new QGridLayout;
-    m_outline = dspin(style.outline, 0, 100);
-    m_shadow = dspin(style.shadow, 0, 100);
-    m_box = new QCheckBox(tr("Opaque box"), this);
-    m_box->setChecked(style.border_style == 3);
+    m_outline = dspin(style.outline, 0, 1000);
+    m_shadow = dspin(style.shadow, 0, 1000);
+    m_border = new QComboBox(this); // border style 1, 3 or 4, as Aegisub offers them
+    m_border->addItems({tr("Outline"), tr("Opaque box"), tr("Shadow box (libass)")});
+    m_border->setCurrentIndex(style.border_style == 3 ? 1 : style.border_style == 4 ? 2 : 0);
     labelled(borderL, 0, 0, tr("Outline:"), m_outline);
     labelled(borderL, 0, 1, tr("Shadow:"), m_shadow);
-    borderL->addWidget(m_box, 2, 0, 1, 2);
+    borderL->addWidget(m_border, 2, 0, 1, 2);
     group(right, tr("Outline"), borderL);
 
     auto *geoL = new QGridLayout;
-    m_scaleX = dspin(style.scale_x, 0, 1000);
-    m_scaleY = dspin(style.scale_y, 0, 1000);
+    m_scaleX = dspin(style.scale_x, 0, 10000);
+    m_scaleY = dspin(style.scale_y, 0, 10000);
     m_angle = dspin(style.angle, -360, 360);
-    m_spacing = dspin(style.spacing, -100, 100);
+    m_spacing = dspin(style.spacing, -1000, 1000);
     labelled(geoL, 0, 0, tr("Scale X:"), m_scaleX);
     labelled(geoL, 0, 1, tr("Scale Y:"), m_scaleY);
     labelled(geoL, 1, 0, tr("Angle:"), m_angle);
@@ -740,9 +752,9 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
     group(right, tr("Miscellaneous"), geoL);
 
     auto *marginL = new QGridLayout;
-    m_ml = ispin(style.margin_l, 9999);
-    m_mr = ispin(style.margin_r, 9999);
-    m_mv = ispin(style.margin_v, 9999);
+    m_ml = ispin(style.margin_l);
+    m_mr = ispin(style.margin_r);
+    m_mv = ispin(style.margin_v);
     labelled(marginL, 0, 0, tr("Left:"), m_ml);
     labelled(marginL, 0, 1, tr("Right:"), m_mr);
     labelled(marginL, 0, 2, tr("Vertical:"), m_mv);
@@ -785,6 +797,7 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
     for (auto *w : findChildren<QSpinBox *>()) connect(w, &QSpinBox::valueChanged, this, &StyleEditor::preview);
     for (auto *w : findChildren<QCheckBox *>()) connect(w, &QCheckBox::toggled, this, &StyleEditor::preview);
     connect(m_font, &QComboBox::currentTextChanged, this, &StyleEditor::preview);
+    connect(m_border, &QComboBox::currentIndexChanged, this, &StyleEditor::preview);
     resize(900, sizeHint().height());
     preview();
 }
@@ -803,7 +816,7 @@ void StyleEditor::resizeEvent(QResizeEvent *e) {
 fsb::StyleData StyleEditor::style() const {
     fsb::StyleData s = m_style;
     s.name = fs::rs(m_name->text().replace(',', ';'));
-    s.font = fs::rs(m_font->currentText());
+    s.font = fs::rs(m_font->currentText().replace(',', ';')); // a comma would split the Style line
     s.size = m_size->value();
     rust::String *dst[] = {&s.primary, &s.secondary, &s.outline_color, &s.back};
     for (int k = 0; k < 4; ++k) {
@@ -819,7 +832,7 @@ fsb::StyleData StyleEditor::style() const {
     s.scale_y = m_scaleY->value();
     s.spacing = m_spacing->value();
     s.angle = m_angle->value();
-    s.border_style = m_box->isChecked() ? 3 : 1;
+    s.border_style = std::array{1, 3, 4}[size_t(std::max(0, m_border->currentIndex()))];
     s.outline = m_outline->value();
     s.shadow = m_shadow->value();
     for (int k = 0; k < 9; ++k)
@@ -970,16 +983,19 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     };
     connect(fNew, &QPushButton::clicked, this, [=, this] {
         int idx = -1;
-        StyleEditor e(defaultStyle(), this);
+        auto d = defaultStyle();
+        d.name = fs::rs(uniqueName("Default", namesOf(session().styles())));
+        StyleEditor e(d, this);
         e.onApply = [&](const fsb::StyleData &s) { return applyToFile(idx, s); };
         e.exec();
     });
     connect(fCopy, &QPushButton::clicked, this, [=, this] {
         const int i = m_file->currentRow();
         if (i < 0) return;
-        auto s = session().styles()[size_t(i)];
-        s.name = fs::rs(fs::q(s.name) + tr(" - copy"));
-        session().set_style(-1, s);
+        const auto styles = session().styles();
+        auto s = styles[size_t(i)];
+        s.name = fs::rs(uniqueName(fs::q(s.name) + tr(" - copy"), namesOf(styles)));
+        session().set_style(-1, s, false);
         edited();
     });
     auto editFile = [=, this] {
@@ -993,9 +1009,10 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     connect(fEdit, &QPushButton::clicked, this, editFile);
     connect(m_file, &QListWidget::itemDoubleClicked, this, editFile);
     connect(fDel, &QPushButton::clicked, this, [=, this] {
-        auto rows = m_file->selectionModel()->selectedRows();
-        std::sort(rows.begin(), rows.end(), [](auto &a, auto &b) { return a.row() > b.row(); });
-        for (const auto &r : rows) session().delete_style(size_t(r.row()));
+        std::vector<size_t> rows;
+        for (const auto &r : m_file->selectionModel()->selectedRows()) rows.push_back(size_t(r.row()));
+        if (rows.empty() || !m_main->confirm(tr("Delete the selected styles?"))) return;
+        session().delete_styles({rows.data(), rows.size()});
         edited();
     });
     connect(fClean, &QPushButton::clicked, this, [=, this] {
@@ -1008,7 +1025,9 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     });
     connect(fClear, &QPushButton::clicked, this, [=, this] {
         if (!m_main->confirm(tr("Delete all styles from the file?"))) return;
-        for (size_t n = session().styles().size(); n > 0; --n) session().delete_style(n - 1);
+        std::vector<size_t> all(session().styles().size());
+        std::iota(all.begin(), all.end(), size_t(0));
+        session().delete_styles({all.data(), all.size()});
         edited();
     });
     const auto selectedStored = [this] {
@@ -1018,13 +1037,15 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         return v;
     };
     connect(toFile, &QPushButton::clicked, this, [=, this] {
-        const auto chosen = selectedStored();
+        const auto chosen = askOverwrite(selectedStored(), namesOf(session().styles()));
         if (chosen.empty()) return;
         session().add_styles({chosen.data(), chosen.size()});
         edited();
     });
     connect(toAll, &QPushButton::clicked, this, [=, this] {
-        const auto chosen = selectedStored();
+        QStringList taken;
+        for (auto *tab : m_main->tabs()) taken << namesOf(tab->s().styles());
+        const auto chosen = askOverwrite(selectedStored(), taken);
         if (chosen.empty()) return;
         for (auto *tab : m_main->tabs()) {
             tab->s().add_styles({chosen.data(), chosen.size()});
@@ -1072,28 +1093,19 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         connect(bb, &QDialogButtonBox::rejected, &pick, &QDialog::reject);
         l->addWidget(bb);
         if (pick.exec() != QDialog::Accepted) return;
-        const auto current = session().styles();
-        std::vector<fsb::StyleData> chosen;
-        for (int r = 0; r < list->count(); ++r) {
-            if (!list->item(r)->isSelected()) continue;
-            const QString name = fs::q(styles[size_t(r)].name);
-            const bool taken =
-                std::any_of(current.begin(), current.end(), [&](const auto &s) { return fs::q(s.name) == name; });
-            if (taken && QMessageBox::question(this, tr("Style name collision"),
-                                               tr("There is already a style with the name \"%1\" in the current "
-                                                  "script. Overwrite?")
-                                                   .arg(name)) != QMessageBox::Yes)
-                continue;
-            chosen.push_back(styles[size_t(r)]);
-        }
+        std::vector<fsb::StyleData> picked;
+        for (int r = 0; r < list->count(); ++r)
+            if (list->item(r)->isSelected()) picked.push_back(styles[size_t(r)]);
+        const auto chosen = askOverwrite(picked, namesOf(session().styles()));
         if (chosen.empty()) return;
         session().add_styles({chosen.data(), chosen.size()});
         edited();
     });
     connect(toStore, &QPushButton::clicked, this, [=, this] {
         const auto styles = session().styles();
-        for (auto *it : m_file->selectedItems()) {
-            const auto &st = styles[size_t(m_file->row(it))];
+        std::vector<fsb::StyleData> picked;
+        for (auto *it : m_file->selectedItems()) picked.push_back(styles[size_t(m_file->row(it))]);
+        for (const auto &st : askOverwrite(picked, namesOf(m_stored))) {
             auto same = std::find_if(m_stored.begin(), m_stored.end(), [&](auto &x) { return fs::q(x.name) == fs::q(st.name); });
             if (same != m_stored.end()) *same = st;
             else m_stored.push_back(st);
@@ -1103,7 +1115,9 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     });
     connect(sNew, &QPushButton::clicked, this, [=, this] {
         int idx = -1;
-        StyleEditor e(defaultStyle(), this);
+        auto d = defaultStyle();
+        d.name = fs::rs(uniqueName("Default", namesOf(m_stored)));
+        StyleEditor e(d, this);
         e.onApply = [&](const fsb::StyleData &s) { return applyToStorage(idx, s); };
         e.exec();
     });
@@ -1119,6 +1133,7 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     connect(m_storage, &QListWidget::itemDoubleClicked, this, editStored);
     connect(sDel, &QPushButton::clicked, this, [this] {
         auto rows = m_storage->selectionModel()->selectedRows();
+        if (rows.empty() || !m_main->confirm(tr("Delete the selected styles?"))) return;
         std::sort(rows.begin(), rows.end(), [](auto &a, auto &b) { return a.row() > b.row(); });
         for (const auto &r : rows) m_stored.erase(m_stored.begin() + r.row());
         saveCatalog();
@@ -1140,7 +1155,8 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         m_catalog->setCurrentText(n);
     });
     connect(delCat, &QPushButton::clicked, this, [this] {
-        if (m_catalog->count() <= 1) return;
+        if (m_catalog->count() <= 1 || !m_main->confirm(tr("Delete the catalog \"%1\"?").arg(m_catalog->currentText())))
+            return;
         QSettings().remove("styles/catalog/" + m_catalog->currentText());
         m_catalog->removeItem(m_catalog->currentIndex());
         QStringList all;
@@ -1150,9 +1166,10 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     connect(m_catalog, &QComboBox::currentTextChanged, this, [this] {
         loadCatalog();
         reload();
-        m_main->current()->s().set_info_value("Last Style Storage", fs::Utf8(m_catalog->currentText()), "");
+        // with the file's project settings, as Aegisub keeps it: not an edit to undo
+        m_main->current()->s().set_project_value("Last Style Storage", fs::Utf8(m_catalog->currentText()));
     });
-    const QString last = fs::q(m_main->current()->s().info_value("Last Style Storage"));
+    const QString last = fs::q(m_main->current()->s().project_value("Last Style Storage"));
     if (!last.isEmpty() && cats.contains(last)) m_catalog->setCurrentText(last);
     loadCatalog();
     reload();
@@ -1209,6 +1226,25 @@ void StyleManager::moveStyles(bool storage, int type) {
     list->setCurrentRow(first, QItemSelectionModel::NoUpdate);
 }
 
+std::vector<fsb::StyleData> StyleManager::askOverwrite(const std::vector<fsb::StyleData> &chosen,
+                                                       const QStringList &taken) {
+    std::vector<fsb::StyleData> out;
+    bool all = false;
+    for (const auto &s : chosen) {
+        if (!all && taken.contains(fs::q(s.name))) {
+            const auto b = QMessageBox::question(this, tr("Style name collision"),
+                                                 tr("A style named \"%1\" already exists. Replace it?").arg(fs::q(s.name)),
+                                                 QMessageBox::Yes | QMessageBox::YesToAll | QMessageBox::No |
+                                                     QMessageBox::Cancel);
+            if (b == QMessageBox::Cancel) return {};
+            if (b == QMessageBox::No) continue;
+            all = b == QMessageBox::YesToAll;
+        }
+        out.push_back(s);
+    }
+    return out;
+}
+
 void StyleManager::reload() {
     m_storage->clear();
     for (const auto &s : m_stored) m_storage->addItem(fs::q(s.name));
@@ -1235,8 +1271,16 @@ bool StyleManager::applyToFile(int &index, const fsb::StyleData &s) {
                                  tr("There is already a style with this name. Please choose another name."));
             return false;
         }
-    // a rename also moves the lines and \r tags that used the old name (Aegisub asks; this always does)
-    session.set_style(index, s);
+    // Aegisub asks whether the lines (and \r tags) that used the old name follow a rename
+    bool lines = true;
+    if (index >= 0 && fs::q(styles[size_t(index)].name) != fs::q(s.name)) {
+        const auto b = QMessageBox::question(
+            this, tr("Update script?"), tr("Do you want to change all instances of this style in the script to this new name?"),
+            QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
+        if (b == QMessageBox::Cancel) return false;
+        lines = b == QMessageBox::Yes;
+    }
+    session.set_style(index, s, lines);
     if (index < 0) index = int(styles.size());
     m_main->current()->changed();
     reload();
@@ -1306,7 +1350,9 @@ PropertiesDialog::PropertiesDialog(TabPanel *tab) : QDialog(tab), m_tab(tab) {
     f->addRow(tr("Layout resolution"), lres);
     m_matrix = new QComboBox(this);
     m_matrix->addItems({"None", "TV.601", "PC.601", "TV.709", "PC.709", "TV.FCC", "PC.FCC", "TV.240M", "PC.240M"});
-    m_matrix->setCurrentText(fs::q(s.info_value("YCbCr Matrix")).isEmpty() ? "None" : fs::q(s.info_value("YCbCr Matrix")));
+    const QString matrix = fs::q(s.info_value("YCbCr Matrix"));
+    if (m_matrix->findText(matrix) < 0) m_matrix->insertItem(0, matrix); // kept as it is, even left out: None changes the colours
+    m_matrix->setCurrentText(matrix);
     f->addRow(tr("YCbCr matrix"), m_matrix);
     m_wrap = new QComboBox(this);
     m_wrap->addItems({tr("0: Smart wrapping, top line is wider"), tr("1: End-of-line word wrapping, only \\N breaks"),

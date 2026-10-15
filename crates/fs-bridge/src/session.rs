@@ -1912,7 +1912,9 @@ impl Session {
 
     /// Replace style `index`, or add a new one when `index < 0`. Renaming
     /// updates the lines that used the old name.
-    pub fn set_style(&mut self, index: i64, style: &StyleData) {
+    /// A rename moves the lines, the `\r` tags and the translation style's name along when
+    /// `rename_lines` (Aegisub asks).
+    pub fn set_style(&mut self, index: i64, style: &StyleData, rename_lines: bool) {
         let style = style.clone();
         self.edit("Edit style", move |d| {
             if index < 0 {
@@ -1926,7 +1928,11 @@ impl Session {
             };
             let old = s.name.clone();
             apply_style_data(s, &style);
-            if old != style.name {
+            if old != style.name && rename_lines {
+                // translation rows pair by that style
+                if tlmode::tl_style(d).as_deref() == Some(old.as_str()) {
+                    d.set_info("TLMode Style", &style.name);
+                }
                 for i in 0..d.event_count() {
                     let e = d.event(i).unwrap();
                     let text = rename_reset_tags(&e.text, &old, &style.name);
@@ -1953,9 +1959,14 @@ impl Session {
         self.edit("Delete unused styles", ops::remove_unused_styles)
     }
 
-    pub fn delete_style(&mut self, index: usize) {
-        self.edit("Delete style", |d| {
-            d.remove_style(index);
+    pub fn delete_styles(&mut self, indices: &[usize]) {
+        let mut v = indices.to_vec();
+        v.sort_unstable_by(|a, b| b.cmp(a));
+        v.dedup();
+        self.edit("Delete styles", |d| {
+            for i in v {
+                d.remove_style(i);
+            }
         });
     }
 
@@ -3198,6 +3209,36 @@ mod tests {
         assert_eq!(s.info_value("Video File"), "");
         s.set_info_value("Title", "x", "");
         assert!(s.file_info().modified && s.can_undo());
+    }
+
+    #[test]
+    fn style_rename_and_delete() {
+        let mut s = session(ASS);
+        s.tl_enable(true);
+        let mut r = s.row(0);
+        r.text = "jeden".into();
+        s.set_row(0, &r, "");
+        let names = |s: &Session| {
+            s.styles()
+                .iter()
+                .map(|x| x.name.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(&s), ["Default", "TLmode"]);
+        let mut tl = s.styles()[1].clone();
+        tl.name = "Orig".into();
+        s.set_style(1, &tl, true);
+        // the pair still pairs: the translation style's name followed
+        assert_eq!(s.info_value("TLMode Style"), "Orig");
+        assert_eq!((s.row_count(), s.row(0).original.as_str()), (3, "one"));
+        let mut main = s.styles()[0].clone();
+        main.name = "Main".into();
+        s.set_style(0, &main, false);
+        assert_eq!(s.row(1).style, "Default");
+        s.delete_styles(&[0, 1, 0]);
+        assert!(s.styles().is_empty());
+        assert!(s.undo());
+        assert_eq!(names(&s), ["Main", "Orig"]);
     }
 
     #[test]
