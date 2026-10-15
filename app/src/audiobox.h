@@ -45,9 +45,10 @@ private:
     std::unique_ptr<QRhiTexture> m_data, m_overlayTex;
     bool m_dataDirty = true, m_overlayDirty = true, m_spectrumTex = false;
     QRhiResourceUpdateBatch *m_pendingInit = nullptr;
-    // drag: 0 none, 1 start, 2 end, 3 ruler scroll, 4 a new selection from the press, 10+k
-    // karaoke boundary k
+    // drag: 0 none, 1 start, 2 end, 3 ruler scroll, 4 a new selection from the press, 5 the line
+    // moved, 6 the video scrubbed, 10+k karaoke boundary k
     int m_drag = 0;
+    std::pair<qint64, qint64> m_moveFrom; // the line's times when its move began
     Qt::MouseButton m_button = Qt::NoButton;
     int m_pressX = 0;
     qint64 m_pressT = 0;

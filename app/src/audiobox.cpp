@@ -276,6 +276,14 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
                 }
         }
         b.m_tab->seekVideo(t);
+        m_drag = 6; // and on while the button is held (Aegisub's scrubbing)
+        return;
+    }
+    if (e->button() == Qt::LeftButton && (e->modifiers() & Qt::AltModifier)) {
+        // Alt+drag moves the whole line (Aegisub)
+        m_drag = 5;
+        m_pressT = t;
+        m_moveFrom = {b.m_selStart, b.m_selEnd};
         return;
     }
     if (b.m_karaoke && !b.m_syl.empty()) {
@@ -343,7 +351,7 @@ void AudioView::mouseMoveEvent(QMouseEvent *e) {
     }
     // a marker dragged past the edges scrolls the view along (Aegisub)
     // shortcut: only while the mouse moves; a timer if holding it still out there should scroll too
-    if (m_drag != 3 && (x < 0 || x >= width())) b.setLeft(b.m_left + qint64((x < 0 ? x : x - width() + 1) * b.m_msPerPx));
+    if (m_drag != 3 && m_drag != 6 && (x < 0 || x >= width())) b.setLeft(b.m_left + qint64((x < 0 ? x : x - width() + 1) * b.m_msPerPx));
     const qint64 t = b.msAt(x);
     const bool snapToggle = e->modifiers() & Qt::ShiftModifier;
     if (m_drag == 3) {
@@ -357,6 +365,11 @@ void AudioView::mouseMoveEvent(QMouseEvent *e) {
             const qint64 u = b.snap(t, snapToggle);
             b.setSelection(std::min(m_pressT, u), std::max(m_pressT, u), true);
         }
+    } else if (m_drag == 5) {
+        const qint64 d = std::max(t - m_pressT, -m_moveFrom.first);
+        b.setSelection(m_moveFrom.first + d, m_moveFrom.second + d, true);
+    } else if (m_drag == 6) {
+        b.m_tab->seekVideo(t);
     } else if (m_drag >= 10) {
         b.writeProposedSplit();
         b.m_tab->s().kara_set_boundary(size_t(b.m_tab->active()), size_t(m_drag - 10), t, m_button == Qt::RightButton,
@@ -369,7 +382,7 @@ void AudioView::mouseMoveEvent(QMouseEvent *e) {
 
 void AudioView::mouseReleaseEvent(QMouseEvent *) {
     auto &b = *m_box;
-    if ((m_drag == 1 || m_drag == 2 || m_drag == 4) && b.m_autoCommit && b.m_selModified) b.commit();
+    if ((m_drag == 1 || m_drag == 2 || m_drag == 4 || m_drag == 5) && b.m_autoCommit && b.m_selModified) b.commit();
     m_drag = 0;
 }
 
@@ -766,8 +779,9 @@ void AudioBox::commit() {
     auto r = m_tab->s().row(size_t(row));
     if (r.start != m_selStart || r.end != m_selEnd) {
         const auto amend = fs::Utf8(QString("audio-%1").arg(m_dragId));
-        // karaoke: the outer syllables take the change, the others keep their place (Aegisub)
-        if (m_karaoke) {
+        // karaoke: the outer syllables take the change, the others keep their place (Aegisub); a
+        // line moved whole keeps its syllables as they are
+        if (m_karaoke && m_selEnd - m_selStart != r.end - r.start) {
             m_tab->s().kara_set_times(size_t(row), m_selStart, m_selEnd, amend);
         } else {
             r.start = m_selStart;
