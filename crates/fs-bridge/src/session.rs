@@ -1138,7 +1138,7 @@ impl Session {
             };
             let n = ops::shift_times(d, &Rows::Selected(evs.clone()), amount, which, None);
             if spec.tag_times && which == ShiftWhich::Start {
-                // shortcut: only \move and \t times follow a start-only shift; \fade is left alone.
+                // the tags' times keep their place on the video
                 for (k, &e) in evs.iter().enumerate() {
                     let delta = d.event(e).unwrap().start.ms() - before[k];
                     shift_tag_times(d.event_mut(e).unwrap(), -delta);
@@ -1913,9 +1913,12 @@ impl Session {
 fn shift_tag_times(ev: &mut Event, delta: i64) {
     let mut line = Line::parse(&ev.text);
     line.for_each_tag_mut(|t| {
+        // the times counted from the line's start (\fad's fade-out counts from its end)
         let idx: &[usize] = match t.name.as_str() {
             "move" if t.args.len() >= 6 => &[4, 5],
             "t" if t.args.len() >= 3 => &[0, 1],
+            "fad" if t.args.len() >= 2 => &[0],
+            "fade" if t.args.len() >= 7 => &[3, 4, 5, 6],
             _ => &[],
         };
         if idx.is_empty() {
@@ -2206,6 +2209,19 @@ mod tests {
         // only the given rows: line 0 against line 1
         let p = a.compare(&b, &[0], &[1], false, false);
         assert_eq!((p.len(), p[0].row, p[0].other), (1, 0, 1));
+    }
+
+    #[test]
+    fn tag_times_follow_a_start_shift() {
+        let mut ev = Event {
+            text: r"{\move(0,0,10,10,500,900)\fad(300,200)\fade(255,0,255,0,100,400,800)\t(100,600,\fscx120)}x".into(),
+            ..Default::default()
+        };
+        shift_tag_times(&mut ev, -200);
+        assert_eq!(
+            ev.text,
+            r"{\move(0,0,10,10,300,700)\fad(100,200)\fade(255,0,255,0,0,200,600)\t(0,400,\fscx120)}x"
+        );
     }
 
     #[test]
