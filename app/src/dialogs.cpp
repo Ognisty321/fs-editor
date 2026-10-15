@@ -1118,9 +1118,11 @@ ResampleDialog::ResampleDialog(TabPanel *tab) : QDialog(tab) {
     setWindowTitle(tr("Resample subtitles"));
     auto *v = new QVBoxLayout(this);
     const auto fi = tab->s().file_info();
-    const QString scriptMatrix = fs::q(tab->s().info_value("YCbCr Matrix"));
     // blank: colours stay; "None" has no fixed meaning, so it is not offered (Aegisub)
     const QStringList matrices{"", "TV.601", "PC.601", "TV.709", "PC.709", "TV.FCC", "PC.FCC", "TV.240M", "PC.240M"};
+    QString scriptMatrix = fs::q(tab->s().info_value("YCbCr Matrix"));
+    if (scriptMatrix != "None" && matrices.indexOf(scriptMatrix) < 1) scriptMatrix = "TV.601"; // how it renders
+    const QString videoMatrix = tab->video()->hasVideo() ? fs::q(tab->video()->info().matrix) : QString();
     const auto resolution = [&](const QString &title, QSpinBox *&x, QSpinBox *&y, QComboBox *&matrix,
                                 QPushButton *from) {
         auto *box = new QGroupBox(title, this);
@@ -1144,8 +1146,11 @@ ResampleDialog::ResampleDialog(TabPanel *tab) : QDialog(tab) {
     auto *fromVideo = new QPushButton(tr("From video"), this);
     resolution(tr("Source resolution"), sx, sy, sm, fromScript);
     resolution(tr("Destination resolution"), dx, dy, dm, fromVideo);
-    // shortcut: the video's own colour matrix is not read, so no conversion is proposed; add it to
-    // VideoInfo when people resample between 601 and 709 sources
+    // Aegisub proposes converting the colours when the script was made for another matrix than the video's
+    if (matrices.indexOf(scriptMatrix) > 0 && matrices.indexOf(videoMatrix) > 0 && scriptMatrix != videoMatrix) {
+        sm->setCurrentText(scriptMatrix);
+        dm->setCurrentText(videoMatrix);
+    }
     const bool video = tab->video()->hasVideo();
     const int vw = video ? tab->video()->info().width : fi.play_res_x;
     const int vh = video ? tab->video()->info().height : fi.play_res_y;
@@ -1215,6 +1220,7 @@ ResampleDialog::ResampleDialog(TabPanel *tab) : QDialog(tab) {
     connect(fromVideo, &QPushButton::clicked, this, [=] {
         dx->setValue(vw);
         dy->setValue(vh);
+        dm->setCurrentIndex(std::max(0, int(matrices.indexOf(videoMatrix))));
     });
     update();
     connect(bb, &QDialogButtonBox::accepted, this, [=, this] {

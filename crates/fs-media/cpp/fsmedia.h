@@ -68,7 +68,7 @@ struct VideoInfo {
     int sar_den = 1;
     double duration_s = 0;
     std::string pixel_format;
-    std::string matrix;  // as detected from the first frame, e.g. "TV.709"
+    std::string matrix;  // the first frame's own, e.g. "TV.709"; "" when unset
 };
 
 class VideoSource {

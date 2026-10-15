@@ -102,7 +102,16 @@ pub fn run(cmd: MediaCmd) -> Result<ExitCode> {
                 let p = v.props();
                 println!(
                     "Video:      {}x{} {} (SAR {}:{}), matrix {}",
-                    p.width, p.height, p.pixel_format, p.sar_num, p.sar_den, p.matrix
+                    p.width,
+                    p.height,
+                    p.pixel_format,
+                    p.sar_num,
+                    p.sar_den,
+                    if p.matrix.is_empty() {
+                        "unspecified"
+                    } else {
+                        p.matrix.as_str()
+                    }
                 );
                 println!(
                     "Frames:     {} at {}/{} ({:.3} fps){}",

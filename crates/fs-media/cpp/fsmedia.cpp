@@ -67,7 +67,10 @@ auto guarded(const std::filesystem::path &file, F &&f) {
     }
 }
 
+// As a YCbCr Matrix header; "" when the matrix or the range is unset (Aegisub's real colour space).
 const char *matrix_name(AVColorSpace cs, AVColorRange range) {
+    if (range != AVCOL_RANGE_MPEG && range != AVCOL_RANGE_JPEG)
+        return "";
     bool pc = range == AVCOL_RANGE_JPEG;
     switch (cs) {
     case AVCOL_SPC_BT709: return pc ? "PC.709" : "TV.709";
@@ -76,7 +79,9 @@ const char *matrix_name(AVColorSpace cs, AVColorRange range) {
     case AVCOL_SPC_BT2020_NCL:
     case AVCOL_SPC_BT2020_CL: return pc ? "PC.2020" : "TV.2020";
     case AVCOL_SPC_RGB: return "None";
-    default: return pc ? "PC.601" : "TV.601";
+    case AVCOL_SPC_BT470BG:
+    case AVCOL_SPC_SMPTE170M: return pc ? "PC.601" : "TV.601";
+    default: return "";
     }
 }
 
@@ -212,15 +217,10 @@ VideoSource::VideoSource(const std::filesystem::path &file, int track, const std
                 keyframes_.push_back(n);
             timestamps_.push_back(fi.PTS * 1000 * vp.TimeBase.Num / vp.TimeBase.Den);
         }
-        // matrix as the first frame reports it (Aegisub guesses by size when unset)
+        // matrix as the first frame reports it, unguessed (frame_rgba guesses by size when unset)
         std::unique_ptr<BestVideoFrame> f(bs_->GetFrame(0));
-        if (f) {
-            const AVFrame *av = f->GetAVFrame();
-            AVColorSpace cs = av->colorspace;
-            if (cs == AVCOL_SPC_UNSPECIFIED)
-                cs = (av->width > 1024 || av->height >= 600) ? AVCOL_SPC_BT709 : AVCOL_SPC_BT470BG;
-            info_.matrix = matrix_name(cs, av->color_range);
-        }
+        if (f)
+            info_.matrix = matrix_name(f->GetAVFrame()->colorspace, f->GetAVFrame()->color_range);
         return 0;
     });
 }

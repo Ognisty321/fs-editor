@@ -283,6 +283,8 @@ pub mod ffi {
         sar_num: i32,
         sar_den: i32,
         duration_ms: i64,
+        /// The file's own YCbCr Matrix ("TV.709"); empty when untagged.
+        matrix: String,
     }
 
     #[derive(Debug, Clone, Default)]

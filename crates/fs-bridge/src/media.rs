@@ -47,6 +47,7 @@ impl Video {
             sar_num: p.sar_num,
             sar_den: p.sar_den,
             duration_ms: (p.duration_s * 1000.0).round() as i64,
+            matrix: p.matrix.clone(),
         }
     }
 
