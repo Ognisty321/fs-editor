@@ -2456,6 +2456,22 @@ Filtry eksportu: %8</translation>
         <translation>Wczytuj ostatnią sesję przy starcie</translation>
     </message>
     <message>
+        <source>Editor</source>
+        <translation>Edytor</translation>
+    </message>
+    <message>
+        <source>Subtitles</source>
+        <translation>Napisy</translation>
+    </message>
+    <message>
+        <source>Video</source>
+        <translation>Wideo</translation>
+    </message>
+    <message>
+        <source>Audio</source>
+        <translation>Audio</translation>
+    </message>
+    <message>
         <source>Ignore whitespace in characters per second</source>
         <translation>Ignoruj spacje w znakach na sekundę</translation>
     </message>

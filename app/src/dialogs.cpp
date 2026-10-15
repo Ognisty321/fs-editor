@@ -43,6 +43,7 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QSpinBox>
+#include <QStackedWidget>
 #include <QStandardPaths>
 #include <QTabWidget>
 #include <QtConcurrentRun>
@@ -1510,32 +1511,44 @@ FontCollectorDialog::FontCollectorDialog(TabPanel *tab) : QDialog(tab) {
 
 SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle(tr("Settings"));
-    // shortcut: a single page with the options the panels read; the full Kainote settings tree (themes, file associations) is not built yet.
+    // shortcut: Kainote's themes and file associations pages are not built yet.
     QSettings st;
-    auto *f = new QFormLayout(this);
-    struct Check { const char *key; const char *label; bool def; };
+    // Kainote's layout: the pages listed on the left
+    auto *list = new QListWidget(this);
+    auto *pages = new QStackedWidget(this);
+    const auto page = [list, pages](const QString &name) {
+        list->addItem(name);
+        auto *w = new QWidget(pages);
+        pages->addWidget(w);
+        auto *form = new QFormLayout(w);
+        form->setContentsMargins(0, 0, 0, 0);
+        return form;
+    };
+    QFormLayout *editor = page(tr("Editor")), *subs = page(tr("Subtitles")), *video = page(tr("Video")),
+                *audio = page(tr("Audio"));
+    struct Check { const char *key; const char *label; bool def; QFormLayout *page; };
     const Check checks[] = {
-        {"video/openAudio", QT_TR_NOOP("Open audio together with video"), true},
-        {"video/openWithSubs", QT_TR_NOOP("Open video and audio named in the subtitles"), true},
-        {"audio/snapKeyframes", QT_TR_NOOP("Snap audio boundaries to keyframes"), false},
-        {"audio/snapLines", QT_TR_NOOP("Snap audio boundaries to other lines"), false},
-        {"audio/inactiveComments", QT_TR_NOOP("Show inactive comments in the audio"), false},
-        {"audio/wheelZooms", QT_TR_NOOP("Mouse wheel zooms the audio (Shift scrolls)"), false},
-        {"main/askSession", QT_TR_NOOP("Load the last session at startup"), true},
-        {"subs/cpsIgnoreWhitespace", QT_TR_NOOP("Ignore whitespace in characters per second"), true},
-        {"subs/cpsIgnorePunctuation", QT_TR_NOOP("Ignore punctuation in characters per second"), true},
+        {"main/askSession", QT_TR_NOOP("Load the last session at startup"), true, editor},
+        {"subs/cpsIgnoreWhitespace", QT_TR_NOOP("Ignore whitespace in characters per second"), true, subs},
+        {"subs/cpsIgnorePunctuation", QT_TR_NOOP("Ignore punctuation in characters per second"), true, subs},
+        {"video/openAudio", QT_TR_NOOP("Open audio together with video"), true, video},
+        {"video/openWithSubs", QT_TR_NOOP("Open video and audio named in the subtitles"), true, video},
+        {"audio/snapKeyframes", QT_TR_NOOP("Snap audio boundaries to keyframes"), false, audio},
+        {"audio/snapLines", QT_TR_NOOP("Snap audio boundaries to other lines"), false, audio},
+        {"audio/inactiveComments", QT_TR_NOOP("Show inactive comments in the audio"), false, audio},
+        {"audio/wheelZooms", QT_TR_NOOP("Mouse wheel zooms the audio (Shift scrolls)"), false, audio},
     };
     std::vector<std::pair<QString, QCheckBox *>> boxes;
     for (const auto &c : checks) {
         auto *b = new QCheckBox(tr(c.label), this);
         b->setChecked(st.value(c.key, c.def).toBool());
-        f->addRow(b);
+        c.page->addRow(b);
         boxes.emplace_back(c.key, b);
     }
     auto *inactive = new QComboBox(this);
     inactive->addItems({tr("None"), tr("Previous line"), tr("Previous and next line"), tr("All lines")});
     inactive->setCurrentIndex(std::clamp(st.value("audio/inactiveLines", 3).toInt(), 0, 3));
-    f->addRow(tr("Inactive lines in the audio"), inactive);
+    audio->addRow(tr("Inactive lines in the audio"), inactive);
     auto *leadIn = new QSpinBox(this), *leadOut = new QSpinBox(this);
     for (auto *s : {leadIn, leadOut}) {
         s->setRange(0, 5000);
@@ -1543,14 +1556,14 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     }
     leadIn->setValue(st.value("audio/leadIn", 200).toInt());
     leadOut->setValue(st.value("audio/leadOut", 300).toInt());
-    f->addRow(tr("Audio lead-in"), leadIn);
-    f->addRow(tr("Audio lead-out"), leadOut);
+    audio->addRow(tr("Audio lead-in"), leadIn);
+    audio->addRow(tr("Audio lead-out"), leadOut);
     auto *autosave = new QSpinBox(this);
     autosave->setRange(0, 3600);
     autosave->setSuffix(" s");
     autosave->setSpecialValueText(tr("off"));
     autosave->setValue(st.value("main/autosaveSeconds", 60).toInt());
-    f->addRow(tr("Autosave every"), autosave);
+    editor->addRow(tr("Autosave every"), autosave);
     // the character counter's limits, red in the grid and the edit box (Aegisub's, Kainote's)
     const std::pair<const char *, int> limitKeys[] = {
         {"subs/maxCps", 15}, {"subs/maxLineLength", 43}, {"subs/maxLines", 2}};
@@ -1561,21 +1574,23 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         auto *s = new QSpinBox(this);
         s->setRange(1, k == 2 ? 20 : 1000);
         s->setValue(st.value(limitKeys[k].first, limitKeys[k].second).toInt());
-        f->addRow(tr(limitLabels[k]), s);
+        subs->addRow(tr(limitLabels[k]), s);
         spins.emplace_back(limitKeys[k].first, s);
     }
-    auto *font = new QPushButton(st.value("grid/font", QFont("Tahoma", 10)).value<QFont>().toString(), this);
-    connect(font, &QPushButton::clicked, this, [font] {
+    const auto fontName = [](const QFont &f) { return QString("%1, %2 pt").arg(f.family()).arg(f.pointSize()); };
+    auto *font = new QPushButton(fontName(st.value("grid/font", QFont("Tahoma", 10)).value<QFont>()), this);
+    connect(font, &QPushButton::clicked, this, [font, fontName] {
         bool ok;
         const QFont f = QFontDialog::getFont(&ok, QSettings().value("grid/font", QFont("Tahoma", 10)).value<QFont>());
         if (ok) {
             QSettings().setValue("grid/font", f);
-            font->setText(f.toString());
+            font->setText(fontName(f));
         }
     });
-    f->addRow(tr("Grid font (applies to new tabs)"), font);
+    editor->addRow(tr("Grid font (applies to new tabs)"), font);
     auto *dictDir = new QLineEdit(QDir::toNativeSeparators(spell::dir()), this);
-    f->addRow(tr("Dictionary folder (Hunspell .aff/.dic)"), dictDir);
+    dictDir->setMinimumWidth(dictDir->fontMetrics().averageCharWidth() * 48);
+    editor->addRow(tr("Dictionary folder (Hunspell .aff/.dic)"), dictDir);
     auto *dictLang = new QComboBox(this);
     dictLang->addItems(spell::languages());
     dictLang->setCurrentText(st.value("spell/lang").toString());
@@ -1586,13 +1601,13 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         dictLang->addItems(spell::languages());
         dictLang->setCurrentText(keep);
     });
-    f->addRow(tr("Spell check language"), dictLang);
+    editor->addRow(tr("Spell check language"), dictLang);
     auto *language = new QComboBox(this);
     language->addItem(tr("System"), "");
     language->addItem("English", "en");
     language->addItem("Polski", "pl");
     language->setCurrentIndex(std::max(0, language->findData(st.value("main/language", ""))));
-    f->addRow(tr("Language (after restart)"), language);
+    editor->addRow(tr("Language (after restart)"), language);
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(bb, &QDialogButtonBox::accepted, this,
             [this, boxes, spins, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language] {
@@ -1611,7 +1626,14 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         accept();
     });
     connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    f->addRow(bb);
+    connect(list, &QListWidget::currentRowChanged, pages, &QStackedWidget::setCurrentIndex);
+    list->setCurrentRow(0);
+    list->setFixedWidth(list->sizeHintForColumn(0) + 2 * list->frameWidth() + 24);
+    auto *g = new QGridLayout(this);
+    g->addWidget(list, 0, 0);
+    g->addWidget(pages, 0, 1, Qt::AlignTop);
+    g->addWidget(bb, 1, 0, 1, 2);
+    g->setColumnStretch(1, 1);
 }
 
 // ---- autosave -----------------------------------------------------------------

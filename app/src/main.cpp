@@ -240,7 +240,7 @@ int main(int argc, char **argv) {
                     }
                 if (!clicked) {
                     for (auto *l : (top ? top : &w)->findChildren<QListWidget *>())
-                        for (auto *it : l->findItems(text, Qt::MatchExactly)) it->setSelected(true);
+                        for (auto *it : l->findItems(text, Qt::MatchExactly)) l->setCurrentItem(it, QItemSelectionModel::Select);
                     for (auto *tb : (top ? top : &w)->findChildren<QTabBar *>())
                         for (int i = 0; i < tb->count(); ++i)
                             if (tb->tabText(i) == text) tb->setCurrentIndex(i);
