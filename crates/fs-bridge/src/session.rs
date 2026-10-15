@@ -1348,8 +1348,8 @@ impl Session {
     }
 
     /// Rows picked by the Shift Times "Which lines" choice (0 all, 1 selected,
-    /// 2 from the first selected, 3/4 starting at or after/before the active
-    /// line, 5 the given styles).
+    /// 2 from the first selected, 3/4 starting at or after/before the first
+    /// selected line (Kainote), 5 the given styles).
     pub fn spec_rows(
         &self,
         lines: u8,
@@ -1359,15 +1359,16 @@ impl Session {
     ) -> Vec<usize> {
         let n = self.rows.len();
         let start_of = |r: usize| self.row(r).start;
+        let first = selected.iter().copied().min();
         match lines {
             1 => selected.to_vec(),
-            2 => (selected.iter().copied().min().unwrap_or(0)..n).collect(),
+            2 => (first.unwrap_or(0)..n).collect(),
             3 => {
-                let t = start_of(active);
+                let t = start_of(first.unwrap_or(active));
                 (0..n).filter(|&r| start_of(r) >= t).collect()
             }
             4 => {
-                let t = start_of(active);
+                let t = start_of(first.unwrap_or(active));
                 (0..n).filter(|&r| start_of(r) <= t).collect()
             }
             5 => (0..n)
@@ -1401,6 +1402,8 @@ impl Session {
         };
         let spec = spec.clone();
         self.edit("Shift times", move |d| {
+            let times = |d: &Document, e: usize| d.event(e).map(|ev| (ev.start, ev.end));
+            let old: Vec<_> = mains.iter().map(|&e| times(d, e)).collect();
             let before: Vec<i64> = evs
                 .iter()
                 .map(|&e| d.event(e).unwrap().start.ms())
@@ -1409,7 +1412,7 @@ impl Session {
                 Some(f) => ShiftAmount::Frames(spec.amount, f),
                 None => ShiftAmount::Time(Time(spec.amount)),
             };
-            let n = ops::shift_times(d, &Rows::Selected(evs.clone()), amount, which, None);
+            ops::shift_times(d, &Rows::Selected(evs.clone()), amount, which, None);
             if spec.tag_times && which == ShiftWhich::Start {
                 // the tags' times keep their place on the video
                 for (k, &e) in evs.iter().enumerate() {
@@ -1426,7 +1429,10 @@ impl Session {
                 _ => {}
             }
             sync_originals(d, &tl);
-            n
+            // lines, not events: a translation pair is one
+            (mains.iter().zip(&old))
+                .filter(|&(&e, o)| times(d, e) != *o)
+                .count()
         })
     }
 
@@ -2990,7 +2996,7 @@ mod tests {
             },
             &[],
         );
-        assert_eq!(n, 6);
+        assert_eq!(n, 3);
         assert_eq!(times(&s), [(1000, 3000), (3000, 5000), (5000, 7500)]);
         assert!(paired(&s));
     }
