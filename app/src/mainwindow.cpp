@@ -1208,6 +1208,81 @@ void MainWindow::buildMenus() {
         compareTabs(!m_compareOn);
     });
     compare->setCheckable(true);
+    view->addSeparator();
+    // the grid's columns and filter (Kainote's grid hotkeys); a toggle flips the current grid's own value
+    auto toggles = std::make_shared<std::vector<std::pair<QAction *, std::function<bool()>>>>();
+    const auto gridToggle = [=, this](const char *id, const QString &text, QMenu *m, std::function<bool()> get,
+                                      std::function<void(bool)> set) {
+        auto *a = add(id, text, {}, m, {});
+        a->setCheckable(true);
+        connect(a, &QAction::triggered, this, [=] {
+            set(!get());
+            a->setChecked(get());
+        });
+        toggles->push_back({a, get});
+    };
+    auto *cols = sub(view, tr("Hide columns"));
+    m_actions.insert("gridColumns", cols->menuAction()); // the grid's context menu shows it too
+    const std::pair<const char *, int> columns[] = {
+        {"hideLayer", Grid::Layer},     {"hideStart", Grid::Start},     {"hideEnd", Grid::End},
+        {"hideActor", Grid::Actor},     {"hideStyle", Grid::Style},     {"hideMarginL", Grid::MarginL},
+        {"hideMarginR", Grid::MarginR}, {"hideMarginV", Grid::MarginV}, {"hideEffect", Grid::Effect},
+        {"hideCps", Grid::Cps},         {"hideWraps", Grid::Wraps}};
+    for (auto [id, c] : columns)
+        gridToggle(id, Grid::colName(c), cols, [=] { return tab()->grid()->columnHidden(c); },
+                   [=](bool on) { tab()->grid()->setColumnHidden(c, on); });
+    auto *flt = sub(view, tr("Filtering"));
+    m_actions.insert("gridFiltering", flt->menuAction());
+    const auto spec = [=]() -> fsb::FilterSpec & { return tab()->grid()->filterSpec; };
+    gridToggle("filterInvert", tr("Reverse filtering"), flt, [=] { return spec().invert; },
+               [=](bool v) { spec().invert = v; });
+    auto *byStyle = sub(flt, tr("Hide lines with styles"));
+    connect(byStyle, &QMenu::aboutToShow, this, [=, this] {
+        byStyle->clear();
+        for (const auto &st : tab()->s().styles()) {
+            const QString name = fs::q(st.name);
+            auto *a = byStyle->addAction(name);
+            a->setCheckable(true);
+            a->setChecked(std::any_of(spec().hide_styles.begin(), spec().hide_styles.end(),
+                                      [&](auto &x) { return fs::q(x) == name; }));
+            connect(a, &QAction::toggled, this, [=](bool on) {
+                // rust::Vec has no erase: rebuild without the style
+                rust::Vec<rust::String> v;
+                for (const auto &x : spec().hide_styles)
+                    if (fs::q(x) != name) v.push_back(x);
+                if (on) v.push_back(fs::rs(name));
+                spec().hide_styles = std::move(v);
+            });
+        }
+    });
+    gridToggle("filterComments", tr("Hide comments"), flt, [=] { return spec().hide_comments; },
+               [=](bool v) { spec().hide_comments = v; });
+    gridToggle("filterDoubtful", tr("Show unconfirmed"), flt, [=] { return spec().only_doubtful; },
+               [=](bool v) { spec().only_doubtful = v; });
+    gridToggle("filterUntranslated", tr("Show untranslated"), flt, [=] { return spec().only_untranslated; },
+               [=](bool v) { spec().only_untranslated = v; });
+    const auto setting = [](const char *key) {
+        return std::pair{std::function<bool()>([key] { return QSettings().value(key).toBool(); }),
+                         std::function<void(bool)>([key](bool v) { QSettings().setValue(key, v); })};
+    };
+    const auto [afterLoad, setAfterLoad] = setting("grid/filterAfterLoad");
+    gridToggle("filterAfterLoad", tr("Filter after loading subtitles"), flt, afterLoad, setAfterLoad);
+    const auto [keep, setKeep] = setting("grid/filterKeep");
+    gridToggle("filterKeep", tr("Do not reset the earlier filtering"), flt, keep, setKeep);
+    flt->addSeparator();
+    add("filter", tr("Filter"), {}, flt, [=] { tab()->grid()->filterNow(); });
+    add("filterOff", tr("Turn off filtering"), {}, flt, [=] { tab()->grid()->filterOff(); });
+    add("hideSelected", tr("Hide selected lines"), {}, view, [=] { tab()->grid()->hideSelected(); });
+    gridToggle("filterIgnoreInActions", tr("Ignore filtering in some actions"), view,
+               [=] { return tab()->grid()->ignoreFilterInActions; },
+               [=](bool v) { tab()->grid()->ignoreFilterInActions = v; });
+    for (auto *m : {view, cols, flt})
+        connect(m, &QMenu::aboutToShow, this, [toggles] {
+            for (const auto &[a, get] : *toggles) a->setChecked(get());
+        });
+    // the grid's context menu only, as Kainote
+    add("makeTree", tr("Make tree"), {}, nullptr, [=] { tab()->grid()->makeTree(); });
+    add("pasteTranslation", tr("Paste translation text"), {}, nullptr, [this] { pasteTranslation(); });
 
     // Subtitles
     auto *subs = menu(tr("&Subtitles"));
@@ -1767,7 +1842,9 @@ void MainWindow::updateActions() {
         {"toASS", "ASS"}, {"toSRT", "SRT"}, {"toMDVD", "MICRODVD"}, {"toMPL2", "MPL2"}, {"toTMP", "TMP"}};
     for (auto [id, f] : conv) action(id)->setEnabled(fmt != f && !fi.tl_mode);
     action("saveTranslation")->setEnabled(fi.tl_mode);
-    action("translationMatching")->setEnabled(fi.tl_mode);
+    for (const char *id : {"translationMatching", "pasteTranslation", "filterDoubtful", "filterUntranslated"})
+        action(id)->setEnabled(fi.tl_mode);
+    action("makeTree")->setEnabled(!fi.tl_mode);
     action("subsFromVideo")->setEnabled(!tab->video()->path().isEmpty());
     action("closeVideo")->setEnabled(tab->video()->hasVideo());
     const char *views[] = {"viewAll", "viewVideoSubs", "viewAudioSubs", "viewOnlyVideo", "viewOnlySubs"};

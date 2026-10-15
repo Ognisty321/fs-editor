@@ -43,6 +43,11 @@ public:
     // a newly loaded file: drops the old rows' filter, refilters with the options when
     // "Filter after loading subtitles" is on (Kainote)
     void resetFilter();
+    // the context menu's commands (Kainote's grid hotkeys)
+    void filterNow(); // with the options; "do not reset" keeps hidden what the filter hides now
+    void filterOff();
+    void hideSelected();
+    void makeTree();
     std::vector<size_t> visibleRows() const { return m_vis; }
     int syncMarker() const { return m_marker; }
 
@@ -105,6 +110,7 @@ private:
     std::vector<int> m_cols;     // visible columns in order
     std::vector<int> m_widths;
     std::set<int> m_userHidden;
+    std::vector<size_t> m_keptHidden; // what earlier filters hid, kept by "do not reset" (Kainote)
     std::set<size_t> m_collisions, m_onVideo, m_linked;
     std::map<size_t, std::vector<size_t>> m_compare;
     quint64 m_gen = ~0ull;

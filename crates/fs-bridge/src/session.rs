@@ -1075,6 +1075,60 @@ impl Session {
         self.rows_of_events(&made)
     }
 
+    /// Kainote's tree "Add lines": the rows in no tree join the tree `head` describes, those above
+    /// it at its start and those below at its end, in order, folded as it is. Returns the head's
+    /// new row, -1 when no row joined.
+    pub fn tree_add_lines(&mut self, head: usize, rows: &[usize]) -> i64 {
+        if self.tl || self.row_tree(head) != Some(TREE_DESCRIPTION) {
+            return -1;
+        }
+        let members = self.tree_members(head);
+        let state = members
+            .first()
+            .and_then(|&m| self.row_tree(m))
+            .unwrap_or(TREE_OPENED);
+        let mut adding: Vec<usize> = rows
+            .iter()
+            .copied()
+            .filter(|&r| r < self.rows.len() && self.row_tree(r).is_none())
+            .collect();
+        adding.sort_unstable();
+        adding.dedup();
+        if adding.is_empty() {
+            return -1;
+        }
+        let end = head + 1 + members.len(); // the first row after the tree
+        let mut groups: Vec<Option<Vec<Arc<EventEntry>>>> =
+            self.groups().into_iter().map(Some).collect();
+        let (mut above, mut below) = (Vec::new(), Vec::new());
+        for &r in &adding {
+            let mut g = groups[r].take().unwrap();
+            for e in &mut g {
+                let ev = &mut Arc::make_mut(e).event;
+                ev.actor = with_tree_state(&ev.actor, Some(state));
+            }
+            if r < head {
+                above.push(g)
+            } else {
+                below.push(g)
+            }
+        }
+        let new_head = head - above.len();
+        let mut out = Vec::with_capacity(groups.len());
+        for (r, g) in groups.into_iter().enumerate() {
+            if r == end {
+                out.append(&mut below);
+            }
+            out.extend(g);
+            if r == head {
+                out.append(&mut above);
+            }
+        }
+        out.append(&mut below); // a tree that ends the file
+        self.set_groups("Add lines to tree", out);
+        new_head as i64
+    }
+
     /// Open a closed tree, or close an open one (a click on its description).
     pub fn toggle_tree(&mut self, row: usize) {
         let evs = self.main_events(&self.tree_members(row));
@@ -3172,6 +3226,16 @@ mod tests {
         );
         // a closed line whose description went shows again
         s.delete_rows(&[0]);
+        assert!(s.tree_hidden().is_empty());
+        // lines join a tree: those above at its start, those below at its end, folded as it is
+        let mut s = session(ASS);
+        assert_eq!(s.make_tree(&[1], "mid"), [1]);
+        assert_eq!(s.tree_add_lines(1, &[2, 0, 3]), 0); // row 2 is in the tree already
+        let texts: Vec<String> = (0..s.row_count()).map(|i| s.row(i).text).collect();
+        assert_eq!(texts, ["mid", "one", "two", "three"]);
+        assert_eq!(s.tree_hidden(), [1, 2, 3]);
+        assert_eq!(s.tree_add_lines(0, &[1]), -1);
+        s.toggle_tree(0);
         assert!(s.tree_hidden().is_empty());
         // Kainote writes the tree mark before the bookmark
         assert_eq!(

@@ -925,6 +925,10 @@ Każdy zmieniany plik jest najpierw kopiowany do %2</translation>
         <translation>Tekst</translation>
     </message>
     <message>
+        <source>Add lines</source>
+        <translation>Dodaj linie</translation>
+    </message>
+    <message>
         <source>Copy tree</source>
         <translation>Kopiuj drzewko</translation>
     </message>
@@ -985,60 +989,8 @@ Każdy zmieniany plik jest najpierw kopiowany do %2</translation>
         <translation>Wklej</translation>
     </message>
     <message>
-        <source>Hide columns</source>
-        <translation>Ukryj kolumny</translation>
-    </message>
-    <message>
         <source>Make tree</source>
         <translation>Stwórz drzewko</translation>
-    </message>
-    <message>
-        <source>Hide selected lines</source>
-        <translation>Ukryj zaznaczone linijki</translation>
-    </message>
-    <message>
-        <source>Filtering</source>
-        <translation>Filtrowanie</translation>
-    </message>
-    <message>
-        <source>Reverse filtering</source>
-        <translation>Filtrowanie odwrócone</translation>
-    </message>
-    <message>
-        <source>Hide lines with styles</source>
-        <translation>Ukryj linijki ze stylami</translation>
-    </message>
-    <message>
-        <source>Hide comments</source>
-        <translation>Ukryj komentarze</translation>
-    </message>
-    <message>
-        <source>Show unconfirmed</source>
-        <translation>Pokaż niepewne</translation>
-    </message>
-    <message>
-        <source>Show untranslated</source>
-        <translation>Pokaż nieprzetłumaczone</translation>
-    </message>
-    <message>
-        <source>Filter after loading subtitles</source>
-        <translation>Filtruj po wczytaniu napisów</translation>
-    </message>
-    <message>
-        <source>Filter</source>
-        <translation>Filtruj</translation>
-    </message>
-    <message>
-        <source>Turn off filtering</source>
-        <translation>Wyłącz filtrowanie</translation>
-    </message>
-    <message>
-        <source>Ignore filtering in some actions</source>
-        <translation>Ignoruj filtrowanie przy akcjach</translation>
-    </message>
-    <message>
-        <source>Paste translation text</source>
-        <translation>Wklej tekst tłumaczenia</translation>
     </message>
 </context>
 <context>
@@ -1918,6 +1870,66 @@ Dekoder: BestSource</translation>
     <message>
         <source>Only subtitles</source>
         <translation>Tylko napisy</translation>
+    </message>
+    <message>
+        <source>Hide columns</source>
+        <translation>Ukryj kolumny</translation>
+    </message>
+    <message>
+        <source>Filtering</source>
+        <translation>Filtrowanie</translation>
+    </message>
+    <message>
+        <source>Reverse filtering</source>
+        <translation>Filtrowanie odwrócone</translation>
+    </message>
+    <message>
+        <source>Hide lines with styles</source>
+        <translation>Ukryj linie ze stylami</translation>
+    </message>
+    <message>
+        <source>Hide comments</source>
+        <translation>Ukryj komentarze</translation>
+    </message>
+    <message>
+        <source>Show unconfirmed</source>
+        <translation>Pokaż niepewne</translation>
+    </message>
+    <message>
+        <source>Show untranslated</source>
+        <translation>Pokaż nieprzetłumaczone</translation>
+    </message>
+    <message>
+        <source>Filter after loading subtitles</source>
+        <translation>Filtruj po wczytaniu napisów</translation>
+    </message>
+    <message>
+        <source>Do not reset the earlier filtering</source>
+        <translation>Nie resetuj wcześniejszego filtrowania</translation>
+    </message>
+    <message>
+        <source>Filter</source>
+        <translation>Filtruj</translation>
+    </message>
+    <message>
+        <source>Turn off filtering</source>
+        <translation>Wyłącz filtrowanie</translation>
+    </message>
+    <message>
+        <source>Hide selected lines</source>
+        <translation>Ukryj zaznaczone linijki</translation>
+    </message>
+    <message>
+        <source>Ignore filtering in some actions</source>
+        <translation>Ignoruj filtrowanie przy niektórych akcjach</translation>
+    </message>
+    <message>
+        <source>Make tree</source>
+        <translation>Stwórz drzewko</translation>
+    </message>
+    <message>
+        <source>Paste translation text</source>
+        <translation>Wklej tekst tłumaczenia</translation>
     </message>
     <message>
         <source>&amp;Subtitles</source>

@@ -550,6 +550,8 @@ pub mod ffi {
         /// A closed tree for each run of the rows, its description line holding `description`;
         /// returns the description rows.
         fn make_tree(self: &mut Session, rows: &[usize], description: &str) -> Vec<usize>;
+        /// The rows in no tree join the tree `head` describes; the head's new row, -1 if none joined.
+        fn tree_add_lines(self: &mut Session, head: usize, rows: &[usize]) -> i64;
         fn toggle_tree(self: &mut Session, row: usize);
         fn remove_tree(self: &mut Session, row: usize);
         fn join_rows(self: &mut Session, rows: &[usize], mode: u8) -> i64;

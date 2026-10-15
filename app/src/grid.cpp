@@ -72,6 +72,7 @@ Grid::Grid(TabPanel *tab) : QAbstractScrollArea(tab), m_tab(tab) {
 void Grid::resetFilter() {
     filterSpec.hide_rows.clear();
     m_expanded.clear();
+    m_keptHidden.clear();
     filterOn = QSettings().value("grid/filterAfterLoad").toBool() &&
                (!filterSpec.hide_styles.empty() || filterSpec.hide_comments);
     applyFilter();
@@ -126,6 +127,11 @@ void Grid::applyFilter() {
     m_vis.clear();
     if (filterOn) {
         m_vis = fs::vec(m_tab->s().filter(filterSpec));
+        if (!m_keptHidden.empty()) {
+            std::vector<size_t> shown;
+            std::ranges::set_difference(m_vis, m_keptHidden, std::back_inserter(shown));
+            m_vis = std::move(shown);
+        }
         if (!m_expanded.empty()) {
             std::vector<size_t> all;
             std::ranges::set_union(m_vis, m_expanded, std::back_inserter(all));
@@ -144,6 +150,52 @@ void Grid::applyFilter() {
     }
     updateScroll();
     viewport()->update();
+}
+
+void Grid::filterNow() {
+    m_keptHidden.clear();
+    // shortcut: the kept rows are row numbers, as hide_rows; lines inserted above shift them
+    if (filterOn && QSettings().value("grid/filterKeep").toBool()) {
+        std::vector<size_t> all(m_tab->s().row_count()), shown;
+        std::iota(all.begin(), all.end(), size_t(0));
+        std::ranges::set_union(m_vis, m_folded, std::back_inserter(shown)); // folded is not filtered
+        std::ranges::set_difference(all, shown, std::back_inserter(m_keptHidden));
+    }
+    filterOn = true;
+    m_expanded.clear();
+    applyFilter();
+    QStringList styles;
+    for (const auto &x : filterSpec.hide_styles) styles << fs::q(x);
+    QSettings st;
+    st.setValue("grid/filterStyles", styles);
+    st.setValue("grid/filterComments", filterSpec.hide_comments);
+    st.setValue("grid/filterInvert", filterSpec.invert);
+}
+
+void Grid::filterOff() {
+    filterOn = false;
+    filterSpec.hide_rows.clear(); // the options stay for the next filter (Kainote)
+    m_keptHidden.clear();
+    applyFilter();
+}
+
+void Grid::hideSelected() {
+    const auto sel = m_tab->selection();
+    if (sel.empty()) return;
+    filterSpec.hide_rows.clear();
+    for (size_t r : sel) filterSpec.hide_rows.push_back(r);
+    filterNow();
+}
+
+void Grid::makeTree() {
+    const auto sel = m_tab->selection();
+    if (sel.empty() || m_tab->s().file_info().tl_mode) return;
+    bool ok = false;
+    const QString d = QInputDialog::getText(this, tr("Make tree"), tr("Description:"), QLineEdit::Normal, {}, &ok);
+    if (!ok) return;
+    const auto heads = fs::vec(m_tab->s().make_tree(fs::slice(sel), fs::Utf8(d)));
+    m_tab->changed();
+    if (!heads.empty()) m_tab->setActive(int(heads.front()));
 }
 
 void Grid::setCompare(std::map<size_t, std::vector<size_t>> rows) {
@@ -527,6 +579,12 @@ void Grid::toggleTree(size_t row) {
 // Kainote's menu on a tree's description line
 void Grid::treeMenu(const QPoint &global, size_t row) {
     QMenu m(this);
+    m.addAction(tr("Add lines"), this, [this, row] {
+        const qint64 head = m_tab->s().tree_add_lines(row, fs::slice(m_tab->selection()));
+        if (head < 0) return;
+        m_tab->changed();
+        m_tab->setActive(int(head));
+    })->setEnabled(!m_tab->selection().empty());
     m.addAction(tr("Copy tree"), this, [this, row] {
         auto rows = fs::vec(m_tab->s().tree_members(row));
         rows.insert(rows.begin(), row);
@@ -814,86 +872,18 @@ void Grid::contextMenu(const QPoint &global) {
     m.addAction(mw->action("copyColumns"));
     m.addAction(mw->action("pasteOver"));
     m.addSeparator();
-    auto *cols = m.addMenu(tr("Hide columns"));
-    for (int c : {Layer, Start, End, Actor, Style, MarginL, MarginR, MarginV, Effect, Cps, Wraps}) {
-        auto *a = cols->addAction(colName(c));
-        a->setCheckable(true);
-        a->setChecked(columnHidden(c));
-        connect(a, &QAction::toggled, this, [this, c](bool on) { setColumnHidden(c, on); });
-    }
-    m.addAction(tr("Make tree"), this, [this, sel] {
-        bool ok = false;
-        const QString d = QInputDialog::getText(this, tr("Make tree"), tr("Description:"), QLineEdit::Normal, {}, &ok);
-        if (!ok) return;
-        const auto heads = fs::vec(m_tab->s().make_tree(fs::slice(sel), fs::Utf8(d)));
-        m_tab->changed();
-        if (!heads.empty()) m_tab->setActive(int(heads.front()));
-    })->setEnabled(!sel.empty() && !tl);
-    m.addAction(tr("Hide selected lines"), this, [this, sel] {
-        filterSpec.hide_rows.clear();
-        for (size_t r : sel) filterSpec.hide_rows.push_back(r);
-        filterOn = true;
-        m_expanded.clear();
-        applyFilter();
-    });
-    auto *flt = m.addMenu(tr("Filtering"));
-    auto check = [flt](const QString &t, bool v, auto f) {
-        auto *a = flt->addAction(t);
-        a->setCheckable(true);
-        a->setChecked(v);
-        QObject::connect(a, &QAction::toggled, f);
-    };
-    check(tr("Reverse filtering"), filterSpec.invert, [this](bool v) { filterSpec.invert = v; });
-    auto *byStyle = flt->addMenu(tr("Hide lines with styles"));
-    for (const auto &st : s.styles()) {
-        const QString name = fs::q(st.name);
-        auto *a = byStyle->addAction(name);
-        a->setCheckable(true);
-        a->setChecked(std::any_of(filterSpec.hide_styles.begin(), filterSpec.hide_styles.end(),
-                                  [&](auto &x) { return fs::q(x) == name; }));
-        connect(a, &QAction::toggled, this, [this, name](bool on) {
-            // rust::Vec has no erase: rebuild without the style
-            rust::Vec<rust::String> v;
-            for (const auto &x : filterSpec.hide_styles)
-                if (fs::q(x) != name) v.push_back(x);
-            if (on) v.push_back(fs::rs(name));
-            filterSpec.hide_styles = std::move(v);
-        });
-    }
-    check(tr("Hide comments"), filterSpec.hide_comments, [this](bool v) { filterSpec.hide_comments = v; });
-    if (tl) {
-        check(tr("Show unconfirmed"), filterSpec.only_doubtful, [this](bool v) { filterSpec.only_doubtful = v; });
-        check(tr("Show untranslated"), filterSpec.only_untranslated,
-              [this](bool v) { filterSpec.only_untranslated = v; });
-    }
-    check(tr("Filter after loading subtitles"), QSettings().value("grid/filterAfterLoad").toBool(),
-          [](bool v) { QSettings().setValue("grid/filterAfterLoad", v); });
-    flt->addSeparator();
-    flt->addAction(tr("Filter"), this, [this] {
-        filterOn = true;
-        m_expanded.clear();
-        applyFilter();
-        QStringList styles;
-        for (const auto &x : filterSpec.hide_styles) styles << fs::q(x);
-        QSettings st;
-        st.setValue("grid/filterStyles", styles);
-        st.setValue("grid/filterComments", filterSpec.hide_comments);
-        st.setValue("grid/filterInvert", filterSpec.invert);
-    });
-    flt->addAction(tr("Turn off filtering"), this, [this] {
-        filterOn = false;
-        filterSpec.hide_rows.clear(); // the options stay for the next filter (Kainote)
-        applyFilter();
-    });
-    auto *ign = m.addAction(tr("Ignore filtering in some actions"));
-    ign->setCheckable(true);
-    ign->setChecked(ignoreFilterInActions);
-    connect(ign, &QAction::toggled, this, [this](bool v) { ignoreFilterInActions = v; });
+    m.addMenu(mw->action("gridColumns")->menu());
+    mw->action("makeTree")->setEnabled(!tl);
+    m.addAction(mw->action("makeTree"));
+    m.addAction(mw->action("hideSelected"));
+    m.addMenu(mw->action("gridFiltering")->menu());
+    mw->action("filterIgnoreInActions")->setChecked(ignoreFilterInActions);
+    m.addAction(mw->action("filterIgnoreInActions"));
     m.addAction(mw->action("changeFps"));
     m.addAction(mw->action("fpsFromVideo"));
     if (tl) {
         m.addSeparator();
-        m.addAction(tr("Paste translation text"), mw, [mw] { mw->pasteTranslation(); });
+        m.addAction(mw->action("pasteTranslation"));
         m.addAction(mw->action("translationMatching"));
     }
     m.addSeparator();
