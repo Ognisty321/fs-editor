@@ -101,6 +101,35 @@ impl Time {
         parse_clock(s, b'.')
     }
 
+    /// An event's Start or End as Aegisub's `AssTime` reads it, which for what files hold is
+    /// what libass shows: anything but digits, `:`, `.` and `,` is skipped, so "-0:00:01.00" is
+    /// one second (libass reads the sign of the hours alone) and a stray letter costs nothing.
+    /// Never negative; an absurd hour count is 0.
+    pub fn from_ass_field(s: &str) -> Time {
+        let read = || -> Option<i64> {
+            let (mut ms, mut cur, mut frac) = (0i64, 0i64, -1i64);
+            for c in s.bytes() {
+                match c {
+                    b':' if frac < 0 => (ms, cur) = (ms.checked_mul(60)?.checked_add(cur)?, 0),
+                    b'.' | b',' if frac < 0 => {
+                        ms = ms.checked_mul(60)?.checked_add(cur)?.checked_mul(1000)?;
+                        (cur, frac) = (0, 100);
+                    }
+                    b'0'..=b'9' if frac < 0 => {
+                        cur = cur.checked_mul(10)?.checked_add(i64::from(c - b'0'))?
+                    }
+                    b'0'..=b'9' => (ms, frac) = (ms + i64::from(c - b'0') * frac, frac / 10),
+                    _ => {}
+                }
+            }
+            if frac < 0 {
+                ms = ms.checked_mul(60)?.checked_add(cur)?.checked_mul(1000)?;
+            }
+            Some(ms)
+        };
+        Time(read().unwrap_or(0))
+    }
+
     /// Parse an SRT timestamp (`HH:MM:SS,mmm`; also tolerates `.`).
     pub fn parse_srt(s: &str) -> Option<Self> {
         parse_clock(s, b',')
@@ -247,6 +276,20 @@ impl Neg for Time {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn event_fields_read_as_aegisub() {
+        assert_eq!(Time::from_ass_field("0:00:01.00"), Time(1000));
+        assert_eq!(Time::from_ass_field("-0:00:01.50"), Time(1500));
+        assert_eq!(Time::from_ass_field(" 1:02:03.456x"), Time(3_723_456));
+        assert_eq!(Time::from_ass_field("0:00:05"), Time(5000));
+        assert_eq!(Time::from_ass_field("12:00:00.00"), Time(43_200_000));
+        assert_eq!(Time::from_ass_field("garbage"), Time(0));
+        assert_eq!(
+            Time::from_ass_field("99999999999999999999:00:00.00"),
+            Time(0)
+        );
+    }
 
     #[test]
     fn parse_basic() {

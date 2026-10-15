@@ -650,8 +650,8 @@ impl Event {
             EventField::Layer => self.layer = parse_i32(v),
             // SSA "Marked=0" carries no information we keep; layer stays 0.
             EventField::Marked => {}
-            EventField::Start => self.start = Time::parse_ass(v).unwrap_or_default(),
-            EventField::End => self.end = Time::parse_ass(v).unwrap_or_default(),
+            EventField::Start => self.start = Time::from_ass_field(v),
+            EventField::End => self.end = Time::from_ass_field(v),
             EventField::Style => self.style = trim_sp(v).to_string(),
             EventField::Name => self.actor = trim_sp(v).to_string(),
             EventField::MarginL => self.margin_l = parse_i32(v),
@@ -677,8 +677,8 @@ impl Event {
         match f {
             EventField::Layer => self.layer == parse_i32(v),
             EventField::Marked => true,
-            EventField::Start => self.start == Time::parse_ass(v).unwrap_or_default(),
-            EventField::End => self.end == Time::parse_ass(v).unwrap_or_default(),
+            EventField::Start => self.start == Time::from_ass_field(v),
+            EventField::End => self.end == Time::from_ass_field(v),
             EventField::Style => self.style == trim_sp(v),
             EventField::Name => self.actor == trim_sp(v),
             EventField::MarginL => self.margin_l == parse_i32(v),
