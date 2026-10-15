@@ -88,6 +88,7 @@ const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"openVideo", {"movie", kBlue}}, {"openKeyframes", {"key", kAmber}}, {"saveKeyframes", {"device-floppy", kAmber}}, {"openDummy", {"photo", kBlue}},
     {"startFromVideo", {"brackets-contain-start", kGreen}}, {"endFromVideo", {"brackets-contain-end", kGreen}},
     {"prevFrame", {"chevron-left", kBlue}}, {"nextFrame", {"chevron-right", kBlue}},
+    {"prevFrames", {"chevrons-left", kBlue}}, {"nextFrames", {"chevrons-right", kBlue}},
     {"goStart", {"arrow-bar-to-left", kGreen}}, {"goEnd", {"arrow-bar-to-right", kGreen}},
     {"playPause", {"player-play", kGreen}}, {"prevKeyframe", {"chevrons-left", kAmber}},
     {"nextKeyframe", {"chevrons-right", kAmber}}, {"audioToVideo", {"wave-sine", kTeal}},
@@ -736,6 +737,9 @@ void MainWindow::buildMenus() {
     });
     add("prevFrame", tr("Previous frame"), QKeySequence("Left"), video, [=] { tab()->video()->stepFrames(-1); });
     add("nextFrame", tr("Next frame"), QKeySequence("Right"), video, [=] { tab()->video()->stepFrames(1); });
+    // Aegisub's video/frame/*/large with its default Fast Jump Step of 10
+    add("prevFrames", tr("Back 10 frames"), QKeySequence("Alt+Left"), video, [=] { tab()->video()->stepFrames(-10); });
+    add("nextFrames", tr("Forward 10 frames"), QKeySequence("Alt+Right"), video, [=] { tab()->video()->stepFrames(10); });
     add("goStart", tr("Go to start time of line"), {}, video, [=] {
         if (tab()->active() >= 0) tab()->video()->seekStart(tab()->s().row(size_t(tab()->active())).start);
     });
