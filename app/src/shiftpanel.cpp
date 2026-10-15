@@ -257,7 +257,8 @@ void ShiftPanel::updateEnabled() {
     m_frames->setEnabled(video);
     m_markerToVideo->setEnabled(video);
     m_markerToAudio->setEnabled(m_tab->audio()->hasAudio());
-    m_kfOn->setEnabled(!m_tab->keyframes().empty());
+    // keyframes snap through the video's frame times
+    m_kfOn->setEnabled(!m_tab->keyframes().empty() && !m_tab->video()->timecodes().empty());
 }
 
 std::vector<size_t> ShiftPanel::rows(int which, const QString &styles) const {
@@ -266,7 +267,13 @@ std::vector<size_t> ShiftPanel::rows(int which, const QString &styles) const {
     const auto sel = m_tab->selection();
     const auto r = m_tab->s().spec_rows(uint8_t(which), fs::slice(sel), size_t(std::max(0, m_tab->active())),
                                         {st.data(), st.size()});
-    return {r.begin(), r.end()};
+    std::vector<size_t> out(r.begin(), r.end());
+    // lines the filter or a folded tree hides stay as they are (Kainote), unless the grid's menu says
+    if (!m_tab->grid()->ignoreFilterInActions) {
+        const auto vis = m_tab->grid()->visibleRows();
+        std::erase_if(out, [&](size_t x) { return !std::ranges::binary_search(vis, x); });
+    }
+    return out;
 }
 
 void ShiftPanel::shift() {
@@ -291,16 +298,9 @@ void ShiftPanel::shift() {
     spec.amount = amount;
     spec.which = uint8_t(m_which->currentIndex());
     spec.end_fix = uint8_t(m_endFix->currentIndex());
-    spec.lines = uint8_t(m_lines->currentIndex());
-    for (size_t r : m_tab->selection()) spec.selected.push_back(r);
-    spec.active = size_t(std::max(0, m_tab->active()));
-    for (const auto &st : m_styles->text().split(',', Qt::SkipEmptyParts)) spec.styles.push_back(fs::rs(st.trimmed()));
+    spec.lines = 1; // the rows, as picked here
+    for (size_t r : rows(m_lines->currentIndex(), m_styles->text())) spec.selected.push_back(r);
     spec.tag_times = m_tagTimes->isChecked();
-    if (m_tab->grid()->filterOn && !m_tab->grid()->ignoreFilterInActions && spec.lines == 0) {
-        spec.lines = 1;
-        spec.selected.clear();
-        for (size_t r : m_tab->grid()->visibleRows()) spec.selected.push_back(r);
-    }
     const auto tc = m_tab->video()->timecodes();
     const size_t n = s.shift(spec, {tc.data(), tc.size()});
     m_tab->changed();
@@ -312,10 +312,10 @@ void ShiftPanel::postProcess() {
     fsb::PostSpec spec;
     spec.lead_in = m_leadInOn->isChecked() ? m_leadIn->value() : 0;
     spec.lead_out = m_leadOutOn->isChecked() ? m_leadOut->value() : 0;
-    // end threshold closes gaps at the next start, then the start threshold at the previous end
-    spec.adjacent = m_contOn->isChecked() ? m_contEnd->value() : 0;
-    spec.bias = 1.0;
-    spec.adjacent_start = m_contOn->isChecked() ? m_contStart->value() : 0;
+    // Kainote's: gaps up to both thresholds close, the end taking its share of the gap
+    const int sum = m_contStart->value() + m_contEnd->value();
+    spec.adjacent = m_contOn->isChecked() ? sum : 0;
+    spec.bias = sum > 0 ? double(m_contEnd->value()) / sum : 0.5;
     spec.snap_keyframes = m_kfOn->isEnabled() && m_kfOn->isChecked();
     spec.kf_before_start = m_kfBs->value();
     spec.kf_after_start = m_kfAs->value();

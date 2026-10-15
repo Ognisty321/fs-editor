@@ -874,12 +874,18 @@ void MainWindow::buildMenus() {
         tab()->openDummyVideo(w->value(), h->value(), fps->value(), ms > 0 ? ms : 1800000);
     });
     video->addSeparator();
-    add("startFromVideo", tr("Insert start time from video"), QKeySequence("Ctrl+Left"), video, [this] {
-        withRow([](TabPanel *t, fsb::Row &r) { r.start = t->videoStartTime(); });
-    });
-    add("endFromVideo", tr("Insert end time from video"), QKeySequence("Ctrl+Right"), video, [this] {
-        withRow([](TabPanel *t, fsb::Row &r) { r.end = t->videoEndTime(); });
-    });
+    // Aegisub's: every selected line, and the other end follows when it would be passed
+    auto toVideo = [this](bool start) {
+        auto *t = current();
+        if (t->active() < 0) return;
+        const auto sel = t->selection();
+        t->s().snap_to_video(fs::slice(sel), t->videoStartTime(), t->videoEndTime(), start);
+        t->changed();
+    };
+    add("startFromVideo", tr("Insert start time from video"), QKeySequence("Ctrl+Left"), video,
+        [toVideo] { toVideo(true); });
+    add("endFromVideo", tr("Insert end time from video"), QKeySequence("Ctrl+Right"), video,
+        [toVideo] { toVideo(false); });
     // Kainote's snap: the active line's start (end) to the nearest keyframe or start/end of the line
     // before or after it, within 5 s and never past the line's other end
     auto snap = [this](bool start) {

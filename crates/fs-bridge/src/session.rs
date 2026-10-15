@@ -1430,6 +1430,22 @@ impl Session {
         })
     }
 
+    pub fn snap_to_video(&mut self, rows: &[usize], start: i64, end: i64, set_start: bool) {
+        let evs = self.all_events(rows);
+        let (start, end) = (Time(start), Time(end));
+        self.edit("Snap to video", |d| {
+            for e in evs {
+                let ev = d.event_mut(e).unwrap();
+                if set_start || ev.start > start {
+                    ev.start = start;
+                }
+                if !set_start || ev.end < end {
+                    ev.end = end;
+                }
+            }
+        });
+    }
+
     pub fn post_process(&mut self, spec: &PostSpec, keyframes: &[i64], timecodes: &[i64]) {
         // the rows' own events: with both halves of a pair, one line's original became the
         // "next line" of the one before
@@ -1447,26 +1463,15 @@ impl Session {
                 adjacent_threshold: opt(spec.adjacent),
                 adjacent_overlap: None, // Kainote's thresholds close gaps, never overlaps
                 adjacent_bias: spec.bias,
-                keyframes: None,
+                keyframes: match (&fr, spec.snap_keyframes && !kf.is_empty()) {
+                    (Some(f), true) => Some((kf.as_slice(), f)),
+                    _ => None,
+                },
                 kf_before_start: Time(spec.kf_before_start),
                 kf_after_start: Time(spec.kf_after_start),
                 kf_before_end: Time(spec.kf_before_end),
                 kf_after_end: Time(spec.kf_after_end),
                 styles: Vec::new(),
-            };
-            ops::post_process(d, &Rows::Selected(evs.clone()), &pp);
-            // Kainote's second threshold: gaps still open move the next start back
-            // to the previous end; keyframes snap last
-            let pp = ops::PostProcess {
-                lead_in: None,
-                lead_out: None,
-                adjacent_threshold: opt(spec.adjacent_start),
-                adjacent_bias: 0.0,
-                keyframes: match (&fr, spec.snap_keyframes && !kf.is_empty()) {
-                    (Some(f), true) => Some((kf.as_slice(), f)),
-                    _ => None,
-                },
-                ..pp
             };
             ops::post_process(d, &Rows::Selected(evs), &pp);
             sync_originals(d, &tl);
@@ -3323,30 +3328,49 @@ mod tests {
     }
 
     #[test]
-    fn continuity_thresholds_move_end_or_start() {
+    fn snap_to_video_keeps_the_line_whole() {
+        let mut s = session(ASS);
+        // starts at 2.5 s: the first line (to 2 s) now ends with the frame, the second keeps its end
+        s.snap_to_video(&[0, 1], 2500, 2540, true);
+        assert_eq!(
+            [
+                (s.row(0).start, s.row(0).end),
+                (s.row(1).start, s.row(1).end)
+            ],
+            [(2500, 2540), (2500, 4000)]
+        );
+        // ends at 0.5 s: a start after it comes back
+        s.snap_to_video(&[2], 460, 500, false);
+        assert_eq!((s.row(2).start, s.row(2).end), (460, 500));
+    }
+
+    #[test]
+    fn continuity_closes_gaps_where_the_bias_puts_them() {
         let times = |s: &Session| {
             (0..3)
                 .map(|i| (s.row(i).start, s.row(i).end))
                 .collect::<Vec<_>>()
         };
+        // Kainote's start 250 and end 750 thresholds: gaps up to 1000, a quarter from the start
         let mut s = session(ASS);
         let spec = PostSpec {
-            adjacent_start: 1000,
+            adjacent: 1000,
+            bias: 0.75,
             rows: vec![0, 1, 2],
             ..Default::default()
         };
         s.post_process(&spec, &[], &[]);
-        assert_eq!(times(&s), [(1000, 2000), (2000, 4000), (4000, 6000)]);
+        assert_eq!(times(&s), [(1000, 2750), (2750, 4750), (4750, 6000)]);
         let mut s = session(ASS);
-        let spec = PostSpec {
-            adjacent: 1000,
-            bias: 1.0,
-            adjacent_start: 1000,
-            rows: vec![0, 1],
-            ..Default::default()
-        };
-        s.post_process(&spec, &[], &[]);
-        assert_eq!(times(&s)[..2], [(1000, 3000), (3000, 4000)]);
+        s.post_process(
+            &PostSpec {
+                adjacent: 999,
+                ..spec
+            },
+            &[],
+            &[],
+        );
+        assert_eq!(times(&s)[1], (3000, 4000));
     }
 
     #[test]

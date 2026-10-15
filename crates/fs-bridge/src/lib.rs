@@ -196,8 +196,6 @@ pub mod ffi {
         /// Gaps up to `adjacent` close at `bias` (0 previous end .. 1 next start).
         adjacent: i64,
         bias: f64,
-        /// Then gaps up to this close by moving the next start back.
-        adjacent_start: i64,
         kf_before_start: i64,
         kf_after_start: i64,
         kf_before_end: i64,
@@ -535,6 +533,9 @@ pub mod ffi {
         fn make_continuous(self: &mut Session, rows: &[usize], next: bool);
         fn sort_rows(self: &mut Session, key: u8, selected_only: bool, rows: &[usize]);
         fn shift(self: &mut Session, spec: &ShiftSpec, fps_timecodes: &[i64]) -> usize;
+        /// Aegisub's Snap start (end) to video: the rows start (end) at the frame, `start..end`,
+        /// and an end before it (a start after it) moves to it too.
+        fn snap_to_video(self: &mut Session, rows: &[usize], start: i64, end: i64, set_start: bool);
         fn post_process(self: &mut Session, spec: &PostSpec, keyframes: &[i64], timecodes: &[i64]);
         fn spec_rows(
             self: &Session,
