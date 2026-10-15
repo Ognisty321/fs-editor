@@ -179,6 +179,11 @@ public:
     bool blend(int64_t ms, int width, int height, int video_w, int video_h, std::span<uint8_t> rgba);
     /// Same, but into a transparent premultiplied RGBA8 overlay (cleared first).
     bool overlay(int64_t ms, int width, int height, int video_w, int video_h, std::span<uint8_t> rgba_premul);
+    /// The pixels the subtitles cover at `ms` in a `width x height` frame (storage the same):
+    /// `box` gets left, top, right, bottom (exclusive) of the text with its borders, no shadows,
+    /// then the same of the text alone (the first again when only borders show). False when
+    /// nothing shows.
+    bool bounds(int64_t ms, int width, int height, std::span<int32_t> box);
 
 private:
     template <bool Premul>

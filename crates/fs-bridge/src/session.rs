@@ -2403,6 +2403,77 @@ impl Session {
         })
     }
 
+    /// The row's line alone for libass to measure: moved by the script's size into the middle of
+    /// a script three times as large, so nothing of it is cut at the screen's edges, without its
+    /// clips and wrapping as wide as before. Returns the script, the time in it to render, its
+    /// size, where the line's anchor is in it at that time and where in the real script.
+    #[allow(clippy::type_complexity)] // one caller, which takes it apart at once
+    pub(crate) fn measure_script(
+        &self,
+        row: usize,
+        at_ms: i64,
+    ) -> Option<(String, i64, (i32, i32), (f64, f64), (f64, f64))> {
+        let e = *self.main_events(&[row]).first()?;
+        let mut doc = self.ed.doc.clone();
+        let ev = doc.event(e)?.clone();
+        let (w, h) = doc.play_res();
+        let v = crate::visual::of_event(&doc, &ev);
+        let dur = (ev.end.0 - ev.start.0).max(1);
+        let at = (at_ms - ev.start.0).clamp(0, dur - 1);
+        let (mut x, mut y) = (v.x, v.y);
+        if v.has_move {
+            // libass: no times (or none past 0) is the whole line
+            let (t1, t2) = if v.t1 <= 0 && v.t2 <= 0 {
+                (0, dur)
+            } else {
+                (v.t1, v.t2)
+            };
+            let u = if at <= t1 {
+                0.0
+            } else if at >= t2 {
+                1.0
+            } else {
+                (at - t1) as f64 / (t2 - t1) as f64
+            };
+            x += (v.x2 - v.x) * u;
+            y += (v.y2 - v.y) * u;
+        }
+        let (dx, dy) = (w as f64, h as f64);
+        let mut line = Line::parse(&ops::transform_place(
+            &ev.text,
+            &|a, b| (a + dx, b + dy),
+            false,
+            (v.x, v.y),
+        ));
+        line.remove_tags(&["clip", "iclip"]);
+        let style = doc.style(&ev.style);
+        let eff = |m: i32, s: Option<i32>| if m != 0 { m } else { s.unwrap_or(0) };
+        let mut one = ev.clone();
+        one.text = line.to_text();
+        one.kind = fs_core::EventKind::Dialogue;
+        one.margin_l = eff(ev.margin_l, style.map(|s| s.margin_l)) + w;
+        one.margin_r = eff(ev.margin_r, style.map(|s| s.margin_r)) + w;
+        (one.start, one.end) = (Time(0), Time(dur));
+        doc.retain_events(|_| false);
+        let entry = doc.new_entry(one);
+        doc.event_entries_mut().push(entry);
+        for (k, n) in [("PlayResX", w), ("PlayResY", h)] {
+            doc.set_info(k, &(3 * n).to_string());
+        }
+        for k in ["LayoutResX", "LayoutResY"] {
+            if let Some(n) = doc.info(k).and_then(|v| v.trim().parse::<i32>().ok()) {
+                doc.set_info(k, &(3 * n).to_string());
+            }
+        }
+        Some((
+            render_script(doc),
+            at,
+            (3 * w, 3 * h),
+            (x + dx, y + dy),
+            (x, y),
+        ))
+    }
+
     pub fn script_for_render(&self, hide_original: bool, at_ms: i64) -> String {
         self.render_subs(hide_original, at_ms).script()
     }
@@ -2544,13 +2615,102 @@ impl Session {
             for (k, &e) in evs.iter().take(n).enumerate() {
                 let style = d.style(&d.event(e).unwrap().style).cloned();
                 let text = changes.iter().fold(base[k].clone(), |text, (tag, delta)| {
-                    adjust_tag(&text, style.as_ref(), tag, mode, *delta, k, n)
+                    adjust_tag(&text, style.as_ref(), tag, mode, &[*delta], k, n)
                 });
                 if d.event(e).unwrap().text != text {
                     d.event_mut(e).unwrap().text = text;
                 }
             }
         });
+    }
+
+    #[allow(clippy::too_many_arguments)] // the cxx bridge passes plain numbers, no tuples
+    pub fn hydra(
+        &mut self,
+        rows: &[usize],
+        active: usize,
+        base: &[String],
+        tag: &str,
+        mode: u8,
+        values: &[f64],
+        from: &[f64],
+        sel_from: i64,
+        sel_to: i64,
+        amend: &str,
+    ) {
+        use fs_core::tag_adjust::{TagAdjust, adjust_tag};
+        let evs = self.main_events(rows);
+        let active = self.main_events(&[active]).first().copied();
+        let base = base.to_vec();
+        let tag = tag.to_string();
+        let values = values.to_vec();
+        let delta: Vec<f64> = values.iter().zip(from).map(|(v, f)| v - f).collect();
+        let from = from.to_vec();
+        let at = (sel_from >= 0).then(|| (sel_from as usize, sel_to.max(sel_from) as usize));
+        self.edit_amend(amend, "Change tags", move |d| {
+            let n = evs.len().min(base.len());
+            for (k, &e) in evs.iter().take(n).enumerate() {
+                let ev = d.event(e).unwrap();
+                let style = d.style(&ev.style).cloned();
+                let mut text = base[k].clone();
+                if tag == "pos" && mode != 7 {
+                    // a line without \pos moves from where it is shown (Kainote)
+                    let mut placed = ev.clone();
+                    placed.text = text.clone();
+                    let v = crate::visual::of_event(d, &placed);
+                    text = ops::transform_place(&text, &|x, y| (x, y), false, (v.x, v.y));
+                }
+                let (how, by) = match mode {
+                    1 => (TagAdjust::Set, values.clone()),
+                    2 => (TagAdjust::Multiply, delta.clone()),
+                    3 | 4 => (
+                        TagAdjust::GradientText {
+                            increasing: mode == 3,
+                        },
+                        delta.clone(),
+                    ),
+                    5 | 6 => (
+                        TagAdjust::GradientLine {
+                            increasing: mode == 5,
+                        },
+                        delta.clone(),
+                    ),
+                    7 => (
+                        TagAdjust::Insert {
+                            at: at.filter(|_| Some(e) == active),
+                        },
+                        values.clone(),
+                    ),
+                    8 => (
+                        TagAdjust::Set,
+                        from.iter()
+                            .zip(&delta)
+                            .map(|(f, x)| f + x * k as f64)
+                            .collect(),
+                    ),
+                    _ => (TagAdjust::Add, delta.clone()),
+                };
+                let text = adjust_tag(&text, style.as_ref(), &tag, how, &by, k, n);
+                if d.event(e).unwrap().text != text {
+                    d.event_mut(e).unwrap().text = text;
+                }
+            }
+        });
+    }
+
+    pub fn tag_values(&self, row: usize, tag: &str, count: usize) -> Vec<f64> {
+        let Some(r) = self.tl_row(row) else {
+            return Vec::new();
+        };
+        let d = &self.ed.doc;
+        let Some(ev) = d.event(r.main()) else {
+            return Vec::new();
+        };
+        if tag == "pos" {
+            let v = crate::visual::of_event(d, ev);
+            return vec![v.x, v.y];
+        }
+        fs_core::tag_adjust::line_values(&ev.text, d.style(&ev.style), tag, count)
     }
 
     #[allow(clippy::too_many_arguments)] // the cxx bridge passes plain numbers, no tuples
@@ -3129,6 +3289,39 @@ mod tests {
     }
 
     const ASS: &str = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,one\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,two\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,three\n";
+
+    #[test]
+    fn a_line_is_measured_whole_past_the_screen_edges() {
+        let mut s = session(ASS);
+        for (i, t) in [
+            r"{\an7\pos(-50,10)\bord3\shad4\p1}m 0 0 l 100 0 100 40 0 40",
+            r"{\an5\move(0,0,200,0)\bord0\clip(0,0,1,1)\p1}m 0 0 l 100 0 100 40 0 40",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut r = s.row(i);
+            r.text = t.into();
+            s.set_row(i, &r, "");
+        }
+        let mut r = crate::media::Renderer::new().unwrap();
+        // within the pixel libass's antialiasing may add
+        let near = |a: Vec<f64>, b: [f64; 10]| {
+            a.len() == 10 && a.iter().zip(b).all(|(x, y)| (x - y).abs() <= 1.0)
+        };
+        // past the left edge, the shadow left out, the border around the text alone
+        assert!(near(
+            r.line_box(&s, 0, 1500),
+            [-3.0, -3.0, 103.0, 43.0, 0.0, 0.0, 100.0, 40.0, -50.0, 10.0]
+        ));
+        // centred on wherever the move has taken it, the clip left out
+        assert!(near(
+            r.line_box(&s, 1, 3500),
+            [
+                -50.0, -20.0, 50.0, 20.0, -50.0, -20.0, 50.0, 20.0, 100.0, 0.0
+            ]
+        ));
+    }
 
     #[test]
     fn scaling_all_tags_with_places_is_one_step_from_the_base() {
@@ -3879,6 +4072,63 @@ mod tests {
             (before.layer, before.style.as_str())
         );
         assert_eq!((s.row(0).start, s.row(0).text.as_str()), (0, "plain"));
+    }
+
+    #[test]
+    fn hydra_inserts_at_the_cursor_and_steps_from_the_active_line() {
+        let mut s = session(ASS);
+        let base: Vec<String> = (0..3).map(|i| s.row(i).text).collect();
+        // insert: at the active line's cursor, the others' starts
+        s.hydra(
+            &[0, 1, 2],
+            1,
+            &base,
+            "blur",
+            7,
+            &[2.0],
+            &[0.0],
+            1,
+            1,
+            "drag",
+        );
+        let texts = |s: &Session| (0..3).map(|i| s.row(i).text).collect::<Vec<_>>();
+        assert_eq!(
+            texts(&s),
+            [r"{\blur2}one", r"t{\blur2}wo", r"{\blur2}three"]
+        );
+        // step: the active line's value + n·Δ, one undo step with the insert's amend
+        s.hydra(
+            &[0, 1, 2],
+            1,
+            &base,
+            "bord",
+            8,
+            &[3.0],
+            &[2.0],
+            -1,
+            -1,
+            "drag",
+        );
+        assert_eq!(
+            texts(&s),
+            [r"{\bord2}one", r"{\bord3}two", r"{\bord4}three"]
+        );
+        // a line without \pos moves from where it is shown: the style's bottom centre
+        s.hydra(
+            &[0],
+            0,
+            &base[..1],
+            "pos",
+            0,
+            &[970.0, 1060.0],
+            &[960.0, 1070.0],
+            -1,
+            -1,
+            "pos",
+        );
+        assert_eq!(s.row(0).text, r"{\pos(970,1060)}one");
+        assert_eq!(s.tag_values(0, "pos", 2), [970.0, 1060.0]);
+        assert_eq!(s.tag_values(1, "3c", 1), [0.0, 0.0, 0.0]);
     }
 
     #[test]

@@ -378,6 +378,21 @@ impl SubtitleRenderer {
         )?)
     }
 
+    /// What the subtitles cover at `ms` in a `width x height` frame: `[left, top, right, bottom]`
+    /// (right and bottom exclusive) of the text with its borders, no shadows, then of the text
+    /// alone (the first again when only borders show).
+    pub fn bounds(&mut self, ms: i64, width: usize, height: usize) -> Result<Option<[i32; 8]>> {
+        let mut b = [0i32; 8];
+        let shown = bridge::subs_bounds(
+            self.inner.pin_mut(),
+            ms,
+            width as i32,
+            height as i32,
+            &mut b,
+        )?;
+        Ok(shown.then_some(b))
+    }
+
     /// Render into a transparent premultiplied RGBA8 overlay.
     pub fn overlay(
         &mut self,

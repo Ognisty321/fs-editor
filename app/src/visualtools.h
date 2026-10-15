@@ -4,9 +4,12 @@
 #pragma once
 
 #include "bridge.h"
+#include "hydra.h"
 
 #include <QObject>
 #include <QPointF>
+#include <QRectF>
+#include <optional>
 #include <set>
 #include <span>
 #include <vector>
@@ -15,6 +18,7 @@ class VideoBox;
 class QPainter;
 class QMouseEvent;
 class QKeyEvent;
+class QWheelEvent;
 class QWidget;
 class QStackedWidget;
 class QToolButton;
@@ -65,6 +69,7 @@ public:
     bool release(QMouseEvent *e);
     bool doubleClick(QMouseEvent *e);
     bool key(QKeyEvent *e);
+    bool wheel(QWheelEvent *e); // the all-tags tool's sliders and tags (Kainote)
 
 private:
     QPointF w(QPointF s) const; // script -> widget
@@ -73,14 +78,33 @@ private:
     void apply(const QString &tags, bool allSelected = false);
     void applyPos(QPointF p);
     void toggleMove();
-    void applyAllTags(double value); // all-tags tool, from the texts in m_tagBase
-    void grabTexts(); // the selected lines and their texts, m_tagRows and m_tagBase, as a drag starts
+    // the all-tags tool (Kainote's Hydra): the sliders m_hv to the lines grabbed, from their texts
+    // in m_tagBase and the active line's values m_hFrom
+    void applyHydra();
+    void hydraValues(); // the sliders from the active line
+    const hydra::Tag &htag() const; // the tag picked
+    QLineF sliderLine(int i) const;       // slider i on the widget
+    int sliderAt(QPointF at) const;       // the slider under a widget point, or -1
+    double snapped(int i, double v) const; // to the tag's steps and digits, in slider i's range
+    // the selected lines and their texts, m_tagRows and m_tagBase, as a drag starts; and the edit
+    // box's selection, m_tagSel
+    void grabTexts();
     // Kainote's "change all tags": every occurrence of the comma-separated tags, from m_tagBase
     // (mode as Session::adjust_tag: 0 add, 7 scale)
     void adjustAll(const char *tags, uint8_t mode, std::initializer_list<double> deltas);
     // Kainote's "preserve proportions": the lines' places scaled and turned around `around`
     void keepPlaces(QPointF around, double sx, double sy, double turn);
     void writeTrack(); // the move tool's \move from its two points and their video times
+    // Kainote's rectangles (the clip's, and the position and scale tools'): a corner (10-13), an
+    // edge (20-23, x1 x2 y1 y2) or inside (30) of r (script coordinates) under the widget point,
+    // else 1, a new one
+    int rectHit(QRectF r, QPointF at) const;
+    // r as the drag `code` changes it: by `by`, or (1) the new one from `from` to `to`
+    static QRectF rectDrag(QRectF r, int code, QPointF by, QPointF from, QPointF to);
+    void paintRect(QPainter &p, QRectF r, QColor c) const;
+    bool measure();  // m_fitBox: the active line as libass draws it now; false when nothing shows
+    void fitPos();   // the grabbed lines moved so the active one sits in m_fit by m_posAlign
+    void fitScale(); // the grabbed lines' scale tags changed so the active line fills m_fit
     QString clipTag() const;
     void writeRectClip(); // m_v's rectangle to the grabbed lines, each keeping its own \iclip (Aegisub)
     void writeVector();
@@ -132,6 +156,18 @@ private:
     // rotation tools: 1 change all \frz, 2 preserve proportions (the places turned too), 4 change
     // all \frx and \fry
     int m_rotWhat = 0;
+    // position tool: 1 position by a rectangle (Kainote), 2 on its X axis, 4 on its Y axis; the scale
+    // tool adds 32 its own rectangle for the text as it is, 64 scale by a rectangle
+    int m_posWhat = 6;
+    QComboBox *m_posAlign = nullptr;
+    QWidget *m_posOptions = nullptr;
+    // the rectangle the position and scale tools fit the line to (red), the scale tool's for the
+    // text as it is (blue), in script coordinates, and where they were as a drag began
+    QRectF m_fit, m_fitStart, m_orig, m_origStart;
+    bool m_fitOn = false, m_origOn = false;
+    std::vector<double> m_fitBox; // Renderer::line_box of the active line as a drag began
+    std::optional<rust::Box<fsb::Renderer>> m_measurer; // with the fonts of m_measurerVideo
+    QString m_measurerVideo;
     QComboBox *m_shapeBox = nullptr; // ready shapes dragged out on the video (Kainote)
     size_t m_shapeFrom = 0;          // first command of the shape being dragged
     QPointF m_shapeA;                // its press point in drawing units
@@ -144,9 +180,14 @@ private:
     qint64 m_trackT[2] = {0, 0};
     QWidget *m_invert = nullptr;
     QComboBox *m_tagName = nullptr, *m_tagMode = nullptr;
-    QDoubleSpinBox *m_tagValue = nullptr;
+    QDoubleSpinBox *m_tagValues[4] = {};
     std::vector<size_t> m_tagRows;
     rust::Vec<rust::String> m_tagBase; // the rows' texts when the drag started
-    double m_tagStart = 0;
+    std::pair<qint64, qint64> m_tagSel{-1, -1}; // the edit box's selection then, bytes
+    std::vector<hydra::Tag> m_hydra;
+    // the sliders: their values, the active line's when the change began, and their ranges (the
+    // tag's, taking in the line's value)
+    double m_hv[4] = {}, m_hFrom[4] = {}, m_hMin[4] = {}, m_hMax[4] = {};
+    double m_sliderY = 40, m_sliderYStart = 0; // the first slider's height over the video
     std::vector<QToolButton *> m_buttons;
 };

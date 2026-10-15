@@ -48,6 +48,8 @@ qt_add_executable(fsed WIN32 MACOSX_BUNDLE
     src/automationhost.h src/automationhost.cpp
     src/colorpicker.h src/colorpicker.cpp
     src/theme.h src/theme.cpp
+    src/hydra.h src/hydra.cpp
+    src/associations.h src/associations.cpp
     src/icons.h src/icons.cpp
 )
 qt_add_shaders(fsed "shaders"

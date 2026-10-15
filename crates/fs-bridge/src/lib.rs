@@ -761,6 +761,29 @@ pub mod ffi {
             deltas: &[f64],
             amend: &str,
         );
+        /// Kainote's all-tags tool (Hydra): `tag` in the rows rewritten from `base`, their texts
+        /// as the drag began. `values`: the sliders now, `from`: where they began (the active
+        /// row's values). `mode`: 0 add, 1 set everywhere, 2 multiply by the line's number (its
+        /// own value + n·Δ), 3/4 gradient over the text up/down, 5/6 over the lines up/down,
+        /// 7 insert (in the active row at its bytes `sel_from..sel_to`, each other row and a
+        /// negative `sel_from` at the line's start), 8 step from the active row (its value + n·Δ).
+        #[allow(clippy::too_many_arguments)]
+        fn hydra(
+            self: &mut Session,
+            rows: &[usize],
+            active: usize,
+            base: &[String],
+            tag: &str,
+            mode: u8,
+            values: &[f64],
+            from: &[f64],
+            sel_from: i64,
+            sel_to: i64,
+            amend: &str,
+        );
+        /// The values the row starts with for the all-tags tool's sliders (the style's where it
+        /// has no such tag; `\pos` where the line is); `count` for plain numbers.
+        fn tag_values(self: &Session, row: usize, tag: &str, count: usize) -> Vec<f64>;
         /// Kainote's "preserve proportions": the rows' places scaled by (sx, sy), then turned by
         /// `turn` degrees (counter-clockwise on screen), around (cx, cy).
         fn transform_places(
@@ -812,8 +835,6 @@ pub mod ffi {
 
         fn fmt_time(ms: i64) -> String;
         fn parse_time(s: &str) -> i64;
-        /// Tags the all-tags visual tool edits.
-        fn adjustable_tags() -> Vec<String>;
         fn strip_tags(s: &str) -> String;
         /// Keyframe frame numbers from an XviD/Aegisub/… keyframes file.
         fn load_keyframes(path: &str) -> Result<Vec<i64>>;
@@ -841,6 +862,15 @@ pub mod ffi {
 
         type Renderer;
         fn new_renderer() -> Result<Box<Renderer>>;
+        /// The row's line as libass draws it at `at_ms`, in script pixels around its anchor:
+        /// [left, top, right, bottom] of the text with borders (no shadow), the same of the text
+        /// alone, then where the anchor is at that time. Empty when nothing of it shows.
+        fn line_box(self: &mut Renderer, s: &Session, row: usize, at_ms: i64) -> Vec<f64>;
+        /// Kainote's position by rectangle: where the anchor goes for a line whose box around it
+        /// is `line` [left, top, right, bottom] to sit in `rect` by `align` (0-based of 21:
+        /// an1-9 inside, left/centre/right below, left/centre/right above, before
+        /// top/middle/bottom, after top/middle/bottom).
+        fn fit_anchor(line: &[f64], rect: &[f64], align: u8) -> Vec<f64>;
         fn load_attached_fonts(self: &mut Renderer, media_path: &str);
         type RenderSubs;
         /// Builds the script and registers the embedded fonts (the render thread's work).
@@ -1037,13 +1067,6 @@ fn attachment_file_name(name: &str) -> String {
     fs_core::attachments::file_name(name)
 }
 
-fn adjustable_tags() -> Vec<String> {
-    fs_core::tag_adjust::ADJUSTABLE_TAGS
-        .iter()
-        .map(|t| t.to_string())
-        .collect()
-}
-
 fn parse_time(s: &str) -> i64 {
     let s = s.trim();
     fs_core::Time::parse_ass(s)
@@ -1123,6 +1146,10 @@ fn subtitle_tracks(path: &str) -> Vec<ffi::SubTrack> {
 
 fn open_video(path: &str, cache_dir: &str, progress: &ffi::Progress) -> Result<Box<Video>, String> {
     Video::open(path, cache_dir, |d, t| progress.report(d, t)).map(Box::new)
+}
+
+fn fit_anchor(line: &[f64], rect: &[f64], align: u8) -> Vec<f64> {
+    visual::fit_anchor(line, rect, align).to_vec()
 }
 
 fn new_renderer() -> Result<Box<Renderer>, String> {

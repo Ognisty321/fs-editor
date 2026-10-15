@@ -285,6 +285,10 @@ void VideoView::wheelEvent(QWheelEvent *e) {
         emit m_box->heightDelta(e->angleDelta().y() / 4);
         return;
     }
+    if (m_box->m_tools->wheel(e)) {
+        updateOverlay();
+        return;
+    }
     if (m_box->m_tools->tool() != VisualTools::Pointer) return;
     zoomBy(e->angleDelta().y() > 0 ? 1 / 1.2 : 1.2, e->position()); // 100%..1000% around the cursor
 }

@@ -1,5 +1,6 @@
 #include "dialogs.h"
 
+#include "associations.h"
 #include "audiobox.h"
 #include "colorpicker.h"
 #include "editbox.h"
@@ -2131,7 +2132,6 @@ FontCollectorDialog::FontCollectorDialog(TabPanel *tab) : QDialog(tab) {
 
 SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle(tr("Settings"));
-    // shortcut: no file associations page (Kainote's), add one together with an installer that registers types.
     QSettings st;
     // Kainote's layout: the pages listed on the left
     auto *list = new QListWidget(this);
@@ -2147,6 +2147,23 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     QFormLayout *editor = page(tr("Editor")), *subs = page(tr("Subtitles")), *video = page(tr("Video")),
                 *audio = page(tr("Audio")), *automation = page(tr("Automation")), *colors = page(tr("Colors"));
     buildColorsPage(colors);
+    // Kainote's file associations: the types ticked open here from Explorer
+    std::vector<std::pair<QString, QCheckBox *>> types;
+    if (assoc::supported()) {
+        QFormLayout *files = page(tr("File associations"));
+        QSettings classes(assoc::kClasses, QSettings::NativeFormat);
+        auto *note = new QLabel(tr("Subtitle files of the types ticked open in this program. A program picked for a "
+                                   "type in Explorer stays its default; this one is then in its \"Open with\" list."),
+                                this);
+        note->setWordWrap(true);
+        files->addRow(note);
+        for (const QString &ext : assoc::types()) {
+            auto *b = new QCheckBox("." + ext, this);
+            b->setChecked(assoc::isOn(classes, ext));
+            files->addRow(b);
+            types.emplace_back(ext, b);
+        }
+    }
     struct Check { const char *key; const char *label; bool def; QFormLayout *page; };
     const Check checks[] = {
         {"main/askSession", QT_TR_NOOP("Load the last session at startup"), true, editor},
@@ -2249,8 +2266,17 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     automation->addRow(tr("Trace level"), trace);
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(bb, &QDialogButtonBox::accepted, this,
-            [this, boxes, spins, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, newCatalog, trace] {
+            [this, boxes, spins, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, newCatalog, trace,
+             types] {
         QSettings st;
+        QSettings classes(assoc::kClasses, QSettings::NativeFormat);
+        bool associated = false;
+        for (const auto &[ext, b] : types)
+            if (b->isChecked() != assoc::isOn(classes, ext)) {
+                assoc::set(classes, ext, b->isChecked(), QCoreApplication::applicationFilePath());
+                associated = true;
+            }
+        if (associated) assoc::notifyShell();
         st.setValue("automation/traceLevel", trace->currentIndex());
         st.setValue("styles/newFileCatalog", newCatalog->currentData());
         st.setValue("main/language", language->currentData());

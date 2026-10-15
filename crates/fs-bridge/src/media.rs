@@ -117,6 +117,29 @@ impl Renderer {
         self.0.set_script(ass).map_err(|e| e.to_string())
     }
 
+    /// The row's line as libass draws it at `at_ms`, in script pixels around its anchor:
+    /// `[left, top, right, bottom]` of the text with borders (no shadow), the same of the text
+    /// alone, then where the anchor is at that time. Empty when nothing of it shows.
+    pub fn line_box(&mut self, s: &crate::session::Session, row: usize, at_ms: i64) -> Vec<f64> {
+        let Some((script, ms, (w, h), (ax, ay), anchor)) = s.measure_script(row, at_ms) else {
+            return Vec::new();
+        };
+        self.add_script_fonts(&s.ed.doc);
+        if self.set_script(&script).is_err() {
+            return Vec::new();
+        }
+        match self.0.bounds(ms, w as usize, h as usize) {
+            Ok(Some(b)) => {
+                let mut out: Vec<f64> = (b.iter().enumerate())
+                    .map(|(i, &v)| v as f64 - if i % 2 == 0 { ax } else { ay })
+                    .collect();
+                out.extend([anchor.0, anchor.1]);
+                out
+            }
+            _ => Vec::new(),
+        }
+    }
+
     pub fn blend(
         &mut self,
         ms: i64,

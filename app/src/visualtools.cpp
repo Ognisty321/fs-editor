@@ -1,11 +1,13 @@
 #include "visualtools.h"
 
+#include "editbox.h"
 #include "icons.h"
 #include "theme.h"
 #include "mainwindow.h"
 #include "tabpanel.h"
 #include "videobox.h"
 
+#include <QApplication>
 #include <QButtonGroup>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -21,6 +23,7 @@
 #include <QSettings>
 #include <QToolTip>
 #include <QToolButton>
+#include <QWheelEvent>
 #include <QtMath>
 
 // ---- Drawing ------------------------------------------------------------------
@@ -153,7 +156,8 @@ const std::pair<const char *, const char *> kShapes[] = {
 VisualTools::VisualTools(VideoBox *box)
     : QObject(box), m_box(box), m_shiftWhat(QSettings().value("visual/shiftWhat", 47).toInt()),
       m_scaleWhat(QSettings().value("visual/scaleWhat", 5).toInt()),
-      m_rotWhat(QSettings().value("visual/rotWhat", 0).toInt()) {}
+      m_rotWhat(QSettings().value("visual/rotWhat", 0).toInt()),
+      m_posWhat(QSettings().value("visual/posWhat", 6).toInt()) {}
 
 QPointF VisualTools::w(QPointF p) const { return m_box->view()->toWidget(p); }
 QPointF VisualTools::s(QPointF p) const { return m_box->view()->toScript(p); }
@@ -169,7 +173,7 @@ static const ToolInfo kTools[] = {
     {"toolVClip", "scissors", QT_TRANSLATE_NOOP("VisualTools", "Vector clipping")},
     {"toolDraw", "vector-bezier", QT_TRANSLATE_NOOP("VisualTools", "Vector drawing")},
     {"toolShifter", "arrows-move", QT_TRANSLATE_NOOP("VisualTools", "Position shifter")},
-    {"toolAllTags", "typography", QT_TRANSLATE_NOOP("VisualTools", "All tags (drag left/right to change the value)")},
+    {"toolAllTags", "typography", QT_TRANSLATE_NOOP("VisualTools", "All tags: sliders over the video; Shift+wheel picks the tag, right-drag moves the sliders")},
 };
 static_assert(std::size(kTools) == VisualTools::ToolCount);
 
@@ -300,6 +304,11 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     conv->setToolTip(tr("Toggle between \\move and \\pos"));
     conv->setAutoRaise(true);
     dh->addWidget(conv);
+    m_posOptions = new QWidget(drag);
+    auto *ph = new QHBoxLayout(m_posOptions);
+    ph->setContentsMargins(6, 0, 0, 0);
+    ph->setSpacing(1);
+    dh->addWidget(m_posOptions);
     dh->addStretch();
     connect(conv, &QToolButton::clicked, this, &VisualTools::toggleMove);
     auto *track = new QToolButton(drag);
@@ -338,46 +347,82 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     }
     sh->addStretch();
     m_sub->addWidget(shift);
-    // all tags (Kainote's tool): one numeric tag over the selected lines
+    // all tags (Kainote's Hydra): a tag of the user's list over the selected lines, its values on
+    // sliders over the video
     auto *tags = new QWidget(m_sub);
     auto *th = new QHBoxLayout(tags);
     th->setContentsMargins(6, 0, 0, 0);
     m_tagName = new QComboBox(tags);
-    for (const auto &t : fsb::adjustable_tags()) m_tagName->addItem("\\" + fs::q(t), fs::q(t));
-    m_tagName->setCurrentIndex(std::max(0, m_tagName->findData(QSettings().value("visual/allTagsTag", "blur"))));
+    m_tagName->setToolTip(tr("The tag; Shift+wheel on the video picks another"));
     m_tagMode = new QComboBox(tags);
-    for (const char *m : {QT_TR_NOOP("Add"), QT_TR_NOOP("Set"), QT_TR_NOOP("Multiply by line number"),
-                          QT_TR_NOOP("Gradient text increasing"), QT_TR_NOOP("Gradient text decreasing"),
-                          QT_TR_NOOP("Gradient lines increasing"), QT_TR_NOOP("Gradient lines decreasing")})
-        m_tagMode->addItem(tr(m));
-    m_tagMode->setCurrentIndex(QSettings().value("visual/allTagsMode", 0).toInt());
-    m_tagValue = new QDoubleSpinBox(tags);
-    m_tagValue->setRange(-10000, 10000);
-    m_tagValue->setDecimals(2);
-    m_tagValue->setToolTip(tr("Value; Enter applies it to the selected lines"));
+    for (const char *m : hydra::modes()) m_tagMode->addItem(tr(m));
+    m_tagMode->setToolTip(tr("How the value changes the selected lines: Insert puts it at the edit box's cursor "
+                             "(around the selected tags for \\t) or the line's start, Step gives each line the "
+                             "active line's value and the change times its place in the selection"));
+    const auto fillTags = [this](int at) {
+        const QSignalBlocker quiet(m_tagName);
+        m_tagName->clear();
+        for (const auto &t : m_hydra) m_tagName->addItem(QString("%1 (\\%2)").arg(t.name, t.tag));
+        m_tagName->setCurrentIndex(std::clamp(at, 0, m_tagName->count() - 1));
+    };
+    m_hydra = hydra::load();
+    const QString lastTag = QSettings().value("visual/allTagsTag", "blur").toString();
+    const auto found = std::ranges::find(m_hydra, lastTag, &hydra::Tag::tag);
+    fillTags(found == m_hydra.end() ? 0 : int(found - m_hydra.begin()));
+    m_tagMode->setCurrentIndex(
+        std::clamp(QSettings().value("visual/allTagsMode", htag().mode).toInt(), 0, m_tagMode->count() - 1));
     th->addWidget(m_tagName);
     th->addWidget(m_tagMode);
-    th->addWidget(m_tagValue);
+    for (auto *&v : m_tagValues) {
+        v = new QDoubleSpinBox(tags);
+        v->setRange(-100000, 100000);
+        v->setToolTip(tr("Value; Enter applies it to the selected lines"));
+        th->addWidget(v);
+        connect(v, &QDoubleSpinBox::editingFinished, this, [this, v] {
+            const int i = int(std::ranges::find(m_tagValues, v) - std::begin(m_tagValues));
+            if (m_drag || !shown() || v->value() == m_hv[i]) return; // the focus left with nothing typed
+            grabTexts();
+            m_hv[i] = v->value();
+            m_amend = QString("visual-tags-%1").arg(++m_dragId);
+            applyHydra();
+        });
+    }
+    auto *editTags = new QToolButton(tags);
+    editTags->setIcon(icon("edit", QColor(0xf2665c)));
+    editTags->setToolTip(tr("Edit the list of tags"));
+    editTags->setAutoRaise(true);
+    th->addWidget(editTags);
     th->addStretch();
-    connect(m_tagName, &QComboBox::currentIndexChanged, this,
-            [this] { QSettings().setValue("visual/allTagsTag", m_tagName->currentData()); });
+    connect(m_tagName, &QComboBox::currentIndexChanged, this, [this](int k) {
+        if (k < 0) return;
+        QSettings().setValue("visual/allTagsTag", htag().tag);
+        m_tagMode->setCurrentIndex(htag().mode);
+        hydraValues();
+        m_box->view()->updateOverlay();
+    });
     connect(m_tagMode, &QComboBox::currentIndexChanged, this,
             [this](int k) { QSettings().setValue("visual/allTagsMode", k); });
-    connect(m_tagValue, &QDoubleSpinBox::editingFinished, this, [this] {
-        if (m_drag || !m_valid) return;
-        grabTexts();
-        m_amend = QString("visual-tags-%1").arg(++m_dragId);
-        applyAllTags(m_tagValue->value());
+    connect(editTags, &QToolButton::clicked, this, [this, fillTags] {
+        HydraDialog dlg(m_box, m_hydra, m_tagName->currentIndex());
+        if (dlg.exec() != QDialog::Accepted) return;
+        m_hydra = dlg.tags();
+        hydra::save(m_hydra);
+        fillTags(dlg.current());
+        emit m_tagName->currentIndexChanged(m_tagName->currentIndex());
     });
     m_sub->addWidget(tags);
-    // Kainote's option toggles: bits of *bits, kept under key; while `forcing` is on, `forced` is
-    // on too and cannot be turned off
+    // Kainote's option toggles: bits of *bits, kept under key
     struct Option {
         int bit;
         const char *icon, *tip;
     };
+    struct Rules {
+        int forcing = 0, forced = 0; // while one of `forcing` is on, `forced` is on and stays so
+        int needing = 0, needed = 0; // these work only while `needed` is on
+        int oneOf = 0;               // one of these stays on
+    };
     const auto options = [this](QWidget *page, QHBoxLayout *lay, int *bits, const char *key,
-                                std::initializer_list<Option> list, int forcing, int forced) {
+                                std::initializer_list<Option> list, Rules rules) {
         std::vector<std::pair<int, QToolButton *>> made;
         for (const Option &o : list) {
             auto *b = new QToolButton(page);
@@ -388,22 +433,53 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
             lay->addWidget(b);
             made.emplace_back(o.bit, b);
         }
-        const auto sync = [bits, made, forcing, forced] {
+        const auto sync = [this, bits, made, rules] {
             for (auto [bit, b] : made) {
                 const QSignalBlocker quiet(b);
                 b->setChecked(*bits & bit);
-                b->setEnabled(!(bit == forced && (*bits & forcing)));
+                b->setEnabled(!(bit == rules.forced && (*bits & rules.forcing)) &&
+                              !((bit & rules.needing) && !(*bits & rules.needed)));
             }
+            m_box->view()->updateOverlay(); // a rectangle turned on or off
         };
         for (auto [bit, b] : made)
             connect(b, &QToolButton::toggled, this, [=](bool on) {
                 *bits = on ? *bits | bit : *bits & ~bit;
-                if (*bits & forcing) *bits |= forced;
+                if (*bits & rules.forcing) *bits |= rules.forced;
+                if (rules.oneOf && !(*bits & rules.oneOf)) *bits |= rules.oneOf & ~bit;
                 QSettings().setValue(key, *bits);
                 sync();
             });
         sync();
     };
+    // position tool (Kainote): fit the line into a rectangle drawn on the video
+    options(m_posOptions, ph, &m_posWhat, "visual/posWhat",
+            {{1, "frame", QT_TR_NOOP("Position by a rectangle: drag a rectangle on the video and the line goes into "
+                                     "it by the chosen alignment, measured as libass draws it; the other selected lines "
+                                     "move along. Drag its corners, edges or inside to change it")},
+             {2, "arrow-autofit-width", QT_TR_NOOP("Position on the X axis")},
+             {4, "arrow-autofit-height", QT_TR_NOOP("Position on the Y axis")}},
+            {0, 0, 2 | 4, 1, 2 | 4});
+    m_posAlign = new QComboBox(m_posOptions);
+    for (const char *a : {QT_TR_NOOP("Left-bottom"), QT_TR_NOOP("Center-bottom"), QT_TR_NOOP("Right-bottom"),
+                          QT_TR_NOOP("Left-middle"), QT_TR_NOOP("Center"), QT_TR_NOOP("Right-middle"),
+                          QT_TR_NOOP("Left-top"), QT_TR_NOOP("Center-top"), QT_TR_NOOP("Right-top"),
+                          QT_TR_NOOP("Left-below"), QT_TR_NOOP("Center-below"), QT_TR_NOOP("Right-below"),
+                          QT_TR_NOOP("Left-above"), QT_TR_NOOP("Center-above"), QT_TR_NOOP("Right-above"),
+                          QT_TR_NOOP("Before-top"), QT_TR_NOOP("Before-middle"), QT_TR_NOOP("Before-bottom"),
+                          QT_TR_NOOP("After-top"), QT_TR_NOOP("After-middle"), QT_TR_NOOP("After-bottom")})
+        m_posAlign->addItem(tr(a));
+    m_posAlign->setToolTip(tr("Where the line goes against the rectangle"));
+    m_posAlign->setCurrentIndex(std::clamp(QSettings().value("visual/posAlign", 4).toInt(), 0, 20));
+    ph->addWidget(m_posAlign);
+    connect(m_posAlign, &QComboBox::currentIndexChanged, this, [this](int k) {
+        QSettings().setValue("visual/posAlign", k);
+        if (m_tool != Pos || !(m_posWhat & 1) || !m_fitOn || !shown() || !measure()) return;
+        grabLines();
+        m_amend = QString("visual-fit-%1").arg(++m_dragId);
+        fitPos();
+        reload();
+    });
     // scale tool (Kainote): which axes a left drag scales, and how far the change reaches
     auto *scale = new QWidget(m_sub);
     auto *ch = new QHBoxLayout(scale);
@@ -417,8 +493,14 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
                                        "inside \\t, by the same factor")},
              {16, "aspect-ratio",
               QT_TR_NOOP("Preserve proportions: the places of the selected lines and their clips are scaled around the "
-                         "active line too, so text and vector drawings keep their positions against each other")}},
-            16, 8);
+                         "active line too, so text and vector drawings keep their positions against each other")},
+             {64, "frame",
+              QT_TR_NOOP("Scale by a rectangle: drag a rectangle on the video and the text, measured as libass draws "
+                         "it, is scaled to fill it on the chosen axes, its borders kept as they are")},
+             {32, "square",
+              QT_TR_NOOP("Your own rectangle for the text at its present scale, dragged with the right mouse button, "
+                         "where the measured one does not fit what the text should fill")}},
+            {16 | 64, 8, 32, 64, 1 | 4});
     ch->addStretch();
     m_sub->addWidget(scale);
     // Z rotation (Kainote): the angle from two points, e.g. along a sign's edge
@@ -438,7 +520,7 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
              {2, "aspect-ratio",
               QT_TR_NOOP("Preserve proportions: the places of the selected lines and their clips turn around the active "
                          "line's origin too, so text and vector drawings keep their positions against each other")}},
-            2, 1);
+            {2, 1});
     rh->addStretch();
     m_sub->addWidget(rot);
     auto *rotXY = new QWidget(m_sub);
@@ -447,7 +529,7 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     options(rotXY, xh, &m_rotWhat, "visual/rotWhat",
             {{4, "stack-2", QT_TR_NOOP("Change all X/Y rotation tags: every \\frx and \\fry of the selected lines, also "
                                        "inside \\t, turns by the same angle")}},
-            0, 0);
+            {});
     xh->addStretch();
     m_sub->addWidget(rotXY);
     // A stack wants the width of its widest page, shown or not: only the shown page counts, and
@@ -476,6 +558,7 @@ void VisualTools::setTool(int t) {
         m_sub->setVisible(m_sub->currentIndex() != 0);
         m_invert->setVisible(t == VClip || t == RClip);
         m_trackButton->setVisible(t == Move);
+        m_posOptions->setVisible(t == Pos);
         for (auto *b : m_sub->widget(1)->findChildren<QToolButton *>())
             if (b != m_invert) b->setVisible(t != RClip);
         m_shapeBox->setVisible(t != RClip);
@@ -498,6 +581,7 @@ void VisualTools::reload() {
     if (m_drag) return; // keep the vector and its frame stable while dragging
     if (row != m_vecRow) m_vecSel.clear();
     if (row != m_trackRow) m_trackPts = 0; // the points belong to the line they were set for
+    if (m_tool == AllTags) hydraValues();
     m_vecRow = row;
     if (m_tool == VClip)
         m_vec = m_v.clip == 2   ? Drawing::parse(fs::q(m_v.clip_drawing))
@@ -601,12 +685,65 @@ void VisualTools::toggleMove() {
     reload();
 }
 
-void VisualTools::applyAllTags(double value) {
+void VisualTools::applyHydra() {
     auto *tab = m_box->tab();
-    tab->s().adjust_tag(fs::slice(m_tagRows), {m_tagBase.data(), m_tagBase.size()},
-                        fs::Utf8(m_tagName->currentData().toString()), uint8_t(m_tagMode->currentIndex()),
-                        rust::Slice<const double>(&value, 1), fs::Utf8(m_amend));
+    const hydra::Tag &t = htag();
+    const size_t n = size_t(hydra::count(t));
+    tab->s().hydra(fs::slice(m_tagRows), size_t(tab->active()), {m_tagBase.data(), m_tagBase.size()}, fs::Utf8(t.tag),
+                   uint8_t(m_tagMode->currentIndex()), rust::Slice<const double>(m_hv, n),
+                   rust::Slice<const double>(m_hFrom, n), t.atStart ? -1 : m_tagSel.first,
+                   t.atStart ? -1 : m_tagSel.second, fs::Utf8(m_amend));
     tab->changed(TabPanel::FromVideo);
+    for (size_t i = 0; i < n; ++i) {
+        const QSignalBlocker quiet(m_tagValues[i]);
+        m_tagValues[i]->setValue(m_hv[i]);
+    }
+}
+
+void VisualTools::hydraValues() {
+    if (m_hydra.empty() || !m_valid) return;
+    const hydra::Tag &t = htag();
+    const int n = hydra::count(t);
+    auto *tab = m_box->tab();
+    const auto v = tab->s().tag_values(size_t(tab->active()), fs::Utf8(t.tag), size_t(n));
+    for (int i = 0; i < 4; ++i) {
+        // the line's value, else the list's default; the range takes it in (Kainote)
+        const double x = i < int(v.size()) ? v[size_t(i)] : t.values.value(i);
+        m_hv[i] = m_hFrom[i] = x;
+        m_hMin[i] = std::min(t.min, x);
+        m_hMax[i] = std::max(t.max, x);
+        QDoubleSpinBox *s = m_tagValues[i];
+        const QSignalBlocker quiet(s);
+        s->setVisible(i < n);
+        s->setDecimals(t.digits);
+        s->setSingleStep(t.step);
+        s->setValue(x);
+    }
+}
+
+const hydra::Tag &VisualTools::htag() const {
+    return m_hydra[size_t(std::clamp(m_tagName->currentIndex(), 0, int(m_hydra.size()) - 1))];
+}
+
+QLineF VisualTools::sliderLine(int i) const {
+    const QRectF d = m_box->view()->displayRect();
+    const double y = d.top() + m_sliderY + i * 28;
+    return {d.left() + 30, y, std::max(d.left() + 60, d.right() - 30), y};
+}
+
+int VisualTools::sliderAt(QPointF at) const {
+    for (int i = 0; i < hydra::count(htag()); ++i) {
+        const QLineF l = sliderLine(i);
+        if (std::abs(at.y() - l.y1()) <= 10 && at.x() >= l.x1() - 8 && at.x() <= l.x2() + 8) return i;
+    }
+    return -1;
+}
+
+double VisualTools::snapped(int i, double v) const {
+    const hydra::Tag &t = htag();
+    const double k = std::pow(10.0, t.digits);
+    v = m_hMin[i] + std::round((v - m_hMin[i]) / t.step) * t.step;
+    return std::clamp(std::round(v * k) / k, m_hMin[i], m_hMax[i]);
 }
 
 // Kainote's movement from two points, without its assumption that the first point was set at the
@@ -640,6 +777,9 @@ void VisualTools::grabTexts() {
     m_tagRows = tab->selection();
     m_tagBase.clear();
     for (size_t r : m_tagRows) m_tagBase.push_back(tab->s().row(r).text);
+    int64_t cursor = 0, from = 0, to = 0;
+    tab->edit()->scriptCursor(cursor, from, to); // 1-based
+    m_tagSel = {from - 1, to - 1};
 }
 
 void VisualTools::adjustAll(const char *tags, uint8_t mode, std::initializer_list<double> deltas) {
@@ -654,6 +794,86 @@ void VisualTools::keepPlaces(QPointF around, double sx, double sy, double turn) 
     auto *tab = m_box->tab();
     tab->s().transform_places(fs::slice(m_tagRows), around.x(), around.y(), sx, sy, turn, fs::Utf8(m_amend));
     tab->changed(TabPanel::FromVideo);
+}
+
+int VisualTools::rectHit(QRectF sr, QPointF at) const {
+    const QPointF a = w(sr.topLeft()), b = w(sr.bottomRight());
+    const QRectF r = QRectF(a, b).normalized();
+    const QPointF cs[] = {a, {b.x(), a.y()}, {a.x(), b.y()}, b};
+    for (int k = 0; k < 4; ++k)
+        if (near(cs[k], at)) return 10 + k;
+    const bool inX = at.x() > r.left() - 5 && at.x() < r.right() + 5;
+    const bool inY = at.y() > r.top() - 5 && at.y() < r.bottom() + 5;
+    for (int k = 0; k < 2; ++k)
+        if (inY && std::abs(at.x() - (k ? b.x() : a.x())) <= 5) return 20 + k;
+        else if (inX && std::abs(at.y() - (k ? b.y() : a.y())) <= 5) return 22 + k;
+    return r.contains(at) ? 30 : 1;
+}
+
+QRectF VisualTools::rectDrag(QRectF r, int code, QPointF by, QPointF from, QPointF to) {
+    if (code == 1) return QRectF(from, to).normalized();
+    if (code == 30) return r.translated(by);
+    const bool x2 = code >= 20 ? code == 21 : (code - 10) % 2, y2 = code >= 20 ? code == 23 : (code - 10) / 2;
+    if (code < 22) x2 ? r.setRight(r.right() + by.x()) : r.setLeft(r.left() + by.x()); // a corner or an x edge
+    if (code < 20 || code >= 22) y2 ? r.setBottom(r.bottom() + by.y()) : r.setTop(r.top() + by.y());
+    return r;
+}
+
+void VisualTools::paintRect(QPainter &p, QRectF sr, QColor c) const {
+    const QRectF r(w(sr.topLeft()), w(sr.bottomRight()));
+    p.setPen(QPen(kShadow, 3));
+    p.drawRect(r);
+    p.setPen(QPen(c, 1.5));
+    p.drawRect(r);
+    for (QPointF k : {r.topLeft(), r.topRight(), r.bottomLeft(), r.bottomRight()}) handle(p, k, false, c);
+}
+
+bool VisualTools::measure() {
+    auto *tab = m_box->tab();
+    try {
+        if (!m_measurer || m_measurerVideo != m_box->path()) {
+            // shortcut: the video's attached fonts are read on the GUI thread, once a video; move it to a
+            // worker if a file with huge attachments makes the first rectangle stall
+            auto r = fsb::new_renderer();
+            r->load_attached_fonts(fs::Utf8(m_box->path()));
+            m_measurer.emplace(std::move(r));
+            m_measurerVideo = m_box->path();
+        }
+        const auto b = (*m_measurer)->line_box(tab->s(), size_t(tab->active()), m_box->time());
+        m_fitBox.assign(b.begin(), b.end());
+    } catch (const rust::Error &) {
+        m_fitBox.clear();
+    }
+    if (m_fitBox.size() < 10)
+        QToolTip::showText(QCursor::pos(), tr("Nothing of the line shows on this frame to be measured"));
+    return m_fitBox.size() >= 10;
+}
+
+void VisualTools::fitPos() {
+    const QRectF r = m_fit.normalized();
+    const double rect[] = {r.left(), r.top(), r.right(), r.bottom()};
+    const auto at = fsb::fit_anchor(rust::Slice<const double>(m_fitBox.data(), 4), rust::Slice<const double>(rect, 4),
+                                    uint8_t(m_posAlign->currentIndex()));
+    moveLines({m_posWhat & 2 ? at[0] - m_fitBox[8] : 0, m_posWhat & 4 ? at[1] - m_fitBox[9] : 0});
+}
+
+// Kainote's scale by rectangle: the text alone grows to fill the red rectangle less the borders, which
+// \fscx and \fscy leave as they are; the blue one, when there is one, stands for the text as it is
+void VisualTools::fitScale() {
+    const QRectF red = m_fit.normalized(), own = m_orig.normalized();
+    const double tw = m_fitBox[6] - m_fitBox[4], th = m_fitBox[7] - m_fitBox[5];
+    const double bw = m_fitBox[2] - m_fitBox[0] - tw, bh = m_fitBox[3] - m_fitBox[1] - th;
+    const bool blue = (m_scaleWhat & 32) && m_origOn;
+    const double gw = blue ? own.width() - bw : tw, gh = blue ? own.height() - bh : th;
+    double fx = gw > 0 ? std::max(0.0, red.width() - bw) / gw : 1;
+    double fy = gh > 0 ? std::max(0.0, red.height() - bh) / gh : 1;
+    if (m_scaleWhat & 2) fx = fy = (m_scaleWhat & 1) ? fx : fy;
+    else {
+        if (!(m_scaleWhat & 1)) fx = 1;
+        if (!(m_scaleWhat & 4)) fy = 1;
+    }
+    adjustAll("fscx,fscy", 7, {fx, fy});
+    if (m_scaleWhat & 16) keepPlaces({m_start.x, m_start.y}, fx, fy, 0);
 }
 
 // The active line to p, the other selected lines along by as much (Aegisub's double-click)
@@ -783,6 +1003,45 @@ void VisualTools::paint(QPainter &p) {
         return;
     }
     p.setClipRect(d);
+    if ((m_tool == Pos && (m_posWhat & 1)) || (m_tool == Scale && (m_scaleWhat & 64))) {
+        // Kainote's colours: red the rectangle to fill, blue the text as it is
+        if (m_fitOn) paintRect(p, m_fit, QColor(255, 60, 60));
+        if (m_tool == Scale && (m_scaleWhat & 32) && m_origOn) paintRect(p, m_orig, QColor(60, 140, 255));
+    }
+    if (m_tool == AllTags && !m_hydra.empty()) {
+        // Kainote's sliders: a tick a step (fifty at most), the value at the thumb
+        const hydra::Tag &t = htag();
+        const int n = hydra::count(t);
+        const auto text = [&p](QPointF at, const QString &s) {
+            p.setPen(kShadow);
+            p.drawText(at + QPointF(1, 1), s);
+            p.setPen(handleColor());
+            p.drawText(at, s);
+        };
+        for (int i = 0; i < n; ++i) {
+            const QLineF l = sliderLine(i);
+            const double range = m_hMax[i] - m_hMin[i];
+            if (range <= 0) continue;
+            line(p, l.p1(), l.p2());
+            const int steps = int(range / t.step), every = std::max(1, int(std::ceil(steps / 50.0)));
+            p.setPen(QPen(lineColor(), 1));
+            for (int k = 0; k <= steps; k += every) {
+                const double x = l.x1() + l.dx() * k * t.step / range;
+                p.drawLine(QPointF(x, l.y1() - 3), QPointF(x, l.y1() + 3));
+            }
+            const QPointF at(l.x1() + l.dx() * (m_hv[i] - m_hMin[i]) / range, l.y1());
+            const QRectF thumb(at.x() - 5, at.y() - 8, 10, 16);
+            p.setPen(QPen(kShadow, 3));
+            p.drawRect(thumb);
+            p.fillRect(thumb, accentColor());
+            const QString part = n == 3 && hydra::fixedCount(t.tag) == 3 ? QString("RGB"[i])
+                                 : t.tag == "pos"                         ? QString("XY"[i])
+                                 : n > 1                                  ? QString::number(i + 1)
+                                                                          : QString();
+            const QString name = i == 0 ? "\\" + t.tag + (part.isEmpty() ? "" : " ") : QString();
+            text(at + QPointF(8, -6), name + part + " " + QString::number(m_hv[i], 'f', t.digits));
+        }
+    }
     const QPointF pos = w({m_v.x, m_v.y});
     switch (m_tool) {
     case Pos:
@@ -982,7 +1241,17 @@ bool VisualTools::press(QMouseEvent *e) {
     m_amend = QString("visual-%1").arg(++m_dragId);
     m_drag = 1;
     switch (m_tool) {
-    case Pos: grabLines(); break;
+    case Pos:
+        if (m_posWhat & 1) {
+            m_drag = 0;
+            if (m_button != Qt::LeftButton || !measure()) return true;
+            grabLines();
+            m_drag = m_fitOn ? rectHit(m_fit, m_pressW) : 1;
+            m_fitStart = m_fit;
+            return true;
+        }
+        grabLines();
+        break;
     case Move:
         if (m_track) {
             m_drag = 0;
@@ -1017,12 +1286,35 @@ bool VisualTools::press(QMouseEvent *e) {
         if (m_button == Qt::RightButton) m_drag = 2;
         break;
     case Scale:
+        if (m_scaleWhat & 64) {
+            const bool own = m_button == Qt::RightButton && (m_scaleWhat & 32);
+            m_drag = 0;
+            if (own) {
+                m_drag = 100 + (m_origOn ? rectHit(m_orig, m_pressW) : 1);
+                m_origStart = m_orig;
+            } else if (m_button == Qt::LeftButton && measure()) {
+                grabTexts();
+                m_drag = m_fitOn ? rectHit(m_fit, m_pressW) : 1;
+                m_fitStart = m_fit;
+            }
+            return true;
+        }
         if (m_scaleWhat & 8) grabTexts();
         break;
-    case AllTags:
+    case AllTags: {
+        m_drag = 0;
+        if (m_hydra.empty()) return true;
+        if (m_button == Qt::RightButton) { // the sliders move up or down (Kainote)
+            m_drag = 60;
+            m_sliderYStart = m_sliderY;
+            return true;
+        }
+        const int i = sliderAt(m_pressW);
+        if (m_button != Qt::LeftButton || i < 0) return true;
         grabTexts();
-        m_tagStart = m_tagMode->currentIndex() == 1 ? m_tagValue->value() : 0;
+        m_drag = 50 + i; // the thumb goes where the slider was clicked
         break;
+    }
     case RotZ:
     case RotXY:
         if (near(w({m_v.org_x, m_v.org_y}), m_pressW, 9)) {
@@ -1035,22 +1327,7 @@ bool VisualTools::press(QMouseEvent *e) {
         break;
     case RClip:
         grabLines();
-        if (m_v.clip == 1) {
-            // a corner, else an edge, else inside moves the whole rectangle; outside starts a new one (Kainote)
-            const QRectF r = QRectF(w({m_v.clip_x1, m_v.clip_y1}), w({m_v.clip_x2, m_v.clip_y2})).normalized();
-            const QPointF cs[] = {w({m_v.clip_x1, m_v.clip_y1}), w({m_v.clip_x2, m_v.clip_y1}),
-                                  w({m_v.clip_x1, m_v.clip_y2}), w({m_v.clip_x2, m_v.clip_y2})};
-            const QPointF at = m_pressW;
-            const bool inX = at.x() > r.left() - 5 && at.x() < r.right() + 5;
-            const bool inY = at.y() > r.top() - 5 && at.y() < r.bottom() + 5;
-            const double ex[] = {cs[0].x(), cs[1].x()}, ey[] = {cs[0].y(), cs[2].y()};
-            for (int k = 0; k < 4; ++k)
-                if (near(cs[k], at)) m_drag = 10 + k;
-            for (int k = 0; k < 2 && m_drag == 1; ++k)
-                if (inY && std::abs(at.x() - ex[k]) <= 5) m_drag = 20 + k; // the x1 or x2 edge
-                else if (inX && std::abs(at.y() - ey[k]) <= 5) m_drag = 22 + k; // y1 or y2
-            if (m_drag == 1 && r.contains(at)) m_drag = 30;
-        }
+        if (m_v.clip == 1) m_drag = rectHit(QRectF(QPointF(m_v.clip_x1, m_v.clip_y1), QPointF(m_v.clip_x2, m_v.clip_y2)), m_pressW);
         break;
     case VClip:
     case Draw: {
@@ -1192,6 +1469,13 @@ bool VisualTools::move(QMouseEvent *e) {
     auto *tab = m_box->tab();
     switch (m_tool) {
     case Pos:
+        if (m_posWhat & 1) {
+            m_fit = rectDrag(m_fitStart, m_drag, delta, m_pressS, now);
+            m_fitOn = true;
+            fitPos();
+            m_box->view()->updateOverlay();
+            break;
+        }
         if (m_drag == 1 && delta.isNull()) break; // a click alone writes nothing
         m_drag = 3;
         moveLines(delta); // every selected line by the same delta
@@ -1225,6 +1509,19 @@ bool VisualTools::move(QMouseEvent *e) {
         break;
     }
     case Scale: {
+        if (m_drag >= 100) { // the blue rectangle: drawn only, the next red one uses it
+            m_orig = rectDrag(m_origStart, m_drag - 100, delta, m_pressS, now);
+            m_origOn = true;
+            m_box->view()->updateOverlay();
+            break;
+        }
+        if (m_scaleWhat & 64) {
+            m_fit = rectDrag(m_fitStart, m_drag, delta, m_pressS, now);
+            m_fitOn = true;
+            fitScale();
+            m_box->view()->updateOverlay();
+            break;
+        }
         double sx = m_start.fscx, sy = m_start.fscy;
         // the move along the line's turned axes, as the handles are drawn
         const double a = qDegreesToRadians(m_start.frz);
@@ -1308,26 +1605,13 @@ bool VisualTools::move(QMouseEvent *e) {
         break;
     }
     case RClip: {
-        if (m_drag == 1) {
-            m_v.clip = 1;
-            m_v.clip_x1 = std::min(m_pressS.x(), now.x());
-            m_v.clip_y1 = std::min(m_pressS.y(), now.y());
-            m_v.clip_x2 = std::max(m_pressS.x(), now.x());
-            m_v.clip_y2 = std::max(m_pressS.y(), now.y());
-        } else if (m_drag == 30) {
-            m_v.clip_x1 = m_start.clip_x1 + delta.x();
-            m_v.clip_x2 = m_start.clip_x2 + delta.x();
-            m_v.clip_y1 = m_start.clip_y1 + delta.y();
-            m_v.clip_y2 = m_start.clip_y2 + delta.y();
-        } else if (m_drag >= 20) {
-            const int k = m_drag - 20;
-            if (k < 2) (k ? m_v.clip_x2 : m_v.clip_x1) = (k ? m_start.clip_x2 : m_start.clip_x1) + delta.x();
-            else (k == 3 ? m_v.clip_y2 : m_v.clip_y1) = (k == 3 ? m_start.clip_y2 : m_start.clip_y1) + delta.y();
-        } else {
-            const int k = m_drag - 10;
-            (k % 2 ? m_v.clip_x2 : m_v.clip_x1) = (k % 2 ? m_start.clip_x2 : m_start.clip_x1) + delta.x();
-            (k / 2 ? m_v.clip_y2 : m_v.clip_y1) = (k / 2 ? m_start.clip_y2 : m_start.clip_y1) + delta.y();
-        }
+        const QRectF r = rectDrag(QRectF(QPointF(m_start.clip_x1, m_start.clip_y1), QPointF(m_start.clip_x2, m_start.clip_y2)),
+                                  m_drag, delta, m_pressS, now);
+        m_v.clip = 1;
+        m_v.clip_x1 = r.left();
+        m_v.clip_y1 = r.top();
+        m_v.clip_x2 = r.right();
+        m_v.clip_y2 = r.bottom();
         writeRectClip();
         break;
     }
@@ -1376,17 +1660,20 @@ bool VisualTools::move(QMouseEvent *e) {
         break;
     }
     case AllTags: {
-        // value per pixel dragged, scaled to the tag's usual range
-        const QString t = m_tagName->currentData().toString();
-        const double step = t.endsWith('a')                            ? 1    // alpha, 1a, 3a, 4a
-                            : t.startsWith("fa")                       ? 0.002
-                            : t == "fsp"                               ? 0.1
-                            : t.startsWith("fs") || t.startsWith("fr") ? 0.5
-                                                                       : 0.05;
-        const double v = std::round((m_tagStart + dw.x() * step) * 100) / 100;
-        const QSignalBlocker block(m_tagValue);
-        m_tagValue->setValue(v);
-        applyAllTags(v);
+        if (m_drag == 60) {
+            const double room = std::max(0.0, m_box->view()->displayRect().height() - 20);
+            m_sliderY = std::clamp(m_sliderYStart + e->position().y() - m_pressW.y(), 0.0, room);
+            m_box->view()->updateOverlay();
+            break;
+        }
+        const int i = m_drag - 50;
+        const QLineF l = sliderLine(i);
+        const double f = std::clamp((e->position().x() - l.x1()) / l.dx(), 0.0, 1.0);
+        const double v = snapped(i, m_hMin[i] + f * (m_hMax[i] - m_hMin[i]));
+        if (v == m_hv[i]) break; // nothing new to write
+        m_hv[i] = v;
+        applyHydra();
+        m_box->view()->updateOverlay();
         break;
     }
     case Shifter: {
@@ -1408,6 +1695,13 @@ bool VisualTools::move(QMouseEvent *e) {
 
 bool VisualTools::release(QMouseEvent *e) {
     if (!m_drag) return m_tool == Pointer;
+    if ((m_tool == Pos && (m_posWhat & 1)) || (m_tool == Scale && (m_scaleWhat & 64))) {
+        // a rectangle of no size is none (Kainote)
+        const auto none = [](QRectF r) { return r.normalized().width() < 1 || r.normalized().height() < 1; };
+        if (m_drag >= 100) m_origOn = !none(m_orig);
+        else if (none(m_fit)) m_fitOn = false;
+        else if (m_tool == Scale && m_origOn) m_orig = m_fit; // the text fills the red one now
+    }
     if (m_drag == 7) { // the selection box
         const QRectF box = QRectF(m_pressW, e->position()).normalized();
         for (const auto &h : m_vec.handles())
@@ -1455,6 +1749,25 @@ bool VisualTools::vecKey(QKeyEvent *e) {
     return true;
 }
 
+bool VisualTools::wheel(QWheelEvent *e) {
+    if (m_tool != AllTags || m_hydra.empty() || !shown()) return false;
+    const int d = e->angleDelta().y() ? e->angleDelta().y() : e->angleDelta().x();
+    if (!d) return true;
+    if (e->modifiers() & Qt::ShiftModifier) { // another tag (Kainote)
+        const int n = m_tagName->count();
+        m_tagName->setCurrentIndex(((m_tagName->currentIndex() + (d > 0 ? -1 : 1)) % n + n) % n);
+        return true;
+    }
+    // a step on the slider at the mouse's height, the first one elsewhere
+    const int i = std::max(0, sliderAt(QPointF(sliderLine(0).x1(), e->position().y())));
+    grabTexts();
+    m_hv[i] = snapped(i, m_hv[i] + (d > 0 ? htag().step : -htag().step));
+    // the notches on one line and tag are one undo step
+    m_amend = QString("visual-tags-wheel-%1-%2").arg(m_box->tab()->active()).arg(htag().tag);
+    applyHydra();
+    return true;
+}
+
 // Aegisub's drag tool: a double-click puts the active line there, the other selected lines go
 // along by as much.
 bool VisualTools::doubleClick(QMouseEvent *e) {
@@ -1467,6 +1780,25 @@ bool VisualTools::doubleClick(QMouseEvent *e) {
 
 bool VisualTools::key(QKeyEvent *e) {
     if ((m_tool == VClip || m_tool == Draw) && shown()) return vecKey(e);
+    if (m_tool == AllTags && shown() && !m_hydra.empty() && (htag().tag == "fad" || htag().tag == "t")) {
+        // the edit box's keys for the video time's distance from the start or to the end (Kainote):
+        // the fade's in and out, or the transform's start and end
+        const char *id = m_box->tab()->main()->panelCommand(e, EditBox::keys());
+        const bool start = id && qstrcmp(id, "editStartDiff") == 0, end = id && qstrcmp(id, "editEndDiff") == 0;
+        if (start || end) {
+            const fsb::Row r = m_box->tab()->s().row(size_t(m_box->tab()->active()));
+            const qint64 t = m_box->time();
+            if (t < r.start || t > r.end) {
+                QApplication::beep();
+                return true;
+            }
+            grabTexts();
+            m_hv[start ? 0 : 1] = double(start || htag().tag == "t" ? t - r.start : r.end - t);
+            m_amend = QString("visual-tags-%1").arg(++m_dragId);
+            applyHydra();
+            return true;
+        }
+    }
     const bool rect = m_tool == RClip && m_v.clip == 1;
     if (!shown() || (m_tool != Pos && m_tool != Move && !rect)) return false;
     const double st = e->modifiers() & Qt::ShiftModifier ? (rect ? 10 : 0.1) : 1;

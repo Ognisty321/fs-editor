@@ -111,6 +111,13 @@ pub(crate) mod bridge {
         fn subs_add_font(r: Pin<&mut SubtitleRenderer>, name: &str, data: &[u8]);
         fn subs_refresh_fonts(r: Pin<&mut SubtitleRenderer>);
         fn subs_set_script(r: Pin<&mut SubtitleRenderer>, ass: &str) -> Result<()>;
+        fn subs_bounds(
+            r: Pin<&mut SubtitleRenderer>,
+            ms: i64,
+            w: i32,
+            h: i32,
+            bounds: &mut [i32],
+        ) -> Result<bool>;
         fn subs_blend(
             r: Pin<&mut SubtitleRenderer>,
             ms: i64,

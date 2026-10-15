@@ -1104,6 +1104,97 @@ Każdy zmieniany plik jest najpierw kopiowany do %2</translation>
     </message>
 </context>
 <context>
+    <name>HydraDialog</name>
+    <message>
+        <source>All tags tool: tags</source>
+        <translation>Narzędzie wszystkich tagów: tagi</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Dodaj</translation>
+    </message>
+    <message>
+        <source>Remove</source>
+        <translation>Usuń</translation>
+    </message>
+    <message>
+        <source>Restore defaults</source>
+        <translation>Przywróć domyślne</translation>
+    </message>
+    <message>
+        <source>The tag without its backslash</source>
+        <translation>Tag bez ukośnika</translation>
+    </message>
+    <message>
+        <source>Sliders: alpha has one, a colour three (red, green, blue), others as many of their leading numbers as are changed (\pos and \fad two)</source>
+        <translation>Suwaki: alfa ma jeden, kolor trzy (czerwony, zielony, niebieski), pozostałe tyle początkowych liczb, ile się zmienia (\pos i \fad dwa)</translation>
+    </message>
+    <message>
+        <source>At the cursor</source>
+        <translation>W miejscu kursora</translation>
+    </message>
+    <message>
+        <source>At the line&apos;s start</source>
+        <translation>Na początku linijki</translation>
+    </message>
+    <message>
+        <source>Name:</source>
+        <translation>Nazwa:</translation>
+    </message>
+    <message>
+        <source>Tag:</source>
+        <translation>Tag:</translation>
+    </message>
+    <message>
+        <source>Minimum:</source>
+        <translation>Minimum:</translation>
+    </message>
+    <message>
+        <source>Maximum:</source>
+        <translation>Maksimum:</translation>
+    </message>
+    <message>
+        <source>Step:</source>
+        <translation>Krok:</translation>
+    </message>
+    <message>
+        <source>Digits after the point:</source>
+        <translation>Cyfry po przecinku:</translation>
+    </message>
+    <message>
+        <source>Values:</source>
+        <translation>Wartości:</translation>
+    </message>
+    <message>
+        <source>Default values:</source>
+        <translation>Wartości domyślne:</translation>
+    </message>
+    <message>
+        <source>Insert puts it:</source>
+        <translation>Wstawianie umieszcza go:</translation>
+    </message>
+    <message>
+        <source>Change mode:</source>
+        <translation>Tryb zmiany:</translation>
+    </message>
+    <message>
+        <source>A tag needs a name.</source>
+        <translation>Tag musi mieć nazwę.</translation>
+    </message>
+    <message>
+        <source>Two tags are named &quot;%1&quot;.</source>
+        <translation>Dwa tagi nazywają się &quot;%1&quot;.</translation>
+    </message>
+    <message>
+        <source>&quot;%1&quot; needs a tag.</source>
+        <translation>&quot;%1&quot; musi mieć tag.</translation>
+    </message>
+    <message>
+        <source>The minimum of &quot;%1&quot; is not below its maximum.</source>
+        <translation>Minimum &quot;%1&quot; nie jest mniejsze od maksimum.</translation>
+    </message>
+</context>
+<context>
     <name>KanjiTimerDialog</name>
     <message>
         <source>Kanji timing</source>
@@ -3355,6 +3446,14 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Kolory</translation>
     </message>
     <message>
+        <source>File associations</source>
+        <translation>Skojarzenia plików</translation>
+    </message>
+    <message>
+        <source>Subtitle files of the types ticked open in this program. A program picked for a type in Explorer stays its default; this one is then in its &quot;Open with&quot; list.</source>
+        <translation>Pliki napisów zaznaczonych typów otwierają się w tym programie. Program wybrany dla typu w Eksploratorze pozostaje domyślnym; ten jest wtedy na jego liście &quot;Otwórz za pomocą&quot;.</translation>
+    </message>
+    <message>
         <source>Ignore whitespace in characters per second</source>
         <translation>Ignoruj spacje w znakach na sekundę</translation>
     </message>
@@ -4692,10 +4791,6 @@ Dopasować rozdzielczość napisów do wideo?</translation>
         <translation>Zmieniacz pozycji</translation>
     </message>
     <message>
-        <source>All tags (drag left/right to change the value)</source>
-        <translation>Wszystkie tagi (przeciągnij w lewo/prawo, aby zmienić wartość)</translation>
-    </message>
-    <message>
         <source>Move points</source>
         <translation>Przesuń punkty</translation>
     </message>
@@ -4792,6 +4887,14 @@ Dopasować rozdzielczość napisów do wideo?</translation>
         <translation>\org</translation>
     </message>
     <message>
+        <source>The tag; Shift+wheel on the video picks another</source>
+        <translation>Tag; Shift+kółko na wideo wybiera inny</translation>
+    </message>
+    <message>
+        <source>How the value changes the selected lines: Insert puts it at the edit box&apos;s cursor (around the selected tags for \t) or the line&apos;s start, Step gives each line the active line&apos;s value and the change times its place in the selection</source>
+        <translation>Jak wartość zmienia zaznaczone linijki: Wstaw umieszcza ją w miejscu kursora pola edycji (wokół zaznaczonych tagów dla \t) albo na początku linijki, Krok daje każdej linijce wartość aktywnej linijki i zmianę razy jej miejsce w zaznaczeniu</translation>
+    </message>
+    <message>
         <source>Add</source>
         <translation>Dodaj</translation>
     </message>
@@ -4820,8 +4923,124 @@ Dopasować rozdzielczość napisów do wideo?</translation>
         <translation>Gradient linijek malejąco</translation>
     </message>
     <message>
+        <source>Insert</source>
+        <translation>Wstaw</translation>
+    </message>
+    <message>
+        <source>Step from the active line</source>
+        <translation>Krok od aktywnej linijki</translation>
+    </message>
+    <message>
+        <source>All tags: sliders over the video; Shift+wheel picks the tag, right-drag moves the sliders</source>
+        <translation>Wszystkie tagi: suwaki nad wideo; Shift+kółko wybiera tag, przeciąganie prawym przyciskiem przesuwa suwaki</translation>
+    </message>
+    <message>
         <source>Value; Enter applies it to the selected lines</source>
         <translation>Wartość; Enter stosuje ją do zaznaczonych linijek</translation>
+    </message>
+    <message>
+        <source>Edit the list of tags</source>
+        <translation>Edytuj listę tagów</translation>
+    </message>
+    <message>
+        <source>Position by a rectangle: drag a rectangle on the video and the line goes into it by the chosen alignment, measured as libass draws it; the other selected lines move along. Drag its corners, edges or inside to change it</source>
+        <translation>Pozycja wg prostokąta: przeciągnij prostokąt na wideo, a linijka trafi do niego wg wybranego wyrównania, zmierzona tak, jak rysuje ją libass; pozostałe zaznaczone linijki przesuwają się razem z nią. Przeciągnij rogi, krawędzie lub wnętrze, by go zmienić</translation>
+    </message>
+    <message>
+        <source>Position on the X axis</source>
+        <translation>Pozycja na osi X</translation>
+    </message>
+    <message>
+        <source>Position on the Y axis</source>
+        <translation>Pozycja na osi Y</translation>
+    </message>
+    <message>
+        <source>Left-bottom</source>
+        <translation>Lewo-dół</translation>
+    </message>
+    <message>
+        <source>Center-bottom</source>
+        <translation>Środek-dół</translation>
+    </message>
+    <message>
+        <source>Right-bottom</source>
+        <translation>Prawo-dół</translation>
+    </message>
+    <message>
+        <source>Left-middle</source>
+        <translation>Lewo-środek</translation>
+    </message>
+    <message>
+        <source>Center</source>
+        <translation>Środek</translation>
+    </message>
+    <message>
+        <source>Right-middle</source>
+        <translation>Prawo-środek</translation>
+    </message>
+    <message>
+        <source>Left-top</source>
+        <translation>Lewo-góra</translation>
+    </message>
+    <message>
+        <source>Center-top</source>
+        <translation>Środek-góra</translation>
+    </message>
+    <message>
+        <source>Right-top</source>
+        <translation>Prawo-góra</translation>
+    </message>
+    <message>
+        <source>Left-below</source>
+        <translation>Lewo-pod</translation>
+    </message>
+    <message>
+        <source>Center-below</source>
+        <translation>Środek-pod</translation>
+    </message>
+    <message>
+        <source>Right-below</source>
+        <translation>Prawo-pod</translation>
+    </message>
+    <message>
+        <source>Left-above</source>
+        <translation>Lewo-nad</translation>
+    </message>
+    <message>
+        <source>Center-above</source>
+        <translation>Środek-nad</translation>
+    </message>
+    <message>
+        <source>Right-above</source>
+        <translation>Prawo-nad</translation>
+    </message>
+    <message>
+        <source>Before-top</source>
+        <translation>Przed-góra</translation>
+    </message>
+    <message>
+        <source>Before-middle</source>
+        <translation>Przed-środek</translation>
+    </message>
+    <message>
+        <source>Before-bottom</source>
+        <translation>Przed-dół</translation>
+    </message>
+    <message>
+        <source>After-top</source>
+        <translation>Za-góra</translation>
+    </message>
+    <message>
+        <source>After-middle</source>
+        <translation>Za-środek</translation>
+    </message>
+    <message>
+        <source>After-bottom</source>
+        <translation>Za-dół</translation>
+    </message>
+    <message>
+        <source>Where the line goes against the rectangle</source>
+        <translation>Gdzie linijka staje względem prostokąta</translation>
     </message>
     <message>
         <source>Scale width</source>
@@ -4844,6 +5063,14 @@ Dopasować rozdzielczość napisów do wideo?</translation>
         <translation>Utrzymanie proporcji: pozycje zaznaczonych linijek i ich clipy też są skalowane wokół aktywnej linijki, by tekst i rysunki wektorowe nie poprzestawiały się względem siebie</translation>
     </message>
     <message>
+        <source>Scale by a rectangle: drag a rectangle on the video and the text, measured as libass draws it, is scaled to fill it on the chosen axes, its borders kept as they are</source>
+        <translation>Skala wg prostokąta: przeciągnij prostokąt na wideo, a tekst, zmierzony tak, jak rysuje go libass, zostanie przeskalowany, by go wypełnić na wybranych osiach, z obramowaniem bez zmian</translation>
+    </message>
+    <message>
+        <source>Your own rectangle for the text at its present scale, dragged with the right mouse button, where the measured one does not fit what the text should fill</source>
+        <translation>Własny prostokąt tekstu w obecnej skali, przeciągany prawym przyciskiem, gdy zmierzony nie pasuje do tego, co tekst ma wypełnić</translation>
+    </message>
+    <message>
         <source>Set the angle from 2 points: drag along an edge in the video</source>
         <translation>Ustaw kąt z 2 punktów: przeciągnij wzdłuż krawędzi na wideo</translation>
     </message>
@@ -4860,6 +5087,10 @@ Dopasować rozdzielczość napisów do wideo?</translation>
         <translation>Zmiana wszystkich tagów obrotu wokół osi X / Y: każdy \frx i \fry zaznaczonych linijek, także w \t, obraca się o ten sam kąt</translation>
     </message>
     <message>
+        <source>Nothing of the line shows on this frame to be measured</source>
+        <translation>Na tej klatce nic z linijki nie widać, nie ma czego zmierzyć</translation>
+    </message>
+    <message>
         <source>The visual tools do not work on comments</source>
         <translation>Narzędzia wizualne nie działają na komentarzach</translation>
     </message>
@@ -4872,6 +5103,124 @@ albo nie trwa wcale</translation>
     <message>
         <source>Seek the video at least one frame from the first point&apos;s time</source>
         <translation>Przesuń wideo co najmniej o jedną klatkę od czasu pierwszego punktu</translation>
+    </message>
+</context>
+<context>
+    <name>assoc</name>
+    <message>
+        <source>%1 subtitles</source>
+        <translation>Napisy %1</translation>
+    </message>
+</context>
+<context>
+    <name>hydra</name>
+    <message>
+        <source>blur</source>
+        <translation>rozmycie</translation>
+    </message>
+    <message>
+        <source>border</source>
+        <translation>obwódka</translation>
+    </message>
+    <message>
+        <source>blur edge</source>
+        <translation>rozmycie krawędzi</translation>
+    </message>
+    <message>
+        <source>alpha</source>
+        <translation>alfa</translation>
+    </message>
+    <message>
+        <source>primary alpha</source>
+        <translation>alfa podstawowa</translation>
+    </message>
+    <message>
+        <source>border alpha</source>
+        <translation>alfa obwódki</translation>
+    </message>
+    <message>
+        <source>shadow alpha</source>
+        <translation>alfa cienia</translation>
+    </message>
+    <message>
+        <source>primary color</source>
+        <translation>kolor podstawowy</translation>
+    </message>
+    <message>
+        <source>border color</source>
+        <translation>kolor obwódki</translation>
+    </message>
+    <message>
+        <source>shadow color</source>
+        <translation>kolor cienia</translation>
+    </message>
+    <message>
+        <source>fading</source>
+        <translation>zanikanie</translation>
+    </message>
+    <message>
+        <source>shear x</source>
+        <translation>pochylenie x</translation>
+    </message>
+    <message>
+        <source>shear y</source>
+        <translation>pochylenie y</translation>
+    </message>
+    <message>
+        <source>font size</source>
+        <translation>rozmiar czcionki</translation>
+    </message>
+    <message>
+        <source>spacing</source>
+        <translation>odstępy</translation>
+    </message>
+    <message>
+        <source>shadow</source>
+        <translation>cień</translation>
+    </message>
+    <message>
+        <source>border x</source>
+        <translation>obwódka x</translation>
+    </message>
+    <message>
+        <source>border y</source>
+        <translation>obwódka y</translation>
+    </message>
+    <message>
+        <source>shadow x</source>
+        <translation>cień x</translation>
+    </message>
+    <message>
+        <source>shadow y</source>
+        <translation>cień y</translation>
+    </message>
+    <message>
+        <source>position</source>
+        <translation>pozycja</translation>
+    </message>
+    <message>
+        <source>transform times</source>
+        <translation>czasy transformacji</translation>
+    </message>
+    <message>
+        <source>scale x</source>
+        <translation>skala x</translation>
+    </message>
+    <message>
+        <source>scale y</source>
+        <translation>skala y</translation>
+    </message>
+    <message>
+        <source>rotation z</source>
+        <translation>obrót z</translation>
+    </message>
+    <message>
+        <source>rotation x</source>
+        <translation>obrót x</translation>
+    </message>
+    <message>
+        <source>rotation y</source>
+        <translation>obrót y</translation>
     </message>
 </context>
 <context>

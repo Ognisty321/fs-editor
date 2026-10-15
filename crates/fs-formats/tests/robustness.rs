@@ -147,7 +147,7 @@ fn exercise_text(text: &str) {
             None,
             tag,
             fs_core::tag_adjust::TagAdjust::Add,
-            1.5,
+            &[1.5, 1.5],
             text.len() / 2,
             1,
         );

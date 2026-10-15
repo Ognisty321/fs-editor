@@ -787,4 +787,42 @@ bool SubtitleRenderer::overlay(int64_t ms, int width, int height, int video_w, i
     return draw<true>(ms, width, height, video_w, video_h, rgba_premul);
 }
 
+bool SubtitleRenderer::bounds(int64_t ms, int width, int height, std::span<int32_t> box) {
+    if (!track_ || width <= 0 || height <= 0 || box.size() < 8)
+        return false;
+    ass_set_frame_size(renderer_, width, height);
+    ass_set_storage_size(renderer_, width, height);
+    int changed = 0;
+    // [0] text and borders, [1] text alone
+    std::array<std::array<int, 4>, 2> b{{{INT_MAX, INT_MAX, INT_MIN, INT_MIN}, {INT_MAX, INT_MAX, INT_MIN, INT_MIN}}};
+    for (ASS_Image *img = ass_render_frame(renderer_, track_, ms, &changed); img; img = img->next) {
+        if (img->type == ASS_Image::IMAGE_TYPE_SHADOW || img->w <= 0 || img->h <= 0)
+            continue;
+        const bool text = img->type == ASS_Image::IMAGE_TYPE_CHARACTER;
+        for (int y = 0; y < img->h; ++y) {
+            const uint8_t *src = img->bitmap + static_cast<ptrdiff_t>(y) * img->stride;
+            int l = 0, r = img->w - 1;
+            while (l < img->w && !src[l])
+                ++l;
+            if (l == img->w)
+                continue;
+            while (!src[r])
+                --r;
+            for (auto &k : text ? std::span(b) : std::span(b).first(1)) {
+                k[0] = std::min(k[0], img->dst_x + l);
+                k[1] = std::min(k[1], img->dst_y + y);
+                k[2] = std::max(k[2], img->dst_x + r + 1);
+                k[3] = std::max(k[3], img->dst_y + y + 1);
+            }
+        }
+    }
+    if (b[0][0] > b[0][2])
+        return false;
+    if (b[1][0] > b[1][2])
+        b[1] = b[0];
+    std::ranges::copy(b[0], box.begin());
+    std::ranges::copy(b[1], box.begin() + 4);
+    return true;
+}
+
 }  // namespace fsmedia

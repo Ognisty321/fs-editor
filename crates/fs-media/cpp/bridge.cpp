@@ -117,6 +117,10 @@ void subs_refresh_fonts(SubtitleRenderer &r) { r.refresh_fonts(); }
 
 void subs_set_script(SubtitleRenderer &r, rust::Str ass) { r.set_script(std::string_view(ass.data(), ass.size())); }
 
+bool subs_bounds(SubtitleRenderer &r, int64_t ms, int32_t w, int32_t h, rust::Slice<int32_t> bounds) {
+    return r.bounds(ms, w, h, std::span<int32_t>(bounds.data(), bounds.size()));
+}
+
 bool subs_blend(SubtitleRenderer &r, int64_t ms, int32_t w, int32_t h, int32_t vw, int32_t vh,
                 rust::Slice<uint8_t> rgba) {
     return r.blend(ms, w, h, vw, vh, std::span<uint8_t>(rgba.data(), rgba.size()));

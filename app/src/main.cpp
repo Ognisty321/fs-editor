@@ -1,6 +1,7 @@
 #include "audiobox.h"
 #include "dialogs.h"
 #include "editbox.h"
+#include "associations.h"
 #include "mainwindow.h"
 #include "tabpanel.h"
 #include "theme.h"
@@ -18,6 +19,7 @@
 #include <QMessageBox>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QFile>
 #include <QSettings>
 #include <QSlider>
 #include <QTabBar>
@@ -149,6 +151,24 @@ static QWidget *smokeDialog(QWidget &w) {
     return top;
 }
 
+// FSED_CHECK_ASSOC=<file>: the file associations' registry writes, on a settings file instead
+static bool checkAssoc(const QString &file) {
+    QFile::remove(file);
+    QSettings c(file, QSettings::IniFormat);
+    c.setValue(".srt/Default", "Other.srt");
+    assoc::set(c, "srt", true, "C:/fsed.exe");
+    assoc::set(c, "ass", true, "C:/fsed.exe");
+    const bool on = assoc::isOn(c, "srt") && !assoc::isOn(c, "ssa") && c.value(".srt/Default") == "FSEditor.srt" &&
+                    c.value("FSEditor.srt/shell/open/command/Default") == "\"C:\\fsed.exe\" \"%1\"" &&
+                    c.contains(".ass/OpenWithProgids/FSEditor.ass");
+    assoc::set(c, "srt", false, {});
+    assoc::set(c, "ass", false, {});
+    const bool off = !assoc::isOn(c, "srt") && c.value(".srt/Default") == "Other.srt" && !c.contains(".ass/Default") &&
+                     !c.contains(".srt/OpenWithProgids/FSEditor.srt") && !c.contains(".srt/FSEditor.Previous");
+    std::fprintf(stderr, "assoc %s\n", on && off ? "ok" : "FAILED");
+    return on && off;
+}
+
 int main(int argc, char **argv) {
 #ifdef _WIN32
     SetUnhandledExceptionFilter(crashHandler);
@@ -158,6 +178,7 @@ int main(int argc, char **argv) {
     std::signal(SIGABRT, fatalSignal);
     fsb::install_panic_hook(std::make_unique<PanicRecovery>());
     App app(argc, argv);
+    if (const QString f = qEnvironmentVariable("FSED_CHECK_ASSOC"); !f.isEmpty()) return checkAssoc(f) ? 0 : 1;
     QApplication::setOrganizationName("FS Editor");
     QApplication::setApplicationName("FS Editor");
     QApplication::setApplicationDisplayName("FS Editor");

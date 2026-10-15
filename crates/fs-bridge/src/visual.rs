@@ -33,6 +33,33 @@ fn default_pos(doc: &Document, ev: &Event, align: i32) -> (f64, f64) {
     (x as f64, y as f64)
 }
 
+/// See the bridge's `fit_anchor`.
+pub fn fit_anchor(b: &[f64], r: &[f64], align: u8) -> [f64; 2] {
+    if b.len() < 4 || r.len() < 4 {
+        return [0.0, 0.0];
+    }
+    let an = align as i32 + 1;
+    // the box's left (1), centre (2) or right (0) on the rectangle's
+    let x = |k: i32| match k {
+        1 => r[0] - b[0],
+        0 => r[2] - b[2],
+        _ => (r[0] + r[2] - b[0] - b[2]) / 2.0,
+    };
+    // its top (0), middle (1) or bottom (2) on the rectangle's
+    let y = |k: i32| match k {
+        0 => r[1] - b[1],
+        1 => (r[1] + r[3] - b[1] - b[3]) / 2.0,
+        _ => r[3] - b[3],
+    };
+    match an {
+        1..=9 => [x(an % 3), y(2 - (an - 1) / 3)],
+        10..=12 => [x(an % 3), r[3] - b[1]], // below: its top on the rectangle's bottom
+        13..=15 => [x(an % 3), r[1] - b[3]], // above
+        16..=18 => [r[0] - b[2], y(an - 16)], // before: its right on the rectangle's left
+        _ => [r[2] - b[0], y(an - 19)],      // after
+    }
+}
+
 pub fn of_event(doc: &Document, ev: &Event) -> Visual {
     let line = Line::parse(&ev.text);
     let style = doc.style(&ev.style);
@@ -119,6 +146,21 @@ pub fn of_event(doc: &Document, ev: &Event) -> Visual {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_box_fits_a_rectangle_each_of_the_21_ways() {
+        let (b, r) = ([-50.0, -20.0, 50.0, 20.0], [100.0, 100.0, 300.0, 200.0]);
+        let at = |an: u8| super::fit_anchor(&b, &r, an - 1);
+        assert_eq!(at(1), [150.0, 180.0]);
+        assert_eq!(at(5), [200.0, 150.0]);
+        assert_eq!(at(7), [150.0, 120.0]);
+        assert_eq!(at(9), [250.0, 120.0]);
+        assert_eq!(at(11), [200.0, 220.0]); // centre below
+        assert_eq!(at(13), [150.0, 80.0]); // left above
+        assert_eq!(at(16), [50.0, 120.0]); // before, top
+        assert_eq!(at(17), [50.0, 150.0]);
+        assert_eq!(at(21), [350.0, 180.0]); // after, bottom
+    }
+
     #[test]
     fn drawing_and_clip() {
         let mut doc = fs_core::Document::new();

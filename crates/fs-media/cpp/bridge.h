@@ -40,6 +40,7 @@ void subs_set_fonts(SubtitleRenderer &r, rust::Str family, rust::Str dir);
 void subs_add_font(SubtitleRenderer &r, rust::Str name, rust::Slice<const uint8_t> data);
 void subs_refresh_fonts(SubtitleRenderer &r);
 void subs_set_script(SubtitleRenderer &r, rust::Str ass);
+bool subs_bounds(SubtitleRenderer &r, int64_t ms, int32_t w, int32_t h, rust::Slice<int32_t> bounds);
 bool subs_blend(SubtitleRenderer &r, int64_t ms, int32_t w, int32_t h, int32_t vw, int32_t vh, rust::Slice<uint8_t> rgba);
 bool subs_overlay(SubtitleRenderer &r, int64_t ms, int32_t w, int32_t h, int32_t vw, int32_t vh,
                   rust::Slice<uint8_t> rgba);
