@@ -177,7 +177,8 @@ fn exercise_doc(mut doc: Document) {
     ops::change_fps(&mut doc, &fr, &Framerate::from_fps(25.0).unwrap());
     ops::snap_to_frames(&mut doc, &Rows::All, &fr);
     ops::sort_events(&mut doc, SortKey::Start, None);
-    ops::make_continuous(&mut doc, &all, true);
+    let pairs: Vec<(usize, usize)> = all.windows(2).map(|w| (w[0], w[1])).collect();
+    ops::make_continuous(&mut doc, &pairs, true);
     ops::fix_styles(&mut doc);
     let mut d2 = doc.clone();
     let _ = ops::split_by_karaoke(&mut d2, &all);

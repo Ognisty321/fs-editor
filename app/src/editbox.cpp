@@ -695,7 +695,14 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     connect(m_text, &QPlainTextEdit::textChanged, this, &EditBox::updateTextInfo);
     for (auto *e : {m_text, m_original}) connect(e, &SubsTextEdit::keyCommand, this, &EditBox::onKey);
     connect(m_text, &SubsTextEdit::splitRequested, this, [this](qint64 at) {
-        splitAtCursor(at == 0 ? m_tab->videoStartTime() : at);
+        // at the video frame, as Aegisub: the frame shown, kept within the line, ends the first part
+        if (VideoBox *v = m_tab->video(); at == 0 && v->hasVideo() && m_row >= 0) {
+            const fsb::Row r = m_tab->s().row(size_t(m_row));
+            at = v->timeAtEnd(std::max(v->frameAtStart(r.start), std::min(v->frame(), v->frameAtEnd(r.end))));
+        } else if (at == 0) {
+            at = m_tab->videoTime();
+        }
+        splitAtCursor(at);
     });
     connect(m_text, &SubsTextEdit::revertRequested, this, [this] { m_text->setText(m_initial); });
     // Aegisub's edit/insert_original: the text from before the edits, at the cursor

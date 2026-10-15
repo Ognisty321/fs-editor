@@ -1106,9 +1106,29 @@ impl Session {
         new
     }
 
+    /// Aegisub's "Change End" / "Change Start": a row ends at the next row's start (or starts
+    /// at the previous row's end) when that row is selected too; a single row uses its neighbour.
     pub fn make_continuous(&mut self, rows: &[usize], next: bool) {
-        let evs = self.main_events(rows);
-        self.edit("Continuous times", |d| ops::make_continuous(d, &evs, next));
+        let mut rows = rows.to_vec();
+        rows.sort_unstable();
+        rows.dedup();
+        if let [r] = rows[..] {
+            rows = if next {
+                vec![r, r + 1]
+            } else {
+                r.checked_sub(1).into_iter().chain([r]).collect()
+            };
+        }
+        let pairs: Vec<(usize, usize)> = rows
+            .windows(2)
+            .filter(|w| w[1] == w[0] + 1)
+            .filter_map(|w| Some((self.tl_row(w[0])?.main(), self.tl_row(w[1])?.main())))
+            .collect();
+        if !pairs.is_empty() {
+            self.edit("Continuous times", |d| {
+                ops::make_continuous(d, &pairs, next)
+            });
+        }
     }
 
     /// Sort by 0 start, 1 end, 2 style, 3 actor, 4 effect, 5 layer, 6 text.
@@ -2460,6 +2480,32 @@ mod tests {
         let texts: Vec<String> = (0..s.row_count()).map(|i| s.row(i).text).collect();
         assert_eq!(texts, ["one", "p1", "plain p2", "two", "three", "x", "y"]);
         assert_eq!((s.row(1).start, s.row(2).end), (7000, 5000));
+    }
+
+    #[test]
+    fn continuous_times_as_aegisub() {
+        let times = |s: &Session| -> Vec<(i64, i64)> {
+            (0..s.row_count())
+                .map(|i| (s.row(i).start, s.row(i).end))
+                .collect()
+        };
+        // one row: its neighbour
+        let mut s = session(ASS);
+        s.make_continuous(&[1], false);
+        s.make_continuous(&[1], true);
+        assert_eq!(times(&s), [(1000, 2000), (2000, 5000), (5000, 6000)]);
+        s.make_continuous(&[2], true); // the last row has no next one
+        assert_eq!(times(&s)[2], (5000, 6000));
+        // rows 0 and 2: not adjacent, so nothing links
+        let mut s = session(ASS);
+        s.make_continuous(&[0, 2], false);
+        assert_eq!(times(&s), [(1000, 2000), (3000, 4000), (5000, 6000)]);
+        // translator mode: rows, not the events between them, are the neighbours
+        s.tl_enable(true);
+        s.paste_translation(0, "jeden");
+        s.paste_translation(1, "dwa");
+        s.make_continuous(&[0, 1], true);
+        assert_eq!((s.row(0).end, s.row(1).start), (3000, 3000));
     }
 
     #[test]

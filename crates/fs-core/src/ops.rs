@@ -589,15 +589,19 @@ pub fn overlapping_with(doc: &Document, row: usize) -> Vec<usize> {
 // Line structure edits
 // ---------------------------------------------------------------------------
 
-/// Duplicate rows (each copy inserted after its original). Returns the new
-/// row indices.
+/// Duplicate rows: the copies of each block of adjacent rows go after the block, in order
+/// (Aegisub, Kainote). Returns the new row indices.
 pub fn duplicate(doc: &mut Document, rows: &[usize]) -> Vec<usize> {
     let mut rows = rows.to_vec();
     rows.sort_unstable();
     rows.dedup();
     let items = rows
-        .iter()
-        .filter_map(|&r| Some((r + 1, doc.event(r)?.clone())))
+        .chunk_by(|a, b| b - a == 1)
+        .flat_map(|block| {
+            let after = block[block.len() - 1] + 1;
+            block.iter().map(move |&r| (after, r))
+        })
+        .filter_map(|(at, r)| Some((at, doc.event(r)?.clone())))
         .collect();
     doc.insert_events(items)
 }
@@ -842,7 +846,7 @@ pub fn join(doc: &mut Document, rows: &[usize], mode: JoinMode) -> Option<usize>
                 s.push_str(&format!(
                     "{{\\k{}}}{}",
                     ((e.end - e.start.max(pos)).ms().max(0) + 5) / 10,
-                    tags::strip_tags(&e.text)
+                    e.text // tags and all, as Aegisub joins them
                 ));
                 pos = pos.max(e.end);
             }
@@ -919,17 +923,18 @@ pub fn set_comment(doc: &mut Document, rows: &[usize], comment: Option<bool>) {
     }
 }
 
-/// Make each row's end equal the next row's start (continuous timing).
-pub fn make_continuous(doc: &mut Document, rows: &[usize], use_next_start: bool) {
-    let mut rows = rows.to_vec();
-    rows.sort_unstable();
-    for w in rows.windows(2) {
-        let (a, b) = (w[0], w[1]);
-        let (ea, eb) = (doc.event(a).unwrap().clone(), doc.event(b).unwrap().clone());
+/// Link each `(previous, next)` pair of rows: the previous one ends at the next one's start, or
+/// with `use_next_start` false the next one starts at the previous one's end.
+pub fn make_continuous(doc: &mut Document, pairs: &[(usize, usize)], use_next_start: bool) {
+    for &(a, b) in pairs {
+        let (Some(end), Some(start)) = (doc.event(a).map(|e| e.end), doc.event(b).map(|e| e.start))
+        else {
+            continue;
+        };
         if use_next_start {
-            doc.event_mut(a).unwrap().end = eb.start;
+            doc.event_mut(a).unwrap().end = start;
         } else {
-            doc.event_mut(b).unwrap().start = ea.end;
+            doc.event_mut(b).unwrap().start = end;
         }
     }
 }
@@ -1685,10 +1690,10 @@ mod tests {
     fn karaoke_join() {
         let mut d = doc(&[
             ("0:00:00.00", "0:00:00.50", "Default", "ka"),
-            ("0:00:00.70", "0:00:01.00", "Default", "ra"),
+            ("0:00:00.70", "0:00:01.00", "Default", r"{\i1}ra"),
         ]);
         join(&mut d, &[0, 1], JoinMode::AsKaraoke);
-        assert_eq!(d.event(0).unwrap().text, r"{\k50}ka{\k20}{\k30}ra");
+        assert_eq!(d.event(0).unwrap().text, r"{\k50}ka{\k20}{\k30}{\i1}ra");
     }
 
     #[test]
@@ -1709,6 +1714,20 @@ mod tests {
         // a ends 2050, b starts 2100 → meet in the middle
         assert_eq!(d.event(0).unwrap().end, Time(2075));
         assert_eq!(d.event(1).unwrap().start, Time(2075));
+    }
+
+    #[test]
+    fn duplicates_follow_their_block() {
+        let lines: Vec<_> = ["a", "b", "c", "d", "e"]
+            .map(|t| ("0:00:00.00", "0:00:01.00", "Default", t))
+            .to_vec();
+        let mut d = doc(&lines);
+        let new = duplicate(&mut d, &[3, 0, 1]);
+        let texts: Vec<_> = (0..d.event_count())
+            .map(|i| d.event(i).unwrap().text.as_str())
+            .collect();
+        assert_eq!(texts, ["a", "b", "a", "b", "c", "d", "d", "e"]);
+        assert_eq!(new, [2, 3, 6]);
     }
 
     /// Aegisub's lead-in/out, checked against its pairwise version (every line clear of this one
