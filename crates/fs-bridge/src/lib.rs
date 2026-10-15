@@ -542,6 +542,7 @@ pub mod ffi {
         fn duplicate_rows(self: &mut Session, rows: &[usize]) -> Vec<usize>;
         fn delete_rows(self: &mut Session, rows: &[usize]);
         fn clear_text(self: &mut Session, rows: &[usize]);
+        fn clear_text_keep_tags(self: &mut Session, rows: &[usize]);
         /// Kainote's trees: the rows closed trees fold away.
         fn tree_hidden(self: &Session) -> Vec<usize>;
         /// The rows of the tree `row` describes (empty when it describes none).
@@ -554,6 +555,7 @@ pub mod ffi {
         fn join_rows(self: &mut Session, rows: &[usize], mode: u8) -> i64;
         fn recombine_rows(self: &mut Session, rows: &[usize]) -> Vec<usize>;
         fn change_fps(self: &mut Session, from: &str, to: &str, video: &[i64]) -> Result<()>;
+        fn stretch_times(self: &mut Session, anchor: i64, from: i64, to: i64);
         fn split_by_karaoke(self: &mut Session, rows: &[usize]) -> Vec<usize>;
         /// `at_ms`: -1 estimates the split time from the text lengths, -2 keeps both parts' times.
         fn split_row(self: &mut Session, row: usize, byte_pos: usize, at_ms: i64) -> i64;

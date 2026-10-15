@@ -1105,6 +1105,18 @@ impl Session {
         });
     }
 
+    /// Aegisub's "Clear text, keep override tags": only the `{\...}` blocks stay; comments
+    /// and drawings go with the text.
+    pub fn clear_text_keep_tags(&mut self, rows: &[usize]) {
+        let evs = self.main_events(rows);
+        self.edit("Delete text", |d| {
+            for e in evs {
+                let ev = d.event_mut(e).unwrap();
+                ev.text = override_blocks(&ev.text);
+            }
+        });
+    }
+
     /// Retime the whole script between frame rates (Aegisub "Transform
     /// Framerate"); `video` as a rate stands for the video's timecodes.
     pub fn change_fps(&mut self, from: &str, to: &str, video: &[i64]) -> Result<(), String> {
@@ -1119,6 +1131,28 @@ impl Session {
         let (from, to) = (rate(from)?, rate(to)?);
         self.edit("Change frame rate", |d| ops::change_fps(d, &from, &to));
         Ok(())
+    }
+
+    /// Kainote's "Set FPS from video": every time of the script stretched about `anchor`, so
+    /// that `from` lands on `to` (subtitles timed to another frame rate).
+    pub fn stretch_times(&mut self, anchor: i64, from: i64, to: i64) {
+        if from == anchor {
+            return;
+        }
+        let k = (to - anchor) as f64 / (from - anchor) as f64;
+        let at = |t: Time| {
+            Time(
+                (anchor as f64 + (t.ms() - anchor) as f64 * k)
+                    .round()
+                    .max(0.0) as i64,
+            )
+        };
+        self.edit("Set FPS from video", |d| {
+            for i in 0..d.events().len() {
+                let ev = d.event_mut(i).unwrap();
+                (ev.start, ev.end) = (at(ev.start), at(ev.end));
+            }
+        });
     }
 
     /// Aegisub's Export: a copy through the Fix Styles / Transform Framerate
@@ -2584,6 +2618,20 @@ fn new_end_times(d: &mut Document, evs: &[usize]) {
     }
 }
 
+fn override_blocks(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(a) = rest.find('{') {
+        let Some(b) = rest[a..].find('}') else { break };
+        let block = &rest[a..=a + b];
+        if block.contains('\\') {
+            out.push_str(block);
+        }
+        rest = &rest[a + b + 1..];
+    }
+    out
+}
+
 /// The clipboard's lines as Aegisub pastes them: a `Dialogue:`/`Comment:` line is an event,
 /// any other line plain text for the caller to wrap.
 fn pasted_lines(text: &str) -> Vec<Result<Event, &str>> {
@@ -3217,6 +3265,27 @@ mod tests {
         assert!(s.undo());
         let texts: Vec<String> = (0..s.row_count()).map(|i| s.row(i).text).collect();
         assert_eq!(texts, ["one", "two", "three"]);
+    }
+
+    #[test]
+    fn override_blocks_stay() {
+        assert_eq!(
+            override_blocks(r"{\an8}Hi {note}there{\i1}!{\p1}m 0 0 l 1 1{\p0}"),
+            r"{\an8}{\i1}{\p1}{\p0}"
+        );
+        assert_eq!(override_blocks("plain {open"), "");
+    }
+
+    #[test]
+    fn stretch_times_keeps_the_anchor() {
+        let mut s = session(ASS);
+        let t0: Vec<_> = (0..3).map(|i| (s.row(i).start, s.row(i).end)).collect();
+        let (a, b) = (t0[0].0, t0[1].0);
+        s.stretch_times(a, b, b + (b - a)); // twice as long
+        let t: Vec<_> = (0..3).map(|i| (s.row(i).start, s.row(i).end)).collect();
+        for (o, n) in t0.iter().zip(&t) {
+            assert_eq!((n.0, n.1), (a + 2 * (o.0 - a), a + 2 * (o.1 - a)));
+        }
     }
 
     #[test]

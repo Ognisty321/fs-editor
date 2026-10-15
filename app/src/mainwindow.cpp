@@ -95,7 +95,7 @@ const QHash<QString, std::pair<QString, QColor>> kIcons = {
     {"redo", {"arrow-forward-up", {}}}, {"history", {"history", {}}}, {"findReplace", {"replace", kOrange}},
     {"find", {"search", kOrange}}, {"findNext", {"search", kOrange}}, {"correctErrors", {"replace", kGreen}},
     {"selectLines", {"list-check", kGreen}},
-    {"duplicate", {"copy", {}}}, {"deleteText", {"eraser", kRed}}, {"deleteLines", {"row-remove", kRed}}, {"pasteOver", {"clipboard-text", kBlue}},
+    {"duplicate", {"copy", {}}}, {"deleteText", {"eraser", kRed}}, {"deleteTextKeepTags", {"eraser", kOrange}}, {"deleteLines", {"row-remove", kRed}}, {"pasteOver", {"clipboard-text", kBlue}},
     {"prevLine", {"arrow-up", {}}}, {"nextLine", {"arrow-down", {}}}, {"joinPrev", {"arrows-join", {}}},
     {"joinNext", {"arrows-join-2", {}}}, {"recombine", {"arrows-join", kGreen}},
     {"splitKaraoke", {"arrows-split", kGreen}}, {"selectFromVideo", {"focus-2", kGreen}}, {"newTab", {"browser-plus", {}}},
@@ -780,6 +780,10 @@ void MainWindow::buildMenus() {
     add("selectOnVideo", tr("Select all lines visible on video"), {}, lines,
         [=] { tab()->grid()->selectVisibleOnVideo(); });
     add("deleteText", tr("Delete text"), QKeySequence("Alt+Del"), lines, [=] { tab()->grid()->deleteText(); });
+    add("deleteTextKeepTags", tr("Delete text, keep tags"), {}, lines, [=] {
+        tab()->s().clear_text_keep_tags(fs::slice(tab()->selection()));
+        tab()->changed();
+    });
     add("deleteLines", tr("Delete lines"), QKeySequence("Shift+Del"), lines, [=] { tab()->grid()->deleteRows(); });
     // Aegisub edit/line/paste/over: onto the selection, or downwards from the active line
     add("pasteOver", tr("Paste lines over..."), QKeySequence("Ctrl+Shift+V"), lines, [=, this] {
@@ -1206,6 +1210,15 @@ void MainWindow::buildMenus() {
     });
     // Kainote's: runs the panel's page shown, hidden or not
     add("runShift", tr("Shift times / run post processor"), {}, subs, [=] { tab()->shift()->run(); });
+    // Kainote's: two lines selected, the first keeps its start and the second's moves to the
+    // video; every line stretches with them
+    add("fpsFromVideo", tr("Set FPS from video"), {}, subs, [=, this] {
+        auto *t = tab();
+        const auto sel = t->selection();
+        if (sel.size() != 2 || !t->video()->hasVideo()) return status(tr("Select two lines and open a video"));
+        t->s().stretch_times(t->s().row(sel[0]).start, t->s().row(sel[1]).start, t->videoStartTime());
+        t->changed();
+    });
     // Kainote "Set new FPS" / Aegisub "Transform Framerate": keep every line on its frames
     add("changeFps", tr("Change frame rate..."), {}, subs, [=, this] {
         auto *t = tab();

@@ -1430,6 +1430,10 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Usuń tekst</translation>
     </message>
     <message>
+        <source>Delete text, keep tags</source>
+        <translation>Usuń tekst, zostaw tagi</translation>
+    </message>
+    <message>
         <source>Delete lines</source>
         <translation>Usuń linijki</translation>
     </message>
@@ -1814,6 +1818,14 @@ Dekoder: BestSource</translation>
     <message>
         <source>Shift times / run post processor</source>
         <translation>Przesuń czasy / uruchom postprocesor</translation>
+    </message>
+    <message>
+        <source>Set FPS from video</source>
+        <translation>Ustaw FPS z wideo</translation>
+    </message>
+    <message>
+        <source>Select two lines and open a video</source>
+        <translation>Zaznacz dwie linijki i otwórz wideo</translation>
     </message>
     <message>
         <source>Change frame rate...</source>
@@ -2927,6 +2939,14 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Usuń wybrany profil</translation>
     </message>
     <message>
+        <source>History</source>
+        <translation>Historia</translation>
+    </message>
+    <message>
+        <source>The last shifts: pick one to set them again</source>
+        <translation>Ostatnie przesunięcia: wybierz jedno, by ustawić je ponownie</translation>
+    </message>
+    <message>
         <source>Time</source>
         <translation>Czas</translation>
     </message>
@@ -3109,6 +3129,22 @@ do czasu audio</translation>
     <message>
         <source>Shifted %1 lines</source>
         <translation>Przesunięte linijki: %1</translation>
+    </message>
+    <message>
+        <source> fr</source>
+        <translation> kl.</translation>
+    </message>
+    <message>
+        <source>to video</source>
+        <translation>do wideo</translation>
+    </message>
+    <message>
+        <source>to audio</source>
+        <translation>do audio</translation>
+    </message>
+    <message>
+        <source>Line %1 ends before it starts. Fix its times first.</source>
+        <translation>Linijka %1 kończy się przed początkiem. Najpierw popraw jej czasy.</translation>
     </message>
 </context>
 <context>

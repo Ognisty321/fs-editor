@@ -99,6 +99,20 @@ ShiftPanel::ShiftPanel(TabPanel *tab) : QScrollArea(tab), m_tab(tab) {
     grid(prof)->addWidget(delProf, 0, 1);
     grid(prof)->addWidget(m_profiles, 0, 2);
     grid(prof)->setColumnStretch(2, 1);
+    m_history = new QComboBox(prof);
+    m_history->setPlaceholderText(tr("History"));
+    m_history->setToolTip(tr("The last shifts: pick one to set them again"));
+    m_history->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    grid(prof)->addWidget(m_history, 1, 0, 1, 3);
+    refreshHistory();
+    connect(m_history, &QComboBox::activated, this, [this](int i) {
+        QSettings st;
+        st.beginReadArray("shiftTimes/history");
+        st.setArrayIndex(i);
+        restore(st);
+        st.endArray();
+        m_history->setCurrentIndex(-1);
+    });
 
     auto *tb = group(tr("Time"), page, pv);
     m_time = new TimeEdit(tb);
@@ -254,6 +268,7 @@ ShiftPanel::ShiftPanel(TabPanel *tab) : QScrollArea(tab), m_tab(tab) {
 
 void ShiftPanel::enterEvent(QEnterEvent *e) {
     updateEnabled();
+    refreshHistory(); // another tab's panel may have shifted
     QScrollArea::enterEvent(e);
 }
 
@@ -318,6 +333,50 @@ void ShiftPanel::shift() {
     m_tab->changed();
     m_tab->main()->status(tr("Shifted %1 lines").arg(n));
     save();
+    if (n) remember(int(n));
+}
+
+void ShiftPanel::remember(int lines) {
+    // "file: +0:00:01.00, start, selected lines (3)", the settings beside it
+    const bool marker = m_markerToVideo->isChecked() || m_markerToAudio->isChecked();
+    QString what = (m_backward->isChecked() ? "-" : "+") + m_time->displayText() + (m_frames->isChecked() ? tr(" fr") : "");
+    if (marker) what = (m_markerToVideo->isChecked() ? tr("to video") : tr("to audio")) + " " + what;
+    const QString label = QString("%1: %2, %3, %4 (%5)")
+                              .arg(m_tab->title().chopped(m_tab->modified() ? 1 : 0), what, m_which->currentText(), m_lines->currentText())
+                              .arg(lines);
+    QSettings st;
+    QList<QVariantMap> old;
+    const int n = std::min(st.beginReadArray("shiftTimes/history"), 49);
+    for (int i = 0; i < n; ++i) {
+        st.setArrayIndex(i);
+        QVariantMap m;
+        for (const QString &k : st.childKeys()) m[k] = st.value(k);
+        old << m;
+    }
+    st.endArray();
+    st.remove("shiftTimes/history"); // a shorter array keeps no old entries past its size
+    st.beginWriteArray("shiftTimes/history", int(old.size()) + 1);
+    st.setArrayIndex(0);
+    store(st);
+    st.setValue("label", label);
+    for (int i = 0; i < old.size(); ++i) {
+        st.setArrayIndex(i + 1);
+        for (auto [k, v] : old[i].asKeyValueRange()) st.setValue(k, v);
+    }
+    st.endArray();
+    refreshHistory();
+}
+
+void ShiftPanel::refreshHistory() {
+    QSettings st;
+    m_history->clear();
+    const int n = st.beginReadArray("shiftTimes/history");
+    for (int i = 0; i < n; ++i) {
+        st.setArrayIndex(i);
+        m_history->addItem(st.value("label").toString());
+    }
+    st.endArray();
+    m_history->setCurrentIndex(-1);
 }
 
 void ShiftPanel::postProcess() {
@@ -336,6 +395,13 @@ void ShiftPanel::postProcess() {
     spec.kf_after_end = m_kfAe->value();
     for (size_t r : rows(m_ppLines->currentIndex(), m_ppStyles->text())) spec.rows.push_back(r);
     if (spec.rows.empty()) return;
+    // Aegisub refuses these: its steps take a line's times as in order
+    for (size_t r : spec.rows)
+        if (const fsb::Row row = m_tab->s().row(r); row.end < row.start && !row.comment) {
+            m_tab->setActive(int(r));
+            m_tab->main()->error(tr("Line %1 ends before it starts. Fix its times first.").arg(r + 1));
+            return;
+        }
     auto kf = m_tab->keyframes();
     // as Aegisub: the video's last frame snaps like a keyframe, so ends can meet the video's end
     if (m_tab->video()->hasVideo() && !kf.empty()) kf.push_back(m_tab->video()->info().frames - 1);
@@ -346,7 +412,7 @@ void ShiftPanel::postProcess() {
 }
 
 void ShiftPanel::store(QSettings &st) const {
-    st.setValue("time", m_time->text());
+    st.setValue("time", m_time->displayText()); // text() drops the mask's blank zeros
     st.setValue("backward", m_backward->isChecked());
     st.setValue("frames", m_frames->isChecked());
     st.setValue("tagTimes", m_tagTimes->isChecked());

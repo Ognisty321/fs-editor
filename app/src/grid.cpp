@@ -794,7 +794,7 @@ void Grid::contextMenu(const QPoint &global) {
         {"swapLines", sel.size() == 2}, {"joinLines", canJoin},          {"joinKeepFirst", canJoin},
         {"joinKeepLast", canJoin},      {"joinKaraoke", canJoin},        {"splitBefore", !tl && video},
         {"splitAfter", !tl && video},   {"splitFrames", !tl && video},   {"splitChars", !tl},
-        {"splitWords", !tl},            {"splitWraps", !tl}};
+        {"splitWords", !tl},            {"splitWraps", !tl},             {"fpsFromVideo", sel.size() == 2 && video}};
     for (auto [id, on] : state) mw->action(id)->setEnabled(on);
     auto *ins = m.addMenu(tr("Insert lines"));
     for (const char *id : {"insertBefore", "insertAfter", "insertBeforeVideo", "insertAfterVideo", "insertBeforeFrame",
@@ -889,6 +889,8 @@ void Grid::contextMenu(const QPoint &global) {
     ign->setCheckable(true);
     ign->setChecked(ignoreFilterInActions);
     connect(ign, &QAction::toggled, this, [this](bool v) { ignoreFilterInActions = v; });
+    m.addAction(mw->action("changeFps"));
+    m.addAction(mw->action("fpsFromVideo"));
     if (tl) {
         m.addSeparator();
         m.addAction(tr("Paste translation text"), mw, [mw] { mw->pasteTranslation(); });
@@ -898,6 +900,7 @@ void Grid::contextMenu(const QPoint &global) {
     m.addAction(mw->action("subsFromVideo"));
     m.addSeparator();
     m.addAction(mw->action("deleteText"));
+    m.addAction(mw->action("deleteTextKeepTags"));
     m.addAction(mw->action("deleteLines"));
     m.exec(global);
     for (auto [id, on] : state) mw->action(id)->setEnabled(true);

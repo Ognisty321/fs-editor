@@ -32,13 +32,15 @@ private:
     void store(QSettings &st) const; // shift-page values, also used for profiles
     void restore(QSettings &st);
     void updateEnabled();            // frames / marker options need video or audio
+    void remember(int lines);        // Aegisub's shift history: the last 50, newest first
+    void refreshHistory();
     std::vector<size_t> rows(int which, const QString &styles) const;
 
     TabPanel *m_tab;
     QStackedWidget *m_stack;
     QPushButton *m_mode;
     // shift
-    QComboBox *m_profiles;
+    QComboBox *m_profiles, *m_history;
     TimeEdit *m_time;
     QRadioButton *m_forward, *m_backward;
     QCheckBox *m_frames, *m_tagTimes;
