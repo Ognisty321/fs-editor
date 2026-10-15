@@ -278,6 +278,62 @@
         <source>Add lead-out</source>
         <translation>Dodaj zakończenie</translation>
     </message>
+    <message>
+        <source>Play or stop</source>
+        <translation>Odtwórz lub zatrzymaj</translation>
+    </message>
+    <message>
+        <source>Commit and go to the next line</source>
+        <translation>Zatwierdź i przejdź do następnej linijki</translation>
+    </message>
+    <message>
+        <source>Commit and stay on the line</source>
+        <translation>Zatwierdź i zostań na linijce</translation>
+    </message>
+    <message>
+        <source>Go to selection start</source>
+        <translation>Przejdź do początku zaznaczenia</translation>
+    </message>
+    <message>
+        <source>Go to selection end</source>
+        <translation>Przejdź do końca zaznaczenia</translation>
+    </message>
+    <message>
+        <source>Add lead-in and lead-out</source>
+        <translation>Dodaj wstęp i zakończenie</translation>
+    </message>
+    <message>
+        <source>Start 10 ms earlier (syllable in karaoke)</source>
+        <translation>Start 10 ms wcześniej (sylaba w karaoke)</translation>
+    </message>
+    <message>
+        <source>Start 10 ms later (syllable in karaoke)</source>
+        <translation>Start 10 ms później (sylaba w karaoke)</translation>
+    </message>
+    <message>
+        <source>End 10 ms earlier (syllable in karaoke)</source>
+        <translation>Koniec 10 ms wcześniej (sylaba w karaoke)</translation>
+    </message>
+    <message>
+        <source>End 10 ms earlier (alternative)</source>
+        <translation>Koniec 10 ms wcześniej (alternatywny)</translation>
+    </message>
+    <message>
+        <source>End 10 ms later (syllable in karaoke)</source>
+        <translation>Koniec 10 ms później (sylaba w karaoke)</translation>
+    </message>
+    <message>
+        <source>End 10 ms later (alternative)</source>
+        <translation>Koniec 10 ms później (alternatywny)</translation>
+    </message>
+    <message>
+        <source>End 10 ms earlier, the following syllables too</source>
+        <translation>Koniec 10 ms wcześniej, z następnymi sylabami</translation>
+    </message>
+    <message>
+        <source>End 10 ms later, the following syllables too</source>
+        <translation>Koniec 10 ms później, z następnymi sylabami</translation>
+    </message>
 </context>
 <context>
     <name>AudioView</name>

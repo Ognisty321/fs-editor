@@ -95,7 +95,7 @@ public:
     void commit();        // writes the markers (auto-commit too)
     // the commit command: then the next line, when asked; resetNext (Shift+G) always goes on, the
     // next line timed from this one's end for the default duration (Aegisub's audio/commit/default)
-    void commitAndNext(bool resetNext = false);
+    void commitAndNext(bool resetNext = false, bool next = false); // next: whatever the toggle says
 
 signals:
     void opened();

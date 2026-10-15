@@ -838,10 +838,10 @@ void AudioBox::commit() {
 // Aegisub's audio/commit: apply, then with "next line on commit" go on as grid/line/next/create
 // does - past the last line a new one follows - and a line not timed yet (end 0) is proposed
 // from where this one ended, for the default 5 s.
-void AudioBox::commitAndNext(bool resetNext) {
+void AudioBox::commitAndNext(bool resetNext, bool next) {
     commit();
     ++m_dragId; // what follows is a step of its own: Aegisub never merges commits
-    if (!m_nextOnCommit && !resetNext) return;
+    if (!m_nextOnCommit && !resetNext && !next) return;
     const qint64 end = m_selEnd;
     const auto vis = m_tab->grid()->visibleRows();
     const auto it = std::upper_bound(vis.begin(), vis.end(), size_t(std::max(0, m_tab->active())));
@@ -1015,6 +1015,21 @@ static const AudioKey kAudioKeys[] = {
     {"audioToEnd", QT_TRANSLATE_NOOP("AudioBox", "Play to end"), "T"},
     {"audioLeadIn", QT_TRANSLATE_NOOP("AudioBox", "Add lead-in"), "C"},
     {"audioLeadOut", QT_TRANSLATE_NOOP("AudioBox", "Add lead-out"), "V"},
+    // Aegisub's, with its keys where Kainote has none
+    {"audioPlayToggle", QT_TRANSLATE_NOOP("AudioBox", "Play or stop"), ""},
+    {"audioCommitNext", QT_TRANSLATE_NOOP("AudioBox", "Commit and go to the next line"), ""},
+    {"audioCommitStay", QT_TRANSLATE_NOOP("AudioBox", "Commit and stay on the line"), ""},
+    {"audioGoStart", QT_TRANSLATE_NOOP("AudioBox", "Go to selection start"), ""},
+    {"audioGoEnd", QT_TRANSLATE_NOOP("AudioBox", "Go to selection end"), ""},
+    {"audioLeadBoth", QT_TRANSLATE_NOOP("AudioBox", "Add lead-in and lead-out"), ""},
+    {"audioStartEarlier", QT_TRANSLATE_NOOP("AudioBox", "Start 10 ms earlier (syllable in karaoke)"), "Num+4"},
+    {"audioStartLater", QT_TRANSLATE_NOOP("AudioBox", "Start 10 ms later (syllable in karaoke)"), "Num+6"},
+    {"audioShorter", QT_TRANSLATE_NOOP("AudioBox", "End 10 ms earlier (syllable in karaoke)"), "Num+-"},
+    {"audioShorterAlt", QT_TRANSLATE_NOOP("AudioBox", "End 10 ms earlier (alternative)"), "Num+7"},
+    {"audioLonger", QT_TRANSLATE_NOOP("AudioBox", "End 10 ms later (syllable in karaoke)"), "Num++"},
+    {"audioLongerAlt", QT_TRANSLATE_NOOP("AudioBox", "End 10 ms later (alternative)"), "Num+9"},
+    {"audioShorterShift", QT_TRANSLATE_NOOP("AudioBox", "End 10 ms earlier, the following syllables too"), "Shift+Num+-"},
+    {"audioLongerShift", QT_TRANSLATE_NOOP("AudioBox", "End 10 ms later, the following syllables too"), "Shift+Num++"},
 };
 
 std::span<const AudioKey> AudioBox::keys() { return kAudioKeys; }
@@ -1050,26 +1065,34 @@ void AudioBox::runCommand(const QString &id) {
         setSelection(std::max<qint64>(0, m_selStart - QSettings().value("audio/leadIn", 200).toInt()), m_selEnd, false);
     else if (id == "audioLeadOut")
         setSelection(m_selStart, m_selEnd + QSettings().value("audio/leadOut", 300).toInt(), false);
+    else if (id == "audioLeadBoth")
+        setSelection(std::max<qint64>(0, m_selStart - QSettings().value("audio/leadIn", 200).toInt()),
+                     m_selEnd + QSettings().value("audio/leadOut", 300).toInt(), false);
+    else if (id == "audioPlayToggle") {
+        if (playing()) stop();
+        else playSelection();
+    } else if (id == "audioCommitNext") commitAndNext(false, true);
+    else if (id == "audioCommitStay") {
+        commit();
+        ++m_dragId;
+    } else if (id == "audioGoStart") setLeft(m_selStart - span / 2);
+    else if (id == "audioGoEnd") setLeft(m_selEnd - span / 2);
+    else if (id == "audioStartEarlier") modifyStart(-1);
+    else if (id == "audioStartLater") modifyStart(1);
+    else if (id == "audioShorter" || id == "audioShorterAlt") modifyLength(-1, false);
+    else if (id == "audioLonger" || id == "audioLongerAlt") modifyLength(1, false);
+    else if (id == "audioShorterShift") modifyLength(-1, true);
+    else if (id == "audioLongerShift") modifyLength(1, true);
 }
 
 void AudioBox::keyPressEvent(QKeyEvent *e) {
-    if (e->modifiers() & Qt::KeypadModifier) {
-        // Aegisub's numpad: 4/6 move the start, 7/9 the end, -/+ the end (Shift: and the following syllables)
-        const bool shift = e->modifiers() & Qt::ShiftModifier;
-        switch (e->key()) {
-        case Qt::Key_4: return modifyStart(-1);
-        case Qt::Key_6: return modifyStart(1);
-        case Qt::Key_7: return modifyLength(-1, false);
-        case Qt::Key_9: return modifyLength(1, false);
-        case Qt::Key_Minus: return modifyLength(-1, shift);
-        case Qt::Key_Plus: return modifyLength(1, shift);
-        default: break;
-        }
-    }
-    // the keys the hotkey editor gives the audio commands; the numpad's Enter is Enter
+    // the keys the hotkey editor gives the audio commands: a numpad key's own first ("Num+4"), else
+    // the same key of the main keyboard; the numpad's Enter is Enter
     const auto key = Qt::Key(e->key() == Qt::Key_Enter ? Qt::Key_Return : e->key());
-    const QKeySequence pressed(QKeyCombination(e->modifiers() & ~Qt::KeypadModifier, key));
-    for (const auto &k : kAudioKeys)
-        if (auto *a = m_tab->main()->action(k.id); a && a->shortcut() == pressed) return runCommand(k.id);
+    for (const auto mods : {e->modifiers(), e->modifiers() & ~Qt::KeypadModifier}) {
+        const QKeySequence pressed(QKeyCombination(mods, key));
+        for (const auto &k : kAudioKeys)
+            if (auto *a = m_tab->main()->action(k.id); a && a->shortcut() == pressed) return runCommand(k.id);
+    }
     QWidget::keyPressEvent(e);
 }
