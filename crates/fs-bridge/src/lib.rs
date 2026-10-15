@@ -10,6 +10,7 @@ mod spell;
 mod visual;
 
 pub use automation::Automation;
+use fs_core::tags::set_cps_ignore;
 pub use kanji::KanjiTimer;
 use kanji::new_kanji_timer;
 pub use media::{Audio, Renderer, Video};
@@ -616,6 +617,8 @@ pub mod ffi {
         fn add_word(self: &mut Speller, word: &str);
         /// Words as flat [start, len, ...] in UTF-16 units; tags and drawings skipped.
         fn text_words(text: &str) -> Vec<usize>;
+        /// What characters per second leaves out (both by default).
+        fn set_cps_ignore(whitespace: bool, punctuation: bool);
 
         type Thesaurus;
         fn new_thesaurus(idx_path: &str, dat_path: &str) -> Result<Box<Thesaurus>>;

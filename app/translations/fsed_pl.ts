@@ -2416,6 +2416,14 @@ Filtry eksportu: %8</translation>
         <translation>Wczytuj ostatnią sesję przy starcie</translation>
     </message>
     <message>
+        <source>Ignore whitespace in characters per second</source>
+        <translation>Ignoruj spacje w znakach na sekundę</translation>
+    </message>
+    <message>
+        <source>Ignore punctuation in characters per second</source>
+        <translation>Ignoruj interpunkcję w znakach na sekundę</translation>
+    </message>
+    <message>
         <source>None</source>
         <translation>Brak</translation>
     </message>

@@ -1474,6 +1474,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"audio/inactiveComments", QT_TR_NOOP("Show inactive comments in the audio"), false},
         {"audio/wheelZooms", QT_TR_NOOP("Mouse wheel zooms the audio (Shift scrolls)"), false},
         {"main/askSession", QT_TR_NOOP("Load the last session at startup"), true},
+        {"subs/cpsIgnoreWhitespace", QT_TR_NOOP("Ignore whitespace in characters per second"), true},
+        {"subs/cpsIgnorePunctuation", QT_TR_NOOP("Ignore punctuation in characters per second"), true},
     };
     std::vector<std::pair<QString, QCheckBox *>> boxes;
     for (const auto &c : checks) {

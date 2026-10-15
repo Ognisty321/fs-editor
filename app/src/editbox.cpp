@@ -187,6 +187,8 @@ struct Limits {
 };
 Limits loadLimits() {
     QSettings st;
+    fsb::set_cps_ignore(st.value("subs/cpsIgnoreWhitespace", true).toBool(),
+                        st.value("subs/cpsIgnorePunctuation", true).toBool());
     return {st.value("subs/maxCps", 15).toInt(), st.value("subs/maxLineLength", 43).toInt(),
             st.value("subs/maxLines", 2).toInt()};
 }

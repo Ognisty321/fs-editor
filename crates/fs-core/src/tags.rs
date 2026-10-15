@@ -5,6 +5,7 @@
 //! modified.
 
 use std::fmt::Write as _;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::model::fmt_f64;
 
@@ -499,8 +500,8 @@ pub fn display_text(text: &str) -> String {
         .replace("\\h", "\u{a0}")
 }
 
-/// Character count used for CPS, following Aegisub's default: tags,
-/// whitespace and punctuation are ignored; `\N` counts as nothing.
+/// Characters of the visible text: tags are left out, `\N` counts as nothing, `\h`
+/// as whitespace.
 pub fn char_count(text: &str, ignore_whitespace: bool, ignore_punctuation: bool) -> usize {
     let t = visible_text(text)
         .replace("\\N", "")
@@ -534,12 +535,27 @@ fn is_unicode_punct(c: char) -> bool {
     )
 }
 
+static CPS_IGNORE_WHITESPACE: AtomicBool = AtomicBool::new(true);
+static CPS_IGNORE_PUNCTUATION: AtomicBool = AtomicBool::new(true);
+
+/// What `cps` leaves out: Aegisub's character counter options, both on by default
+/// (counting them is the Netflix way). A user preference, so process-wide.
+pub fn set_cps_ignore(whitespace: bool, punctuation: bool) {
+    CPS_IGNORE_WHITESPACE.store(whitespace, Ordering::Relaxed);
+    CPS_IGNORE_PUNCTUATION.store(punctuation, Ordering::Relaxed);
+}
+
 /// Characters per second as Aegisub computes it (0 for zero-length lines).
 pub fn cps(text: &str, duration_ms: i64) -> f64 {
     if duration_ms <= 0 {
         return 0.0;
     }
-    char_count(text, true, true) as f64 * 1000.0 / duration_ms as f64
+    let count = char_count(
+        text,
+        CPS_IGNORE_WHITESPACE.load(Ordering::Relaxed),
+        CPS_IGNORE_PUNCTUATION.load(Ordering::Relaxed),
+    );
+    count as f64 * 1000.0 / duration_ms as f64
 }
 
 // ---------------------------------------------------------------------------

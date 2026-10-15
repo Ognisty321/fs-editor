@@ -31,7 +31,8 @@ void addWord(const QString &word); // to the user dictionary of the loaded langu
 int generation();                  // changes on every reload, for caches of results
 } // namespace spell
 
-// Character counter limits from Settings (subs/maxCps, subs/maxLineLength, subs/maxLines).
+// Character counter limits from Settings (subs/maxCps, subs/maxLineLength, subs/maxLines), and what
+// characters per second counts (subs/cpsIgnore*, applied by reload()).
 namespace limits {
 int cps();
 bool wrapsOver(const QString &wraps); // "a/b/c" line lengths: too many lines or one too long

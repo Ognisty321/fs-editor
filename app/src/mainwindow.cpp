@@ -157,6 +157,7 @@ public:
 } // namespace
 
 MainWindow::MainWindow() {
+    limits::reload(); // the counter options, before any row's characters per second
     setWindowTitle("FS Editor");
     setAcceptDrops(true);
     m_tabs = new QTabWidget(this);
