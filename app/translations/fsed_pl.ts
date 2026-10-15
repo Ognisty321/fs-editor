@@ -527,6 +527,10 @@
         <translation>Znajdź we wszystkich otwartych napisach</translation>
     </message>
     <message>
+        <source>Replace in files</source>
+        <translation>Zamień w plikach</translation>
+    </message>
+    <message>
         <source>Replace next</source>
         <translation>Zamień następne</translation>
     </message>
@@ -557,6 +561,34 @@
     <message>
         <source>Searching in %1...</source>
         <translation>Szukanie w %1...</translation>
+    </message>
+    <message>
+        <source>Replace in every matching file in %1?
+
+Each file changed is first copied to %2</source>
+        <translation>Zamienić we wszystkich pasujących plikach w %1?
+
+Każdy zmieniany plik jest najpierw kopiowany do %2</translation>
+    </message>
+    <message>
+        <source>could not be copied to the backup folder, left as it was</source>
+        <translation>nie udało się skopiować do folderu kopii, pozostawiono bez zmian</translation>
+    </message>
+    <message>
+        <source>Replacing in %1...</source>
+        <translation>Zamienianie w %1...</translation>
+    </message>
+    <message>
+        <source>Replaced %1 times in %2 files.</source>
+        <translation>Zamieniono %1 razy w %2 plikach.</translation>
+    </message>
+    <message>
+        <source>The files as they were: %1</source>
+        <translation>Pliki sprzed zmian: %1</translation>
+    </message>
+    <message>
+        <source>Not saved:</source>
+        <translation>Nie zapisano:</translation>
     </message>
     <message>
         <source>Search results</source>

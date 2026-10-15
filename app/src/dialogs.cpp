@@ -163,16 +163,18 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
     auto *findAll = new QPushButton(tr("Find all"), this);
     auto *findOpen = new QPushButton(tr("Find in all open subtitles"), this);
     auto *findFiles = m_findFiles = new QPushButton(tr("Find in files"), this);
+    auto *replFiles = m_replFiles = new QPushButton(tr("Replace in files"), this);
     auto *replNext = new QPushButton(tr("Replace next"), this);
     auto *replAll = new QPushButton(tr("Replace all"), this);
     auto *replOpen = new QPushButton(tr("Replace in all open subtitles"), this);
     auto *close = new QPushButton(tr("Close"), this);
-    for (auto *b : {find, findAll, findOpen, findFiles, replNext, replAll, replOpen, close}) bb->addWidget(b);
+    for (auto *b : {find, findAll, findOpen, findFiles, replFiles, replNext, replAll, replOpen, close}) bb->addWidget(b);
     v->addLayout(bb);
     connect(find, &QPushButton::clicked, this, &FindDialog::findNext);
     connect(findAll, &QPushButton::clicked, this, [this] { this->findAll({m_main->current()}); });
     connect(findOpen, &QPushButton::clicked, this, [this] { this->findAll(m_main->tabs()); });
     connect(findFiles, &QPushButton::clicked, this, &FindDialog::findInFiles);
+    connect(replFiles, &QPushButton::clicked, this, &FindDialog::replaceInFiles);
     connect(close, &QPushButton::clicked, this, &QDialog::hide);
     connect(replNext, &QPushButton::clicked, this, [this] {
         auto *tab = m_main->current();
@@ -225,10 +227,10 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
         m_main->status(tr("Replacements: %1").arg(n));
     });
     connect(m_tabs, &QTabWidget::currentChanged, this, [=, this](int i) {
-        for (QWidget *w : std::initializer_list<QWidget *>{replLabel, m_replace, replNext, replAll, replOpen})
-            w->setVisible(i == 1);
+        for (QWidget *w : std::initializer_list<QWidget *>{replNext, replAll, replOpen}) w->setVisible(i == 1);
+        for (QWidget *w : std::initializer_list<QWidget *>{replLabel, m_replace}) w->setVisible(i >= 1);
         for (QWidget *w : std::initializer_list<QWidget *>{find, findAll, findOpen, lg}) w->setVisible(i < 2);
-        for (QWidget *w : std::initializer_list<QWidget *>{filesBox, findFiles}) w->setVisible(i == 2);
+        for (QWidget *w : std::initializer_list<QWidget *>{filesBox, findFiles, replFiles}) w->setVisible(i == 2);
         (i < 2 ? find : findFiles)->setDefault(true);
         adjustSize();
     });
@@ -348,20 +350,27 @@ void FindDialog::findAll(const QList<TabPanel *> &tabs) {
     showResults(tr("Matches found: %1, in files: %2").arg(matches).arg(files));
 }
 
-void FindDialog::findInFiles() {
+bool FindDialog::filesReady() {
     const QString dir = m_dir->text().trimmed();
-    if (!ready() || !QFileInfo(dir).isDir()) return;
-    remember(false);
+    if (!ready() || !QFileInfo(dir).isDir()) return false;
     QSettings st;
     st.setValue("find/dir", dir);
     st.setValue("find/filter", m_filter->text());
     st.setValue("find/subdirs", m_subdirs->isChecked());
-    const auto s = spec(nullptr);
     try {
-        (void)fsb::new_session()->find_all(s); // a bad regex fails here once, not for every file
+        (void)fsb::new_session()->find_all(spec(nullptr)); // a bad regex fails here once, not for every file
     } catch (const rust::Error &e) {
-        return m_main->error(QString::fromUtf8(e.what()));
+        m_main->error(QString::fromUtf8(e.what()));
+        return false;
     }
+    return true;
+}
+
+void FindDialog::findInFiles() {
+    if (!filesReady()) return;
+    remember(false);
+    const QString dir = m_dir->text().trimmed();
+    const auto s = spec(nullptr);
     // the files are read on a worker, each into its own session
     struct Found {
         std::vector<std::pair<QString, rust::Vec<fsb::FindMatch>>> files; // path, its matches
@@ -404,6 +413,72 @@ void FindDialog::findInFiles() {
             if (total == kMaxResults) break;
         }
         return f;
+    }));
+}
+
+void FindDialog::replaceInFiles() {
+    if (!filesReady()) return;
+    const QString dir = m_dir->text().trimmed();
+    const QString backup = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/ReplaceBackup/" +
+                           QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
+    const bool smoke = qEnvironmentVariableIsSet("FSED_SMOKE"); // asks nothing in a smoke test
+    if (!smoke && QMessageBox::question(this, tr("Replace in files"),
+                              tr("Replace in every matching file in %1?\n\nEach file changed is first copied to %2")
+                                  .arg(QDir::toNativeSeparators(dir), QDir::toNativeSeparators(backup))) != QMessageBox::Yes)
+        return;
+    remember(true);
+    const auto s = spec(nullptr);
+    const QStringList filters = m_filter->text().split(QRegularExpression("[;,\\s]+"), Qt::SkipEmptyParts);
+    const auto flags = m_subdirs->isChecked() ? QDirIterator::Subdirectories : QDirIterator::NoIteratorFlags;
+    const QString noCopy = tr("could not be copied to the backup folder, left as it was");
+    struct Done {
+        int files = 0;
+        size_t replaced = 0;
+        QStringList failed;
+    };
+    m_findFiles->setEnabled(false);
+    m_replFiles->setEnabled(false);
+    m_main->status(tr("Replacing in %1...").arg(dir));
+    auto *watch = new QFutureWatcher<Done>(this);
+    connect(watch, &QFutureWatcher<Done>::finished, this, [this, watch, backup, smoke] {
+        const Done d = watch->result();
+        watch->deleteLater();
+        m_findFiles->setEnabled(true);
+        m_replFiles->setEnabled(true);
+        QString msg = tr("Replaced %1 times in %2 files.").arg(d.replaced).arg(d.files);
+        if (d.files) msg += "\n" + tr("The files as they were: %1").arg(QDir::toNativeSeparators(backup));
+        if (!d.failed.isEmpty()) msg += "\n\n" + tr("Not saved:") + "\n" + d.failed.join('\n');
+        m_main->status(tr("Replaced %1 times in %2 files.").arg(d.replaced).arg(d.files));
+        if (!smoke) QMessageBox::information(this, tr("Replace in files"), msg);
+    });
+    watch->setFuture(QtConcurrent::run([dir, filters, flags, s, backup, noCopy] {
+        Done d;
+        QDirIterator it(dir, filters, QDir::Files, flags);
+        while (it.hasNext()) {
+            const QString path = it.next();
+            auto file = fsb::new_session();
+            try {
+                file->open(fs::Utf8(path));
+            } catch (const rust::Error &) {
+                continue; // not subtitles after all
+            }
+            try {
+                const size_t n = file->replace_all(s);
+                if (!n) continue;
+                // never saved without its copy
+                const QString copy = backup + "/" + QDir(dir).relativeFilePath(path);
+                if (!QDir().mkpath(QFileInfo(copy).path()) || !QFile::copy(path, copy)) {
+                    d.failed << QDir::toNativeSeparators(path) + ": " + noCopy;
+                    continue;
+                }
+                file->save(fs::Utf8(path)); // in its own format and encoding
+                ++d.files;
+                d.replaced += n;
+            } catch (const rust::Error &e) {
+                d.failed << QString::fromUtf8(e.what());
+            }
+        }
+        return d;
     }));
 }
 

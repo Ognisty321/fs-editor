@@ -52,6 +52,8 @@ private:
     // Kainote's Find all: the matching lines of the tabs, or of the files in a folder, in a results window
     void findAll(const QList<TabPanel *> &tabs);
     void findInFiles();
+    void replaceInFiles(); // Kainote's Replace in subtitles, each file backed up first
+    bool filesReady();     // the folder search's settings kept; false without a folder or a valid search
     void clearResults();
     void addResults(TabPanel *tab, const QString &title, const QString &path, const rust::Vec<fsb::FindMatch> &found);
     void showResults(const QString &summary);
@@ -62,7 +64,7 @@ private:
     QCheckBox *m_case, *m_regex, *m_comments, *m_skipTags, *m_skipText, *m_atStart, *m_atEnd, *m_subdirs;
     QRadioButton *m_field[4], *m_lines[3];
     QLineEdit *m_dir, *m_filter;
-    class QPushButton *m_findFiles;
+    class QPushButton *m_findFiles, *m_replFiles;
     QDialog *m_results = nullptr;
     QTreeWidget *m_tree = nullptr;
     QLabel *m_summary = nullptr;
