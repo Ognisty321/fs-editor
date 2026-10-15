@@ -111,6 +111,8 @@ protected:
 
 private:
     void applyLayout();
+    void syncSelection();    // to the session, for the undo steps
+    void restoreSelection(); // the one undo or redo brought back
     void matchResolution();
 
     MainWindow *m_main;

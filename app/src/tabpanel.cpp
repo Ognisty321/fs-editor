@@ -266,6 +266,7 @@ void TabPanel::setActive(int row, bool select) {
         if (select) m_sel = {size_t(row)};
         m_active = row;
     }
+    syncSelection();
     m_grid->refresh();
     m_grid->ensureVisible(m_active);
     m_edit->load(m_active);
@@ -298,6 +299,7 @@ void TabPanel::setSelection(const std::vector<size_t> &rows, int active) {
 void TabPanel::toggleSelected(size_t r) {
     if (m_sel.contains(r) && m_sel.size() > 1) m_sel.erase(r);
     else m_sel.insert(r);
+    syncSelection();
     m_grid->refresh();
 }
 
@@ -307,6 +309,7 @@ void TabPanel::changed(int source) {
     while (!m_sel.empty() && *m_sel.rbegin() >= n) m_sel.erase(std::prev(m_sel.end()));
     if (m_active >= int(n)) m_active = int(n) - 1;
     if (m_sel.empty() && m_active >= 0) m_sel.insert(size_t(m_active));
+    syncSelection();
     m_grid->refresh();
     if (!(source & FromEditBox)) m_edit->reload();
     m_audio->docChanged();
@@ -316,12 +319,24 @@ void TabPanel::changed(int source) {
     emit statusChanged();
 }
 
+// the lines the step was made on come back selected (Aegisub)
 void TabPanel::undo() {
-    if (s().undo()) changed();
+    if (s().undo()) restoreSelection();
 }
 
 void TabPanel::redo() {
-    if (s().redo()) changed();
+    if (s().redo()) restoreSelection();
+}
+
+void TabPanel::restoreSelection() {
+    const auto rows = s().selected_rows();
+    const int active = int(s().selected_active());
+    changed();
+    if (!rows.empty()) setSelection({rows.begin(), rows.end()}, active >= 0 ? active : int(rows.front()));
+}
+
+void TabPanel::syncSelection() {
+    s().set_selection(fs::slice(selection()), m_active);
 }
 
 void TabPanel::openVideo(const QString &path, qint64 frame, double ar) {

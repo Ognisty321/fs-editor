@@ -1911,6 +1911,38 @@ impl Session {
         r
     }
 
+    /// The grid's selection, kept with each undo step (Aegisub's): undo brings back the one from
+    /// before the edit, redo the one after it.
+    pub fn set_selection(&mut self, rows: &[usize], active: i64) {
+        let id = |r: usize| {
+            self.tl_row(r)
+                .and_then(|t| self.ed.doc.event_id(t.original))
+        };
+        self.ed.selection = fs_core::history::Selection {
+            active: usize::try_from(active).ok().and_then(id),
+            selected: rows.iter().filter_map(|&r| id(r)).collect(),
+        };
+    }
+
+    /// Rows of the selection [`Session::set_selection`] kept, as undo or redo left it.
+    pub fn selected_rows(&self) -> Vec<usize> {
+        let ids: std::collections::HashSet<EventId> =
+            self.ed.selection.selected.iter().copied().collect();
+        let evs: Vec<usize> = (self.ed.doc.events().iter().enumerate())
+            .filter(|(_, e)| ids.contains(&e.id))
+            .map(|(i, _)| i)
+            .collect();
+        self.rows_of_events(&evs)
+    }
+
+    /// The active row of that selection, -1 if its line is gone.
+    pub fn selected_active(&self) -> i64 {
+        (self.ed.selection.active)
+            .and_then(|id| self.ed.doc.index_of_id(id))
+            .and_then(|e| self.row_of_event(e))
+            .map_or(-1, |r| r as i64)
+    }
+
     pub fn can_undo(&self) -> bool {
         self.ed.can_undo()
     }
@@ -2793,6 +2825,18 @@ mod tests {
         s.undo();
         assert_eq!(row(&s, 0), ("one".into(), 1000, 2000));
         assert_eq!(row(&s, 2), ("three".into(), 5000, 6000));
+    }
+
+    #[test]
+    fn undo_brings_back_the_selection_of_its_step() {
+        let mut s = session(ASS);
+        s.set_selection(&[1, 2], 2);
+        s.delete_rows(&[1, 2]);
+        s.set_selection(&[0], 0);
+        s.undo();
+        assert_eq!((s.selected_rows(), s.selected_active()), (vec![1, 2], 2));
+        s.redo();
+        assert_eq!((s.selected_rows(), s.selected_active()), (vec![0], 0));
     }
 
     #[test]

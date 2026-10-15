@@ -478,6 +478,10 @@ pub mod ffi {
         fn converted(self: &Session) -> bool;
         /// Forget the file (a recovered autosave): Save asks for a name, modified until then.
         fn detach(self: &mut Session);
+        /// The grid's selection, kept with each undo step: undo and redo bring theirs back.
+        fn set_selection(self: &mut Session, rows: &[usize], active: i64);
+        fn selected_rows(self: &Session) -> Vec<usize>;
+        fn selected_active(self: &Session) -> i64;
         fn file_info(self: &Session) -> FileInfo;
         /// Edits with the same non-empty `amend` make one undo step.
         fn set_info_value(self: &mut Session, key: &str, value: &str, amend: &str);
