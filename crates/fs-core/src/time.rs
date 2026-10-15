@@ -198,7 +198,14 @@ fn parse_clock(s: &str, frac_sep: u8) -> Option<Time> {
         1 => (0, groups[0], groups[1]),
         _ => (groups[0], groups[1], groups[2]),
     };
-    let ms = ((h * 60 + m) * 60 + sec) * 1000 + frac_ms;
+    // checked: a corrupt file's absurd hour count is not a time
+    let ms = h
+        .checked_mul(60)?
+        .checked_add(m)?
+        .checked_mul(60)?
+        .checked_add(sec)?
+        .checked_mul(1000)?
+        .checked_add(frac_ms)?;
     Some(Time(if neg { -ms } else { ms }))
 }
 
@@ -257,6 +264,7 @@ mod tests {
         assert_eq!(Time::parse_ass("1:30.25"), Some(Time(90_250)));
         assert_eq!(Time::parse_ass("abc"), None);
         assert_eq!(Time::parse_ass(""), None);
+        assert_eq!(Time::parse_ass("9999999999999999:00:00.00"), None);
         assert_eq!(
             Time::parse_srt("01:02:03,456"),
             Some(Time::from_hmsms(1, 2, 3, 456))

@@ -67,6 +67,11 @@ impl Default for Framerate {
     }
 }
 
+/// An i128 intermediate result clamped back into i64.
+fn sat(v: i128) -> i64 {
+    v.clamp(i64::MIN as i128, i64::MAX as i128) as i64
+}
+
 impl Framerate {
     /// Parse a user-typed rate: `24000/1001`, `25`, `23.976` (common NTSC
     /// values map to their exact rationals), with `,` accepted as decimal point.
@@ -345,23 +350,30 @@ impl Framerate {
         // With X ms per frame, this returns 0 for:
         //   Exact: [0, X-1], Start: [1-X, 0], End: [1, X]
         match ty {
-            TimeType::Start => return self.frame_at_time(ms - 1, TimeType::Exact) + 1,
-            TimeType::End => return self.frame_at_time(ms - 1, TimeType::Exact),
+            TimeType::Start => {
+                return self
+                    .frame_at_time(ms.saturating_sub(1), TimeType::Exact)
+                    .saturating_add(1);
+            }
+            TimeType::End => return self.frame_at_time(ms.saturating_sub(1), TimeType::Exact),
             TimeType::Exact => {}
         }
         if self.numerator == 0 {
             return 0;
         }
+        // i128: a from_fps numerator is fps * 10^9, so i64 products overflow past ~100 hours
+        let (ms, num, den) = (ms as i128, self.numerator as i128, self.denominator as i128);
         if ms < 0 {
-            return (ms * self.numerator / self.denominator - 999) / 1000;
+            return sat((ms * num / den - 999) / 1000);
         }
-        let back = *self.timecodes.last().unwrap();
+        let back = *self.timecodes.last().unwrap() as i128;
         if ms > back {
-            let d = 1000 * self.denominator;
-            return ((ms + 1) * self.numerator - self.last - self.numerator / 2 + (d - 1)) / d
-                + self.timecodes.len() as i64
-                - 2;
+            let d = 1000 * den;
+            return sat(((ms + 1) * num - self.last as i128 - num / 2 + (d - 1)) / d
+                + self.timecodes.len() as i128
+                - 2);
         }
+        let ms = ms as i64;
         // index of the last timecode <= ms
         self.timecodes.partition_point(|&t| t <= ms) as i64 - 1
     }
@@ -369,29 +381,29 @@ impl Framerate {
     pub fn time_at_frame(&self, frame: i64, ty: TimeType) -> i64 {
         match ty {
             TimeType::Start => {
-                let prev = self.time_at_frame(frame - 1, TimeType::Exact);
-                let cur = self.time_at_frame(frame, TimeType::Exact);
+                let prev = self.time_at_frame(frame.saturating_sub(1), TimeType::Exact) as i128;
+                let cur = self.time_at_frame(frame, TimeType::Exact) as i128;
                 // +1 so two frames 1 ms apart round up
-                return prev + (cur - prev + 1) / 2;
+                return sat(prev + (cur - prev + 1) / 2);
             }
             TimeType::End => {
-                let cur = self.time_at_frame(frame, TimeType::Exact);
-                let next = self.time_at_frame(frame + 1, TimeType::Exact);
-                return cur + (next - cur + 1) / 2;
+                let cur = self.time_at_frame(frame, TimeType::Exact) as i128;
+                let next = self.time_at_frame(frame.saturating_add(1), TimeType::Exact) as i128;
+                return sat(cur + (next - cur + 1) / 2);
             }
             TimeType::Exact => {}
         }
         if self.numerator == 0 {
             return 0;
         }
+        let (num, den) = (self.numerator as i128, self.denominator as i128);
         if frame < 0 {
-            return frame * self.denominator * 1000 / self.numerator;
+            return sat(frame as i128 * den * 1000 / num);
         }
         let n = self.timecodes.len() as i64;
         if frame >= n {
-            let past = frame - n + 1;
-            return (past * 1000 * self.denominator + self.last + self.numerator / 2)
-                / self.numerator;
+            let past = (frame - n + 1) as i128;
+            return sat((past * 1000 * den + self.last as i128 + num / 2) / num);
         }
         self.timecodes[frame as usize]
     }
@@ -722,5 +734,16 @@ mod tests {
         let last = i32::MAX as i64 / 1000;
         assert_eq!(f.time_at_frame(last, Exact), last * 1000);
         assert_eq!(f.frame_at_time(last * 1000, Exact), last);
+        // fps * 10^9 numerators: a corrupt file's 1000-hour time, and the extremes, saturate
+        let ntsc = cfr(23.976);
+        let hours = 1000 * 3_600_000;
+        let f = ntsc.frame_at_time(hours, Exact);
+        assert!(ntsc.time_at_frame(f, Exact) <= hours && hours < ntsc.time_at_frame(f + 1, Exact));
+        for t in [Start, Exact, End] {
+            assert!(ntsc.frame_at_time(i64::MAX, t) > 0);
+            assert!(ntsc.frame_at_time(i64::MIN, t) < 0);
+            assert!(ntsc.time_at_frame(i64::MAX, t) > 0);
+            assert!(ntsc.time_at_frame(i64::MIN, t) < 0);
+        }
     }
 }
