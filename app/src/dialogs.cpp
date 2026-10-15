@@ -2222,14 +2222,11 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     dictDir->setMinimumWidth(dictDir->fontMetrics().averageCharWidth() * 48);
     editor->addRow(tr("Dictionary folder (Hunspell .aff/.dic)"), dictDir);
     auto *dictLang = new QComboBox(this);
-    dictLang->addItems(spell::languages());
-    dictLang->setCurrentText(st.value("spell/lang").toString());
+    spell::fillLanguages(dictLang, st.value("spell/lang").toString());
     connect(dictDir, &QLineEdit::editingFinished, this, [dictDir, dictLang] {
-        const QString keep = dictLang->currentText();
+        const QString keep = dictLang->currentData().toString();
         QSettings().setValue("spell/dir", QDir::fromNativeSeparators(dictDir->text()));
-        dictLang->clear();
-        dictLang->addItems(spell::languages());
-        dictLang->setCurrentText(keep);
+        spell::fillLanguages(dictLang, keep);
     });
     editor->addRow(tr("Spell check language"), dictLang);
     auto *language = new QComboBox(this);
@@ -2251,7 +2248,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         st.setValue("styles/newFileCatalog", newCatalog->currentData());
         st.setValue("main/language", language->currentData());
         st.setValue("spell/dir", QDir::fromNativeSeparators(dictDir->text()));
-        st.setValue("spell/lang", dictLang->currentText());
+        st.setValue("spell/lang", dictLang->currentData().toString());
         spell::reload();
         for (auto &[k, b] : boxes) st.setValue(k, b->isChecked());
         st.setValue("audio/inactiveLines", inactive->currentIndex());
@@ -2355,11 +2352,7 @@ SpellCheckDialog::SpellCheckDialog(MainWindow *main, TabPanel *tab) : QDialog(ma
     m_with = new QLineEdit(this);
     m_suggest = new QListWidget(this);
     auto *lang = new QComboBox(this);
-    for (const QString &code : spell::languages()) { // "polski (pl_PL)"
-        const QLocale l(code);
-        lang->addItem(l.language() == QLocale::C ? code : QString("%1 (%2)").arg(l.nativeLanguageName(), code), code);
-    }
-    lang->setCurrentIndex(std::max(0, lang->findData(QSettings().value("spell/lang", "pl_PL").toString())));
+    spell::fillLanguages(lang, QSettings().value("spell/lang", "pl_PL").toString());
     m_skipComments = new QCheckBox(tr("Skip comments"), this);
     m_skipUpper = new QCheckBox(tr("Ignore UPPERCASE words"), this);
     m_skipComments->setChecked(QSettings().value("spell/skipComments", true).toBool());

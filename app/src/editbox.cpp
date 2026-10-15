@@ -11,6 +11,7 @@
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
+#include <QLocale>
 #include <QCompleter>
 #include <QContextMenuEvent>
 #include <QCoreApplication>
@@ -141,6 +142,15 @@ QStringList spell::languages() {
     for (const QFileInfo &fi : QDir(dir()).entryInfoList({"*.dic"}, QDir::Files, QDir::Name))
         if (QFileInfo::exists(fi.absolutePath() + "/" + fi.completeBaseName() + ".aff")) out << fi.completeBaseName();
     return out;
+}
+
+void spell::fillLanguages(QComboBox *box, const QString &current) {
+    box->clear();
+    for (const QString &code : languages()) {
+        const QLocale l(code);
+        box->addItem(l.language() == QLocale::C ? code : QString("%1 (%2)").arg(l.nativeLanguageName(), code), code);
+    }
+    box->setCurrentIndex(std::max(0, box->findData(current)));
 }
 
 fsb::Speller *spell::get() {

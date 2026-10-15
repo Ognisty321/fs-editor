@@ -30,6 +30,7 @@ fsb::Speller *get(); // nullptr when disabled or no dictionary could be loaded
 void reload();       // after a settings change: reload the dictionary, re-highlight
 QString dir();
 QStringList languages();
+void fillLanguages(QComboBox *box, const QString &current); // "polski (pl_PL)", the code as data
 void addWord(const QString &word); // to the user dictionary of the loaded language
 void removeWord(const QString &word);
 QStringList userWords();
