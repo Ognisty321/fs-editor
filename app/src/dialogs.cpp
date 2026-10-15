@@ -47,6 +47,7 @@
 #include <QStandardPaths>
 #include <QTabWidget>
 #include <QtConcurrentRun>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
@@ -1482,28 +1483,46 @@ FontCollectorDialog::FontCollectorDialog(TabPanel *tab) : QDialog(tab) {
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, this);
     auto *check = bb->addButton(tr("Check"), QDialogButtonBox::ActionRole);
     auto *copy = bb->addButton(tr("Copy"), QDialogButtonBox::ActionRole);
+    auto *attach = bb->addButton(tr("Attach to subtitles"), QDialogButtonBox::ActionRole);
+    attach->setToolTip(tr("Embed the found fonts in the script's [Fonts] section (Aegisub)"));
     // the script's fonts are read here, the font files on a worker (the first scan of the system's takes seconds)
-    auto run = [=, this](bool doCopy) {
-        if (doCopy && dest->text().isEmpty()) return report->setPlainText(tr("Choose a destination folder first."));
+    enum Mode { Check, Copy, Attach };
+    auto run = [=, this](Mode mode) {
+        if (mode == Copy && dest->text().isEmpty()) return report->setPlainText(tr("Choose a destination folder first."));
         QSettings s;
         s.setValue("fonts/extraDir", extra->text());
         s.setValue("fonts/destDir", dest->text());
         auto uses = std::make_shared<rust::Box<fsb::FontUses>>(tab->s().font_uses());
+        // attaching collects the files into a folder of its own first, like a copy
+        auto tmp = mode == Attach ? std::make_shared<QTemporaryDir>() : nullptr;
+        if (tmp && !tmp->isValid()) return report->setPlainText(tmp->errorString());
         const QString dir = extra->text(), from = attached->isChecked() ? media : QString(),
-                      to = doCopy ? dest->text() : QString();
-        check->setEnabled(false);
-        copy->setEnabled(false);
+                      to = mode == Copy ? dest->text() : tmp ? tmp->path() : QString();
+        for (auto *b : {check, copy, attach}) b->setEnabled(false);
         report->setPlainText(tr("Searching for fonts..."));
         using Result = std::pair<bool, QString>; // ok, report or error
         auto *watch = new QFutureWatcher<Result>(this);
         connect(watch, &QFutureWatcher<Result>::finished, this, [=, this] {
-            const auto [ok, r] = watch->result();
+            auto [ok, r] = watch->result();
             const int missing = r.count("MISSING") + r.count("missing glyphs");
+            QString done = mode == Copy ? tr("Copied to %1").arg(to) : QString();
+            if (ok && tmp) {
+                QStringList files;
+                for (const QFileInfo &fi : QDir(tmp->path()).entryInfoList(QDir::Files)) files << fi.filePath();
+                const auto paths = fs::rvec(files);
+                try {
+                    const size_t n = tab->s().attach_fonts({paths.data(), paths.size()});
+                    if (n) tab->changed();
+                    done = tr("Attached %1 font file(s) to the subtitles").arg(n);
+                } catch (const rust::Error &e) {
+                    ok = false;
+                    r = QString::fromUtf8(e.what());
+                }
+            }
             report->setPlainText(!ok ? r
                                      : r + "\n" + (missing ? tr("%n problem(s) found.", nullptr, missing) : tr("All fonts found.")) +
-                                           (to.isEmpty() ? QString() : "\n" + tr("Copied to %1").arg(to)));
-            check->setEnabled(true);
-            copy->setEnabled(true);
+                                           (done.isEmpty() ? QString() : "\n" + done));
+            for (auto *b : {check, copy, attach}) b->setEnabled(true);
             watch->deleteLater();
         });
         watch->setFuture(QtConcurrent::run([uses, dir, from, to]() -> Result {
@@ -1516,8 +1535,9 @@ FontCollectorDialog::FontCollectorDialog(TabPanel *tab) : QDialog(tab) {
             }
         }));
     };
-    connect(check, &QPushButton::clicked, this, [run] { run(false); });
-    connect(copy, &QPushButton::clicked, this, [run] { run(true); });
+    connect(check, &QPushButton::clicked, this, [run] { run(Check); });
+    connect(copy, &QPushButton::clicked, this, [run] { run(Copy); });
+    connect(attach, &QPushButton::clicked, this, [run] { run(Attach); });
     connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
     f->addRow(bb);
 }

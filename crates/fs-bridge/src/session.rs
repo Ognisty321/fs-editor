@@ -1578,6 +1578,37 @@ impl Session {
         Ok(stored)
     }
 
+    /// Aegisub's "Attach fonts to current subtitles": the files go into [Fonts] in one step,
+    /// except those attached already. Returns how many went in.
+    pub fn attach_fonts(&mut self, paths: &[String]) -> Result<usize, String> {
+        let mut have: HashSet<String> = self
+            .ed
+            .doc
+            .attachments()
+            .into_iter()
+            .filter(|a| a.font)
+            .map(|a| fs_core::attachments::file_name(&a.name).to_lowercase())
+            .collect();
+        let mut files = Vec::new();
+        for p in paths {
+            let name = Path::new(p)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if !name.is_empty() && have.insert(name.to_lowercase()) {
+                files.push((name, std::fs::read(p).map_err(|e| format!("{p}: {e}"))?));
+            }
+        }
+        if !files.is_empty() {
+            self.edit("Attach fonts", |d| {
+                for (name, data) in &files {
+                    d.attach(true, name, data);
+                }
+            });
+        }
+        Ok(files.len())
+    }
+
     pub fn extract_attachment(&self, font: bool, name: &str, path: &str) -> Result<(), String> {
         let data = self
             .ed
@@ -2364,6 +2395,29 @@ mod tests {
             s.row(0).text,
             r"{\pos(10,0)\fscx200\frz90\p1}m 0 10 l 10 10 10 20"
         );
+    }
+
+    #[test]
+    fn fonts_attach_once_in_one_step() {
+        let dir = std::env::temp_dir().join(format!("fsb-fonts-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let paths: Vec<String> = ["A.ttf", "b.otf"]
+            .iter()
+            .map(|n| {
+                let p = dir.join(n);
+                std::fs::write(&p, b"not really a font").unwrap();
+                p.to_string_lossy().into_owned()
+            })
+            .collect();
+        let mut s = session(ASS);
+        assert_eq!(s.attach_fonts(&paths), Ok(2));
+        // the same files again (in another case too) add nothing
+        assert_eq!(s.attach_fonts(&paths), Ok(0));
+        let names: Vec<String> = s.attachments().into_iter().map(|a| a.name).collect();
+        assert_eq!(names, ["A_0.ttf", "b.otf"]);
+        assert!(s.undo());
+        assert!(s.attachments().is_empty());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

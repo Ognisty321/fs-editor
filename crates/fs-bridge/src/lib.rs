@@ -538,6 +538,8 @@ pub mod ffi {
         fn attachments(self: &Session) -> Vec<AttachmentRow>;
         /// Embed a file into [Fonts] or [Graphics]; returns the stored name.
         fn attach_file(self: &mut Session, font: bool, path: &str) -> Result<String>;
+        /// Font files into [Fonts], one undo step, skipping ones already attached; how many went in.
+        fn attach_fonts(self: &mut Session, paths: &[String]) -> Result<usize>;
         fn extract_attachment(self: &Session, font: bool, name: &str, path: &str) -> Result<()>;
         fn remove_attachment(self: &mut Session, font: bool, name: &str);
         /// The file name an attachment extracts to (without SSA's `_0`).

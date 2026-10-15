@@ -598,12 +598,24 @@
         <translation>Kopiuj</translation>
     </message>
     <message>
+        <source>Attach to subtitles</source>
+        <translation>Dołącz do napisów</translation>
+    </message>
+    <message>
+        <source>Embed the found fonts in the script&apos;s [Fonts] section (Aegisub)</source>
+        <translation>Osadza znalezione czcionki w sekcji [Fonts] skryptu (Aegisub)</translation>
+    </message>
+    <message>
         <source>Choose a destination folder first.</source>
         <translation>Najpierw wybierz folder docelowy.</translation>
     </message>
     <message>
         <source>Searching for fonts...</source>
         <translation>Szukanie czcionek...</translation>
+    </message>
+    <message>
+        <source>Attached %1 font file(s) to the subtitles</source>
+        <translation>Dołączono do napisów pliki czcionek: %1</translation>
     </message>
     <message numerus="yes">
         <source>%n problem(s) found.</source>
