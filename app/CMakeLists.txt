@@ -46,6 +46,8 @@ qt_add_executable(fsed WIN32 MACOSX_BUNDLE
     src/audiobox.h src/audiobox.cpp
     src/dialogs.h src/dialogs.cpp
     src/automationhost.h src/automationhost.cpp
+    src/colorpicker.h src/colorpicker.cpp
+    src/theme.h src/theme.cpp
     src/icons.h src/icons.cpp
 )
 qt_add_shaders(fsed "shaders"

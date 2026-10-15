@@ -3,6 +3,7 @@
 #include "editbox.h"
 #include "mainwindow.h"
 #include "tabpanel.h"
+#include "theme.h"
 #include "videobox.h"
 #include "visualtools.h"
 
@@ -179,6 +180,7 @@ int main(int argc, char **argv) {
     if (qt.load(locale, "qtbase", "_", ":/i18n") ||
         qt.load(locale, "qtbase", "_", QLibraryInfo::path(QLibraryInfo::TranslationsPath)))
         app.installTranslator(&qt);
+    theme::apply(theme::current(), false); // its window palette
     MainWindow w;
     g_main = &w;
     w.show();

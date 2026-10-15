@@ -1,16 +1,17 @@
 #include "editbox.h"
 #include "audiobox.h"
+#include "colorpicker.h"
 
 #include "dialogs.h"
 #include "grid.h"
 #include "mainwindow.h"
 #include "tabpanel.h"
+#include "theme.h"
 #include "videobox.h"
 
 #include <QAbstractItemView>
 #include <QApplication>
 #include <QCheckBox>
-#include <QColorDialog>
 #include <QComboBox>
 #include <QLocale>
 #include <QCompleter>
@@ -77,32 +78,30 @@ void TimeEdit::wheelEvent(QWheelEvent *e) {
 // ---- text editor --------------------------------------------------------------
 
 namespace {
+// Aegisub's syntax highlighting (fs_core::syntax) in the theme's colours, misspellings squiggled
 class TagHighlighter : public QSyntaxHighlighter {
 public:
-    using QSyntaxHighlighter::QSyntaxHighlighter;
+    TagHighlighter(QTextDocument *doc, const bool *templateLine) : QSyntaxHighlighter(doc), m_template(templateLine) {}
 protected:
     void highlightBlock(const QString &t) override {
-        static const QColor brace(0xc6, 0x78, 0xdd), name(0x6c, 0xb4, 0xee), value(0xd1, 0x9a, 0x66),
-            newline(0xe5, 0xc0, 0x7b), comment(0x80, 0x88, 0x90);
-        static const QRegularExpression block("\\{[^}]*\\}"), tag("\\\\(\\d?[a-zA-Z]+)([^\\\\}]*)"),
-            nl("\\\\[Nnh]");
-        for (auto it = block.globalMatch(t); it.hasNext();) {
-            const auto m = it.next();
-            const int s = int(m.capturedStart()), l = int(m.capturedLength());
-            const bool hasTag = m.captured().contains('\\');
-            setFormat(s, l, hasTag ? value : comment);
-            setFormat(s, 1, brace);
-            setFormat(s + l - 1, 1, brace);
-            if (!hasTag) continue;
-            for (auto ti = tag.globalMatch(m.captured()); ti.hasNext();) {
-                const auto tm = ti.next();
-                setFormat(s + int(tm.capturedStart()), int(tm.capturedLength(1)) + 1, name);
-            }
-        }
-        for (auto it = nl.globalMatch(t); it.hasNext();) {
-            const auto m = it.next();
-            if (format(int(m.capturedStart())).foreground().color() != value)
-                setFormat(int(m.capturedStart()), 2, newline);
+        using namespace theme;
+        // by fs_core::syntax::Style; a curve's endpoints are its X and Y, underlined
+        static constexpr Role roles[] = {SyntaxNormal,   SyntaxComment,    SyntaxDrawingCmd,      SyntaxDrawingX,
+                                         SyntaxDrawingY, SyntaxDrawingX,   SyntaxDrawingY,        SyntaxBrackets,
+                                         SyntaxSlashes,  SyntaxTags,       SyntaxError,           SyntaxParameters,
+                                         SyntaxLineBreak, SyntaxKaraokeTemplate, SyntaxKaraokeVariable};
+        const auto runs = fsb::syntax_styles(fs::Utf8(t), *m_template);
+        int at = 0;
+        for (size_t i = 0; i + 1 < runs.size(); i += 2) {
+            const size_t style = std::min<size_t>(runs[i], std::size(roles) - 1);
+            const int len = int(runs[i + 1]);
+            QTextCharFormat f;
+            f.setForeground(color(roles[style]));
+            if (bold(roles[style])) f.setFontWeight(QFont::Bold);
+            if (style == 5 || style == 6) f.setFontUnderline(true);
+            if (roles[style] == SyntaxError) f.setBackground(color(SyntaxErrorBackground));
+            setFormat(at, len, f);
+            at += len;
         }
         if (auto *sp = spell::get()) {
             const auto bad = sp->misspelled(fs::Utf8(t));
@@ -110,11 +109,13 @@ protected:
                 for (int j = int(bad[i]); j < int(bad[i] + bad[i + 1]); ++j) {
                     QTextCharFormat f = format(j);
                     f.setUnderlineStyle(QTextCharFormat::SpellCheckUnderline);
-                    f.setUnderlineColor(Qt::red);
+                    f.setUnderlineColor(color(SyntaxMisspelled));
                     setFormat(j, 1, f);
                 }
         }
     }
+private:
+    const bool *m_template;
 };
 
 std::optional<rust::Box<fsb::Speller>> g_speller;
@@ -432,7 +433,16 @@ void SubsTextEdit::wheelEvent(QWheelEvent *e) {
 }
 
 SubsTextEdit::SubsTextEdit(QWidget *parent) : QPlainTextEdit(parent) {
-    new TagHighlighter(document());
+    m_highlighter = new TagHighlighter(document(), &m_templateLine);
+    const auto colors = [this] {
+        QPalette pal = palette();
+        pal.setColor(QPalette::Base, theme::color(theme::SyntaxBackground));
+        pal.setColor(QPalette::Text, theme::color(theme::SyntaxNormal));
+        setPalette(pal);
+        m_highlighter->rehighlight();
+    };
+    colors();
+    connect(theme::notifier(), &theme::Notifier::changed, this, colors);
     setTabChangesFocus(true);
     m_completer = new QCompleter(new QStringListModel(kTags, this), this);
     m_completer->setWidget(this);
@@ -946,10 +956,38 @@ void EditBox::setColorTag(int which) {
     const QRegularExpression alpha(QString(R"(\\(?:%1a|alpha)&H([0-9A-Fa-f]+))").arg(which));
     if (const QString a = m_text->tagValue(alpha, pos); !a.isEmpty())
         start.setAlpha(255 - int(a.toUInt(nullptr, 16) & 0xff));
-    const QColor c = QColorDialog::getColor(start, this, tr("Color"), QColorDialog::ShowAlphaChannel);
-    if (!c.isValid()) return;
-    m_text->insertTag(QString::asprintf("\\%dc&H%02X%02X%02X&", which, c.blue(), c.green(), c.red()));
-    if (c.alpha() != start.alpha()) m_text->insertTag(QString::asprintf("\\%da&H%02X&", which, 255 - c.alpha()));
+    // Aegisub: the line shows the colour as it is picked, in an undo step of its own that Cancel undoes
+    const QString before = m_text->toPlainText();
+    const int at = m_text->textCursor().position();
+    const auto place = [this, at] {
+        auto c = m_text->textCursor();
+        c.setPosition(std::min(at, int(m_text->toPlainText().size())));
+        m_text->setTextCursor(c);
+    };
+    const auto restore = [this, &before, place] {
+        m_text->setPlainText(before);
+        place();
+    };
+    ++m_undoStep;
+    bool previewed = false;
+    const QColor c = ColorPicker::get(this, start, true, [&](const QColor &col) {
+        {
+            const QSignalBlocker quiet(m_text); // the colour and its alpha as one change
+            restore();
+            m_text->insertTag(QString::asprintf("\\%dc&H%02X%02X%02X&", which, col.blue(), col.green(), col.red()));
+            if (col.alpha() != start.alpha())
+                m_text->insertTag(QString::asprintf("\\%da&H%02X&", which, 255 - col.alpha()));
+        }
+        previewed = true;
+        emit m_text->textChanged();
+    });
+    if (!c.isValid() && previewed) {
+        m_tab->undo();
+        // a preview longer than the 30 s of a typing step spans two of them: the text goes back anyway
+        if (m_text->toPlainText() != before) restore();
+        place();
+    }
+    ++m_undoStep;
 }
 
 void EditBox::load(int row) {
@@ -991,6 +1029,10 @@ void EditBox::reload() {
     m_tlMode->setEnabled(ass);
     m_tlMode->setChecked(info.tl_mode);
     m_tlBox->setVisible(info.tl_mode);
+    // Aegisub: a comment whose effect starts with "template" is the karaoke templater's code
+    const bool tpl = r.comment && fs::q(r.effect).startsWith("template", Qt::CaseInsensitive);
+    m_text->setTemplateLine(tpl);
+    m_original->setTemplateLine(tpl);
     m_text->setText(fs::q(r.text));
     m_original->setText(fs::q(r.original));
     m_doubtful->setChecked(r.doubtful);

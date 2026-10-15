@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 #include <QLineEdit>
 #include <QPlainTextEdit>
+#include <QSyntaxHighlighter>
 #include <QWidget>
 
 #include <unordered_map>
@@ -72,6 +73,10 @@ public:
     void toggleTag(const QString &name, bool styleOn);
     // Capture 1 of the last `re` among the tags in effect at `pos` (Aegisub's), empty if none
     QString tagValue(const QRegularExpression &re, int pos) const;
+    // a karaoke template line: its !code! and $variables are highlighted (Aegisub)
+    void setTemplateLine(bool on) {
+        if (on != m_templateLine) m_templateLine = on, m_highlighter->rehighlight();
+    }
 signals:
     void keyCommand(const char *id); // one of EditBox::keys()
     void splitRequested(qint64 atMs); // -1 estimate, -2 keep both times, else at that time
@@ -84,6 +89,8 @@ protected:
 private:
     std::pair<int, int> blockAt(int pos) const;
     QCompleter *m_completer;
+    QSyntaxHighlighter *m_highlighter;
+    bool m_templateLine = false;
 };
 
 class EditBox : public QWidget {

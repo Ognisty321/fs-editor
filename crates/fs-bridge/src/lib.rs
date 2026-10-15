@@ -751,13 +751,26 @@ pub mod ffi {
         fn set_tags(self: &mut Session, rows: &[usize], tags: &str, amend: &str);
         /// `tags[i]` into `rows[i]`, one edit.
         fn set_each_tags(self: &mut Session, rows: &[usize], tags: &[String], amend: &str);
+        /// `tags`: comma-separated, each changed by its own of `deltas`, one after another.
         fn adjust_tag(
             self: &mut Session,
             rows: &[usize],
             base: &[String],
-            tag: &str,
+            tags: &str,
             mode: u8,
-            delta: f64,
+            deltas: &[f64],
+            amend: &str,
+        );
+        /// Kainote's "preserve proportions": the rows' places scaled by (sx, sy), then turned by
+        /// `turn` degrees (counter-clockwise on screen), around (cx, cy).
+        fn transform_places(
+            self: &mut Session,
+            rows: &[usize],
+            cx: f64,
+            cy: f64,
+            sx: f64,
+            sy: f64,
+            turn: f64,
             amend: &str,
         );
         fn remove_tags(self: &mut Session, rows: &[usize], names: &str, amend: &str);
@@ -861,6 +874,9 @@ pub mod ffi {
         fn add_word(self: &mut Speller, word: &str);
         /// Words as flat [start, len, ...] in UTF-16 units; tags and drawings skipped.
         fn text_words(text: &str) -> Vec<usize>;
+        /// Aegisub's syntax highlighting as flat [style, len, ...], len in UTF-16 units; style is
+        /// fs_core::syntax::Style's number; template_line: a karaoke template line.
+        fn syntax_styles(text: &str, template_line: bool) -> Vec<u32>;
         /// What characters per second leaves out (both by default).
         fn set_cps_ignore(whitespace: bool, punctuation: bool);
 
@@ -1034,6 +1050,17 @@ fn parse_time(s: &str) -> i64 {
         .or_else(|| fs_core::Time::parse_srt(s))
         .or_else(|| fs_core::Time::parse_offset(s))
         .map_or(-1, |t| t.ms())
+}
+
+fn syntax_styles(text: &str, template_line: bool) -> Vec<u32> {
+    let mut at = 0;
+    let mut out = Vec::new();
+    for (style, len) in fs_core::syntax::highlight(text, template_line) {
+        out.push(style as u32);
+        out.push(text[at..at + len].encode_utf16().count() as u32);
+        at += len;
+    }
+    out
 }
 
 fn strip_tags(s: &str) -> String {

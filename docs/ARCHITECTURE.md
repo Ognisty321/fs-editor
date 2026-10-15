@@ -51,6 +51,8 @@ fs-editor/
 │  │  ├─ shiftpanel.*         # panel „Zmiana czasów” i postprocesor
 │  │  ├─ videobox.*           # VideoView (QRhiWidget), wątek dekodowania, zoom, tryb odtwarzacza
 │  │  ├─ visualtools.*        # \pos \move \org \clip \iclip \p, skala, obroty
+│  │  ├─ colorpicker.*        # okno koloru Aegisuba: widmo w 5 trybach, RGB/HSL/HSV, ASS/HTML, alfa, ostatnie kolory, pipeta
+│  │  ├─ theme.*              # motywy kolorów: role kolorów, Ciemny/Jasny, motywy użytkownika (.ini), paleta okien
 │  │  ├─ audiobox.*           # AudioView (QRhiWidget): waveform/spektrogram, karaoke, przyciski
 │  │  ├─ rhiquad.*            # jeden teksturowany prostokąt QRhi używany przez wideo i audio
 │  │  ├─ dialogs.*            # style, właściwości, szukaj/zamień, zaznacz linie, historia, ustawienia
@@ -99,6 +101,8 @@ Zmiana pola czyści `raw`, a zapis serializuje wtedy wpis kanonicznie, według `
 
 Tokenizer bloków `{…}` daje `Text | Override(Vec<Tag>) | Comment | Drawing`. Rozpoznaje pełną listę tagów libass/VSFilter (`\pos \move \org \clip \iclip \fad \fade \t \k \kf \K \ko \kt \p \pbo \an \a \fn \fs \fsc \fscx \fscy \fsp \frx \fry \frz \fr \fax \fay \bord \xbord \ybord \shad \xshad \yshad \be \blur \c \1c-\4c \alpha \1a-\4a \b \i \u \s \q \r …`) i argumenty z tolerancją (np. `\pos(1,2` bez nawiasu). Z tokenizera korzystają narzędzia wizualne, karaoke, czyszczenie tagów, liczenie CPS i podmiana wartości (np. przesunięcie `\pos`). Zapis tagów jest minimalnie inwazyjny: zmienia się tylko dotknięty fragment tekstu.
 
+Podświetlanie składni (`fs-core::syntax`) to port lexera Aegisuba (`TokenizeDialogueBody`, `MarkDrawings`, `SyntaxHighlight`) jako ręcznie pisany automat z tą samą regułą najdłuższego dopasowania. Rozróżnia nawiasy, ukośniki i nawiasy okrągłe, nazwy tagów, parametry, komentarze, łamania linii, kod i zmienne szablonu karaoke (tylko w linijkach-szablonach). Rysunki (`\p` > 0 i wektorowy `\clip`) dzieli na polecenia, współrzędne X/Y i punkty końcowe krzywych, a błędy oznacza (brak `m` na początku, nieparzysta liczba współrzędnych, polecenie sklejone z liczbą). Wynikiem są przebiegi (styl, długość). Most zwraca je w jednostkach UTF-16 dla `QSyntaxHighlighter`. Testy Aegisuba są przeniesione 1:1.
+
 ### 3.4 Czas i VFR
 
 * `Time(i64 ms)` z formatowaniem i parsowaniem ASS (`H:MM:SS.cc`), SRT (`HH:MM:SS,mmm`) i klatek.
@@ -125,6 +129,8 @@ Wszystkie operacje są wywoływalne z CLI, GUI i Lua:
 * zmiana FPS (CFR→CFR, VFR→CFR);
 * kolizje i nakładanie, CPS/długość linii, czyszczenie tagów, łączenie i dzielenie linii;
 * karaoke: podział `\k` na sylaby i ich zapis;
+* zmiana jednego tagu w wielu linijkach (`tag_adjust`, Hydra Kainote i „zmiana wszystkich tagów” narzędzi skali i obrotu): dodanie, ustawienie, mnożenie przez numer linijki, gradienty oraz skalowanie wszystkich wystąpień. Zmiany względne obejmują też tagi wewnątrz `\t`, a linijka bez tagu na początku dostaje go tam (od wartości stylu), żeby zmieniła się cała. Liczone są zawsze od tekstu sprzed przeciągania, więc nic się nie kumuluje;
+* „utrzymanie proporcji” (`transform_place`): pozycje, oba punkty `\move`, `\org` i clipy przekształcone tą samą skalą lub obrotem wokół jednego punktu. Przy obrocie linijka z `\org` przesuwa tylko `\org`, bo libass już obraca ją wokół niego;
 * tryb tłumaczenia: para (oryginał, tłumaczenie) per linia, odczyt/zapis w formacie zgodnym z Kainote (szczegóły w `docs/research/kainote-ui.md`).
 
 ### 3.7 Czcionki i pisownia
@@ -190,6 +196,9 @@ Szczegóły są w `docs/research/kainote-ui.md`. W skrócie:
 * przesuwanie czasów w gridzie, panel przesuwania czasów i filtrowanie linii;
 * zoom wideo (kółko, prostokąt, komendy Aegisub: powiększ/pomniejsz Ctrl+Num+/−, 50/100/200% pikseli wideo, „Ctrl+Spacja” na suwak) i tryb odtwarzacza (samo wideo bez edycji, pełny ekran). Widok nie zmienia rozmiaru z zoomem, więc skala poniżej dopasowania pokazuje całą klatkę;
 * komendy Aegisub z własnymi klawiszami w edytorze skrótów: przesuwanie linii (Alt+↑/↓; w polu tekstu Alt+↓ nadal oznacza linię jako niepotwierdzoną), widok widma lub fali audio, Ctrl+Enter w polu tekstu (zatwierdza czasy z audio i zamyka krok undo bez zmiany linii);
+* okno koloru Aegisuba (`colorpicker.*`) dla tagów koloru, stylów, dialogów Lua i atrapy wideo. Ma widmo w trybach RGB/R, G, B, HSL/L i HSV/H, pola RGB/HSL/HSV, ASS i HTML, alfę, 32 ostatnie kolory i pipetę: przeciągnięcie albo dwa kliknięcia, powiększenie 7×7, a puszczenie bierze piksel. W polu tekstu kolor jest podglądany na żywo w osobnym kroku undo, który Anuluj cofa;
+* motywy kolorów (`theme.*`, strona „Kolory” w ustawieniach). Każdy kolor rysowany przez program (siatka, pole tekstu ze stylami Aegisuba i ich pogrubieniem, audio, narzędzia wizualne) to rola. Są wbudowane motywy Ciemny i Jasny (domyślne kolory Aegisuba), motywy użytkownika w plikach `.ini` (zapisz jako, usuń, przywróć) i paleta okien (systemowa, jasna, ciemna). Zmiana jest widoczna od razu, a Anuluj przywraca poprzedni motyw;
+* opcje narzędzi wizualnych z Kainote, zapamiętywane w ustawieniach. Skala: zmiana wszystkich tagów skali i utrzymanie proporcji. Obrót Z: zmiana wszystkich `rz` i utrzymanie proporcji. Obrót X/Y: zmiana wszystkich `rx`/`ry`. Ruch: `\move` z dwóch punktów i czasu wideo. Kotwicą jest czas pierwszego punktu, a nie początek linijki jak w Kainote. Każda linijka idzie od miejsca, w którym była w tym czasie, w swoich czasach `\move`;
 * menu kontekstowe pola tekstu: podpowiedzi pisowni, dodanie słowa do słownika i usunięcie go stamtąd, język sprawdzania pisowni (albo jego wyłączenie) i tezaurus;
 * autozapis co N sekund (Aegisub): kopia dokumentu w O(1) w GUI, a zapis ASS na dysk w wątku roboczym. Przy awarii i wylogowaniu zapis odbywa się synchronicznie.
 

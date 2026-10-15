@@ -1,6 +1,7 @@
 #include "visualtools.h"
 
 #include "icons.h"
+#include "theme.h"
 #include "mainwindow.h"
 #include "tabpanel.h"
 #include "videobox.h"
@@ -18,6 +19,7 @@
 #include <QSignalBlocker>
 #include <QStackedWidget>
 #include <QSettings>
+#include <QToolTip>
 #include <QToolButton>
 #include <QtMath>
 
@@ -108,14 +110,17 @@ QRectF Drawing::bounds() const {
 // ---- tools --------------------------------------------------------------------
 
 namespace {
-const QColor kHandle(255, 255, 255), kLine(240, 200, 60), kAccent(230, 70, 70), kShadow(0, 0, 0, 160);
+const QColor kShadow(0, 0, 0, 160);
+QColor handleColor() { return theme::color(theme::VisualHandle); }
+QColor lineColor() { return theme::color(theme::VisualLine); }
+QColor accentColor() { return theme::color(theme::VisualAccent); }
 
 QString n2(double v) {
     const double r = std::round(v * 100) / 100;
     return QString::number(r == 0 ? 0.0 : r, 'g', 12); // 12.5, not 12.50; 0, not -0
 }
 
-void handle(QPainter &p, QPointF c, bool round = false, QColor col = kHandle) {
+void handle(QPainter &p, QPointF c, bool round = false, QColor col = handleColor()) {
     p.setPen(QPen(kShadow, 3));
     const QRectF r(c.x() - 4, c.y() - 4, 8, 8);
     round ? p.drawEllipse(r) : p.drawRect(r);
@@ -123,7 +128,7 @@ void handle(QPainter &p, QPointF c, bool round = false, QColor col = kHandle) {
     round ? p.drawEllipse(r) : p.drawRect(r);
 }
 
-void line(QPainter &p, QPointF a, QPointF b, QColor c = kLine, Qt::PenStyle st = Qt::SolidLine) {
+void line(QPainter &p, QPointF a, QPointF b, QColor c = lineColor(), Qt::PenStyle st = Qt::SolidLine) {
     p.setPen(QPen(kShadow, 3));
     p.drawLine(a, b);
     p.setPen(QPen(c, 1.2, st));
@@ -147,7 +152,8 @@ const std::pair<const char *, const char *> kShapes[] = {
 
 VisualTools::VisualTools(VideoBox *box)
     : QObject(box), m_box(box), m_shiftWhat(QSettings().value("visual/shiftWhat", 47).toInt()),
-      m_scaleWhat(QSettings().value("visual/scaleWhat", 5).toInt()) {}
+      m_scaleWhat(QSettings().value("visual/scaleWhat", 5).toInt()),
+      m_rotWhat(QSettings().value("visual/rotWhat", 0).toInt()) {}
 
 QPointF VisualTools::w(QPointF p) const { return m_box->view()->toWidget(p); }
 QPointF VisualTools::s(QPointF p) const { return m_box->view()->toScript(p); }
@@ -296,6 +302,20 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     dh->addWidget(conv);
     dh->addStretch();
     connect(conv, &QToolButton::clicked, this, &VisualTools::toggleMove);
+    auto *track = new QToolButton(drag);
+    track->setIcon(icon("focus-2", QColor(0x4aa3ff)));
+    track->setToolTip(tr("Movement from 2 points and the video's time: click a point of the moving thing in the "
+                         "video, seek a few frames on, click the same point again. The selected lines follow it "
+                         "through their \\move times. Drag a point to correct it, right-click to start over."));
+    track->setCheckable(true);
+    track->setAutoRaise(true);
+    connect(track, &QToolButton::toggled, this, [this](bool on) {
+        m_track = on;
+        m_trackPts = 0;
+        m_box->view()->updateOverlay();
+    });
+    dh->addWidget(track);
+    m_trackButton = track;
     m_sub->addWidget(drag);
     // position shifter: which tags move (Kainote's toggles), bits as in Session::shift_positions
     auto *shift = new QWidget(m_sub);
@@ -345,34 +365,60 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
             [this](int k) { QSettings().setValue("visual/allTagsMode", k); });
     connect(m_tagValue, &QDoubleSpinBox::editingFinished, this, [this] {
         if (m_drag || !m_valid) return;
-        auto *tab = m_box->tab();
-        m_tagRows = tab->selection();
-        m_tagBase.clear();
-        for (size_t r : m_tagRows) m_tagBase.push_back(tab->s().row(r).text);
+        grabTexts();
         m_amend = QString("visual-tags-%1").arg(++m_dragId);
         applyAllTags(m_tagValue->value());
     });
     m_sub->addWidget(tags);
-    // scale tool (Kainote): which axes a left drag scales
+    // Kainote's option toggles: bits of *bits, kept under key; while `forcing` is on, `forced` is
+    // on too and cannot be turned off
+    struct Option {
+        int bit;
+        const char *icon, *tip;
+    };
+    const auto options = [this](QWidget *page, QHBoxLayout *lay, int *bits, const char *key,
+                                std::initializer_list<Option> list, int forcing, int forced) {
+        std::vector<std::pair<int, QToolButton *>> made;
+        for (const Option &o : list) {
+            auto *b = new QToolButton(page);
+            b->setIcon(icon(o.icon, QColor(0x4aa3ff)));
+            b->setToolTip(tr(o.tip));
+            b->setCheckable(true);
+            b->setAutoRaise(true);
+            lay->addWidget(b);
+            made.emplace_back(o.bit, b);
+        }
+        const auto sync = [bits, made, forcing, forced] {
+            for (auto [bit, b] : made) {
+                const QSignalBlocker quiet(b);
+                b->setChecked(*bits & bit);
+                b->setEnabled(!(bit == forced && (*bits & forcing)));
+            }
+        };
+        for (auto [bit, b] : made)
+            connect(b, &QToolButton::toggled, this, [=](bool on) {
+                *bits = on ? *bits | bit : *bits & ~bit;
+                if (*bits & forcing) *bits |= forced;
+                QSettings().setValue(key, *bits);
+                sync();
+            });
+        sync();
+    };
+    // scale tool (Kainote): which axes a left drag scales, and how far the change reaches
     auto *scale = new QWidget(m_sub);
     auto *ch = new QHBoxLayout(scale);
     ch->setContentsMargins(6, 0, 0, 0);
     ch->setSpacing(1);
-    const char *si[] = {"arrow-autofit-width", "link", "arrow-autofit-height"};
-    const char *st[] = {QT_TR_NOOP("Scale width"), QT_TR_NOOP("Keep proportions"), QT_TR_NOOP("Scale height")};
-    for (int k = 0; k < 3; ++k) {
-        auto *b = new QToolButton(scale);
-        b->setIcon(icon(si[k], QColor(0x4aa3ff)));
-        b->setToolTip(tr(st[k]));
-        b->setCheckable(true);
-        b->setAutoRaise(true);
-        b->setChecked(m_scaleWhat & (1 << k));
-        connect(b, &QToolButton::toggled, this, [this, k](bool on) {
-            m_scaleWhat = on ? m_scaleWhat | (1 << k) : m_scaleWhat & ~(1 << k);
-            QSettings().setValue("visual/scaleWhat", m_scaleWhat);
-        });
-        ch->addWidget(b);
-    }
+    options(scale, ch, &m_scaleWhat, "visual/scaleWhat",
+            {{1, "arrow-autofit-width", QT_TR_NOOP("Scale width")},
+             {2, "link", QT_TR_NOOP("Keep proportions")},
+             {4, "arrow-autofit-height", QT_TR_NOOP("Scale height")},
+             {8, "stack-2", QT_TR_NOOP("Change all scale tags: every \\fscx and \\fscy of the selected lines, also "
+                                       "inside \\t, by the same factor")},
+             {16, "aspect-ratio",
+              QT_TR_NOOP("Preserve proportions: the places of the selected lines and their clips are scaled around the "
+                         "active line too, so text and vector drawings keep their positions against each other")}},
+            16, 8);
     ch->addStretch();
     m_sub->addWidget(scale);
     // Z rotation (Kainote): the angle from two points, e.g. along a sign's edge
@@ -386,8 +432,24 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     two->setAutoRaise(true);
     connect(two, &QToolButton::toggled, this, [this](bool on) { m_twoPoints = on; });
     rh->addWidget(two);
+    options(rot, rh, &m_rotWhat, "visual/rotWhat",
+            {{1, "stack-2", QT_TR_NOOP("Change all Z rotation tags: every \\frz of the selected lines, also inside \\t, "
+                                       "turns by the same angle")},
+             {2, "aspect-ratio",
+              QT_TR_NOOP("Preserve proportions: the places of the selected lines and their clips turn around the active "
+                         "line's origin too, so text and vector drawings keep their positions against each other")}},
+            2, 1);
     rh->addStretch();
     m_sub->addWidget(rot);
+    auto *rotXY = new QWidget(m_sub);
+    auto *xh = new QHBoxLayout(rotXY);
+    xh->setContentsMargins(6, 0, 0, 0);
+    options(rotXY, xh, &m_rotWhat, "visual/rotWhat",
+            {{4, "stack-2", QT_TR_NOOP("Change all X/Y rotation tags: every \\frx and \\fry of the selected lines, also "
+                                       "inside \\t, turns by the same angle")}},
+            0, 0);
+    xh->addStretch();
+    m_sub->addWidget(rotXY);
     // A stack wants the width of its widest page, shown or not: only the shown page counts, and
     // a narrow video clips it rather than widening the window.
     m_sub->setMinimumWidth(1);
@@ -410,13 +472,15 @@ void VisualTools::setTool(int t) {
     m_vecSel.clear();
     if (t < int(m_buttons.size())) m_buttons[t]->setChecked(true);
     if (m_sub) {
-        m_sub->setCurrentIndex(t == VClip || t == Draw || t == RClip ? 1 : t == Pos || t == Move ? 2 : t == Shifter ? 3 : t == AllTags ? 4 : t == Scale ? 5 : t == RotZ ? 6 : 0);
+        m_sub->setCurrentIndex(t == VClip || t == Draw || t == RClip ? 1 : t == Pos || t == Move ? 2 : t == Shifter ? 3 : t == AllTags ? 4 : t == Scale ? 5 : t == RotZ ? 6 : t == RotXY ? 7 : 0);
         m_sub->setVisible(m_sub->currentIndex() != 0);
         m_invert->setVisible(t == VClip || t == RClip);
+        m_trackButton->setVisible(t == Move);
         for (auto *b : m_sub->widget(1)->findChildren<QToolButton *>())
             if (b != m_invert) b->setVisible(t != RClip);
         m_shapeBox->setVisible(t != RClip);
     }
+    m_trackPts = 0;
     reload();
     m_box->view()->setCursor(t == Pointer ? Qt::ArrowCursor : Qt::CrossCursor);
     m_box->view()->updateOverlay();
@@ -433,6 +497,7 @@ void VisualTools::reload() {
     m_last = r.comment ? -1 : m_box->frameAtEnd(r.end);
     if (m_drag) return; // keep the vector and its frame stable while dragging
     if (row != m_vecRow) m_vecSel.clear();
+    if (row != m_trackRow) m_trackPts = 0; // the points belong to the line they were set for
     m_vecRow = row;
     if (m_tool == VClip)
         m_vec = m_v.clip == 2   ? Drawing::parse(fs::q(m_v.clip_drawing))
@@ -539,8 +604,55 @@ void VisualTools::toggleMove() {
 void VisualTools::applyAllTags(double value) {
     auto *tab = m_box->tab();
     tab->s().adjust_tag(fs::slice(m_tagRows), {m_tagBase.data(), m_tagBase.size()},
-                        fs::Utf8(m_tagName->currentData().toString()), uint8_t(m_tagMode->currentIndex()), value,
-                        fs::Utf8(m_amend));
+                        fs::Utf8(m_tagName->currentData().toString()), uint8_t(m_tagMode->currentIndex()),
+                        rust::Slice<const double>(&value, 1), fs::Utf8(m_amend));
+    tab->changed(TabPanel::FromVideo);
+}
+
+// Kainote's movement from two points, without its assumption that the first point was set at the
+// line's start: the thing tracked moves from P1 at T1 to P2 at T2, and each grabbed line goes along
+// from where it was at T1, over its own \move times (the whole line without them)
+void VisualTools::writeTrack() {
+    const double dt = double(m_trackT[1] - m_trackT[0]);
+    if (dt == 0 || m_rows.empty()) return;
+    const QPointF v = (m_trackP[1] - m_trackP[0]) / dt;
+    auto &s = m_box->tab()->s();
+    QStringList tags;
+    for (size_t k = 0; k < m_rows.size(); ++k) {
+        const fsb::Visual &st = m_starts[k];
+        const fsb::Row r = s.row(m_rows[k]);
+        const auto [t1, t2] = moveTimes(st, r);
+        QPointF at(st.x, st.y);
+        if (st.has_move) {
+            const double u = std::clamp(double(m_trackT[0] - r.start - t1) / double(std::max<qint64>(1, t2 - t1)), 0.0, 1.0);
+            at += (QPointF(st.x2, st.y2) - at) * u;
+        }
+        const QPointF a = at + v * double(r.start + t1 - m_trackT[0]), b = at + v * double(r.start + t2 - m_trackT[0]);
+        tags << QString("\\move(%1,%2,%3,%4,%5,%6)").arg(n2(a.x()), n2(a.y()), n2(b.x()), n2(b.y())).arg(t1).arg(t2);
+    }
+    const auto t = fs::rvec(tags);
+    s.set_each_tags(fs::slice(m_rows), {t.data(), t.size()}, fs::Utf8(m_amend)); // one step a drag
+    m_box->tab()->changed(TabPanel::FromVideo);
+}
+
+void VisualTools::grabTexts() {
+    auto *tab = m_box->tab();
+    m_tagRows = tab->selection();
+    m_tagBase.clear();
+    for (size_t r : m_tagRows) m_tagBase.push_back(tab->s().row(r).text);
+}
+
+void VisualTools::adjustAll(const char *tags, uint8_t mode, std::initializer_list<double> deltas) {
+    auto *tab = m_box->tab();
+    tab->s().adjust_tag(fs::slice(m_tagRows), {m_tagBase.data(), m_tagBase.size()}, tags, mode,
+                        rust::Slice<const double>(deltas.begin(), deltas.size()), fs::Utf8(m_amend));
+    tab->changed(TabPanel::FromVideo);
+}
+
+void VisualTools::keepPlaces(QPointF around, double sx, double sy, double turn) {
+    if (m_tagRows.size() < 2) return; // one line keeps its place (Kainote)
+    auto *tab = m_box->tab();
+    tab->s().transform_places(fs::slice(m_tagRows), around.x(), around.y(), sx, sy, turn, fs::Utf8(m_amend));
     tab->changed(TabPanel::FromVideo);
 }
 
@@ -650,13 +762,13 @@ void VisualTools::paint(QPainter &p) {
         const QString t = QString("%1, %2").arg(qRound(sp.x())).arg(qRound(sp.y()));
         p.setPen(kShadow);
         p.drawText(m + QPointF(9, -7), t);
-        p.setPen(kHandle);
+        p.setPen(handleColor());
         p.drawText(m + QPointF(8, -8), t);
         return;
     }
     // the other selected lines on this frame (Kainote), a click makes one the active line (Aegisub)
     const auto oth = others();
-    for (const auto &o : oth) handle(p, o.second, true, kLine);
+    for (const auto &o : oth) handle(p, o.second, true, lineColor());
     if (!shown()) {
         // why the tool does nothing (Kainote)
         if (m_valid && oth.empty()) {
@@ -675,21 +787,30 @@ void VisualTools::paint(QPainter &p) {
     switch (m_tool) {
     case Pos:
     case Shifter:
-        handle(p, pos, !m_v.has_pos, m_v.has_pos ? kHandle : kLine);
+        handle(p, pos, !m_v.has_pos, m_v.has_pos ? handleColor() : lineColor());
         break;
     case Move: {
         const QPointF end = w({m_v.x2, m_v.y2});
         line(p, pos, end);
         handle(p, pos);
-        handle(p, end, true, kAccent);
+        handle(p, end, true, accentColor());
         if (m_v.has_move) { // where the line is on this frame (Kainote)
             const auto r = m_box->tab()->s().row(size_t(m_box->tab()->active()));
             const auto [t1, t2] = moveTimes(m_v, r);
             const double k = std::clamp(double(m_box->time() - r.start - t1) / double(std::max<qint64>(1, t2 - t1)), 0.0, 1.0);
             p.setPen(Qt::NoPen);
-            p.setBrush(kAccent);
+            p.setBrush(accentColor());
             p.drawEllipse(pos + (end - pos) * k, 3, 3);
             p.setBrush(Qt::NoBrush);
+        }
+        if (m_track && m_trackPts) { // the two points tracked, numbered
+            if (m_trackPts == 2) line(p, w(m_trackP[0]), w(m_trackP[1]), accentColor(), Qt::DashLine);
+            for (int k = 0; k < m_trackPts; ++k) {
+                const QPointF at = w(m_trackP[k]);
+                handle(p, at, false, accentColor());
+                p.setPen(accentColor());
+                p.drawText(at + QPointF(7, -6), QString::number(k + 1));
+            }
         }
         break;
     }
@@ -710,17 +831,17 @@ void VisualTools::paint(QPainter &p) {
         const QPointF org = w({m_v.org_x, m_v.org_y});
         const double a = qDegreesToRadians(m_v.frz);
         const QPointF tip = org + QPointF(std::cos(a), -std::sin(a)) * 70;
-        p.setPen(QPen(kLine, 1, Qt::DashLine));
+        p.setPen(QPen(lineColor(), 1, Qt::DashLine));
         p.drawEllipse(org, 70, 70);
         line(p, org, tip);
         line(p, org, pos, QColor(255, 255, 255, 100), Qt::DotLine);
         handle(p, tip, true);
-        handle(p, org, false, kAccent);
+        handle(p, org, false, accentColor());
         handle(p, pos, true);
         if (m_drag == 4) {
-            line(p, m_pressW, m_mouseW, kAccent);
-            handle(p, m_pressW, false, kAccent);
-            handle(p, m_mouseW, false, kAccent);
+            line(p, m_pressW, m_mouseW, accentColor());
+            handle(p, m_pressW, false, accentColor());
+            handle(p, m_mouseW, false, accentColor());
         }
         break;
     }
@@ -729,7 +850,7 @@ void VisualTools::paint(QPainter &p) {
         p.translate(pos);
         // the grid is foreshortened like the rotated text plane
         p.scale(std::cos(qDegreesToRadians(m_v.fry)), std::cos(qDegreesToRadians(m_v.frx)));
-        p.setPen(QPen(kLine, 1));
+        p.setPen(QPen(lineColor(), 1));
         for (int k = -3; k <= 3; ++k) {
             p.drawLine(QPointF(k * 20, -60), QPointF(k * 20, 60));
             p.drawLine(QPointF(-60, k * 20), QPointF(60, k * 20));
@@ -738,20 +859,20 @@ void VisualTools::paint(QPainter &p) {
         const QPointF org = w({m_v.org_x, m_v.org_y});
         line(p, org, pos, QColor(255, 255, 255, 100), Qt::DotLine);
         handle(p, pos, true);
-        handle(p, org, false, kAccent);
+        handle(p, org, false, accentColor());
         break;
     }
     case RClip:
         if (m_v.clip == 1) {
             const QRectF r(w({m_v.clip_x1, m_v.clip_y1}), w({m_v.clip_x2, m_v.clip_y2}));
-            if (m_v.inverse) p.fillRect(r, QColor(0, 0, 0, 90));
+            if (m_v.inverse) p.fillRect(r, theme::color(theme::VisualShade));
             else {
                 QPainterPath outside;
                 outside.addRect(d);
                 outside.addRect(r.normalized());
-                p.fillPath(outside, QColor(0, 0, 0, 90));
+                p.fillPath(outside, theme::color(theme::VisualShade));
             }
-            p.setPen(QPen(kLine, 1));
+            p.setPen(QPen(lineColor(), 1));
             p.drawRect(r);
             for (QPointF c : {r.topLeft(), r.topRight(), r.bottomLeft(), r.bottomRight()}) handle(p, c);
         }
@@ -799,12 +920,12 @@ void VisualTools::paint(QPainter &p) {
             QPainterPath shade;
             shade.addRect(d);
             shade.addPath(path);
-            if (!m_v.inverse) p.fillPath(shade, QColor(0, 0, 0, 90));
-            else p.fillPath(path, QColor(0, 0, 0, 90));
+            if (!m_v.inverse) p.fillPath(shade, theme::color(theme::VisualShade));
+            else p.fillPath(path, theme::color(theme::VisualShade));
         }
         p.setPen(QPen(kShadow, 3));
         p.drawPath(path);
-        p.setPen(QPen(kLine, 1.2));
+        p.setPen(QPen(lineColor(), 1.2));
         p.drawPath(path);
         for (const auto &c : m_vec.cmds) {
             if (c.type == 'b' && c.pts.size() == 3) {
@@ -817,16 +938,16 @@ void VisualTools::paint(QPainter &p) {
                 for (const auto &pt : c.pts) handle(p, map(pt), true);
             if (!c.pts.empty()) {
                 last = map(c.pts.back());
-                handle(p, last, false, c.type == 'm' ? kAccent : kHandle);
+                handle(p, last, false, c.type == 'm' ? accentColor() : handleColor());
             }
         }
-        if (m_tool == Draw) handle(p, pos, true, kAccent);
+        if (m_tool == Draw) handle(p, pos, true, accentColor());
         p.setPen(Qt::NoPen);
-        p.setBrush(kAccent);
+        p.setBrush(accentColor());
         for (const auto &h : m_vecSel) p.drawRect(QRectF(map(m_vec.at(h)) - QPointF(3, 3), QSizeF(6, 6)));
         p.setBrush(Qt::NoBrush);
         if (m_drag == 7) {
-            p.setPen(QPen(kLine, 1, Qt::DashLine));
+            p.setPen(QPen(lineColor(), 1, Qt::DashLine));
             p.drawRect(QRectF(m_pressW, m_mouseW).normalized());
         }
         break;
@@ -863,12 +984,43 @@ bool VisualTools::press(QMouseEvent *e) {
     switch (m_tool) {
     case Pos: grabLines(); break;
     case Move:
+        if (m_track) {
+            m_drag = 0;
+            if (m_button == Qt::RightButton) m_trackPts = 0;
+            else if (m_trackPts && near(w(m_trackP[0]), m_pressW, 8)) m_drag = 40;
+            else if (m_trackPts == 2 && near(w(m_trackP[1]), m_pressW, 8)) m_drag = 41;
+            else if (m_trackPts == 0) {
+                m_trackP[0] = m_pressS;
+                m_trackT[0] = m_box->time();
+                m_trackPts = 1;
+                m_trackRow = tab->active();
+            } else if (m_trackPts == 1) {
+                if (m_box->time() == m_trackT[0]) {
+                    QToolTip::showText(e->globalPosition().toPoint(),
+                                       tr("Seek the video at least one frame from the first point's time"));
+                    return true;
+                }
+                QPointF at = m_pressS;
+                if (e->modifiers() & Qt::ShiftModifier) { // level or plumb with the first point
+                    const QPointF d = at - m_trackP[0];
+                    std::abs(d.x()) > std::abs(d.y()) ? at.setY(m_trackP[0].y()) : at.setX(m_trackP[0].x());
+                }
+                m_trackP[1] = at;
+                m_trackT[1] = m_box->time();
+                m_trackPts = 2;
+                grabLines();
+                writeTrack();
+            }
+            m_box->view()->updateOverlay();
+            return true;
+        }
         if (m_button == Qt::RightButton) m_drag = 2;
         break;
+    case Scale:
+        if (m_scaleWhat & 8) grabTexts();
+        break;
     case AllTags:
-        m_tagRows = tab->selection();
-        m_tagBase.clear();
-        for (size_t r : m_tagRows) m_tagBase.push_back(tab->s().row(r).text);
+        grabTexts();
         m_tagStart = m_tagMode->currentIndex() == 1 ? m_tagValue->value() : 0;
         break;
     case RotZ:
@@ -876,7 +1028,10 @@ bool VisualTools::press(QMouseEvent *e) {
         if (near(w({m_v.org_x, m_v.org_y}), m_pressW, 9)) {
             m_drag = 2;
             grabLines();
-        } else if (m_tool == RotZ && m_twoPoints) m_drag = 4;
+            break;
+        }
+        if (m_tool == RotZ && m_twoPoints) m_drag = 4;
+        if (m_rotWhat & (m_tool == RotZ ? 1 : 4)) grabTexts();
         break;
     case RClip:
         grabLines();
@@ -1042,6 +1197,18 @@ bool VisualTools::move(QMouseEvent *e) {
         moveLines(delta); // every selected line by the same delta
         break;
     case Move: {
+        if (m_drag >= 40) {
+            const int k = m_drag - 40;
+            QPointF at = now;
+            if (e->modifiers() & Qt::ShiftModifier) { // shares x or y with the other point
+                const QPointF d = at - m_trackP[1 - k];
+                std::abs(d.x()) > std::abs(d.y()) ? at.setY(m_trackP[1 - k].y()) : at.setX(m_trackP[1 - k].x());
+            }
+            m_trackP[k] = at;
+            if (m_trackPts == 2) writeTrack();
+            m_box->view()->updateOverlay();
+            break;
+        }
         QPointF a(m_start.x, m_start.y), b(m_start.x2, m_start.y2);
         if (m_drag == 2) b = m_start.has_move || near(w(b), m_pressW, 9) ? b + delta : now;
         else a += delta;
@@ -1082,7 +1249,14 @@ bool VisualTools::move(QMouseEvent *e) {
         const double step = e->modifiers() & Qt::ControlModifier ? 25 : 1;
         sx = std::round(sx / step) * step;
         sy = std::round(sy / step) * step;
-        apply(QString("\\fscx%1\\fscy%2").arg(sx).arg(sy), true);
+        if (m_scaleWhat & 8) {
+            // the active line's change as a factor, for every scale tag of every selected line
+            const double fx = m_start.fscx > 0 ? sx / m_start.fscx : 1, fy = m_start.fscy > 0 ? sy / m_start.fscy : 1;
+            adjustAll("fscx,fscy", 7, {fx, fy});
+            if (m_scaleWhat & 16) keepPlaces({m_start.x, m_start.y}, fx, fy, 0);
+        } else {
+            apply(QString("\\fscx%1\\fscy%2").arg(sx).arg(sy), true);
+        }
         break;
     }
     case RotZ:
@@ -1101,25 +1275,36 @@ bool VisualTools::move(QMouseEvent *e) {
             if (e->modifiers() & Qt::ControlModifier) a = std::round(a / 30) * 30;
             return std::fmod(std::fmod(a, 360) + 360, 360);
         };
+        // the shortest turn from the angle the drag started at
+        const auto turned = [](double from, double to) { return std::remainder(to - from, 360.0); };
         if (m_tool == RotXY) {
             double frx = m_start.frx, fry = m_start.fry;
             // two degrees a pixel (Aegisub)
             if (m_button != Qt::RightButton) fry = angle(m_start.fry + dw.x() * 2);
             if (m_button != Qt::LeftButton) frx = angle(m_start.frx - dw.y() * 2);
-            apply(QString("\\frx%1\\fry%2").arg(n2(frx), n2(fry)), true);
+            if (m_rotWhat & 4) adjustAll("frx,fry", 0, {turned(m_start.frx, frx), turned(m_start.fry, fry)});
+            else apply(QString("\\frx%1\\fry%2").arg(n2(frx), n2(fry)), true);
             break;
         }
+        double frz;
         if (m_drag == 4) {
             const QPointF d = now - m_pressS;
             if (QLineF(m_pressW, e->position()).length() < 4) break;
-            apply(QString("\\frz%1").arg(n2(angle(qRadiansToDegrees(std::atan2(-d.y(), d.x()))))), true);
+            frz = angle(qRadiansToDegrees(std::atan2(-d.y(), d.x())));
             m_box->view()->updateOverlay();
-            break;
+        } else {
+            const QPointF c = w({m_start.org_x, m_start.org_y});
+            const double a0 = std::atan2(-(m_pressW.y() - c.y()), m_pressW.x() - c.x());
+            const double a1 = std::atan2(-(e->position().y() - c.y()), e->position().x() - c.x());
+            frz = angle(m_start.frz + qRadiansToDegrees(a1 - a0));
         }
-        const QPointF c = w({m_start.org_x, m_start.org_y});
-        const double a0 = std::atan2(-(m_pressW.y() - c.y()), m_pressW.x() - c.x());
-        const double a1 = std::atan2(-(e->position().y() - c.y()), e->position().x() - c.x());
-        apply(QString("\\frz%1").arg(n2(angle(m_start.frz + qRadiansToDegrees(a1 - a0)))), true);
+        if (m_rotWhat & 1) {
+            const double by = turned(m_start.frz, frz);
+            adjustAll("frz", 0, {by});
+            if (m_rotWhat & 2) keepPlaces({m_start.org_x, m_start.org_y}, 1, 1, by);
+        } else {
+            apply(QString("\\frz%1").arg(n2(frz)), true);
+        }
         break;
     }
     case RClip: {

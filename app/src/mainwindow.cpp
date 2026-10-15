@@ -2,6 +2,7 @@
 
 #include "audiobox.h"
 #include "automationhost.h"
+#include "colorpicker.h"
 #include "dialogs.h"
 #include "editbox.h"
 #include "icons.h"
@@ -51,7 +52,6 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QCheckBox>
-#include <QColorDialog>
 #include <QSettings>
 #include <QSpinBox>
 #include <QStandardPaths>
@@ -1123,7 +1123,7 @@ void MainWindow::buildMenus() {
         const auto show = [pick, &colour] { pick->setStyleSheet(QString("background:%1").arg(colour.name())); };
         show();
         connect(pick, &QPushButton::clicked, &d, [&, show] {
-            if (const QColor c = QColorDialog::getColor(colour, &d); c.isValid()) colour = c, show();
+            if (const QColor c = ColorPicker::get(&d, colour, false); c.isValid()) colour = c, show();
         });
         auto *pattern = new QCheckBox(tr("Checkerboard pattern"), &d);
         pattern->setChecked(st.value("video/dummyPattern").toBool());

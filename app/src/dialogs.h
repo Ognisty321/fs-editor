@@ -17,6 +17,7 @@ class QComboBox;
 class QCheckBox;
 class QRadioButton;
 class QButtonGroup;
+class QFormLayout;
 class QListWidget;
 class QSpinBox;
 class QDoubleSpinBox;
@@ -185,6 +186,9 @@ class SettingsDialog : public QDialog {
     Q_OBJECT
 public:
     explicit SettingsDialog(QWidget *parent);
+
+private:
+    void buildColorsPage(QFormLayout *form);
 };
 
 // Autosave folder; files are "<name>.<yyyy-MM-dd-HH-mm-ss>.AUTOSAVE.ass" (Aegisub naming).

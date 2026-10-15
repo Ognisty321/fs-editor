@@ -1,11 +1,13 @@
 #include "dialogs.h"
 
 #include "audiobox.h"
+#include "colorpicker.h"
 #include "editbox.h"
 #include "grid.h"
 #include "icons.h"
 #include "mainwindow.h"
 #include "tabpanel.h"
+#include "theme.h"
 #include "videobox.h"
 
 #include <QApplication>
@@ -13,7 +15,6 @@
 #include <QCheckBox>
 #include <QAction>
 #include <QClipboard>
-#include <QColorDialog>
 #include <QComboBox>
 #include <QCompleter>
 #include <QDataStream>
@@ -936,9 +937,7 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
             const int alphaBefore = m_alpha[k]->value();
             QColor start = assColor(m_colors[k]);
             start.setAlpha(255 - alphaBefore);
-            QColorDialog d(start, this);
-            d.setOption(QColorDialog::ShowAlphaChannel);
-            connect(&d, &QColorDialog::currentColorChanged, this, [&](const QColor &c) {
+            const QColor taken = ColorPicker::get(this, start, true, [&](const QColor &c) {
                 m_colors[k] = assColorString(c);
                 {
                     const QSignalBlocker block(m_alpha[k]);
@@ -947,7 +946,7 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
                 paint();
                 preview();
             });
-            if (d.exec() == QDialog::Accepted) return;
+            if (taken.isValid()) return;
             m_colors[k] = before;
             m_alpha[k]->setValue(alphaBefore);
             paint();
@@ -977,7 +976,8 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
     };
     bgMenu->addAction(tr("Checkerboard"), this, [setBg] { setBg({}); });
     bgMenu->addAction(tr("Colour..."), this, [this, setBg] {
-        if (const QColor c = QColorDialog::getColor(m_previewBg.isValid() ? m_previewBg : Qt::black, this); c.isValid()) setBg(c);
+        if (const QColor c = ColorPicker::get(this, m_previewBg.isValid() ? m_previewBg : Qt::black, false); c.isValid())
+            setBg(c);
     });
     bg->setMenu(bgMenu);
     auto *textRow = new QHBoxLayout;
@@ -2131,7 +2131,7 @@ FontCollectorDialog::FontCollectorDialog(TabPanel *tab) : QDialog(tab) {
 
 SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle(tr("Settings"));
-    // shortcut: Kainote's themes and file associations pages are not built yet.
+    // shortcut: no file associations page (Kainote's), add one together with an installer that registers types.
     QSettings st;
     // Kainote's layout: the pages listed on the left
     auto *list = new QListWidget(this);
@@ -2145,7 +2145,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         return form;
     };
     QFormLayout *editor = page(tr("Editor")), *subs = page(tr("Subtitles")), *video = page(tr("Video")),
-                *audio = page(tr("Audio")), *automation = page(tr("Automation"));
+                *audio = page(tr("Audio")), *automation = page(tr("Automation")), *colors = page(tr("Colors"));
+    buildColorsPage(colors);
     struct Check { const char *key; const char *label; bool def; QFormLayout *page; };
     const Check checks[] = {
         {"main/askSession", QT_TR_NOOP("Load the last session at startup"), true, editor},
@@ -2266,14 +2267,157 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         accept();
     });
     connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    connect(list, &QListWidget::currentRowChanged, pages, &QStackedWidget::setCurrentIndex);
-    list->setCurrentRow(0);
+    connect(list, &QListWidget::currentRowChanged, pages, [pages](int row) {
+        pages->setCurrentIndex(row);
+        QSettings().setValue("settings/page", row); // opens where it was left
+    });
+    list->setCurrentRow(std::clamp(st.value("settings/page").toInt(), 0, list->count() - 1));
     list->setFixedWidth(list->sizeHintForColumn(0) + 2 * list->frameWidth() + 24);
     auto *g = new QGridLayout(this);
     g->addWidget(list, 0, 0);
     g->addWidget(pages, 0, 1, Qt::AlignTop);
     g->addWidget(bb, 1, 0, 1, 2);
     g->setColumnStretch(1, 1);
+}
+
+// Kainote's colours page: a theme (built-in or a user's file), the window's palette, and every colour
+// by where it is used, each change shown at once; Cancel puts the theme back as it was.
+void SettingsDialog::buildColorsPage(QFormLayout *form) {
+    auto work = std::make_shared<theme::Theme>(theme::current());
+    auto *themes = new QComboBox(this);
+    const auto fillThemes = [themes](const QString &select) {
+        const QSignalBlocker quiet(themes);
+        themes->clear();
+        themes->addItem(tr("Dark"), "Dark");
+        themes->addItem(tr("Light"), "Light");
+        for (const QString &n : theme::userThemes()) themes->addItem(n, n);
+        themes->setCurrentIndex(std::max(0, themes->findData(select)));
+    };
+    fillThemes(work->name);
+    auto *saveAs = new QPushButton(tr("Save as..."), this), *remove = new QPushButton(tr("Delete"), this),
+         *restore = new QPushButton(tr("Restore"), this);
+    restore->setToolTip(tr("Discard the changes made to the colours of this theme"));
+    auto *row = new QHBoxLayout;
+    row->addWidget(themes, 1);
+    for (auto *b : {saveAs, remove, restore}) row->addWidget(b);
+    form->addRow(tr("Theme"), row);
+    auto *palette = new QComboBox(this);
+    palette->addItems({tr("System"), tr("Light"), tr("Dark")});
+    form->addRow(tr("Window colors"), palette);
+    auto *tree = new QTreeWidget(this);
+    tree->setHeaderLabels({tr("Element"), tr("Color"), tr("Bold")});
+    tree->setRootIsDecorated(false);
+    tree->setMinimumHeight(320);
+    form->addRow(tree);
+
+    const auto swatch = [](const QColor &c) {
+        QPixmap px(28, 14);
+        px.fill(Qt::transparent);
+        QPainter p(&px);
+        for (int y = 0; y < 14; y += 7) // a checkerboard under what is see-through
+            for (int x = 0; x < 28; x += 7) p.fillRect(x, y, 7, 7, (x + y) / 7 % 2 ? Qt::lightGray : Qt::white);
+        p.fillRect(px.rect(), c);
+        p.setPen(Qt::gray);
+        p.drawRect(px.rect().adjusted(0, 0, -1, -1));
+        return QIcon(px);
+    };
+    const auto refresh = [=] {
+        const QSignalBlocker quiet(tree);
+        tree->clear();
+        QTreeWidgetItem *groupItem = nullptr;
+        for (int r = 0; r < theme::RoleCount; ++r) {
+            const auto role = theme::Role(r);
+            if (!groupItem || groupItem->text(0) != theme::group(role)) {
+                groupItem = new QTreeWidgetItem(tree, {theme::group(role)});
+                groupItem->setFirstColumnSpanned(true);
+                QFont f = groupItem->font(0);
+                f.setBold(true);
+                groupItem->setFont(0, f);
+                groupItem->setExpanded(true);
+            }
+            auto *it = new QTreeWidgetItem(groupItem, {theme::label(role), work->colors[r].name(QColor::HexArgb)});
+            it->setIcon(1, swatch(work->colors[r]));
+            it->setData(0, Qt::UserRole, r);
+            if (theme::hasBold(role)) it->setCheckState(2, work->bold[r] ? Qt::Checked : Qt::Unchecked);
+        }
+        tree->expandAll();
+        tree->resizeColumnToContents(0);
+        palette->setCurrentIndex(work->palette);
+        remove->setEnabled(work->name != "Dark" && work->name != "Light");
+    };
+    refresh();
+    const auto show = [work] { theme::apply(*work, false); };
+    connect(themes, &QComboBox::currentIndexChanged, this, [=] {
+        if (auto t = theme::load(themes->currentData().toString())) *work = *t;
+        refresh();
+        show();
+    });
+    connect(restore, &QPushButton::clicked, this, [=] {
+        if (auto t = theme::load(work->name)) *work = *t;
+        refresh();
+        show();
+    });
+    connect(palette, &QComboBox::currentIndexChanged, this, [=](int i) {
+        work->palette = i;
+        show();
+    });
+    connect(tree, &QTreeWidget::itemChanged, this, [=](QTreeWidgetItem *it, int column) {
+        if (column != 2 || !it->data(0, Qt::UserRole).isValid()) return;
+        work->bold[it->data(0, Qt::UserRole).toInt()] = it->checkState(2) == Qt::Checked;
+        show();
+    });
+    connect(tree, &QTreeWidget::itemActivated, this, [=, this](QTreeWidgetItem *it) {
+        if (!it->data(0, Qt::UserRole).isValid()) return;
+        const int r = it->data(0, Qt::UserRole).toInt();
+        const QColor before = work->colors[r];
+        const auto set = [=](const QColor &c) {
+            work->colors[r] = c;
+            const QSignalBlocker quiet(tree);
+            it->setText(1, c.name(QColor::HexArgb));
+            it->setIcon(1, swatch(c));
+            show();
+        };
+        const QColor c = ColorPicker::get(this, before, true, set);
+        set(c.isValid() ? c : before);
+    });
+    connect(saveAs, &QPushButton::clicked, this, [=, this] {
+        const QString name =
+            QInputDialog::getText(this, tr("Save theme"), tr("Theme name:"), QLineEdit::Normal,
+                                  work->name == "Dark" || work->name == "Light" ? QString() : work->name)
+                .trimmed();
+        if (name.isEmpty()) return;
+        static const QRegularExpression bad(R"([\\/:*?"<>|])");
+        if (name == "Dark" || name == "Light" || name.contains(bad)) {
+            QMessageBox::warning(this, tr("Save theme"), tr("A theme cannot be named \"%1\".").arg(name));
+            return;
+        }
+        if (theme::userThemes().contains(name) &&
+            QMessageBox::question(this, tr("Save theme"), tr("Replace the theme \"%1\"?").arg(name)) != QMessageBox::Yes)
+            return;
+        work->name = name;
+        if (!theme::save(*work)) {
+            QMessageBox::warning(this, tr("Save theme"), tr("Could not write the theme to %1.").arg(theme::userDir()));
+            return;
+        }
+        fillThemes(name);
+        refresh();
+    });
+    connect(remove, &QPushButton::clicked, this, [=, this] {
+        if (QMessageBox::question(this, tr("Delete theme"), tr("Delete the theme \"%1\"?").arg(work->name)) !=
+            QMessageBox::Yes)
+            return;
+        theme::remove(work->name);
+        *work = theme::builtIn(true);
+        fillThemes(work->name);
+        refresh();
+        show();
+    });
+    // OK keeps it (a user theme's file too); Cancel shows the theme of before again
+    connect(this, &QDialog::accepted, this, [work] {
+        theme::apply(*work);
+        if (work->name != "Dark" && work->name != "Light") theme::save(*work);
+    });
+    connect(this, &QDialog::rejected, this, [before = theme::current()] { theme::apply(before, false); });
 }
 
 // ---- autosave -----------------------------------------------------------------

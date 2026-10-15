@@ -4,6 +4,7 @@
 #include "editbox.h"
 #include "mainwindow.h"
 #include "tabpanel.h"
+#include "theme.h"
 #include "videobox.h"
 
 #include <QApplication>
@@ -18,15 +19,18 @@
 #include <numeric>
 
 namespace {
+// the theme's grid colours, read once per paint
 struct GridTheme {
-    QColor background{0x1f, 0x22, 0x27}, dialogue{0x27, 0x2b, 0x31}, comment{0x3b, 0x33, 0x2e};
-    QColor selection{80, 140, 220, 90}, onVideo{70, 140, 70, 60}, collision{0xe0, 0x6c, 0x6c}, compare{0x9a, 0x5a, 0xd0, 80},
-        compareText{0xb0, 0x70, 0xf0, 150};
-    QColor text{0xdc, 0xdc, 0xdc}, lines{0x3a, 0x3f, 0x46}, header{0x17, 0x19, 0x1d}, headerText{0xb0, 0xb6, 0xbe};
-    QColor labelNormal{0x2d, 0x3e, 0x57}, labelModified{0x55, 0x70, 0x2c}, labelSaved{0x4a, 0x4e, 0x56},
-        labelDoubtful{0xb8, 0x64, 0x1a}, active{0xf0, 0xb0, 0x30}, error{0x8a, 0x25, 0x25};
+    QColor background = theme::color(theme::GridBackground), dialogue = theme::color(theme::GridDialogue),
+           comment = theme::color(theme::GridComment), selection = theme::color(theme::GridSelection),
+           onVideo = theme::color(theme::GridOnVideo), collision = theme::color(theme::GridCollision),
+           compare = theme::color(theme::GridCompare), compareText = theme::color(theme::GridCompareText),
+           text = theme::color(theme::GridText), lines = theme::color(theme::GridLines),
+           header = theme::color(theme::GridHeader), headerText = theme::color(theme::GridHeaderText),
+           labelNormal = theme::color(theme::GridLabelNormal), labelModified = theme::color(theme::GridLabelModified),
+           labelSaved = theme::color(theme::GridLabelSaved), labelDoubtful = theme::color(theme::GridLabelDoubtful),
+           active = theme::color(theme::GridActive), error = theme::color(theme::GridError);
 };
-const GridTheme T;
 constexpr int Pad = 4;
 
 // Calls draw(x, width) for each (start, length) span of the raw text as the cell shows it: with
@@ -352,7 +356,7 @@ void Grid::underlineMisspelled(QPainter &p, const fsb::Row &r, const QString &sh
     if (it->empty()) return;
     const QFontMetrics fm = p.fontMetrics();
     p.save();
-    p.setPen(QPen(QColor(0xe0, 0x40, 0x40), 1));
+    p.setPen(QPen(theme::color(theme::GridMisspelled), 1));
     p.setClipRect(rect);
     const int y = rect.center().y() + (fm.ascent() - fm.descent()) / 2 + 2; // under the baseline
     eachSpan(*it, raw, shown, m_tagMode, rect, fm, [&](int x, int w) { p.drawLine(x, y, x + w, y); });
@@ -361,6 +365,7 @@ void Grid::underlineMisspelled(QPainter &p, const fsb::Row &r, const QString &sh
 
 void Grid::paintEvent(QPaintEvent *) {
     QPainter p(viewport());
+    const GridTheme T;
     const int rh = rowHeight(), w = viewport()->width();
     p.fillRect(viewport()->rect(), T.background);
     p.setFont(font());

@@ -1562,6 +1562,84 @@ pub fn translate_positions(doc: &mut Document, rows: &Rows, dx: f64, dy: f64, wh
     }
 }
 
+/// Kainote's "preserve proportions" of the scale and Z rotation tools: one line's place carried
+/// through `f`, the same scale or turn around one point for every selected line, so the lines keep
+/// their places against each other while their `\fscx`/`\frz` change. `\pos` and both points of
+/// `\move` go through `f`; for a turn, a line with `\org` moves only that, as libass already turns
+/// the line around it. Clips, drawn in screen space, go along; a rectangle a turn tilts becomes the
+/// vector of its corners. A line with neither `\pos` nor `\move` gets a `\pos` from `place`.
+pub fn transform_place(
+    text: &str,
+    f: &dyn Fn(f64, f64) -> (f64, f64),
+    turn: bool,
+    place: (f64, f64),
+) -> String {
+    let mut line = Line::parse(text);
+    let s = |v: f64| crate::model::fmt_f64((v * 1000.0).round() / 1000.0);
+    let has = |name: &str| line.tags().any(|t| t.name == name);
+    let org_only = turn && has("org");
+    let placed = has("pos") || has("move");
+    line.for_each_tag_mut(|t| {
+        let n = |k: usize| t.arg_f64(k).unwrap_or(0.0);
+        match t.name.as_str() {
+            "pos" | "org" if t.args.len() >= 2 && (t.name == "org" || !org_only) => {
+                let (x, y) = f(n(0), n(1));
+                t.set_args(vec![s(x), s(y)]);
+            }
+            "move" if !org_only && t.args.len() >= 4 => {
+                let ((x1, y1), (x2, y2)) = (f(n(0), n(1)), f(n(2), n(3)));
+                let mut a = vec![s(x1), s(y1), s(x2), s(y2)];
+                a.extend(t.args[4..].iter().cloned());
+                t.set_args(a);
+            }
+            "clip" | "iclip" if t.args.len() == 4 => {
+                let (x1, y1, x2, y2) = (n(0), n(1), n(2), n(3));
+                if turn {
+                    let c = [f(x1, y1), f(x2, y1), f(x2, y2), f(x1, y2)];
+                    let d = format!(
+                        "m {} {} l {} {} {} {} {} {}",
+                        s(c[0].0),
+                        s(c[0].1),
+                        s(c[1].0),
+                        s(c[1].1),
+                        s(c[2].0),
+                        s(c[2].1),
+                        s(c[3].0),
+                        s(c[3].1)
+                    );
+                    t.set_args(vec![d]);
+                } else {
+                    let ((a, b), (c, d)) = (f(x1, y1), f(x2, y2));
+                    t.set_args(vec![s(a.min(c)), s(b.min(d)), s(a.max(c)), s(b.max(d))]);
+                }
+            }
+            "clip" | "iclip" => {
+                let k = tags::drawing_divisor(if t.args.len() == 2 {
+                    t.arg_f64(0).unwrap_or(1.0)
+                } else {
+                    1.0
+                });
+                let mut cmds = tags::parse_drawing(t.args.last().map(String::as_str).unwrap_or(""));
+                tags::transform_drawing(&mut cmds, |x, y| {
+                    let (x, y) = f(x / k, y / k);
+                    (x * k, y * k)
+                });
+                let mut a = t.args.clone();
+                if let Some(l) = a.last_mut() {
+                    *l = tags::write_drawing(&cmds);
+                }
+                t.set_args(a);
+            }
+            _ => {}
+        }
+    });
+    if !placed && !org_only {
+        let (x, y) = f(place.0, place.1);
+        line.set_line_tag(Tag::new("pos", vec![s(x), s(y)]));
+    }
+    line.to_text()
+}
+
 /// Used by the drawing tool: drawing commands of the first drawing block.
 pub fn drawing_of(text: &str) -> Option<Vec<DrawCmd>> {
     Line::parse(text).blocks.iter().find_map(|b| match b {
@@ -1633,6 +1711,49 @@ pub fn stats(doc: &Document, cps_limit: f64) -> Stats {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transform_place_scales_and_turns_around_one_point() {
+        let twice = |x: f64, y: f64| (100.0 + (x - 100.0) * 2.0, 100.0 + (y - 100.0) * 2.0);
+        assert_eq!(
+            transform_place(
+                r"{\pos(110,90)\clip(90,90,110,110)}a",
+                &twice,
+                false,
+                (0.0, 0.0)
+            ),
+            r"{\pos(120,80)\clip(80,80,120,120)}a"
+        );
+        assert_eq!(
+            transform_place(
+                r"{\move(100,100,110,100,0,500)}a",
+                &twice,
+                false,
+                (0.0, 0.0)
+            ),
+            r"{\move(100,100,120,100,0,500)}a"
+        );
+        // no \pos: one from where the line is
+        assert_eq!(
+            transform_place("a", &twice, false, (105.0, 100.0)),
+            r"{\pos(110,100)}a"
+        );
+        // a quarter turn: a line with \org keeps its \pos, the \org goes round
+        let quarter = |x: f64, y: f64| (100.0 + (y - 100.0), 100.0 - (x - 100.0));
+        assert_eq!(
+            transform_place(r"{\pos(5,5)\org(110,100)}a", &quarter, true, (0.0, 0.0)),
+            r"{\pos(5,5)\org(100,90)}a"
+        );
+        assert_eq!(
+            transform_place(
+                r"{\pos(110,100)\clip(100,100,110,110)}a",
+                &quarter,
+                true,
+                (0.0, 0.0)
+            ),
+            r"{\pos(100,90)\clip(m 100 100 l 100 90 110 90 110 100)}a"
+        );
+    }
 
     fn doc(lines: &[(&str, &str, &str, &str)]) -> Document {
         let mut s = String::from(

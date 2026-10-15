@@ -74,6 +74,13 @@ private:
     void applyPos(QPointF p);
     void toggleMove();
     void applyAllTags(double value); // all-tags tool, from the texts in m_tagBase
+    void grabTexts(); // the selected lines and their texts, m_tagRows and m_tagBase, as a drag starts
+    // Kainote's "change all tags": every occurrence of the comma-separated tags, from m_tagBase
+    // (mode as Session::adjust_tag: 0 add, 7 scale)
+    void adjustAll(const char *tags, uint8_t mode, std::initializer_list<double> deltas);
+    // Kainote's "preserve proportions": the lines' places scaled and turned around `around`
+    void keepPlaces(QPointF around, double sx, double sy, double turn);
+    void writeTrack(); // the move tool's \move from its two points and their video times
     QString clipTag() const;
     void writeRectClip(); // m_v's rectangle to the grabbed lines, each keeping its own \iclip (Aegisub)
     void writeVector();
@@ -119,11 +126,22 @@ private:
     QString m_amend;
     QStackedWidget *m_sub = nullptr;
     int m_shiftWhat = 47; // all but drawing points
-    int m_scaleWhat = 5;  // scale tool: 1 width, 2 keep proportions, 4 height
+    // scale tool: 1 width, 2 keep proportions, 4 height, 8 change all scale tags, 16 preserve
+    // proportions (the lines' places scaled too)
+    int m_scaleWhat = 5;
+    // rotation tools: 1 change all \frz, 2 preserve proportions (the places turned too), 4 change
+    // all \frx and \fry
+    int m_rotWhat = 0;
     QComboBox *m_shapeBox = nullptr; // ready shapes dragged out on the video (Kainote)
     size_t m_shapeFrom = 0;          // first command of the shape being dragged
     QPointF m_shapeA;                // its press point in drawing units
     bool m_twoPoints = false; // Z rotation: the angle of a line dragged on the video
+    // move tool (Kainote): the movement of something in the video from two points at two times
+    bool m_track = false;
+    QWidget *m_trackButton = nullptr;
+    int m_trackPts = 0, m_trackRow = -1;
+    QPointF m_trackP[2];
+    qint64 m_trackT[2] = {0, 0};
     QWidget *m_invert = nullptr;
     QComboBox *m_tagName = nullptr, *m_tagMode = nullptr;
     QDoubleSpinBox *m_tagValue = nullptr;

@@ -366,6 +366,101 @@
     </message>
 </context>
 <context>
+    <name>ColorPicker</name>
+    <message>
+        <source>Select Color</source>
+        <translation>Wybierz kolor</translation>
+    </message>
+    <message>
+        <source>Color spectrum</source>
+        <translation>Widmo kolorów</translation>
+    </message>
+    <message>
+        <source>RGB/R</source>
+        <translation>RGB/R</translation>
+    </message>
+    <message>
+        <source>RGB/G</source>
+        <translation>RGB/G</translation>
+    </message>
+    <message>
+        <source>RGB/B</source>
+        <translation>RGB/B</translation>
+    </message>
+    <message>
+        <source>HSL/L</source>
+        <translation>HSL/L</translation>
+    </message>
+    <message>
+        <source>HSV/H</source>
+        <translation>HSV/H</translation>
+    </message>
+    <message>
+        <source>Spectrum mode:</source>
+        <translation>Tryb widma:</translation>
+    </message>
+    <message>
+        <source>Alpha (transparency)</source>
+        <translation>Alfa (przezroczystość)</translation>
+    </message>
+    <message>
+        <source>RGB color</source>
+        <translation>Kolor RGB</translation>
+    </message>
+    <message>
+        <source>Red:</source>
+        <translation>Czerwony:</translation>
+    </message>
+    <message>
+        <source>Green:</source>
+        <translation>Zielony:</translation>
+    </message>
+    <message>
+        <source>Blue:</source>
+        <translation>Niebieski:</translation>
+    </message>
+    <message>
+        <source>0 is opaque, 255 transparent</source>
+        <translation>0 to pełne krycie, 255 pełna przezroczystość</translation>
+    </message>
+    <message>
+        <source>Alpha:</source>
+        <translation>Alfa:</translation>
+    </message>
+    <message>
+        <source>HSL color</source>
+        <translation>Kolor HSL</translation>
+    </message>
+    <message>
+        <source>Hue:</source>
+        <translation>Odcień:</translation>
+    </message>
+    <message>
+        <source>Sat.:</source>
+        <translation>Nasyc.:</translation>
+    </message>
+    <message>
+        <source>Lum.:</source>
+        <translation>Jasn.:</translation>
+    </message>
+    <message>
+        <source>HSV color</source>
+        <translation>Kolor HSV</translation>
+    </message>
+    <message>
+        <source>Value:</source>
+        <translation>Wartość:</translation>
+    </message>
+    <message>
+        <source>Click a pixel to take its color</source>
+        <translation>Kliknij piksel, by pobrać jego kolor</translation>
+    </message>
+    <message>
+        <source>Drag over the screen, or click and then click where, to take a color</source>
+        <translation>Przeciągnij po ekranie albo kliknij, a potem kliknij w wybranym miejscu, by pobrać kolor</translation>
+    </message>
+</context>
+<context>
     <name>EditBox</name>
     <message>
         <source>Font selection</source>
@@ -534,10 +629,6 @@
     <message>
         <source>Manage tag buttons</source>
         <translation>Zarządzaj przyciskami tagów</translation>
-    </message>
-    <message>
-        <source>Color</source>
-        <translation>Kolor</translation>
     </message>
     <message>
         <source>Length: %1     Lines: %2     Ln: %3     Col: %4     Sel: %5     Ch: %6</source>
@@ -3260,6 +3351,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Automatyzacja</translation>
     </message>
     <message>
+        <source>Colors</source>
+        <translation>Kolory</translation>
+    </message>
+    <message>
         <source>Ignore whitespace in characters per second</source>
         <translation>Ignoruj spacje w znakach na sekundę</translation>
     </message>
@@ -3382,6 +3477,78 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Trace level</source>
         <translation>Poziom komunikatów</translation>
+    </message>
+    <message>
+        <source>Dark</source>
+        <translation>Ciemny</translation>
+    </message>
+    <message>
+        <source>Light</source>
+        <translation>Jasny</translation>
+    </message>
+    <message>
+        <source>Save as...</source>
+        <translation>Zapisz jako...</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>Usuń</translation>
+    </message>
+    <message>
+        <source>Restore</source>
+        <translation>Przywróć</translation>
+    </message>
+    <message>
+        <source>Discard the changes made to the colours of this theme</source>
+        <translation>Odrzuć zmiany kolorów tego motywu</translation>
+    </message>
+    <message>
+        <source>Theme</source>
+        <translation>Motyw</translation>
+    </message>
+    <message>
+        <source>Window colors</source>
+        <translation>Kolory okien</translation>
+    </message>
+    <message>
+        <source>Element</source>
+        <translation>Element</translation>
+    </message>
+    <message>
+        <source>Color</source>
+        <translation>Kolor</translation>
+    </message>
+    <message>
+        <source>Bold</source>
+        <translation>Pogrubienie</translation>
+    </message>
+    <message>
+        <source>Save theme</source>
+        <translation>Zapisz motyw</translation>
+    </message>
+    <message>
+        <source>Theme name:</source>
+        <translation>Nazwa motywu:</translation>
+    </message>
+    <message>
+        <source>A theme cannot be named &quot;%1&quot;.</source>
+        <translation>Motyw nie może się nazywać „%1”.</translation>
+    </message>
+    <message>
+        <source>Replace the theme &quot;%1&quot;?</source>
+        <translation>Zastąpić motyw „%1”?</translation>
+    </message>
+    <message>
+        <source>Could not write the theme to %1.</source>
+        <translation>Nie udało się zapisać motywu w %1.</translation>
+    </message>
+    <message>
+        <source>Delete theme</source>
+        <translation>Usuń motyw</translation>
+    </message>
+    <message>
+        <source>Delete the theme &quot;%1&quot;?</source>
+        <translation>Usunąć motyw „%1”?</translation>
     </message>
 </context>
 <context>
@@ -4597,6 +4764,10 @@ Dopasować rozdzielczość napisów do wideo?</translation>
         <translation>Przełącz między \move a \pos</translation>
     </message>
     <message>
+        <source>Movement from 2 points and the video&apos;s time: click a point of the moving thing in the video, seek a few frames on, click the same point again. The selected lines follow it through their \move times. Drag a point to correct it, right-click to start over.</source>
+        <translation>Ruch z 2 punktów i czasu wideo: kliknij punkt poruszającego się elementu na wideo, przewiń o kilka klatek, kliknij ten sam punkt jeszcze raz. Zaznaczone linijki podążą za nim w czasach swojego \move. Przeciągnij punkt, by go poprawić; prawy przycisk zaczyna od nowa.</translation>
+    </message>
+    <message>
         <source>\pos</source>
         <translation>\pos</translation>
     </message>
@@ -4665,8 +4836,28 @@ Dopasować rozdzielczość napisów do wideo?</translation>
         <translation>Skaluj wysokość</translation>
     </message>
     <message>
+        <source>Change all scale tags: every \fscx and \fscy of the selected lines, also inside \t, by the same factor</source>
+        <translation>Zmiana wszystkich tagów skali: każdy \fscx i \fscy zaznaczonych linijek, także w \t, o ten sam mnożnik</translation>
+    </message>
+    <message>
+        <source>Preserve proportions: the places of the selected lines and their clips are scaled around the active line too, so text and vector drawings keep their positions against each other</source>
+        <translation>Utrzymanie proporcji: pozycje zaznaczonych linijek i ich clipy też są skalowane wokół aktywnej linijki, by tekst i rysunki wektorowe nie poprzestawiały się względem siebie</translation>
+    </message>
+    <message>
         <source>Set the angle from 2 points: drag along an edge in the video</source>
         <translation>Ustaw kąt z 2 punktów: przeciągnij wzdłuż krawędzi na wideo</translation>
+    </message>
+    <message>
+        <source>Change all Z rotation tags: every \frz of the selected lines, also inside \t, turns by the same angle</source>
+        <translation>Zmiana wszystkich tagów obrotu wokół osi Z: każdy \frz zaznaczonych linijek, także w \t, obraca się o ten sam kąt</translation>
+    </message>
+    <message>
+        <source>Preserve proportions: the places of the selected lines and their clips turn around the active line&apos;s origin too, so text and vector drawings keep their positions against each other</source>
+        <translation>Utrzymanie proporcji: pozycje zaznaczonych linijek i ich clipy też obracają się wokół punktu obrotu aktywnej linijki, by tekst i rysunki wektorowe nie poprzestawiały się względem siebie</translation>
+    </message>
+    <message>
+        <source>Change all X/Y rotation tags: every \frx and \fry of the selected lines, also inside \t, turns by the same angle</source>
+        <translation>Zmiana wszystkich tagów obrotu wokół osi X / Y: każdy \frx i \fry zaznaczonych linijek, także w \t, obraca się o ten sam kąt</translation>
     </message>
     <message>
         <source>The visual tools do not work on comments</source>
@@ -4677,6 +4868,213 @@ Dopasować rozdzielczość napisów do wideo?</translation>
 or lasts no time</source>
         <translation>Linijka nie jest widoczna na tej klatce
 albo nie trwa wcale</translation>
+    </message>
+    <message>
+        <source>Seek the video at least one frame from the first point&apos;s time</source>
+        <translation>Przesuń wideo co najmniej o jedną klatkę od czasu pierwszego punktu</translation>
+    </message>
+</context>
+<context>
+    <name>theme</name>
+    <message>
+        <source>Background</source>
+        <translation>Tło</translation>
+    </message>
+    <message>
+        <source>Line background</source>
+        <translation>Tło linijki</translation>
+    </message>
+    <message>
+        <source>Comment background</source>
+        <translation>Tło komentarza</translation>
+    </message>
+    <message>
+        <source>Selection</source>
+        <translation>Zaznaczenie</translation>
+    </message>
+    <message>
+        <source>Lines visible on the video</source>
+        <translation>Linijki widoczne na wideo</translation>
+    </message>
+    <message>
+        <source>Collisions</source>
+        <translation>Kolizje</translation>
+    </message>
+    <message>
+        <source>Compared lines</source>
+        <translation>Porównywane linijki</translation>
+    </message>
+    <message>
+        <source>Differences of compared lines</source>
+        <translation>Różnice porównywanych linijek</translation>
+    </message>
+    <message>
+        <source>Text</source>
+        <translation>Tekst</translation>
+    </message>
+    <message>
+        <source>Lines</source>
+        <translation>Linie</translation>
+    </message>
+    <message>
+        <source>Header</source>
+        <translation>Nagłówek</translation>
+    </message>
+    <message>
+        <source>Header text</source>
+        <translation>Tekst nagłówka</translation>
+    </message>
+    <message>
+        <source>Line number</source>
+        <translation>Numer linijki</translation>
+    </message>
+    <message>
+        <source>Line number: modified</source>
+        <translation>Numer linijki: zmieniona</translation>
+    </message>
+    <message>
+        <source>Line number: saved</source>
+        <translation>Numer linijki: zapisana</translation>
+    </message>
+    <message>
+        <source>Line number: doubtful</source>
+        <translation>Numer linijki: niepewna</translation>
+    </message>
+    <message>
+        <source>Active line border</source>
+        <translation>Ramka aktywnej linijki</translation>
+    </message>
+    <message>
+        <source>Over the limits</source>
+        <translation>Ponad limity</translation>
+    </message>
+    <message>
+        <source>Misspelled words</source>
+        <translation>Błędnie napisane słowa</translation>
+    </message>
+    <message>
+        <source>Normal</source>
+        <translation>Zwykły tekst</translation>
+    </message>
+    <message>
+        <source>Comments</source>
+        <translation>Komentarze</translation>
+    </message>
+    <message>
+        <source>Drawing commands</source>
+        <translation>Polecenia rysunku</translation>
+    </message>
+    <message>
+        <source>Drawing X</source>
+        <translation>Rysunek X</translation>
+    </message>
+    <message>
+        <source>Drawing Y</source>
+        <translation>Rysunek Y</translation>
+    </message>
+    <message>
+        <source>Brackets</source>
+        <translation>Nawiasy klamrowe</translation>
+    </message>
+    <message>
+        <source>Slashes and parentheses</source>
+        <translation>Ukośniki i nawiasy</translation>
+    </message>
+    <message>
+        <source>Tags</source>
+        <translation>Tagi</translation>
+    </message>
+    <message>
+        <source>Errors</source>
+        <translation>Błędy</translation>
+    </message>
+    <message>
+        <source>Parameters</source>
+        <translation>Parametry</translation>
+    </message>
+    <message>
+        <source>Line breaks</source>
+        <translation>Łamania linii</translation>
+    </message>
+    <message>
+        <source>Karaoke templater code</source>
+        <translation>Kod szablonu karaoke</translation>
+    </message>
+    <message>
+        <source>Karaoke templater variables</source>
+        <translation>Zmienne szablonu karaoke</translation>
+    </message>
+    <message>
+        <source>Error background</source>
+        <translation>Tło błędów</translation>
+    </message>
+    <message>
+        <source>Modified selection</source>
+        <translation>Zmienione zaznaczenie</translation>
+    </message>
+    <message>
+        <source>Waveform</source>
+        <translation>Wykres fali</translation>
+    </message>
+    <message>
+        <source>Waveform average</source>
+        <translation>Średnia fali</translation>
+    </message>
+    <message>
+        <source>Line start</source>
+        <translation>Początek linijki</translation>
+    </message>
+    <message>
+        <source>Line end</source>
+        <translation>Koniec linijki</translation>
+    </message>
+    <message>
+        <source>Inactive line boundaries</source>
+        <translation>Granice nieaktywnych linijek</translation>
+    </message>
+    <message>
+        <source>Marker</source>
+        <translation>Znacznik</translation>
+    </message>
+    <message>
+        <source>Keyframes</source>
+        <translation>Klatki kluczowe</translation>
+    </message>
+    <message>
+        <source>Play cursor</source>
+        <translation>Kursor odtwarzania</translation>
+    </message>
+    <message>
+        <source>Syllable boundaries</source>
+        <translation>Granice sylab</translation>
+    </message>
+    <message>
+        <source>Handles</source>
+        <translation>Uchwyty</translation>
+    </message>
+    <message>
+        <source>Highlighted handle</source>
+        <translation>Wyróżniony uchwyt</translation>
+    </message>
+    <message>
+        <source>Shaded area</source>
+        <translation>Zacieniony obszar</translation>
+    </message>
+    <message>
+        <source>Grid</source>
+        <translation>Siatka</translation>
+    </message>
+    <message>
+        <source>Text field</source>
+        <translation>Pole tekstu</translation>
+    </message>
+    <message>
+        <source>Audio</source>
+        <translation>Audio</translation>
+    </message>
+    <message>
+        <source>Visual tools</source>
+        <translation>Narzędzia wizualne</translation>
     </message>
 </context>
 </TS>

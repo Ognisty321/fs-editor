@@ -1,10 +1,11 @@
 #include "automationhost.h"
 
+#include "colorpicker.h"
+
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QCloseEvent>
-#include <QColorDialog>
 #include <QComboBox>
 #include <QDialog>
 #include <QDir>
@@ -201,9 +202,7 @@ std::vector<QWidget *> scriptControls(const rust::Vec<fsb::DialogControlData> &c
             };
             paint();
             QObject::connect(b, &QPushButton::clicked, b, [b, paint, alpha] {
-                const QColor c = QColorDialog::getColor(parseColor(b->property("color").toString()), b, {},
-                                                        alpha ? QColorDialog::ShowAlphaChannel
-                                                              : QColorDialog::ColorDialogOptions());
+                const QColor c = ColorPicker::get(b, parseColor(b->property("color").toString()), alpha);
                 if (!c.isValid()) return;
                 b->setProperty("color", colorText(c, alpha));
                 paint();

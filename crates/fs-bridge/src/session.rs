@@ -2508,14 +2508,15 @@ impl Session {
 
     /// Kainote's all-tags tool: rewrite `tag` in the rows from `base` (their
     /// texts when the drag started). `mode`: 0 add, 1 set, 2 multiply,
-    /// 3/4 gradient over characters up/down, 5/6 gradient over lines up/down.
+    /// 3/4 gradient over characters up/down, 5/6 gradient over lines up/down, 7 scale (every
+    /// occurrence times `delta`).
     pub fn adjust_tag(
         &mut self,
         rows: &[usize],
         base: &[String],
-        tag: &str,
+        tags: &str,
         mode: u8,
-        delta: f64,
+        deltas: &[f64],
         amend: &str,
     ) {
         use fs_core::tag_adjust::{TagAdjust, adjust_tag};
@@ -2528,17 +2529,53 @@ impl Session {
             5 | 6 => TagAdjust::GradientLine {
                 increasing: mode == 5,
             },
+            7 => TagAdjust::Scale,
             _ => TagAdjust::Add,
         };
         let evs = self.main_events(rows);
         let base = base.to_vec();
-        let tag = tag.to_string();
+        let changes: Vec<(String, f64)> = tags
+            .split(',')
+            .map(str::to_string)
+            .zip(deltas.iter().copied())
+            .collect();
         self.edit_amend(amend, "Change tags", move |d| {
             let n = evs.len().min(base.len());
             for (k, &e) in evs.iter().take(n).enumerate() {
                 let style = d.style(&d.event(e).unwrap().style).cloned();
-                let text = adjust_tag(&base[k], style.as_ref(), &tag, mode, delta, k, n);
+                let text = changes.iter().fold(base[k].clone(), |text, (tag, delta)| {
+                    adjust_tag(&text, style.as_ref(), tag, mode, *delta, k, n)
+                });
                 if d.event(e).unwrap().text != text {
+                    d.event_mut(e).unwrap().text = text;
+                }
+            }
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)] // the cxx bridge passes plain numbers, no tuples
+    pub fn transform_places(
+        &mut self,
+        rows: &[usize],
+        cx: f64,
+        cy: f64,
+        sx: f64,
+        sy: f64,
+        turn: f64,
+        amend: &str,
+    ) {
+        let evs = self.main_events(rows);
+        let (s, c) = turn.to_radians().sin_cos();
+        self.edit_amend(amend, "Change tags", move |d| {
+            let f = move |x: f64, y: f64| {
+                let (dx, dy) = ((x - cx) * sx, (y - cy) * sy);
+                (cx + dx * c + dy * s, cy - dx * s + dy * c)
+            };
+            for e in evs {
+                let ev = d.event(e).unwrap();
+                let v = crate::visual::of_event(d, ev);
+                let text = fs_core::ops::transform_place(&ev.text, &f, turn != 0.0, (v.x, v.y));
+                if text != ev.text {
                     d.event_mut(e).unwrap().text = text;
                 }
             }
@@ -3092,6 +3129,31 @@ mod tests {
     }
 
     const ASS: &str = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,one\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,two\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,three\n";
+
+    #[test]
+    fn scaling_all_tags_with_places_is_one_step_from_the_base() {
+        let mut s = session(ASS);
+        for (i, t) in [r"{\pos(100,100)}one", r"{\pos(200,100)\fscx50}two"]
+            .into_iter()
+            .enumerate()
+        {
+            let mut r = s.row(i);
+            r.text = t.into();
+            s.set_row(i, &r, "");
+        }
+        let base = vec![s.row(0).text, s.row(1).text];
+        for f in [2.0, 3.0] {
+            s.adjust_tag(&[0, 1], &base, "fscx,fscy", 7, &[f, f], "drag");
+            s.transform_places(&[0, 1], 100.0, 100.0, f, f, 0.0, "drag");
+        }
+        assert_eq!(s.row(0).text, r"{\pos(100,100)\fscx300\fscy300}one");
+        assert_eq!(s.row(1).text, r"{\pos(400,100)\fscx150\fscy300}two");
+        s.undo();
+        assert_eq!(
+            [s.row(0).text, s.row(1).text],
+            [base[0].clone(), base[1].clone()]
+        );
+    }
 
     #[test]
     fn edit_box_changes_reach_the_selection_in_one_step() {
@@ -3823,8 +3885,8 @@ mod tests {
     fn adjust_tag_rewrites_from_base_in_one_step() {
         let mut s = session(ASS);
         let base = vec![s.row(0).text];
-        s.adjust_tag(&[0], &base, "bord", 1, 3.0, "drag");
-        s.adjust_tag(&[0], &base, "bord", 1, 5.0, "drag");
+        s.adjust_tag(&[0], &base, "bord", 1, &[3.0], "drag");
+        s.adjust_tag(&[0], &base, "bord", 1, &[5.0], "drag");
         assert!(s.row(0).text.starts_with(r"{\bord5}"));
         s.undo();
         assert_eq!(s.row(0).text, base[0]);

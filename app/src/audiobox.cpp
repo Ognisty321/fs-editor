@@ -5,6 +5,7 @@
 #include "icons.h"
 #include "mainwindow.h"
 #include "tabpanel.h"
+#include "theme.h"
 #include "videobox.h"
 
 #include <QApplication>
@@ -25,9 +26,7 @@
 
 namespace {
 constexpr int RulerH = 20, KaraH = 18;
-const QColor kBg(0x10, 0x14, 0x18), kSel(0x26, 0x34, 0x4e), kSelMod(0x45, 0x30, 0x48), kWave(0x4c, 0xb0, 0x60),
-    kWaveAvg(0x9c, 0xe8, 0xa8), kStart(0xe0, 0x30, 0x30), kEnd(0xf0, 0x90, 0x20), kInactive(0x80, 0x80, 0x90),
-    kMark(0xe0, 0x40, 0xe0), kKeyframe(0x40, 0xd0, 0x40), kCursor(0xff, 0xff, 0xff), kSyl(0xf0, 0xe0, 0x40);
+QColor col(theme::Role r) { return theme::color(r); }
 } // namespace
 
 // ---- view ---------------------------------------------------------------------
@@ -118,13 +117,13 @@ void AudioView::render(QRhiCommandBuffer *cb) {
     const double w = std::max(1, width());
     wu.p0[2] = float(b.xOf(b.m_selStart) / w);
     wu.p0[3] = float(b.xOf(b.m_selEnd) / w);
-    RhiQuad::setColor(wu.c0, kBg);
-    RhiQuad::setColor(wu.c1, b.m_selModified ? kSelMod : kSel);
-    RhiQuad::setColor(wu.c2, kWave);
-    RhiQuad::setColor(wu.c3, kWaveAvg);
+    RhiQuad::setColor(wu.c0, col(theme::AudioBackground));
+    RhiQuad::setColor(wu.c1, b.m_selModified ? col(theme::AudioSelectionModified) : col(theme::AudioSelection));
+    RhiQuad::setColor(wu.c2, col(theme::AudioWaveform));
+    RhiQuad::setColor(wu.c3, col(theme::AudioWaveformAverage));
     m_wave.setUniforms(u, wu, QRectF(QPointF(0, 0), QSizeF(out)), out);
     m_overlay.setUniforms(u, RhiQuad::Uniforms{}, QRectF(QPointF(0, 0), QSizeF(out)), out);
-    cb->beginPass(renderTarget(), kBg, {1.0f, 0}, u);
+    cb->beginPass(renderTarget(), col(theme::AudioBackground), {1.0f, 0}, u);
     if (b.m_audio) m_wave.draw(cb, out);
     m_overlay.draw(cb, out);
     cb->endPass();
@@ -155,14 +154,14 @@ void AudioView::paintOverlay(QPainter &p) {
     }
     // keyframes
     auto *video = b.m_tab->video();
-    p.setPen(QPen(kKeyframe, 1, Qt::DashLine));
+    p.setPen(QPen(col(theme::AudioKeyframe), 1, Qt::DashLine));
     for (qint64 kf : b.m_tab->keyframes()) {
         const qint64 t = video->hasVideo() ? video->timeAtStart(kf) : -1; // where snapping puts a line
         if (t < l || t > r) continue;
         p.drawLine(b.xOf(t), RulerH, b.xOf(t), h);
     }
     // inactive lines: shaded, with dotted boundaries
-    p.setPen(QPen(kInactive, 1, Qt::DotLine));
+    p.setPen(QPen(col(theme::AudioInactive), 1, Qt::DotLine));
     for (const auto &[start, end] : b.inactiveLines()) {
         if (end < l || start > r) continue;
         p.fillRect(QRect(QPoint(b.xOf(start), RulerH), QPoint(b.xOf(end), h)), QColor(0x80, 0x80, 0x90, 48));
@@ -176,29 +175,29 @@ void AudioView::paintOverlay(QPainter &p) {
             const auto &sy = b.m_syl[k];
             const int x0 = b.xOf(sy.start), x1 = b.xOf(sy.end);
             if (k > 0) {
-                p.setPen(QPen(kSyl, 1));
+                p.setPen(QPen(col(theme::AudioSyllable), 1));
                 p.drawLine(x0, RulerH, x0, h);
             }
-            p.setPen(kSyl);
+            p.setPen(col(theme::AudioSyllable));
             p.drawText(QRect(x0 + 2, RulerH, std::max(1, x1 - x0 - 2), KaraH), Qt::AlignVCenter | Qt::AlignLeft,
                        fs::q(sy.text));
             if (int(k) == b.m_activeSyl) {
-                p.setPen(QPen(kStart, 1));
+                p.setPen(QPen(col(theme::AudioStart), 1));
                 p.drawRect(x0, RulerH, x1 - x0, h - RulerH - 1);
             }
         }
     }
     // active line
-    p.setPen(QPen(kStart, 2));
+    p.setPen(QPen(col(theme::AudioStart), 2));
     p.drawLine(b.xOf(b.m_selStart), RulerH, b.xOf(b.m_selStart), h);
-    p.setPen(QPen(kEnd, 2));
+    p.setPen(QPen(col(theme::AudioEnd), 2));
     p.drawLine(b.xOf(b.m_selEnd), RulerH, b.xOf(b.m_selEnd), h);
     p.setPen(QColor(230, 230, 230));
     p.drawText(QRect(b.xOf(b.m_selStart) + 3, h - 16, 400, 14), Qt::AlignLeft,
                QString("%1 - %2 (%3 ms)").arg(fs::fmtTime(b.m_selStart), fs::fmtTime(b.m_selEnd))
                    .arg(b.m_selEnd - b.m_selStart));
     if (b.m_mark >= 0) {
-        p.setPen(QPen(kMark, 1));
+        p.setPen(QPen(col(theme::AudioMark), 1));
         p.drawLine(b.xOf(b.m_mark), 0, b.xOf(b.m_mark), h);
     }
     // the time under the mouse while nothing plays (Aegisub's and Kainote's track cursor)
@@ -215,7 +214,7 @@ void AudioView::paintOverlay(QPainter &p) {
     // play cursor or video position
     const qint64 cur = b.playing() ? b.positionMs() : video->hasVideo() ? video->time() : -1;
     if (cur >= l && cur <= r) {
-        p.setPen(QPen(kCursor, 1));
+        p.setPen(QPen(col(theme::AudioCursor), 1));
         p.drawLine(b.xOf(cur), 0, b.xOf(cur), h);
     }
 }
