@@ -37,22 +37,33 @@ pub fn parse_srt(text: &str) -> Vec<Sub> {
             let end = Time::parse_srt(b.split_whitespace().next().unwrap_or(""));
             if let (Some(start), Some(end)) = (start, end) {
                 i += 1;
+                // the timing or the index and timing of the next cue
+                let next_cue = |k: usize| {
+                    is_srt_timing(lines[k])
+                        || (!lines[k].trim().is_empty()
+                            && lines[k].trim().chars().all(|c| c.is_ascii_digit())
+                            && lines.get(k + 1).is_some_and(|n| is_srt_timing(n)))
+                };
                 let mut body: Vec<&str> = Vec::new();
-                while i < lines.len() && !lines[i].trim().is_empty() && !is_srt_timing(lines[i]) {
-                    // stop if this is the index line of the next cue
-                    if lines[i].trim().chars().all(|c| c.is_ascii_digit())
-                        && lines.get(i + 1).is_some_and(|n| n.contains("-->"))
-                    {
-                        break;
+                while i < lines.len() && !next_cue(i) {
+                    if lines[i].trim().is_empty() {
+                        // blank lines end the cue unless more of its text follows: they are
+                        // its line breaks then (Aegisub)
+                        match (i..lines.len()).find(|&k| !lines[k].trim().is_empty()) {
+                            Some(j) if !next_cue(j) => {
+                                body.extend(&lines[i..j]);
+                                i = j;
+                            }
+                            _ => break,
+                        }
                     }
                     body.push(lines[i]);
                     i += 1;
                 }
-                let (runs, an) = html_to_runs(&body.join("\n"));
                 out.push(Sub {
                     start,
                     end,
-                    text: runs_to_ass(&runs, an),
+                    text: runs_to_ass(&html_to_runs(&body.join("\n")), None),
                 });
                 continue;
             }
@@ -282,7 +293,9 @@ fn microdvd_to_ass(body: &str) -> String {
                         ));
                     }
                 }
-                "f" | "s" | "p" | "o" | "h" => {}
+                "f" => target.face = Some(val.trim().to_string()).filter(|f| !f.is_empty()),
+                "s" => target.size = val.trim().parse().ok().filter(|s: &f64| *s > 0.0),
+                "p" | "o" | "h" => {}
                 _ => break,
             }
             if upper {
@@ -318,6 +331,8 @@ fn merge(g: &Fmt, l: &Fmt) -> Fmt {
         u: g.u || l.u,
         s: g.s || l.s,
         color: l.color.or(g.color),
+        face: l.face.clone().or_else(|| g.face.clone()),
+        size: l.size.or(g.size),
     }
 }
 
@@ -463,6 +478,14 @@ mod tests {
             parse_srt("00:00:01.000 --> 00:00:02.000\nA\n00:00:03,000 --> 00:00:04,000\nB\n");
         assert_eq!(subs.len(), 2);
         assert_eq!(subs[1].text, "B");
+        // a blank line inside a cue keeps the text after it (Aegisub); one before the next
+        // cue's index or timing ends it
+        let subs = parse_srt(
+            "1\n00:00:01,000 --> 00:00:02,000\nA\n\n\nmore\n\n2\n00:00:03,000 --> 00:00:04,000\n\nB\n\n12\n\n",
+        );
+        assert_eq!(subs.len(), 2);
+        assert_eq!(subs[0].text, r"A\N\N\Nmore");
+        assert_eq!(subs[1].text, r"\NB\N\N12");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 //! Conversion between ASS override tags and the simpler markups used by
-//! SRT (`<i>`, `<b>`, `<u>`, `<s>`, `<font color>`), MPL2 (`/` italics) and
+//! SRT (`<i>`, `<b>`, `<u>`, `<s>`, `<font>`), MPL2 (`/` italics) and
 //! MicroDVD (`{y:i}` …).
 
 use fs_core::Color;
@@ -13,6 +13,20 @@ pub struct Fmt {
     pub u: bool,
     pub s: bool,
     pub color: Option<Color>,
+    /// `\fn`, `<font face>`.
+    pub face: Option<String>,
+    /// `\fs`, `<font size>` (Aegisub's reading).
+    pub size: Option<f64>,
+}
+
+impl Fmt {
+    fn font(&self) -> (Option<Color>, Option<&str>, Option<f64>) {
+        (self.color, self.face.as_deref(), self.size)
+    }
+
+    fn has_font(&self) -> bool {
+        self.font() != (None, None, None)
+    }
 }
 
 /// A run of text with uniform formatting. `\N` is represented as '\n'.
@@ -51,6 +65,14 @@ pub fn ass_to_runs(text: &str) -> (Vec<Run>, Option<u8>) {
                                 .and_then(Color::parse_tag)
                                 .filter(|_| !t.args[0].trim().is_empty())
                         }
+                        "fn" => {
+                            fmt.face = t
+                                .arg(0)
+                                .map(str::trim)
+                                .filter(|f| !f.is_empty())
+                                .map(String::from)
+                        }
+                        "fs" => fmt.size = t.arg_f64(0).filter(|s| *s > 0.0),
                         "r" => fmt = Fmt::default(),
                         "an" => {
                             an = t
@@ -115,8 +137,28 @@ pub fn runs_to_ass(runs: &[Run], an: Option<u8>) -> String {
                 None => pending.push_str("\\c"),
             }
         }
+        if f.face != cur.face {
+            pending.push_str("\\fn");
+            pending.push_str(f.face.as_deref().unwrap_or(""));
+        }
+        if f.size != cur.size {
+            pending.push_str("\\fs");
+            if let Some(s) = f.size {
+                pending.push_str(&fs_core::model::fmt_f64(s));
+            }
+        }
         if !pending.is_empty() {
-            out.push('{');
+            // right after a block the text brought (`{\an8}<i>` in SRT): into it
+            let open = out.rfind('{').filter(|&o| {
+                out.ends_with('}')
+                    && out[o..].starts_with("{\\")
+                    && !out[o..out.len() - 1].contains('}')
+            });
+            if open.is_some() {
+                out.pop();
+            } else {
+                out.push('{');
+            }
             out.push_str(&pending);
             out.push('}');
             pending.clear();
@@ -134,13 +176,14 @@ pub fn runs_to_ass(runs: &[Run], an: Option<u8>) -> String {
 // HTML-ish (SRT)
 // ---------------------------------------------------------------------------
 
-/// Parse SRT/WebVTT-style markup into runs. Unknown tags are dropped; ASS
-/// override blocks embedded in SRT (`{\an8}`) are honoured for alignment.
-pub fn html_to_runs(text: &str) -> (Vec<Run>, Option<u8>) {
+/// Parse SRT/WebVTT-style markup into runs, as Aegisub reads it: ASS blocks in the text
+/// (`{\an8}`, `{\pos(…)}`) and tags it does not know stay as they are; WebVTT's own
+/// (`<c.yellow>`, `<v Name>`, `<ruby>`, timestamps) go.
+pub fn html_to_runs(text: &str) -> Vec<Run> {
     let mut runs: Vec<Run> = Vec::new();
     let mut fmt = Fmt::default();
-    let mut color_stack: Vec<Option<Color>> = Vec::new();
-    let mut an = None;
+    // what each open <font> changed from
+    let mut fonts: Vec<Fmt> = Vec::new();
     let mut rest = text;
     let push = |runs: &mut Vec<Run>, fmt: &Fmt, t: &str| {
         if t.is_empty() {
@@ -154,50 +197,24 @@ pub fn html_to_runs(text: &str) -> (Vec<Run>, Option<u8>) {
             }),
         }
     };
+    let timestamp = |t: &str| {
+        t.contains(':')
+            && t.chars()
+                .all(|c| c.is_ascii_digit() || c == ':' || c == '.')
+    };
     while !rest.is_empty() {
-        let next = rest.find(['<', '{']).unwrap_or(rest.len());
+        let next = rest.find('<').unwrap_or(rest.len());
         push(&mut runs, &fmt, &rest[..next]);
         rest = &rest[next..];
         if rest.is_empty() {
             break;
         }
-        if rest.starts_with('{') {
-            match rest.find('}') {
-                Some(e) => {
-                    let inner = &rest[1..e];
-                    if inner.contains('\\') {
-                        // embedded ASS tags: take what we can represent
-                        let (r, a) = ass_to_runs(&format!("{{{inner}}}x"));
-                        if a.is_some() {
-                            an = a;
-                        }
-                        if let Some(r0) = r.first() {
-                            let f = &r0.fmt;
-                            if inner.contains("\\i") {
-                                fmt.i = f.i;
-                            }
-                            if inner.contains("\\b") {
-                                fmt.b = f.b;
-                            }
-                        }
-                    } else {
-                        push(&mut runs, &fmt, &rest[..=e]);
-                    }
-                    rest = &rest[e + 1..];
-                }
-                None => {
-                    push(&mut runs, &fmt, rest);
-                    rest = "";
-                }
-            }
-            continue;
-        }
-        // '<' — only a tag if followed by a letter or '/', and closed before
-        // any other '<'
+        // '<' — only a tag if followed by a letter or '/' (or a WebVTT timestamp), and closed
+        // before any other '<'
         let looks_like_tag = rest[1..].starts_with(|c: char| c.is_ascii_alphabetic() || c == '/');
         let e = rest
             .find('>')
-            .filter(|&e| looks_like_tag && !rest[1..e].contains('<'));
+            .filter(|&e| !rest[1..e].contains('<') && (looks_like_tag || timestamp(&rest[1..e])));
         let Some(e) = e else {
             push(&mut runs, &fmt, "<");
             rest = &rest[1..];
@@ -212,28 +229,37 @@ pub fn html_to_runs(text: &str) -> (Vec<Run>, Option<u8>) {
                 lower.split_whitespace().next().unwrap_or("").to_string(),
             ),
         };
-        match name.as_str() {
+        match name.split('.').next().unwrap_or("") {
             "i" | "em" => fmt.i = !close,
             "b" | "strong" => fmt.b = !close,
             "u" => fmt.u = !close,
             "s" | "strike" | "del" => fmt.s = !close,
             "br" | "br/" => push(&mut runs, &fmt, "\n"),
-            "font" => {
-                if close {
-                    fmt.color = color_stack.pop().unwrap_or(None);
-                } else {
-                    color_stack.push(fmt.color);
-                    if let Some(c) = attr(tag, "color").and_then(|c| parse_html_color(&c)) {
-                        fmt.color = Some(c);
-                    }
+            "font" if close => {
+                if let Some(f) = fonts.pop() {
+                    (fmt.color, fmt.face, fmt.size) = (f.color, f.face, f.size);
                 }
             }
-            // unknown tags (<c.yellow>, <v Name>, <ruby> …) are dropped
-            _ => {}
+            "font" => {
+                fonts.push(fmt.clone());
+                if let Some(c) = attr(tag, "color").and_then(|c| parse_html_color(&c)) {
+                    fmt.color = Some(c);
+                }
+                if let Some(f) = attr(tag, "face").filter(|f| !f.trim().is_empty()) {
+                    fmt.face = Some(f.trim().to_string());
+                }
+                if let Some(s) = attr(tag, "size").and_then(|s| s.trim().parse().ok()) {
+                    fmt.size = Some(s).filter(|s: &f64| *s > 0.0).or(fmt.size);
+                }
+            }
+            "c" | "v" | "ruby" | "rt" | "lang" => {}
+            _ if timestamp(tag) => {}
+            // anything else is text: `<Narrator>`, a stray `<3>` (Aegisub)
+            _ => push(&mut runs, &fmt, &rest[..=e]),
         }
         rest = &rest[e + 1..];
     }
-    (runs, an)
+    runs
 }
 
 fn attr(tag: &str, name: &str) -> Option<String> {
@@ -279,9 +305,9 @@ pub fn runs_to_html(runs: &[Run], an: Option<u8>) -> String {
     let mut cur = Fmt::default();
     let close_all = |out: &mut String, cur: &mut Fmt, target: &Fmt| {
         // close in reverse order of opening (font, s, u, b, i)
-        if cur.color.is_some() && cur.color != target.color {
+        if cur.has_font() && cur.font() != target.font() {
             out.push_str("</font>");
-            cur.color = None;
+            (cur.color, cur.face, cur.size) = (None, None, None);
         }
         if cur.s && !target.s {
             out.push_str("</s>");
@@ -314,13 +340,18 @@ pub fn runs_to_html(runs: &[Run], an: Option<u8>) -> String {
         if r.fmt.s && !cur.s {
             out.push_str("<s>");
         }
-        if let Some(c) = r.fmt.color
-            && cur.color != Some(c)
-        {
-            out.push_str(&format!(
-                "<font color=\"#{:02x}{:02x}{:02x}\">",
-                c.r, c.g, c.b
-            ));
+        if r.fmt.has_font() && cur.font() != r.fmt.font() {
+            out.push_str("<font");
+            if let Some(f) = &r.fmt.face {
+                out.push_str(&format!(" face=\"{f}\""));
+            }
+            if let Some(s) = r.fmt.size {
+                out.push_str(&format!(" size=\"{}\"", fs_core::model::fmt_f64(s)));
+            }
+            if let Some(c) = r.fmt.color {
+                out.push_str(&format!(" color=\"#{:02x}{:02x}{:02x}\"", c.r, c.g, c.b));
+            }
+            out.push('>');
         }
         cur = r.fmt.clone();
         out.push_str(&r.text);
@@ -342,14 +373,39 @@ mod tests {
             html,
             "<i>Hello</i> <b>world</b>\nline <font color=\"#ff0000\">red</font> x"
         );
-        let (runs2, an2) = html_to_runs(&html);
-        assert_eq!(runs_to_ass(&runs2, an2), ass);
+        assert_eq!(runs_to_ass(&html_to_runs(&html), None), ass);
+        // face and size, Aegisub's way, there and back
+        let ass = r"a {\c&H0000FF&\fnComic Sans\fs30}b{\c\fn\fs} c";
+        let html = runs_to_html(&ass_to_runs(ass).0, None);
+        assert_eq!(
+            html,
+            "a <font face=\"Comic Sans\" size=\"30\" color=\"#ff0000\">b</font> c"
+        );
+        assert_eq!(runs_to_ass(&html_to_runs(&html), None), ass);
     }
 
     #[test]
-    fn html_alignment_and_junk() {
-        let (runs, an) = html_to_runs("{\\an8}<i>Top</i> <3 <unknown-tag>x");
-        assert_eq!(an, Some(8));
-        assert_eq!(runs_to_ass(&runs, an), r"{\an8\i1}Top{\i0} <3 x");
+    fn html_keeps_what_it_does_not_know() {
+        let ass = |html: &str| runs_to_ass(&html_to_runs(html), None);
+        // ASS blocks and unknown tags stay (Aegisub); ours join the block before them
+        assert_eq!(
+            ass("{\\an8}<i>Top</i> <3 <unknown-tag>x"),
+            r"{\an8\i1}Top{\i0} <3 <unknown-tag>x"
+        );
+        assert_eq!(
+            ass("{\\pos(1,2)\\fad(0,200)}<b>a</b>{note}"),
+            r"{\pos(1,2)\fad(0,200)\b1}a{\b0}{note}"
+        );
+        assert_eq!(ass("a}<i>b"), r"a}{\i1}b");
+        // WebVTT's own tags and timestamps go
+        assert_eq!(
+            ass("<v Bob><c.yellow>Hi</c> <00:00:01.500>there</v> <ruby>漢<rt>kan</rt></ruby>"),
+            "Hi there 漢kan"
+        );
+        // a font closes back to the one around it
+        assert_eq!(
+            ass("<font color=red>a<font size=20>b</font>c</font>d"),
+            r"{\c&H0000FF&}a{\fs20}b{\fs}c{\c}d"
+        );
     }
 }
