@@ -118,13 +118,7 @@ pub fn detect_format(text: &str, ext: Option<&str>) -> Option<Format> {
                 .split_once(']')
                 .is_some_and(|(n, r)| n.trim().parse::<i64>().is_ok() && r.starts_with('['))
     };
-    let is_tmp = |l: &&str| {
-        let mut it = l.splitn(4, [':', '=']);
-        let (a, b, c, d) = (it.next(), it.next(), it.next(), it.next());
-        [a, b, c].iter().all(|x| {
-            x.is_some_and(|x| !x.is_empty() && x.chars().all(|c| c.is_ascii_digit() || c == ','))
-        }) && d.is_some()
-    };
+    let is_tmp = |l: &&str| simple::tmp_line(l).is_some();
     let count = |f: &dyn Fn(&&str) -> bool| sample.iter().filter(|l| f(l)).count();
     let (m, p, t) = (count(&is_mdvd), count(&is_mpl), count(&is_tmp));
     let best = [(m, Format::MicroDvd), (p, Format::Mpl2), (t, Format::Tmp)]

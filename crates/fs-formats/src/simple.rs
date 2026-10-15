@@ -357,53 +357,30 @@ pub fn write_microdvd(subs: &[Sub], fr: &Framerate, declare_fps: bool) -> String
 // TMP: H:MM:SS:text (no end times)
 // ---------------------------------------------------------------------------
 
+/// The start and text of a TMPlayer line: `H:MM:SS:text`, `=` and TMP+'s `,1=` before the
+/// text, and Kainote's `;`, `,` and space.
+pub(crate) fn tmp_line(l: &str) -> Option<(Time, &str)> {
+    fn num(s: &str) -> Option<(i64, &str)> {
+        let n = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+        Some((s[..n].parse().ok()?, &s[n..]))
+    }
+    let (h, r) = num(l.trim_start_matches('\u{feff}'))?;
+    let (m, r) = num(r.strip_prefix([':', ';'])?)?;
+    let (s, r) = num(r.strip_prefix([':', ';'])?)?;
+    let r = match r.strip_prefix(',').and_then(num) {
+        Some((_, after)) if after.starts_with(['=', ':']) => after,
+        _ => r,
+    };
+    let text = r.strip_prefix([':', ';', '=', ',', ' '])?;
+    Some((Time::from_hmsms(h, m, s, 0), text))
+}
+
 /// Parse TMPlayer. End time = next line's start, capped at `max_duration`.
 pub fn parse_tmp(text: &str, max_duration: Time) -> Vec<Sub> {
-    let mut starts: Vec<(Time, String)> = Vec::new();
-    for l in lines_of(text) {
-        let l = l.trim_start_matches('\u{feff}');
-        // H:MM:SS:text, HH:MM:SS=text, H:MM:SS,1=text variants
-        let b = l.as_bytes();
-        let mut fields = [0i64; 3];
-        let mut fi = 0;
-        let mut p = 0;
-        let mut ok = false;
-        while p < b.len() && fi < 3 {
-            let s = p;
-            while p < b.len() && b[p].is_ascii_digit() {
-                p += 1;
-            }
-            if s == p {
-                break;
-            }
-            fields[fi] = l[s..p].parse().unwrap_or(0);
-            fi += 1;
-            if fi == 3 {
-                // skip optional ",N" and the separator ':' or '='
-                if p < b.len() && b[p] == b',' {
-                    p += 1;
-                    while p < b.len() && b[p].is_ascii_digit() {
-                        p += 1;
-                    }
-                }
-                if p < b.len() && (b[p] == b':' || b[p] == b'=') {
-                    p += 1;
-                    ok = true;
-                }
-                break;
-            }
-            if p < b.len() && b[p] == b':' {
-                p += 1;
-            } else {
-                break;
-            }
-        }
-        if !ok {
-            continue;
-        }
-        let t = Time::from_hmsms(fields[0], fields[1], fields[2], 0);
-        starts.push((t, slash_lines_to_ass(&l[p..], '/')));
-    }
+    let starts: Vec<(Time, String)> = lines_of(text)
+        .filter_map(tmp_line)
+        .map(|(t, body)| (t, slash_lines_to_ass(body, '/')))
+        .collect();
     let mut out = Vec::new();
     for k in 0..starts.len() {
         let (s, ref text) = starts[k];
@@ -520,6 +497,28 @@ mod tests {
         assert_eq!(
             write_microdvd(&subs[..1], &vfr, true),
             "{30}{60}{y:i}Hej|ty\r\n"
+        );
+    }
+
+    #[test]
+    fn tmp_variants() {
+        let starts = |t: &str| {
+            parse_tmp(t, Time(5000))
+                .iter()
+                .map(|s| (s.start.ms(), s.text.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            starts(
+                "0:00:01=a\n00;00;02;b\n0:00:03 c\n0:00:04,1=d\n0:00:05,e\n0:00:06\nx:00:07:f\n"
+            ),
+            [
+                (1000, "a".into()),
+                (2000, "b".into()),
+                (3000, "c".into()),
+                (4000, "d".into()),
+                (5000, "e".into())
+            ]
         );
     }
 
