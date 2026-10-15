@@ -20,7 +20,6 @@
 #include <QSettings>
 #include <QToolButton>
 #include <QtMath>
-#include <map>
 
 // ---- Drawing ------------------------------------------------------------------
 
@@ -417,6 +416,9 @@ void VisualTools::reload() {
     m_valid = row >= 0 && size_t(row) < tab->s().row_count() && m_box->hasVideo();
     if (!m_valid) return;
     m_v = tab->s().visual(size_t(row));
+    const auto r = tab->s().row(size_t(row));
+    m_first = r.comment ? 0 : m_box->frameAtStart(r.start);
+    m_last = r.comment ? -1 : m_box->frameAtEnd(r.end);
     if (m_drag) return; // keep the vector and its frame stable while dragging
     if (m_tool == VClip) m_vec = m_v.clip == 2 ? Drawing::parse(fs::q(m_v.clip_drawing)) : Drawing{};
     if (m_tool == Draw) {
@@ -427,6 +429,36 @@ void VisualTools::reload() {
         m_drawOrigin = QPointF(m_v.x, m_v.y);
         m_vec.translate(-alignShift(m_vec));
     }
+}
+
+bool VisualTools::shown() const {
+    return m_valid && m_box->frame() >= m_first && m_box->frame() <= m_last;
+}
+
+void VisualTools::grabLines() {
+    auto *tab = m_box->tab();
+    m_rows = tab->selection();
+    if (std::find(m_rows.begin(), m_rows.end(), size_t(tab->active())) == m_rows.end()) m_rows = {size_t(tab->active())};
+    m_starts.clear();
+    for (size_t r : m_rows) m_starts.push_back(tab->s().visual(r));
+}
+
+// Aegisub's drag tool moves a line whole: \pos (a line without one gets it), both \move points and
+// its \org, so a rotated line keeps its shape.
+void VisualTools::moveLines(QPointF d) {
+    QStringList tags;
+    for (const auto &v : m_starts) {
+        const QString at = QString("%1,%2").arg(n2(v.x + d.x()), n2(v.y + d.y()));
+        QString t = v.has_move ? QString("\\move(%1,%2,%3").arg(at, n2(v.x2 + d.x()), n2(v.y2 + d.y())) +
+                                     (v.t2 > v.t1 ? QString(",%1,%2").arg(v.t1).arg(v.t2) : QString()) + ")"
+                               : QString("\\pos(%1)").arg(at);
+        if (v.has_org) t += QString("\\org(%1,%2)").arg(n2(v.org_x + d.x()), n2(v.org_y + d.y()));
+        tags << t;
+    }
+    auto *tab = m_box->tab();
+    const auto t = fs::rvec(tags);
+    tab->s().set_each_tags(fs::slice(m_rows), {t.data(), t.size()}, fs::Utf8(m_amend));
+    tab->changed(TabPanel::FromVideo);
 }
 
 // libass puts drawing point (0,0) at \pos minus the alignment share of the points' bounding box
@@ -469,8 +501,10 @@ void VisualTools::applyAllTags(double value) {
     tab->changed(TabPanel::FromVideo);
 }
 
+// The active line to p, the other selected lines along by as much (Aegisub's double-click)
 void VisualTools::applyPos(QPointF p) {
-    apply(QString("\\pos(%1,%2)").arg(n2(p.x()), n2(p.y())));
+    grabLines();
+    moveLines(p - QPointF(m_v.x, m_v.y));
 }
 
 QString VisualTools::clipTag() const {
@@ -567,7 +601,7 @@ void VisualTools::paint(QPainter &p) {
         p.drawText(m + QPointF(8, -8), t);
         return;
     }
-    if (!m_valid) return;
+    if (!shown()) return;
     p.setClipRect(d);
     const QPointF pos = w({m_v.x, m_v.y});
     switch (m_tool) {
@@ -714,14 +748,14 @@ bool VisualTools::press(QMouseEvent *e) {
     m_mouseW = e->position();
     auto *tab = m_box->tab();
     if (m_tool == Pointer) {
-        if (m_valid && (e->button() == Qt::MiddleButton ||
+        if (shown() && (e->button() == Qt::MiddleButton ||
                         (e->button() == Qt::LeftButton && (e->modifiers() & Qt::ControlModifier)))) {
             m_amend = QString("visual-%1").arg(++m_dragId);
             applyPos(s(e->position()));
         }
         return true;
     }
-    if (!m_valid) return false;
+    if (!shown()) return false;
     m_button = e->button();
     m_pressW = e->position();
     m_pressS = s(m_pressW);
@@ -729,6 +763,7 @@ bool VisualTools::press(QMouseEvent *e) {
     m_amend = QString("visual-%1").arg(++m_dragId);
     m_drag = 1;
     switch (m_tool) {
+    case Pos: grabLines(); break;
     case Move:
         if (m_button == Qt::RightButton) m_drag = 2;
         break;
@@ -775,6 +810,10 @@ bool VisualTools::press(QMouseEvent *e) {
         }
         if (h >= 0 && (m_vecMode == VecMove || m_vecMode >= VecFreehand || e->button() != Qt::LeftButton)) {
             m_vecHandle = hs[h];
+            return true;
+        }
+        if (m_vecMode == VecMove && !m_vec.cmds.empty()) {
+            m_drag = 0; // a miss adds nothing; only an empty shape starts with a line, as Aegisub opens it
             return true;
         }
         if (m_vecMode == VecInsert || m_vecMode == VecConvert) {
@@ -864,32 +903,11 @@ bool VisualTools::move(QMouseEvent *e) {
     const QPointF dw = e->position() - m_pressW;
     auto *tab = m_box->tab();
     switch (m_tool) {
-    case Pos: {
-        const auto sel = tab->selection();
-        if (sel.size() > 1) {
-            // every selected line moves by the same delta from where it started
-            static std::map<size_t, QPointF> starts;
-            if (m_drag == 1) {
-                starts.clear();
-                for (size_t r : sel) {
-                    const auto v = tab->s().visual(r);
-                    starts[r] = {v.x, v.y};
-                }
-                m_drag = 3;
-            }
-            QStringList tags;
-            for (size_t r : sel) {
-                const QPointF p = starts[r] + delta;
-                tags << QString("\\pos(%1,%2)").arg(n2(p.x()), n2(p.y()));
-            }
-            const auto t = fs::rvec(tags);
-            tab->s().set_each_tags(fs::slice(sel), {t.data(), t.size()}, fs::Utf8(m_amend));
-            tab->changed(TabPanel::FromVideo);
-        } else {
-            applyPos(QPointF(m_start.x, m_start.y) + delta);
-        }
+    case Pos:
+        if (m_drag == 1 && delta.isNull()) break; // a click alone writes nothing
+        m_drag = 3;
+        moveLines(delta); // every selected line by the same delta
         break;
-    }
     case Move: {
         QPointF a(m_start.x, m_start.y), b(m_start.x2, m_start.y2);
         if (m_drag == 2) b = m_start.has_move || near(w(b), m_pressW, 9) ? b + delta : now;
@@ -966,7 +984,7 @@ bool VisualTools::move(QMouseEvent *e) {
     case VClip:
     case Draw: {
         if (m_vecHandle.first < 0 && m_drag != 5 && m_drag != 6) break;
-        QPointF pt = now;
+        QPointF pt = m_drag == 5 ? now : m_pressS + delta; // Shift keeps a point on one axis
         if (m_tool == VClip) pt *= std::pow(2.0, std::max(1, m_v.clip_scale) - 1);
         else pt = scriptToDraw(now);
         if (m_drag == 5) {
@@ -985,8 +1003,8 @@ bool VisualTools::move(QMouseEvent *e) {
             break;
         }
         if (m_drag == 6) {
-            // freehand: a new line point once the cursor moved a few screen pixels (Aegisub's freehand mode)
-            if (QLineF(vecW(m_vec.last()), e->position()).length() >= 4) {
+            // freehand: a new line point every 30 screen pixels (Aegisub's freehand mode)
+            if (QLineF(vecW(m_vec.last()), e->position()).length() >= 30) {
                 m_vec.cmds.push_back({'l', {pt}});
                 writeVector();
             }
@@ -1042,8 +1060,18 @@ bool VisualTools::release(QMouseEvent *e) {
     return true;
 }
 
+// Aegisub's drag tool: a double-click puts the active line there, the other selected lines go
+// along by as much.
+bool VisualTools::doubleClick(QMouseEvent *e) {
+    if ((m_tool != Pos && m_tool != Move) || e->button() != Qt::LeftButton || !shown()) return false;
+    m_amend = QString("visual-%1").arg(++m_dragId);
+    applyPos(s(e->position()));
+    reload();
+    return true;
+}
+
 bool VisualTools::key(QKeyEvent *e) {
-    if (!m_valid || (m_tool != Pos && m_tool != Move)) return false;
+    if (!shown() || (m_tool != Pos && m_tool != Move)) return false;
     const double st = e->modifiers() & Qt::ShiftModifier ? 0.1 : 1;
     QPointF d;
     switch (e->key()) {

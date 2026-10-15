@@ -53,6 +53,7 @@ public:
     bool press(QMouseEvent *e);
     bool move(QMouseEvent *e);
     bool release(QMouseEvent *e);
+    bool doubleClick(QMouseEvent *e);
     bool key(QKeyEvent *e);
 
 private:
@@ -74,12 +75,19 @@ private:
     QPointF scriptToDraw(QPointF s) const;
     // the l/b command whose segment passes near the point (t: where on it), or -1
     int hitSegment(QPointF widgetPos, double &t) const;
+    // the active line is on the video's frame and not a comment: only then the tools work (Aegisub)
+    bool shown() const;
+    void grabLines();         // the selected lines, as they are, for moveLines
+    void moveLines(QPointF d); // the grabbed lines moved by d
 
     VideoBox *m_box;
     int m_tool = Pointer;
     int m_vecMode = VecMove;
     fsb::Visual m_v{};
     bool m_valid = false;
+    qint64 m_first = 0, m_last = -1; // the frames the active line is shown on
+    std::vector<size_t> m_rows;      // the lines a drag moves, and how they were
+    std::vector<fsb::Visual> m_starts;
     Drawing m_vec;            // vector clip or drawing being edited
     QPointF m_drawOrigin, m_drawScale{1, 1};
     // drag state

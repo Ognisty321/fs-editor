@@ -224,6 +224,7 @@ void VideoView::mouseReleaseEvent(QMouseEvent *e) {
 }
 
 void VideoView::mouseDoubleClickEvent(QMouseEvent *e) {
+    if (m_box->m_tools->doubleClick(e)) return updateOverlay();
     if (m_box->m_tools->tool() == VisualTools::Pointer && e->button() == Qt::LeftButton)
         m_box->setFullscreen(!m_box->isFullScreen());
 }
