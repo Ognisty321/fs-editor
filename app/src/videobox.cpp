@@ -293,14 +293,14 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
                 [this] { m_box->m_seek->setVisible(!m_box->m_seek->isVisible()); });
     m.addAction(tr("Change aspect ratio"), m_box, [this] {
         bool ok;
+        const QRectF r = displayRect();
         const double ar = QInputDialog::getDouble(this, tr("Aspect ratio"), tr("Display aspect ratio (width / height)"),
-                                                  double(m_box->m_info.width) / std::max(1, m_box->m_info.height),
-                                                  0.1, 10, 4, &ok);
+                                                  r.width() / std::max(1.0, r.height()), 0.5, 5, 4, &ok);
         if (!ok) return;
-        // express the override as a sample aspect ratio
-        m_box->m_info.sar_num = int(ar * m_box->m_info.height * 1000);
-        m_box->m_info.sar_den = m_box->m_info.width * 1000;
-        updateOverlay();
+        m_box->setAspect(ar);
+        // Aegisub's Custom mode, so reopening the script keeps it
+        m_box->tab()->s().set_project_value("Video AR Mode", "4");
+        m_box->tab()->s().set_project_value("Video AR Value", fs::Utf8(QString::number(ar)));
     });
     m.addSeparator();
     auto saveFrame = [this](bool subs) {
@@ -448,7 +448,7 @@ void VideoBox::setTimecodes(std::vector<std::int64_t> tc) {
     updateTimeField();
 }
 
-void VideoBox::open(const QString &path, qint64 frame) {
+void VideoBox::open(const QString &path, qint64 frame, double ar) {
     const QString name = QFileInfo(path).fileName();
     m_tab->main()->status(tr("Indexing %1…").arg(name));
     *m_openCancel = true; // a file still indexing is replaced
@@ -456,7 +456,7 @@ void VideoBox::open(const QString &path, qint64 frame) {
     auto media = m_media;
     auto cancel = m_openCancel;
     const QString cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex";
-    QMetaObject::invokeMethod(m_worker, [this, media, path, name, cache, cancel, frame] {
+    QMetaObject::invokeMethod(m_worker, [this, media, path, name, cache, cancel, frame, ar] {
         QString err;
         {
             std::lock_guard g(media->m);
@@ -479,7 +479,7 @@ void VideoBox::open(const QString &path, qint64 frame) {
                 err = QString::fromUtf8(e.what());
             }
         }
-        QMetaObject::invokeMethod(this, [this, path, err, cancel, frame] {
+        QMetaObject::invokeMethod(this, [this, path, err, cancel, frame, ar] {
             if (*cancel) { // closed, or replaced by a newer open (which has its own status)
                 if (cancel == m_openCancel) m_tab->main()->status(QString());
                 return;
@@ -496,6 +496,7 @@ void VideoBox::open(const QString &path, qint64 frame) {
                 m_timecodes.assign(tc.begin(), tc.end());
                 m_keyframes.assign(kf.begin(), kf.end());
             }
+            if (ar > 0) setAspect(ar);
             m_frames = m_info.frames;
             m_dummyFps = 0;
             m_path = path;
@@ -506,6 +507,12 @@ void VideoBox::open(const QString &path, qint64 frame) {
             emit opened();
         });
     });
+}
+
+void VideoBox::setAspect(double ar) {
+    m_info.sar_num = int(ar * m_info.height * 1000);
+    m_info.sar_den = std::max(1, m_info.width * 1000);
+    m_view->updateOverlay();
 }
 
 void VideoBox::openDummy(int w, int h, double fps, qint64 ms) {

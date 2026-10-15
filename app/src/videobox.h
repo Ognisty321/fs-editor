@@ -100,7 +100,8 @@ public:
     ~VideoBox() override;
 
     TabPanel *tab() const { return m_tab; }
-    void open(const QString &path, qint64 frame = 0); // frame: where to start (a script's "Video Position")
+    // frame: where to start, ar: display aspect override (a script's "Video Position" / "Video AR Value")
+    void open(const QString &path, qint64 frame = 0, double ar = 0);
     void openDummy(int w, int h, double fps, qint64 ms);
     void close();
     bool hasVideo() const { return m_frames > 0; }
@@ -109,6 +110,7 @@ public:
     std::vector<std::int64_t> timecodes() const; // int64_t = cxx i64 (qint64 is long long, int64_t is long on Linux)
     std::vector<std::int64_t> keyframes() const;
     void setTimecodes(std::vector<std::int64_t> tc); // empty: the video's own
+    void setAspect(double ar); // display width / height, expressed as the sample aspect ratio
 
     qint64 frameAt(qint64 ms) const;      // frame shown at ms
     qint64 frameAtStart(qint64 ms) const; // first frame a line starting at ms is visible on (Aegisub START)

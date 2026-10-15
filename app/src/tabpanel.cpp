@@ -120,8 +120,16 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
         return QFileInfo::exists(abs) ? abs : QString();
     };
     if (QSettings().value("video/openWithSubs", true).toBool()) {
-        if (const QString v = resolve("Video File"); !v.isEmpty())
-            openVideo(v, fs::q(s().project_value("Video Position")).toLongLong());
+        if (const QString v = resolve("Video File"); !v.isEmpty()) {
+            // Aegisub's AR modes: 1 4:3, 2 16:9, 3 2.35, 4 custom
+            const int mode = fs::q(s().project_value("Video AR Mode")).toInt();
+            const double ar = mode == 1   ? 4.0 / 3
+                              : mode == 2 ? 16.0 / 9
+                              : mode == 3 ? 2.35
+                              : mode == 4 ? fs::q(s().project_value("Video AR Value")).toDouble()
+                                          : 0;
+            openVideo(v, fs::q(s().project_value("Video Position")).toLongLong(), std::clamp(ar, 0.0, 5.0));
+        }
         if (const QString a = resolve("Audio File"); !a.isEmpty() && a != resolve("Video File")) openAudio(a);
         if (const QString k = resolve("Keyframes File"); !k.isEmpty()) openKeyframes(k);
         if (const QString t = resolve("Timecodes File"); !t.isEmpty()) openTimecodes(t);
@@ -250,8 +258,12 @@ void TabPanel::redo() {
     if (s().redo()) changed();
 }
 
-void TabPanel::openVideo(const QString &path, qint64 frame) {
-    m_video->open(path, frame);
+void TabPanel::openVideo(const QString &path, qint64 frame, double ar) {
+    if (ar <= 0) { // another video: its own aspect, as Aegisub resets it
+        s().set_project_value("Video AR Mode", "");
+        s().set_project_value("Video AR Value", "");
+    }
+    m_video->open(path, frame, ar);
     m_main->addRecent("video", path);
 }
 
