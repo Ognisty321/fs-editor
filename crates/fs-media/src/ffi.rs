@@ -93,6 +93,7 @@ pub(crate) mod bridge {
         fn video_timestamps(v: &VideoSource) -> Vec<i64>;
         fn video_keyframes(v: &VideoSource) -> Vec<i64>;
         fn video_linear(v: &VideoSource) -> bool;
+        fn video_exact(v: &VideoSource) -> bool;
         fn video_set_matrix(v: Pin<&mut VideoSource>, matrix: u8, range: u8);
         fn video_frame_rgba(v: Pin<&mut VideoSource>, n: i64, out: &mut [u8]) -> Result<()>;
 

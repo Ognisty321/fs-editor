@@ -27,6 +27,7 @@ VideoProps video_props(const VideoSource &v);
 rust::Vec<int64_t> video_timestamps(const VideoSource &v);
 rust::Vec<int64_t> video_keyframes(const VideoSource &v);
 bool video_linear(const VideoSource &v);
+bool video_exact(const VideoSource &v);
 void video_set_matrix(VideoSource &v, uint8_t matrix, uint8_t range);
 void video_frame_rgba(VideoSource &v, int64_t n, rust::Slice<uint8_t> out);
 

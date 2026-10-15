@@ -155,7 +155,9 @@ pub struct Video {
 impl Video {
     /// Open and index a video track (`track` < 0: n-th video track, -1 =
     /// first). `progress(done, total)` returns false to cancel. With a
-    /// cache directory the index is stored and reused on the next open.
+    /// cache directory the index is stored and reused on the next open, and a
+    /// Matroska/MP4 file not indexed yet opens from its packets at once while
+    /// BestSource indexes it in the background ([`Video::is_exact`]).
     pub fn open(
         path: &Path,
         track: i32,
@@ -197,6 +199,10 @@ impl Video {
     }
     pub fn linear_decoding(&self) -> bool {
         bridge::video_linear(&self.inner)
+    }
+    /// False while a file opened from its packets waits for BestSource's exact index.
+    pub fn is_exact(&self) -> bool {
+        bridge::video_exact(&self.inner)
     }
 
     /// True when the frame timestamps do not follow the nominal frame rate

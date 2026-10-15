@@ -3,18 +3,22 @@
 // directly; crates/fs-media/src/ffi.rs exposes it to Rust through cxx.
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 class BestVideoSource;
 class BestAudioSource;
 struct SwsContext;
+struct AVFrame;
 struct ass_library;
 struct ass_renderer;
 struct ass_track;
@@ -75,6 +79,10 @@ class VideoSource {
 public:
     /// Open (and index, or read the cached index of) a video track.
     /// `track` < 0 selects the n-th video track (-1 = first).
+    /// With a cache directory, a Matroska or MP4 file BestSource has not indexed yet opens from its
+    /// packets as Aegisub's FFMS2 does (a second for an episode, where BestSource decodes and hashes
+    /// every frame for half a minute); BestSource indexes it in the background and takes over when
+    /// its index has the same frames.
     VideoSource(const std::filesystem::path &file, int track, const std::filesystem::path &cache_dir,
                 const Progress &progress = {});
     ~VideoSource();
@@ -88,6 +96,8 @@ public:
     const std::vector<int64_t> &keyframes() const { return keyframes_; }
     /// True once BestSource gave up on seeking (very slow random access).
     bool linear_decoding() const;
+    /// True when frames come from BestSource's exact index, false while the packets serve them.
+    bool exact() const;
 
     void set_matrix(Matrix m, bool full_range_override = false, bool use_override_range = false);
 
@@ -96,7 +106,15 @@ public:
     void frame_rgba(int64_t n, std::span<uint8_t> out);
 
 private:
+    struct Packets; // the packet index and its decoder (fsmedia.cpp)
+    void convert(const AVFrame *frame, std::span<uint8_t> out, int64_t n);
+    void index_in_background(const std::filesystem::path &file, int track, const std::filesystem::path &cache);
+
     std::unique_ptr<BestVideoSource> bs_;
+    std::unique_ptr<Packets> packets_; // until bs_ takes over
+    mutable std::mutex m_;             // bs_ and packets_, swapped by the background indexer
+    std::atomic_bool stop_{false};
+    std::thread indexer_;
     VideoInfo info_;
     std::vector<int64_t> timestamps_;
     std::vector<int64_t> keyframes_;

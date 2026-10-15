@@ -1,10 +1,14 @@
 #include "fsmedia.h"
 
 #include <algorithm>
+#include <array>
+#include <climits>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <set>
 
 #include <audiosource.h>
 #include <tracklist.h>
@@ -12,6 +16,7 @@
 
 extern "C" {
 #include <ass/ass.h>
+#include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/pixdesc.h>
@@ -188,14 +193,256 @@ std::string subtitle_packets(const std::filesystem::path &file, int index, std::
 // Video
 // ---------------------------------------------------------------------------
 
+namespace {
+
+std::unique_ptr<BestVideoSource> open_bs(const std::filesystem::path &file, int track,
+                                         const std::filesystem::path &cache, const Progress &progress) {
+    auto bs = std::make_unique<BestVideoSource>(file, false, std::nullopt, track, 0, 0,
+                                                cache.empty() ? bcmDisable : bcmAutoAbsolutePath, cache, nullptr,
+                                                wrap(progress));
+    bs->SetMaxCacheSize(256ull << 20);
+    return bs;
+}
+
+// BestSource's (videosource.cpp): 23.98 for 23.976..., so both indexes report the same rate
+void nearest_common_rate(AVRational &fps) {
+    constexpr std::array rates = {24, 25, 30, 48, 50, 60, 100, 120};
+    const double d = av_q2d(fps);
+    for (int r : rates) {
+        const double delta = (r - r / 1.001) / 2.0;
+        if (std::fabs(d - r) < delta) {
+            fps = {r, 1};
+            return;
+        }
+        if (r % 25 != 0 && std::fabs(d - r / 1.001) < delta) {
+            fps = {r * 1000, 1001};
+            return;
+        }
+    }
+}
+
+// BestSource's frame rate from the frame durations, on the sorted timestamps
+AVRational guess_rate(const std::vector<int64_t> &pts, AVRational fps, AVRational tb) {
+    std::map<int64_t, size_t> hist;
+    for (size_t i = 0; i + 1 < pts.size(); ++i)
+        ++hist[pts[i + 1] - pts[i]];
+    if (hist.empty())
+        return fps;
+    const auto common = *std::ranges::max_element(hist, {}, [](const auto &h) { return h.second; });
+    if (hist.size() == 1 && common.first > 0) {
+        av_reduce(&fps.num, &fps.den, tb.den, common.first * tb.num, INT_MAX);
+    } else if (pts.size() >= 20 && hist.size() > 1) {
+        // drop the rarest durations while 95% of the frames stay
+        const size_t total = pts.size() - 1;
+        size_t used = total;
+        while (hist.size() > 1) {
+            const auto rare = std::ranges::min_element(hist, {}, [](const auto &h) { return h.second; });
+            if ((used - rare->second) * 100 / total < 95)
+                break;
+            used -= rare->second;
+            hist.erase(rare);
+        }
+        int64_t dur = 0;
+        for (const auto &[d, n] : hist)
+            dur += d * int64_t(n);
+        av_reduce(&fps.num, &fps.den, int64_t(used) * tb.den, dur * tb.num, INT_MAX);
+        nearest_common_rate(fps);
+    }
+    return fps;
+}
+
+} // namespace
+
+// Aegisub's FFMS2 way: the index is the packets' timestamps and keyframe flags, read without
+// decoding; a frame is found by seeking to the keyframe before it and decoding up to its timestamp.
+struct VideoSource::Packets {
+    AVFormatContext *fmt = nullptr;
+    AVCodecContext *dec = nullptr;
+    AVPacket *pkt = av_packet_alloc();
+    AVFrame *frame = av_frame_alloc();
+    int stream = -1;
+    std::vector<int64_t> pts;  // by frame, in presentation order
+    std::vector<int64_t> keys; // keyframes' frame numbers
+    int64_t last_duration = 0; // of the last frame, in the stream's time base; 0 unknown
+    int64_t at = -1;           // the frame `frame` holds, -1 none; decoding on gives the ones after it
+    int64_t shown = INT64_MIN; // its timestamp
+    bool draining = false;
+
+    ~Packets() {
+        av_frame_free(&frame);
+        av_packet_free(&pkt);
+        avcodec_free_context(&dec);
+        avformat_close_input(&fmt);
+    }
+
+    // The track's decoder; nullptr for a container whose packets are not a reliable index (AVI,
+    // MPEG-TS: missing or split timestamps) or a track BestSource would not open the same way.
+    static std::unique_ptr<Packets> open(const std::filesystem::path &file, int track) {
+        auto p = std::make_unique<Packets>();
+        if (avformat_open_input(&p->fmt, reinterpret_cast<const char *>(file.u8string().c_str()), nullptr, nullptr) < 0)
+            return nullptr;
+        const std::string_view format = p->fmt->iformat->name;
+        if ((format.find("matroska") == std::string_view::npos && !format.starts_with("mov")) ||
+            avformat_find_stream_info(p->fmt, nullptr) < 0)
+            return nullptr;
+        // BestSource's numbering: -1 the first video track, -2 the second...
+        for (int i = 0, want = track; i < int(p->fmt->nb_streams) && p->stream < 0; ++i)
+            if (p->fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && (track >= 0 ? i == track : ++want == 0))
+                p->stream = i;
+        if (p->stream < 0)
+            return nullptr;
+        const AVStream *st = p->fmt->streams[p->stream];
+        for (unsigned i = 0; i < p->fmt->nb_streams; ++i)
+            if (int(i) != p->stream)
+                p->fmt->streams[i]->discard = AVDISCARD_ALL;
+        const AVCodec *codec = avcodec_find_decoder(st->codecpar->codec_id);
+        if (!codec || !(p->dec = avcodec_alloc_context3(codec)) ||
+            avcodec_parameters_to_context(p->dec, st->codecpar) < 0)
+            return nullptr;
+        p->dec->thread_count = std::min(int(std::thread::hardware_concurrency()), 16); // as BestSource
+        p->dec->pkt_timebase = st->time_base;
+        p->dec->apply_cropping = 1;
+        if (avcodec_open2(p->dec, codec, nullptr) < 0)
+            return nullptr;
+        return p;
+    }
+
+    // Reads every packet of the track; false when some have no or the same timestamp.
+    bool scan(const Progress &progress) {
+        const int64_t size = avio_size(fmt->pb);
+        std::vector<std::pair<int64_t, bool>> frames; // pts, keyframe; in decode order
+        int64_t last = INT64_MIN;
+        for (int64_t n = 0; av_read_frame(fmt, pkt) >= 0; ++n) {
+            if (pkt->stream_index == stream) {
+                if (pkt->pts == AV_NOPTS_VALUE) {
+                    av_packet_unref(pkt);
+                    return false;
+                }
+                frames.emplace_back(pkt->pts, (pkt->flags & AV_PKT_FLAG_KEY) != 0);
+                if (pkt->pts > last) {
+                    last = pkt->pts;
+                    last_duration = pkt->duration;
+                }
+            }
+            av_packet_unref(pkt);
+            if (progress && n % 256 == 0 && !progress(avio_tell(fmt->pb), size))
+                throw MediaError("indexing canceled");
+        }
+        std::ranges::sort(frames);
+        for (size_t i = 0; i < frames.size(); ++i) {
+            if (i > 0 && frames[i].first == frames[i - 1].first)
+                return false;
+            pts.push_back(frames[i].first);
+            if (frames[i].second)
+                keys.push_back(int64_t(i));
+        }
+        if (pts.empty())
+            return false;
+        seek_to(0);
+        return true;
+    }
+
+    void seek_to(int64_t key) {
+        av_seek_frame(fmt, stream, pts[key], AVSEEK_FLAG_BACKWARD);
+        avcodec_flush_buffers(dec);
+        draining = false;
+        at = -1;
+        shown = INT64_MIN;
+    }
+
+    bool decode_next() {
+        while (true) {
+            const int r = avcodec_receive_frame(dec, frame);
+            if (r == 0) {
+                shown = frame->pts != AV_NOPTS_VALUE ? frame->pts : frame->best_effort_timestamp;
+                const auto it = std::ranges::lower_bound(pts, shown);
+                at = it != pts.end() && *it == shown ? it - pts.begin() : -1;
+                return true;
+            }
+            if (r != AVERROR(EAGAIN) || draining) { // the frame is unreferenced now
+                at = -1;
+                shown = INT64_MIN;
+                return false;
+            }
+            if (av_read_frame(fmt, pkt) < 0) {
+                avcodec_send_packet(dec, nullptr);
+                draining = true;
+                continue;
+            }
+            if (pkt->stream_index == stream)
+                avcodec_send_packet(dec, pkt); // a broken packet is skipped, as FFMS2 does
+            av_packet_unref(pkt);
+        }
+    }
+
+    const AVFrame *get(int64_t n) {
+        if (at == n)
+            return frame;
+        const auto key_of = [&](int64_t back) { // the keyframe at or before n, `back` keyframes earlier
+            const auto it = std::ranges::upper_bound(keys, n) - keys.begin() - 1 - back;
+            return it < 0 || keys.empty() ? int64_t(0) : keys[size_t(it)];
+        };
+        // decoding on reaches n when no keyframe lies between the frame held and it
+        bool seek = !(at >= 0 && n > at && key_of(0) <= at);
+        for (int64_t back = 0; back < 3; ++back, seek = true) {
+            if (seek)
+                seek_to(key_of(back));
+            while (decode_next()) {
+                if (at == n)
+                    return frame;
+                if (shown > pts[n]) // passed it: the seek landed late, retry from a keyframe before
+                    break;
+            }
+        }
+        // shortcut: a frame the decoder never outputs (an open GOP's leading frames at the start)
+        // shows the next one; the next open reads BestSource's index, which has no such frame
+        return shown > pts[n] ? frame : nullptr;
+    }
+};
+
 VideoSource::VideoSource(const std::filesystem::path &file, int track, const std::filesystem::path &cache_dir,
                          const Progress &progress) {
     guarded(file, [&] {
         auto cache = cache_file(file, cache_dir);
-        bs_ = std::make_unique<BestVideoSource>(file, false, std::nullopt, track, 0, 0,
-                                                cache.empty() ? bcmDisable : bcmAutoAbsolutePath, cache, nullptr,
-                                                wrap(progress));
-        bs_->SetMaxCacheSize(256ull << 20);
+        if (auto p = cache.empty() ? nullptr : Packets::open(file, track)) {
+            auto index = cache;
+            index += "." + std::to_string(p->stream) + ".bsindex"; // BestSource's own name for it
+            std::error_code ec;
+            if (!std::filesystem::exists(index, ec) && p->scan(progress) && p->get(0)) {
+                const AVStream *st = p->fmt->streams[p->stream];
+                const AVFrame *f = p->get(0);
+                info_.width = f->width;
+                info_.height = f->height;
+                info_.num_frames = int64_t(p->pts.size());
+                AVRational fps = p->dec->framerate.num > 0 && p->dec->framerate.den > 0 ? p->dec->framerate
+                                                                                       : st->r_frame_rate;
+                if (fps.num <= 0 || fps.den <= 0)
+                    fps = {30, 1};
+                fps = guess_rate(p->pts, fps, st->time_base);
+                info_.fps_num = fps.num;
+                info_.fps_den = fps.den;
+                AVRational sar = p->dec->sample_aspect_ratio;
+                if (sar.num <= 0 || sar.den <= 0)
+                    sar = st->sample_aspect_ratio;
+                info_.sar_num = sar.num > 0 ? sar.num : 1;
+                info_.sar_den = sar.den > 0 ? sar.den : 1;
+                int64_t last = p->last_duration;
+                if (last <= 0) // BestSource takes the most common duration: about a frame at that rate
+                    last = av_rescale_q(1, av_inv_q(fps), st->time_base);
+                info_.duration_s = double(p->pts.back() - p->pts.front() + std::max<int64_t>(1, last)) *
+                                   av_q2d(st->time_base);
+                if (const char *n = av_get_pix_fmt_name(static_cast<AVPixelFormat>(f->format)))
+                    info_.pixel_format = n;
+                info_.matrix = matrix_name(f->colorspace, f->color_range);
+                for (size_t n = 0; n < p->pts.size(); ++n)
+                    timestamps_.push_back(p->pts[n] * 1000 * st->time_base.num / st->time_base.den);
+                keyframes_ = p->keys;
+                packets_ = std::move(p);
+                index_in_background(file, track, cache);
+                return 0;
+            }
+        }
+        bs_ = open_bs(file, track, cache, progress);
         const auto &vp = bs_->GetVideoProperties();
         if (vp.NumFrames <= 0)
             throw MediaError("video track has no frames");
@@ -225,9 +472,65 @@ VideoSource::VideoSource(const std::filesystem::path &file, int track, const std
     });
 }
 
-VideoSource::~VideoSource() { sws_free_context(&sws_); }
+void VideoSource::index_in_background(const std::filesystem::path &file, int track,
+                                      const std::filesystem::path &cache) {
+    // one indexer per index file: a second tab with the same video stays with its packets
+    static std::mutex busy_m;
+    static std::set<std::filesystem::path> busy;
+    {
+        std::lock_guard g(busy_m);
+        if (!busy.insert(cache).second)
+            return;
+    }
+    indexer_ = std::thread([this, file, track, cache] {
+        struct Done {
+            const std::filesystem::path &cache;
+            ~Done() {
+                std::lock_guard g(busy_m);
+                busy.erase(cache);
+            }
+        } done{cache};
+        try {
+            {
+                // half the cores: playback and the editor keep up meanwhile
+                const int threads = std::max(1, int(std::thread::hardware_concurrency()) / 2);
+                BestVideoSource index(file, false, std::nullopt, track, 0, threads, bcmAutoAbsolutePath, cache, nullptr,
+                                      [this](int, int64_t, int64_t) { return !stop_; });
+            }
+            auto bs = open_bs(file, track, cache, {}); // from the index just written, every core to seek with
+            const auto &vp = bs->GetVideoProperties();
+            bool same = vp.NumFrames == info_.num_frames;
+            for (int64_t n = 0; same && n < vp.NumFrames; ++n)
+                same = bs->GetFrameInfo(n).PTS * 1000 * vp.TimeBase.Num / vp.TimeBase.Den == timestamps_[size_t(n)];
+            // shortcut: other frames than the packets showed stay with the packets until the next open,
+            // which reads the exact index; frame numbers must not change under the open script
+            if (!same || stop_)
+                return;
+            std::lock_guard g(m_);
+            bs_ = std::move(bs);
+            packets_.reset();
+        } catch (const std::exception &) {
+            // canceled, or BestSource cannot index it: the packets go on serving
+        }
+    });
+}
 
-bool VideoSource::linear_decoding() const { return bs_->GetLinearDecodingState(); }
+VideoSource::~VideoSource() {
+    stop_ = true;
+    if (indexer_.joinable())
+        indexer_.join();
+    sws_free_context(&sws_);
+}
+
+bool VideoSource::linear_decoding() const {
+    std::lock_guard g(m_);
+    return bs_ && bs_->GetLinearDecodingState();
+}
+
+bool VideoSource::exact() const {
+    std::lock_guard g(m_);
+    return bs_ != nullptr;
+}
 
 void VideoSource::set_matrix(Matrix m, bool full_range, bool use_override_range) {
     matrix_ = m;
@@ -240,11 +543,22 @@ void VideoSource::frame_rgba(int64_t n, std::span<uint8_t> out) {
     if (out.size() < static_cast<size_t>(w) * h * 4)
         throw MediaError("frame buffer too small");
     n = std::clamp<int64_t>(n, 0, info_.num_frames - 1);
+    std::lock_guard g(m_);
+    if (packets_) {
+        const AVFrame *f = packets_->get(n);
+        if (!f)
+            throw MediaError("cannot decode frame " + std::to_string(n));
+        return convert(f, out, n);
+    }
     std::unique_ptr<BestVideoFrame> f(bs_->GetFrame(n));
     if (!f)
         throw MediaError("cannot decode frame " + std::to_string(n));
+    convert(f->GetAVFrame(), out, n);
+}
 
-    AVFrame *src = av_frame_clone(f->GetAVFrame());
+void VideoSource::convert(const AVFrame *frame, std::span<uint8_t> out, int64_t n) {
+    const int w = info_.width, h = info_.height;
+    AVFrame *src = av_frame_clone(frame);
     if (src->colorspace == AVCOL_SPC_UNSPECIFIED)
         src->colorspace = (src->width > 1024 || src->height >= 600) ? AVCOL_SPC_BT709 : AVCOL_SPC_BT470BG;
     if (src->color_range == AVCOL_RANGE_UNSPECIFIED)

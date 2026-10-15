@@ -83,6 +83,45 @@ fn frame_exact_random_access() {
 }
 
 #[test]
+fn packet_index_matches_the_exact_one_and_hands_over() {
+    for name in ["cfr.mkv", "vfr.mkv"] {
+        let exact = Video::open(&media(name), -1, None, |_, _| true).unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let mut v = Video::open(&media(name), -1, Some(cache.path()), |_, _| true).unwrap();
+        assert_eq!(v.timestamps_ms(), exact.timestamps_ms(), "{name}");
+        assert_eq!(v.keyframes(), exact.keyframes(), "{name}");
+        let (a, b) = (v.props(), exact.props());
+        assert_eq!(
+            (a.width, a.height, a.num_frames, a.fps_num, a.fps_den),
+            (b.width, b.height, b.num_frames, b.fps_num, b.fps_den),
+            "{name}"
+        );
+        assert_eq!((&a.pixel_format, &a.matrix), (&b.pixel_format, &b.matrix));
+        assert!((a.duration_s - b.duration_s).abs() < 0.05, "{name}");
+        let frames = [
+            239, 0, 100, 47, 48, 49, 200, 1, 150, 99, 238, 191, 192, 2, 3,
+        ];
+        for n in frames {
+            check_frame(&mut v, n);
+        }
+        let start = std::time::Instant::now();
+        while !v.is_exact() {
+            assert!(start.elapsed().as_secs() < 60, "{name}: no exact index");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        for n in frames {
+            check_frame(&mut v, n);
+        }
+        // the next open reads BestSource's index
+        assert!(
+            Video::open(&media(name), -1, Some(cache.path()), |_, _| true)
+                .unwrap()
+                .is_exact()
+        );
+    }
+}
+
+#[test]
 fn cancelled_indexing_is_an_error() {
     let r = Video::open(&media("cfr.mkv"), -1, None, |_, _| false);
     assert!(r.is_err());

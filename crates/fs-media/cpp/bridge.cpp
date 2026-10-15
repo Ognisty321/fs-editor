@@ -79,6 +79,8 @@ rust::Vec<int64_t> video_keyframes(const VideoSource &v) {
 
 bool video_linear(const VideoSource &v) { return v.linear_decoding(); }
 
+bool video_exact(const VideoSource &v) { return v.exact(); }
+
 void video_set_matrix(VideoSource &v, uint8_t matrix, uint8_t range) {
     // range: 0 = as decoded, 1 = force TV (limited), 2 = force PC (full)
     v.set_matrix(static_cast<Matrix>(matrix), range == 2, range != 0);
