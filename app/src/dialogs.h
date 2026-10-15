@@ -99,6 +99,9 @@ private:
     // checks the name like Aegisub, then stores the style; index -1 = new, set to where it landed
     bool applyToFile(int &index, const fsb::StyleData &s);
     bool applyToStorage(int &index, const fsb::StyleData &s);
+    // Aegisub: the block from the first to the last selected style goes to the top (0), up (1),
+    // down (2) or to the bottom (3)
+    void moveStyles(bool storage, int type);
     void reload();
     void loadCatalog();
     void saveCatalog();

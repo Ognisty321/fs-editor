@@ -1619,6 +1619,24 @@ impl Session {
         });
     }
 
+    pub fn reorder_styles(&mut self, order: &[usize]) {
+        self.edit("Move styles", |d| d.reorder_styles(order));
+    }
+
+    pub fn add_styles(&mut self, styles: &[StyleData]) {
+        self.edit("Add styles", |d| {
+            for st in styles {
+                if let Some(s) = d.style_index(&st.name).and_then(|i| d.style_mut(i)) {
+                    apply_style_data(s, st);
+                } else {
+                    let mut s = Style::default();
+                    apply_style_data(&mut s, st);
+                    d.add_style(s);
+                }
+            }
+        });
+    }
+
     /// The script libass renders: in TL mode with "hide original" only the
     /// translations are shown.
     /// The script for libass. `at_ms >= 0` keeps only the lines shown at that

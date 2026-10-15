@@ -642,6 +642,37 @@ impl Document {
         Some(e.style)
     }
 
+    /// Put the styles in `order` (old indices); comments above a style move
+    /// with it. False, and nothing changes, unless `order` is a permutation.
+    pub fn reorder_styles(&mut self, order: &[usize]) -> bool {
+        let le = self.default_ending;
+        let sec = self.ensure_styles();
+        let n = sec.entries.len();
+        let mut seen = vec![false; n];
+        if order.len() != n
+            || order
+                .iter()
+                .any(|&i| i >= n || std::mem::replace(&mut seen[i], true))
+        {
+            return false;
+        }
+        let eof_without_newline = sec
+            .entries
+            .last()
+            .is_some_and(|e| e.ending == LineEnding::None);
+        let mut entries: Vec<_> = order.iter().map(|&i| sec.entries[i].clone()).collect();
+        for e in &mut entries {
+            if e.ending == LineEnding::None {
+                Arc::make_mut(e).ending = le;
+            }
+        }
+        if eof_without_newline && let Some(last) = entries.last_mut() {
+            Arc::make_mut(last).ending = LineEnding::None;
+        }
+        sec.entries = entries;
+        true
+    }
+
     // ---- events --------------------------------------------------------
 
     pub fn events(&self) -> &[Arc<EventEntry>] {
@@ -1424,4 +1455,37 @@ fn parse_style_line(line: &str, fmt: &[StyleField], version: AssVersion) -> Opti
         st.set_field(f, v, version);
     }
     Some(st)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reorder_styles_keeps_comments_and_eof() {
+        let fmt = "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding";
+        let st = |n: &str| {
+            format!(
+                "Style: {n},Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1"
+            )
+        };
+        let src = format!(
+            "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\n{fmt}\n{}\n; about B\n{}\n{}",
+            st("A"),
+            st("B"),
+            st("C")
+        );
+        let mut d = Document::parse(&src);
+        assert!(!d.reorder_styles(&[0, 0, 1]));
+        assert!(!d.reorder_styles(&[0, 1]));
+        assert!(d.reorder_styles(&[2, 1, 0]));
+        let names: Vec<_> = d.styles().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["C", "B", "A"]);
+        let out = d.to_ass_string();
+        assert!(
+            out.contains(&format!("{}\n; about B\n{}\n{}", st("C"), st("B"), st("A"))),
+            "{out}"
+        );
+        assert!(!out.ends_with('\n'));
+    }
 }

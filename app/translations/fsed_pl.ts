@@ -2840,8 +2840,32 @@ do czasu audio</translation>
         <translation>Oczyść</translation>
     </message>
     <message>
+        <source>Import...</source>
+        <translation>Importuj...</translation>
+    </message>
+    <message>
         <source>Delete unused styles</source>
         <translation>Usuń nieużywane style</translation>
+    </message>
+    <message>
+        <source>Import styles from another subtitle file</source>
+        <translation>Importuj style z innego pliku napisów</translation>
+    </message>
+    <message>
+        <source>Move to top</source>
+        <translation>Przenieś na początek</translation>
+    </message>
+    <message>
+        <source>Move up</source>
+        <translation>Przenieś w górę</translation>
+    </message>
+    <message>
+        <source>Move down</source>
+        <translation>Przenieś w dół</translation>
+    </message>
+    <message>
+        <source>Move to bottom</source>
+        <translation>Przenieś na koniec</translation>
     </message>
     <message>
         <source>Close</source>
@@ -2864,6 +2888,30 @@ do czasu audio</translation>
     <message>
         <source>Delete all styles from the file?</source>
         <translation>Usunąć wszystkie style z pliku?</translation>
+    </message>
+    <message>
+        <source>Import styles</source>
+        <translation>Import stylów</translation>
+    </message>
+    <message>
+        <source>ASS/SSA subtitles (*.ass *.ssa);;All files (*)</source>
+        <translation>Napisy ASS/SSA (*.ass *.ssa);;Wszystkie pliki (*)</translation>
+    </message>
+    <message>
+        <source>The selected file has no available styles.</source>
+        <translation>Wybrany plik nie zawiera stylów.</translation>
+    </message>
+    <message>
+        <source>Choose styles to import:</source>
+        <translation>Wybierz style do zaimportowania:</translation>
+    </message>
+    <message>
+        <source>Style name collision</source>
+        <translation>Kolizja nazw stylów</translation>
+    </message>
+    <message>
+        <source>There is already a style with the name &quot;%1&quot; in the current script. Overwrite?</source>
+        <translation>Styl o nazwie „%1” już istnieje w tym pliku. Zastąpić?</translation>
     </message>
     <message>
         <source>Catalog</source>

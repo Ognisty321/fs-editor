@@ -467,6 +467,10 @@ pub mod ffi {
         fn set_style(self: &mut Session, index: i64, style: &StyleData);
         fn delete_style(self: &mut Session, index: usize);
         fn clean_styles(self: &mut Session) -> Vec<String>;
+        /// `order` lists the old style indices in their new order.
+        fn reorder_styles(self: &mut Session, order: &[usize]);
+        /// Add the styles, replacing ones with the same name, in one undo step.
+        fn add_styles(self: &mut Session, styles: &[StyleData]);
         fn script_for_render(self: &Session, hide_original: bool, at_ms: i64) -> String;
 
         fn tl_enable(self: &mut Session, on: bool);
