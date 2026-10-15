@@ -884,6 +884,8 @@ void MainWindow::buildMenus() {
             a->setProperty("context", context); // the hotkey editor's conflicts are within one panel
         }
     };
+    panelKeys(sub(edit, tr("Edit box keys")), EditBox::keys(), "EditBox",
+              [=](const char *id) { tab()->edit()->runCommand(id); });
 
     // Video
     auto *video = menu(tr("&Video"));
@@ -2011,10 +2013,7 @@ bool MainWindow::eventFilter(QObject *o, QEvent *e) {
                      ke->matches(QKeySequence::SelectAll) || ke->matches(QKeySequence::Copy) ||
                      ke->matches(QKeySequence::Cut) || ke->matches(QKeySequence::Paste);
         } else if (dynamic_cast<SubsTextEdit *>(o)) {
-            wanted = ((mods & Qt::ControlModifier) &&
-                      (k == Qt::Key_D || k == Qt::Key_R || k == Qt::Key_B || k == Qt::Key_I || k == Qt::Key_Comma ||
-                       k == Qt::Key_Period)) ||
-                     ((mods & Qt::AltModifier) && k == Qt::Key_Down);
+            wanted = panelCommand(ke, EditBox::keys());
         }
         if (wanted) {
             e->accept();

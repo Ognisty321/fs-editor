@@ -4,6 +4,7 @@
 #pragma once
 
 #include "bridge.h"
+#include "mainwindow.h"
 
 #include <QElapsedTimer>
 #include <QLineEdit>
@@ -72,7 +73,7 @@ public:
     // Capture 1 of the last `re` among the tags in effect at `pos` (Aegisub's), empty if none
     QString tagValue(const QRegularExpression &re, int pos) const;
 signals:
-    void keyCommand(int key, Qt::KeyboardModifiers mods);
+    void keyCommand(const char *id); // one of EditBox::keys()
     void splitRequested(qint64 atMs); // -1 estimate, -2 keep both times, else at that time
     void revertRequested();
     void insertOriginalRequested();
@@ -97,6 +98,8 @@ public:
     QString selectedText(bool original = false) const;
     int row() const { return m_row; }
     bool framesMode() const { return m_framesMode; } // the grid shows frames too (Aegisub)
+    static std::span<const PanelKey> keys(); // the text fields' own keys (Kainote's edit box hotkeys)
+    void runCommand(const QString &id, SubsTextEdit *in = nullptr); // in: the text field; default the line's
 
 protected:
     void resizeEvent(QResizeEvent *) override;
@@ -107,7 +110,6 @@ private:
     void showTimes(const fsb::Row &r, const QString &skip);
     void updateInfo(const fsb::Row &r);
     void rebuildTagButtons();
-    void onKey(int key, Qt::KeyboardModifiers mods);
     void nextLine();
     void splitAtCursor(qint64 atMs);
     void setColorTag(int which);

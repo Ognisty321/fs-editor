@@ -252,10 +252,12 @@ int main(int argc, char **argv) {
                     for (int k = 1; k <= 4; ++k) send(QEvent::MouseMove, at(x1 + (x2 - x1) * k / 4), button);
                     send(QEvent::MouseButtonRelease, at(x2), Qt::NoButton);
                 }
-                // FSED_SMOKE_AUDIOKEY="Shift+G" / FSED_SMOKE_VIDEOKEY="L": that key pressed in the audio / video
+                // FSED_SMOKE_AUDIOKEY="Shift+G", _VIDEOKEY="L", _EDITKEY="Ctrl+B": a key in the audio, video, line text
                 const std::pair<const char *, QWidget *> keyTargets[] = {
                     {"FSED_SMOKE_AUDIOKEY", w.current()->audio()->findChild<AudioView *>()},
-                    {"FSED_SMOKE_VIDEOKEY", w.current()->video()->view()}};
+                    {"FSED_SMOKE_VIDEOKEY", w.current()->video()->view()},
+                    {"FSED_SMOKE_EDITKEY",
+                     w.current()->edit()->findChild<SubsTextEdit *>({}, Qt::FindDirectChildrenOnly)}};
                 for (const auto &[var, view] : keyTargets)
                     if (const QKeySequence k(qEnvironmentVariable(var)); !k.isEmpty()) {
                         QKeyEvent e(QEvent::KeyPress, k[0].key(), k[0].keyboardModifiers());

@@ -556,6 +556,38 @@
         <translation>Znaki na sekundę: %1&lt;=%2</translation>
     </message>
     <message>
+        <source>Go to the next line</source>
+        <translation>Przejdź do następnej linijki</translation>
+    </message>
+    <message>
+        <source>Insert a line break</source>
+        <translation>Wstaw znak podziału</translation>
+    </message>
+    <message>
+        <source>Insert a hard space</source>
+        <translation>Wstaw twardą spację</translation>
+    </message>
+    <message>
+        <source>Insert the video time&apos;s distance from the start</source>
+        <translation>Wstaw różnicę początkową (czas wideo od startu)</translation>
+    </message>
+    <message>
+        <source>Insert the video time&apos;s distance to the end</source>
+        <translation>Wstaw różnicę końcową (czas wideo do końca)</translation>
+    </message>
+    <message>
+        <source>Next unconfirmed line</source>
+        <translation>Następna niepewna linijka</translation>
+    </message>
+    <message>
+        <source>Next untranslated line</source>
+        <translation>Następna nieprzetłumaczona linijka</translation>
+    </message>
+    <message>
+        <source>Mark as not confirmed and go to the next line</source>
+        <translation>Ustaw jako niepewne i przejdź dalej</translation>
+    </message>
+    <message>
         <source>No unconfirmed lines found</source>
         <translation>Nie znaleziono niepewnych linijek</translation>
     </message>
@@ -1548,6 +1580,10 @@ Backspace: rozłącz ostatnią grupę</translation>
     <message>
         <source>Previous tab</source>
         <translation>Poprzednia zakładka</translation>
+    </message>
+    <message>
+        <source>Edit box keys</source>
+        <translation>Klawisze pola edycji</translation>
     </message>
     <message>
         <source>&amp;Video</source>

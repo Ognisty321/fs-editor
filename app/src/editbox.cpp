@@ -513,17 +513,9 @@ void SubsTextEdit::keyPressEvent(QKeyEvent *e) {
         return insertPlainText(before.lastIndexOf(QChar(0x201E)) > before.lastIndexOf(QChar(0x201D)) ? QChar(0x201D)
                                                                                                      : QChar(0x201E));
     }
-    const auto mods = e->modifiers();
-    const bool ctrl = mods & Qt::ControlModifier;
-    // Aegisub's hard space
-    if (ctrl && (mods & Qt::ShiftModifier) && e->key() == Qt::Key_Space) return insertPlainText("\\h");
-    if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter ||
-        (ctrl && (e->key() == Qt::Key_D || e->key() == Qt::Key_R || e->key() == Qt::Key_B ||
-                  e->key() == Qt::Key_I || e->key() == Qt::Key_Comma || e->key() == Qt::Key_Period)) ||
-        ((mods & Qt::AltModifier) && (e->key() == Qt::Key_Down || (e->key() >= Qt::Key_1 && e->key() <= Qt::Key_4)))) {
-        emit keyCommand(e->key(), mods);
-        return;
-    }
+    if (auto *mw = qobject_cast<MainWindow *>(window()))
+        if (const char *id = mw->panelCommand(e, EditBox::keys())) return emit keyCommand(id);
+    if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) return; // a line breaks with \N, not Enter
     QPlainTextEdit::keyPressEvent(e);
     // tag autocomplete after a backslash
     const QString before = toPlainText().left(textCursor().position());
@@ -725,7 +717,8 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     connect(m_text, &QPlainTextEdit::cursorPositionChanged, this, &EditBox::updateTextInfo);
     connect(m_text, &QPlainTextEdit::selectionChanged, this, &EditBox::updateTextInfo);
     connect(m_text, &QPlainTextEdit::textChanged, this, &EditBox::updateTextInfo);
-    for (auto *e : {m_text, m_original}) connect(e, &SubsTextEdit::keyCommand, this, &EditBox::onKey);
+    for (auto *e : {m_text, m_original})
+        connect(e, &SubsTextEdit::keyCommand, this, [this, e](const char *id) { runCommand(id, e); });
     connect(m_text, &SubsTextEdit::splitRequested, this, [this](qint64 at) {
         // at the video frame, as Aegisub: the frame shown, kept within the line, ends the first part
         if (VideoBox *v = m_tab->video(); at == 0 && v->hasVideo() && m_row >= 0) {
@@ -1139,70 +1132,67 @@ void EditBox::splitAtCursor(qint64 atMs) {
     if (r >= 0) m_tab->setActive(int(r));
 }
 
-void EditBox::onKey(int key, Qt::KeyboardModifiers mods) {
+// Kainote's edit box hotkeys and defaults, with Aegisub's colours and hard space
+static const PanelKey kEditKeys[] = {
+    {"editNextLine", QT_TRANSLATE_NOOP("EditBox", "Go to the next line"), "Return"},
+    {"editLineBreak", QT_TRANSLATE_NOOP("EditBox", "Insert a line break"), "Shift+Return"},
+    {"editHardSpace", QT_TRANSLATE_NOOP("EditBox", "Insert a hard space"), "Ctrl+Shift+Space"},
+    {"editBold", QT_TRANSLATE_NOOP("EditBox", "Bold"), "Ctrl+B"},
+    {"editItalic", QT_TRANSLATE_NOOP("EditBox", "Italic"), "Ctrl+I"},
+    {"editUnderline", QT_TRANSLATE_NOOP("EditBox", "Underline"), ""},
+    {"editStrikeout", QT_TRANSLATE_NOOP("EditBox", "Strikethrough"), ""},
+    {"editColor1", QT_TRANSLATE_NOOP("EditBox", "Primary color"), "Alt+1"},
+    {"editColor2", QT_TRANSLATE_NOOP("EditBox", "Secondary color for karaoke"), "Alt+2"},
+    {"editColor3", QT_TRANSLATE_NOOP("EditBox", "Border color"), "Alt+3"},
+    {"editColor4", QT_TRANSLATE_NOOP("EditBox", "Shadow color"), "Alt+4"},
+    {"editStartDiff", QT_TRANSLATE_NOOP("EditBox", "Insert the video time's distance from the start"), "Ctrl+,"},
+    {"editEndDiff", QT_TRANSLATE_NOOP("EditBox", "Insert the video time's distance to the end"), "Ctrl+."},
+    {"editNextDoubtful", QT_TRANSLATE_NOOP("EditBox", "Next unconfirmed line"), "Ctrl+D"},
+    {"editNextUntranslated", QT_TRANSLATE_NOOP("EditBox", "Next untranslated line"), "Ctrl+R"},
+    {"editSetDoubtful", QT_TRANSLATE_NOOP("EditBox", "Mark as not confirmed and go to the next line"), "Alt+Down"},
+};
+
+std::span<const PanelKey> EditBox::keys() { return kEditKeys; }
+
+void EditBox::runCommand(const QString &id, SubsTextEdit *e) {
+    if (m_row < 0) return;
+    if (!e) e = m_text;
     auto &s = m_tab->s();
     const bool tl = s.file_info().tl_mode;
-    switch (key) {
-    case Qt::Key_Return:
-    case Qt::Key_Enter:
-        if (mods & Qt::ShiftModifier) {
-            // a line break in place of the selection, the spaces around it dropped (Kainote, Aegisub)
-            auto *e = qobject_cast<SubsTextEdit *>(sender());
-            if (!e) e = m_text;
-            const QString t = e->text();
-            auto c = e->textCursor();
-            int a = c.selectionStart(), b = c.selectionEnd();
-            if (a > 0 && t[a - 1] == ' ') --a;
-            if (b < t.size() && t[b] == ' ') ++b;
-            c.setPosition(a);
-            c.setPosition(b, QTextCursor::KeepAnchor);
-            c.insertText("\\N");
-            e->setTextCursor(c);
-        } else if (!(mods & Qt::ControlModifier)) {
-            nextLine();
-        }
-        break;
-    case Qt::Key_1:
-    case Qt::Key_2:
-    case Qt::Key_3:
-    case Qt::Key_4: // Alt: Aegisub's edit/color/primary, secondary, outline, shadow
-        setColorTag(key - Qt::Key_0);
-        break;
-    case Qt::Key_D:
-        if (tl) {
-            const auto r = s.next_doubtful(size_t(m_row));
-            if (r >= 0) m_tab->setActive(int(r));
-            else m_tab->main()->status(tr("No unconfirmed lines found"));
-        }
-        break;
-    case Qt::Key_R:
-        if (tl) {
-            const auto r = s.next_untranslated(size_t(m_row));
-            if (r >= 0) m_tab->setActive(int(r));
-            else m_tab->main()->status(tr("No untranslated lines found"));
-        }
-        break;
-    case Qt::Key_B: toggleTag("b"); break;
-    case Qt::Key_I: toggleTag("i"); break;
-    case Qt::Key_Comma:
-    case Qt::Key_Period: {
+    if (id == "editNextLine") nextLine();
+    else if (id == "editLineBreak") {
+        // a line break in place of the selection, the spaces around it dropped (Kainote, Aegisub)
+        const QString t = e->text();
+        auto c = e->textCursor();
+        int a = c.selectionStart(), b = c.selectionEnd();
+        if (a > 0 && t[a - 1] == ' ') --a;
+        if (b < t.size() && t[b] == ' ') ++b;
+        c.setPosition(a);
+        c.setPosition(b, QTextCursor::KeepAnchor);
+        c.insertText("\\N");
+        e->setTextCursor(c);
+    } else if (id == "editHardSpace") e->insertPlainText("\\h");
+    else if (id == "editBold") toggleTag("b");
+    else if (id == "editItalic") toggleTag("i");
+    else if (id == "editUnderline") toggleTag("u");
+    else if (id == "editStrikeout") toggleTag("s");
+    else if (id.startsWith("editColor")) setColorTag(id.back().digitValue()); // Aegisub's edit/color/*
+    else if (id == "editNextDoubtful" || id == "editNextUntranslated") {
+        if (!tl) return;
+        const bool doubtful = id == "editNextDoubtful";
+        const auto r = doubtful ? s.next_doubtful(size_t(m_row)) : s.next_untranslated(size_t(m_row));
+        if (r >= 0) m_tab->setActive(int(r));
+        else m_tab->main()->status(doubtful ? tr("No unconfirmed lines found") : tr("No untranslated lines found"));
+    } else if (id == "editStartDiff" || id == "editEndDiff") {
         // Kainote: the video time's distance from the line's start (end), only within the line
         const fsb::Row r = s.row(size_t(m_row));
         const qint64 t = m_tab->videoTime();
-        if (!m_tab->video()->hasVideo() || t < r.start || t > r.end) {
-            QApplication::beep();
-            break;
-        }
-        m_text->insertPlainText(QString::number(key == Qt::Key_Comma ? t - r.start : r.end - t));
-        break;
-    }
-    case Qt::Key_Down:
-        if (tl) {
-            const size_t row = size_t(m_row);
-            s.set_doubtful({&row, 1}, true);
-            m_tab->changed();
-            nextLine();
-        }
-        break;
+        if (!m_tab->video()->hasVideo() || t < r.start || t > r.end) return QApplication::beep();
+        m_text->insertPlainText(QString::number(id == "editStartDiff" ? t - r.start : r.end - t));
+    } else if (id == "editSetDoubtful" && tl) {
+        const size_t row = size_t(m_row);
+        s.set_doubtful({&row, 1}, true);
+        m_tab->changed();
+        nextLine();
     }
 }
