@@ -2371,6 +2371,14 @@ Filtry eksportu: %8</translation>
         <translation>FS Editor uległ awarii. Niezapisane napisy zapisano w %1; można je otworzyć przez Plik &gt; Otwórz autozapis.</translation>
     </message>
     <message>
+        <source>An error occurred: %1
+
+Unsaved subtitles were written to the autosave folder. Save your work and restart FS Editor.</source>
+        <translation>Wystąpił błąd: %1
+
+Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Editor ponownie.</translation>
+    </message>
+    <message>
         <source>FS Editor was not closed properly last time. Open one of the autosaved subtitles?</source>
         <translation>FS Editor nie został ostatnio poprawnie zamknięty. Otworzyć któreś z automatycznie zapisanych napisów?</translation>
     </message>

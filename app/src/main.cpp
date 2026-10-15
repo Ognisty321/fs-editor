@@ -89,6 +89,34 @@ static LONG WINAPI crashHandler(EXCEPTION_POINTERS *ep) {
 #endif
 
 // A panic on the GUI thread: the bridge aborts the process right after.
+// Aegisub's OnExceptionInMainLoop: an exception out of an event handler (a bridge error a slot
+// missed) writes the autosaves and says so, and the app goes on instead of ending
+class App final : public QApplication {
+public:
+    using QApplication::QApplication;
+    bool notify(QObject *o, QEvent *e) override {
+        try {
+            return QApplication::notify(o, e);
+        } catch (const std::exception &x) {
+            failed(QString::fromUtf8(x.what()));
+        } catch (...) {
+            failed(QStringLiteral("unknown exception"));
+        }
+        return false;
+    }
+
+private:
+    static void failed(const QString &what) {
+        std::fprintf(stderr, "fsed: %s\n", qPrintable(what));
+        if (g_main) g_main->autosaveTabs();
+        if (!qEnvironmentVariableIsSet("FSED_SMOKE"))
+            QMessageBox::critical(g_main, "FS Editor",
+                                  QObject::tr("An error occurred: %1\n\nUnsaved subtitles were written to the "
+                                              "autosave folder. Save your work and restart FS Editor.")
+                                      .arg(what));
+    }
+};
+
 struct PanicRecovery final : fsb::PanicHandler {
     void fatal(rust::Str) const override { recoverTabs(); } // Rust already printed the message
 };
@@ -125,7 +153,7 @@ int main(int argc, char **argv) {
 #endif
     std::signal(SIGABRT, fatalSignal);
     fsb::install_panic_hook(std::make_unique<PanicRecovery>());
-    QApplication app(argc, argv);
+    App app(argc, argv);
     QApplication::setOrganizationName("FS Editor");
     QApplication::setApplicationName("FS Editor");
     QApplication::setApplicationDisplayName("FS Editor");

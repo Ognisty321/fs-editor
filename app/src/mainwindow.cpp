@@ -557,7 +557,10 @@ void MainWindow::buildMenus() {
         if (const int i = pickEmbeddedTrack(tracks, tr("Subtitles to load:")); i >= 0) tab()->openEmbedded(video, i);
     });
     add("saveTranslation", tr("Save translation"), {}, file, [=, this] {
-        const QString p = QFileDialog::getSaveFileName(this, tr("Save translation"), tab()->path(), kSubsFilter);
+        // a name of its own: Enter in the dialog must not replace the file with both texts
+        const QFileInfo fi(tab()->path());
+        const QString start = fi.fileName().isEmpty() ? QString() : fi.dir().filePath(fi.completeBaseName() + ".translation.ass");
+        const QString p = QFileDialog::getSaveFileName(this, tr("Save translation"), start, kSubsFilter);
         if (!p.isEmpty()) tab()->saveTranslation(p);
     });
     // Aegisub's Export: a filtered copy in another format/encoding; the open file stays as it is
@@ -1380,7 +1383,10 @@ bool MainWindow::autosaveTabs() {
     const QString stamp = QDateTime::currentDateTime().toString("yyyy-MM-dd-HH-mm-ss");
     QSet<QString> used; // two untitled tabs in the same second must not share a file
     bool any = false;
-    for (auto *t : tabs()) {
+    // the current tab last: after a panic in it, the others are written before it can fail again
+    auto all = tabs();
+    std::ranges::stable_partition(all, [this](TabPanel *t) { return t != current(); });
+    for (auto *t : all) {
         const quint64 gen = t->s().generation();
         if (!t->modified() || t->property("autosaved").toULongLong() == gen) continue;
         const QString base = t->path().isEmpty() ? tr("Untitled") : QFileInfo(t->path()).completeBaseName();
