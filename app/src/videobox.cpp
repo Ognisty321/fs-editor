@@ -253,6 +253,11 @@ void VideoView::keyPressEvent(QKeyEvent *e) {
         updateOverlay();
         return;
     }
+    if (e->matches(QKeySequence::Copy)) { // Aegisub's "copy coordinates": the script point under the mouse
+        const QPointF p = toScript(mapFromGlobal(QCursor::pos()).toPointF());
+        QApplication::clipboard()->setText(QString("%1,%2").arg(qRound(p.x())).arg(qRound(p.y())));
+        return;
+    }
     // Kainote's volume keys: Num . louder, Num 0 quieter
     const int k = e->key();
     if (e->modifiers() & Qt::KeypadModifier && (k == Qt::Key_Period || k == Qt::Key_Comma || k == Qt::Key_0)) {
