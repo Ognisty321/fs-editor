@@ -16,6 +16,7 @@ class QTabWidget;
 class QToolBar;
 class QLabel;
 class FindDialog;
+class StyleManager;
 class GuiAutomationHost;
 
 class MainWindow : public QMainWindow {
@@ -92,6 +93,7 @@ private:
     QMap<QString, QMenu *> m_recent;
     QLabel *m_statusFields[9];
     FindDialog *m_find = nullptr;
+    QPointer<StyleManager> m_styles; // open beside the editor (Kainote), gone when closed
     std::optional<rust::Box<fsb::Automation>> m_automation;
     GuiAutomationHost *m_host = nullptr; // owned by m_automation
     qint64 m_lastMacro = -1; // first macro of the last script loaded by hand

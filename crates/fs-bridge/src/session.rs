@@ -2150,6 +2150,15 @@ impl Session {
     }
 
     /// Delete styles no line uses; returns their names (no undo step when none).
+    pub fn style_in_use(&self, name: &str) -> bool {
+        let d = &self.ed.doc;
+        tlmode::tl_style(d).as_deref() == Some(name)
+            || (0..d.event_count()).any(|i| {
+                let e = d.event(i).unwrap();
+                e.style == name || rename_reset_tags(&e.text, name, "").is_some()
+            })
+    }
+
     pub fn clean_styles(&mut self) -> Vec<String> {
         let mut probe = self.ed.doc.clone();
         if ops::remove_unused_styles(&mut probe).is_empty() {
@@ -3670,6 +3679,18 @@ mod tests {
         assert!(s.styles().is_empty());
         assert!(s.undo());
         assert_eq!(names(&s), ["Main", "Orig"]);
+    }
+
+    #[test]
+    fn style_in_use_by_lines_and_reset_tags() {
+        let mut s = session(ASS);
+        assert!(s.style_in_use("Default"));
+        assert!(!s.style_in_use("Sign"));
+        let mut r = s.row(0);
+        r.text = r"{\rSign}x".into();
+        s.set_row(0, &r, "");
+        assert!(s.style_in_use("Sign"));
+        assert!(!s.style_in_use("Signs"));
     }
 
     #[test]

@@ -11,6 +11,7 @@
 #include <QApplication>
 #include <QButtonGroup>
 #include <QCheckBox>
+#include <QAction>
 #include <QClipboard>
 #include <QColorDialog>
 #include <QComboBox>
@@ -1137,7 +1138,7 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     if (cats.isEmpty()) cats << "Default";
     m_catalog->addItems(cats);
     auto *newCat = new QPushButton(tr("New"), this);
-    auto *delCat = new QPushButton(tr("Delete"), this);
+    auto *delCat = m_delCat = new QPushButton(tr("Delete"), this);
     catRow->addWidget(new QLabel(tr("Catalog:"), this));
     catRow->addWidget(m_catalog, 1);
     catRow->addWidget(newCat);
@@ -1148,9 +1149,10 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     m_storage->setSelectionMode(QAbstractItemView::ExtendedSelection);
     g->addWidget(m_storage, 2, 0);
     auto *sb = new QVBoxLayout;
-    auto *sNew = new QPushButton(tr("New"), this), *sEdit = new QPushButton(tr("Edit"), this),
-         *sDel = new QPushButton(tr("Delete"), this), *sSort = new QPushButton(tr("Sort"), this);
-    for (auto *b : {sNew, sEdit, sDel, sSort}) sb->addWidget(b);
+    auto *sNew = new QPushButton(tr("New"), this), *sCopy = new QPushButton(tr("Copy"), this),
+         *sEdit = new QPushButton(tr("Edit"), this), *sDel = new QPushButton(tr("Delete"), this),
+         *sSort = new QPushButton(tr("Sort"), this);
+    for (auto *b : {sNew, sCopy, sEdit, sDel, sSort}) sb->addWidget(b);
     sb->addStretch();
     g->addLayout(sb, 2, 1);
     auto *mid = new QHBoxLayout;
@@ -1173,6 +1175,10 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     for (auto *b : {fNew, fCopy, fEdit, fDel, fClear, fClean, fSort, fImport}) fb->addWidget(b);
     fb->addStretch();
     g->addLayout(fb, 5, 1);
+    m_forOne[0] = {sCopy, sEdit};
+    m_forAny[0] = {sDel, toFile, toAll};
+    m_forOne[1] = {fCopy, fEdit};
+    m_forAny[1] = {fDel, toStore};
     const auto moveButtons = [this](QBoxLayout *column, bool storage) {
         static const char *const names[] = {"arrow-bar-to-up", "arrow-up", "arrow-down", "arrow-bar-to-down"};
         static const char *const tips[] = {QT_TR_NOOP("Move to top"), QT_TR_NOOP("Move up"), QT_TR_NOOP("Move down"),
@@ -1184,6 +1190,7 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
             b->setToolTip(tr(tips[k]));
             connect(b, &QToolButton::clicked, this, [=, this] { moveStyles(storage, k); });
             row->addWidget(b);
+            m_moves[storage ? 0 : 1][k] = b;
         }
         column->insertLayout(column->count() - 1, row); // above the stretch
     };
@@ -1191,7 +1198,7 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     moveButtons(fb, false);
     auto *close = new QPushButton(tr("Close"), this);
     g->addWidget(close, 6, 1);
-    connect(close, &QPushButton::clicked, this, &QDialog::accept);
+    connect(close, &QPushButton::clicked, this, &QDialog::close);
 
     auto session = [this]() -> fsb::Session & { return m_main->current()->s(); };
     auto edited = [this] {
@@ -1224,14 +1231,17 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         e.onApply = [&](const fsb::StyleData &s) { return applyToFile(idx, s); };
         e.exec();
     });
+    // Copy opens the editor on the copy, which OK adds (Aegisub)
     connect(fCopy, &QPushButton::clicked, this, [=, this] {
         const int i = m_file->currentRow();
         if (i < 0) return;
         const auto styles = session().styles();
         auto s = styles[size_t(i)];
         s.name = fs::rs(uniqueName(fs::q(s.name) + tr(" - copy"), namesOf(styles)));
-        session().set_style(-1, s, false);
-        edited();
+        int idx = -1;
+        StyleEditor e(s, this);
+        e.onApply = [&](const fsb::StyleData &st) { return applyToFile(idx, st); };
+        e.exec();
     });
     auto editFile = [=, this] {
         const int i = m_file->currentRow();
@@ -1242,7 +1252,7 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         e.exec();
     };
     connect(fEdit, &QPushButton::clicked, this, editFile);
-    connect(m_file, &QListWidget::itemDoubleClicked, this, editFile);
+    connect(m_file, &QListWidget::itemActivated, this, editFile); // a double click or Enter
     connect(fDel, &QPushButton::clicked, this, [=, this] {
         std::vector<size_t> rows;
         for (const auto &r : m_file->selectionModel()->selectedRows()) rows.push_back(size_t(r.row()));
@@ -1340,13 +1350,7 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         const auto styles = session().styles();
         std::vector<fsb::StyleData> picked;
         for (auto *it : m_file->selectedItems()) picked.push_back(styles[size_t(m_file->row(it))]);
-        for (const auto &st : askOverwrite(picked, namesOf(m_stored))) {
-            auto same = std::find_if(m_stored.begin(), m_stored.end(), [&](auto &x) { return fs::q(x.name) == fs::q(st.name); });
-            if (same != m_stored.end()) *same = st;
-            else m_stored.push_back(st);
-        }
-        saveCatalog();
-        reload();
+        addToStorage(picked);
     });
     connect(sNew, &QPushButton::clicked, this, [=, this] {
         int idx = -1;
@@ -1365,7 +1369,17 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         e.exec();
     };
     connect(sEdit, &QPushButton::clicked, this, editStored);
-    connect(m_storage, &QListWidget::itemDoubleClicked, this, editStored);
+    connect(m_storage, &QListWidget::itemActivated, this, editStored);
+    connect(sCopy, &QPushButton::clicked, this, [this] {
+        const int i = m_storage->currentRow();
+        if (i < 0) return;
+        auto s = m_stored[size_t(i)];
+        s.name = fs::rs(uniqueName(fs::q(s.name) + tr(" - copy"), namesOf(m_stored)));
+        int idx = -1;
+        StyleEditor e(s, this);
+        e.onApply = [&](const fsb::StyleData &st) { return applyToStorage(idx, st); };
+        e.exec();
+    });
     connect(sDel, &QPushButton::clicked, this, [this] {
         auto rows = m_storage->selectionModel()->selectedRows();
         if (rows.empty() || !m_main->confirm(tr("Delete the selected styles?"))) return;
@@ -1402,11 +1416,92 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         // with the file's project settings, as Aegisub keeps it: not an edit to undo
         m_main->current()->s().set_project_value("Last Style Storage", fs::Utf8(m_catalog->currentText()));
     });
+    // Delete, Ctrl+C and Ctrl+V on the lists (Kainote); Enter edits, so no button is the default
+    for (const bool storage : {true, false}) {
+        QListWidget *list = storage ? m_storage : m_file;
+        const auto key = [this, list](QKeySequence k, auto fn) {
+            auto *a = new QAction(list);
+            a->setShortcut(k);
+            a->setShortcutContext(Qt::WidgetShortcut);
+            connect(a, &QAction::triggered, this, fn);
+            list->addAction(a);
+        };
+        key(QKeySequence::Delete, [b = storage ? sDel : fDel] { b->click(); });
+        key(QKeySequence::Copy, [this, storage] { copyStyles(storage); });
+        key(QKeySequence::Paste, [this, storage] { pasteStyles(storage); });
+        connect(list, &QListWidget::itemSelectionChanged, this, &StyleManager::updateButtons);
+    }
+    for (auto *b : findChildren<QPushButton *>()) b->setAutoDefault(false);
     const QString last = fs::q(m_main->current()->s().project_value("Last Style Storage"));
     if (!last.isEmpty() && cats.contains(last)) m_catalog->setCurrentText(last);
     loadCatalog();
-    reload();
+    tabChanged();
+    // the active line's style picked (Aegisub)
+    if (auto *tab = m_main->current(); tab->active() >= 0)
+        if (const auto items = m_file->findItems(fs::q(tab->s().row(size_t(tab->active())).style), Qt::MatchExactly);
+            !items.isEmpty())
+            m_file->setCurrentItem(items.first());
     resize(560, 640);
+}
+
+void StyleManager::tabChanged() {
+    disconnect(m_docConn);
+    if (auto *tab = m_main->current())
+        m_docConn = connect(tab, &TabPanel::docChanged, this, [this] {
+            if (isVisible()) reload(); // an undo, a style edited in the line's box
+        });
+    reload();
+}
+
+void StyleManager::updateButtons() {
+    m_delCat->setEnabled(m_catalog->count() > 1);
+    for (int k = 0; k < 2; ++k) {
+        QListWidget *list = k ? m_file : m_storage;
+        int first = -1, last = -1, n = 0;
+        for (int r = 0; r < list->count(); ++r)
+            if (list->item(r)->isSelected()) {
+                if (first < 0) first = r;
+                last = r;
+                ++n;
+            }
+        for (auto *b : m_forOne[k]) b->setEnabled(n == 1);
+        for (auto *b : m_forAny[k]) b->setEnabled(n > 0);
+        // a block moves only when it is one
+        const bool block = n > 0 && last - first + 1 == n;
+        for (int m = 0; m < 4; ++m) m_moves[k][m]->setEnabled(block && (m < 2 ? first > 0 : last < list->count() - 1));
+    }
+}
+
+void StyleManager::addToStorage(const std::vector<fsb::StyleData> &styles) {
+    for (const auto &st : askOverwrite(styles, namesOf(m_stored))) {
+        auto same = std::find_if(m_stored.begin(), m_stored.end(), [&](auto &x) { return fs::q(x.name) == fs::q(st.name); });
+        if (same != m_stored.end()) *same = st;
+        else m_stored.push_back(st);
+    }
+    saveCatalog();
+    reload();
+}
+
+void StyleManager::copyStyles(bool storage) {
+    std::vector<fsb::StyleData> v;
+    const auto styles = m_main->current()->s().styles();
+    QListWidget *list = storage ? m_storage : m_file;
+    for (int r = 0; r < list->count(); ++r)
+        if (list->item(r)->isSelected()) v.push_back(storage ? m_stored[size_t(r)] : styles[size_t(r)]);
+    if (!v.empty()) QApplication::clipboard()->setText(fs::q(fsb::style_lines({v.data(), v.size()})));
+}
+
+void StyleManager::pasteStyles(bool storage) {
+    const auto parsed = fsb::parse_style_lines(fs::Utf8(QApplication::clipboard()->text()));
+    const std::vector<fsb::StyleData> v(parsed.begin(), parsed.end());
+    if (v.empty()) return;
+    if (storage) return addToStorage(v);
+    auto &s = m_main->current()->s();
+    const auto chosen = askOverwrite(v, namesOf(s.styles()));
+    if (chosen.empty()) return;
+    s.add_styles({chosen.data(), chosen.size()});
+    m_main->current()->changed();
+    reload();
 }
 
 void StyleManager::loadCatalog() {
@@ -1430,6 +1525,8 @@ void StyleManager::moveStyles(bool storage, int type) {
     for (int r = 0; r < list->count(); ++r)
         if (list->item(r)->isSelected()) first = std::min(first, r), last = r;
     if (last < 0) return;
+    for (int r = first; r <= last; ++r)
+        if (!list->item(r)->isSelected()) return; // Aegisub moves only a block
     if (storage) {
         if (!moveBlock(m_stored, type, first, last)) return;
         saveCatalog();
@@ -1465,10 +1562,34 @@ std::vector<fsb::StyleData> StyleManager::askOverwrite(const std::vector<fsb::St
 }
 
 void StyleManager::reload() {
-    m_storage->clear();
-    for (const auto &s : m_stored) m_storage->addItem(fs::q(s.name));
-    m_file->clear();
-    for (const auto &s : m_main->current()->s().styles()) m_file->addItem(fs::q(s.name));
+    // shortcut: the fonts installed when the manager first opened, and a font attached to the
+    // file shows as missing; read them again if people install fonts while it is open
+    static const QSet<QString> fonts = [] {
+        QSet<QString> f;
+        for (const QString &n : QFontDatabase::families()) f.insert(n.toLower());
+        return f;
+    }();
+    const auto refill = [this](QListWidget *list, const auto &styles) {
+        QSet<QString> selected;
+        for (auto *it : list->selectedItems()) selected.insert(it->text());
+        const QString current = list->currentItem() ? list->currentItem()->text() : QString();
+        const QSignalBlocker block(list);
+        list->clear();
+        for (const auto &s : styles) {
+            auto *it = new QListWidgetItem(fs::q(s.name), list);
+            QString font = fs::q(s.font);
+            if (font.startsWith('@')) font.remove(0, 1); // vertical text
+            if (!fonts.contains(font.toLower())) { // Kainote marks them
+                it->setForeground(QColor(230, 70, 70));
+                it->setToolTip(tr("The font \"%1\" is not installed").arg(font));
+            }
+            it->setSelected(selected.contains(it->text()));
+            if (it->text() == current) list->setCurrentItem(it, QItemSelectionModel::NoUpdate);
+        }
+    };
+    refill(m_storage, m_stored);
+    if (auto *tab = m_main->current()) refill(m_file, tab->s().styles());
+    updateButtons();
 }
 
 void StyleManager::editStyle(const QString &name) {
@@ -1492,7 +1613,8 @@ bool StyleManager::applyToFile(int &index, const fsb::StyleData &s) {
         }
     // Aegisub asks whether the lines (and \r tags) that used the old name follow a rename
     bool lines = true;
-    if (index >= 0 && fs::q(styles[size_t(index)].name) != fs::q(s.name)) {
+    if (index >= 0 && fs::q(styles[size_t(index)].name) != fs::q(s.name) &&
+        session.style_in_use(fs::Utf8(fs::q(styles[size_t(index)].name)))) {
         const auto b = QMessageBox::question(
             this, tr("Update script?"), tr("Do you want to change all instances of this style in the script to this new name?"),
             QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);

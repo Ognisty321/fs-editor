@@ -632,6 +632,9 @@ pub mod ffi {
         fn style_lines(styles: &[StyleData]) -> String;
         /// `index` < 0 adds it; a rename moves the lines to the new name when `rename_lines`.
         fn set_style(self: &mut Session, index: i64, style: &StyleData, rename_lines: bool);
+        /// Whether lines, their `\r` tags or the translation pairing use the style: a rename asks
+        /// about them only then (Aegisub's StyleRenamer).
+        fn style_in_use(self: &Session, name: &str) -> bool;
         /// One undo step for them all.
         fn delete_styles(self: &mut Session, indices: &[usize]);
         fn clean_styles(self: &mut Session) -> Vec<String>;

@@ -192,6 +192,7 @@ MainWindow::MainWindow() {
         followActive();
         updateActions();
         updateStatus();
+        if (m_styles) m_styles->tabChanged();
         checkDisk(current());
     });
     m_tabs->tabBar()->installEventFilter(this);
@@ -1162,7 +1163,15 @@ void MainWindow::buildMenus() {
     editor->setChecked(true);
     connect(editor, &QAction::triggered, this, [=](bool on) { tab()->setPlayerMode(!on); });
     add("properties", tr("ASS file properties"), {}, subs, [=] { PropertiesDialog(tab()).exec(); });
-    add("styleManager", tr("Style manager"), QKeySequence("Ctrl+M"), subs, [this] { StyleManager(this).exec(); });
+    add("styleManager", tr("Style manager"), QKeySequence("Ctrl+M"), subs, [this] {
+        if (!m_styles) {
+            m_styles = new StyleManager(this);
+            m_styles->setAttribute(Qt::WA_DeleteOnClose);
+        }
+        m_styles->show();
+        m_styles->raise();
+        m_styles->activateWindow();
+    });
     auto *conv = sub(subs, tr("Conversion"));
     const std::tuple<const char *, const char *, const char *> formats[] = {
         {"toASS", "ASS", "F9"}, {"toSRT", "SRT", "F8"}, {"toMDVD", "MicroDVD", "F10"},

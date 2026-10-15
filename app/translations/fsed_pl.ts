@@ -3410,6 +3410,10 @@ do czasu audio</translation>
         <translation>Kolizja nazw stylów</translation>
     </message>
     <message>
+        <source>The font &quot;%1&quot; is not installed</source>
+        <translation>Czcionka „%1” nie jest zainstalowana</translation>
+    </message>
+    <message>
         <source>Update script?</source>
         <translation>Zaktualizować napisy?</translation>
     </message>

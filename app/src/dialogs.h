@@ -120,6 +120,8 @@ class StyleManager : public QDialog {
 public:
     explicit StyleManager(MainWindow *main);
     void editStyle(const QString &name);
+    // the window's tab changed: its styles shown, and followed as they change, while this stays open
+    void tabChanged();
 private:
     // checks the name like Aegisub, then stores the style; index -1 = new, set to where it landed
     bool applyToFile(int &index, const fsb::StyleData &s);
@@ -129,13 +131,22 @@ private:
     void moveStyles(bool storage, int type);
     // Kainote: a style replaces one of the same name only when the user says so
     std::vector<fsb::StyleData> askOverwrite(const std::vector<fsb::StyleData> &chosen, const QStringList &taken);
-    void reload();
+    void reload(); // the selections kept, by name
     void loadCatalog();
     void saveCatalog();
+    void updateButtons(); // Aegisub: what the selections allow
+    void addToStorage(const std::vector<fsb::StyleData> &styles); // replacing the same names when told to
+    void copyStyles(bool storage); // as Style: lines (Kainote)
+    void pasteStyles(bool storage);
     MainWindow *m_main;
     QComboBox *m_catalog;
     QListWidget *m_storage, *m_file;
     std::vector<fsb::StyleData> m_stored;
+    QMetaObject::Connection m_docConn;
+    // [0] the storage's, [1] the file's: buttons for one style, for any, the move arrows
+    QList<QWidget *> m_forOne[2], m_forAny[2];
+    QWidget *m_moves[2][4];
+    QPushButton *m_delCat;
 };
 
 class PropertiesDialog : public QDialog {
