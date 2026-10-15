@@ -14,7 +14,8 @@ use fs_core::tags::set_cps_ignore;
 pub use kanji::KanjiTimer;
 use kanji::new_kanji_timer;
 pub use media::{Audio, Renderer, Video};
-pub use session::Session;
+use session::collect_fonts;
+pub use session::{FontUses, Session};
 pub use spell::{Speller, Thesaurus};
 use spell::{new_speller, new_thesaurus, text_words, thesaurus_word};
 
@@ -424,6 +425,15 @@ pub mod ffi {
         fn install_panic_hook(handler: UniquePtr<PanicHandler>);
 
         type Session;
+        type FontUses;
+        /// Font collector report (one line per face). Fonts attached to `media` are searched
+        /// too; a non-empty `dest` receives a copy of every found file. Safe off the GUI thread.
+        fn collect_fonts(
+            uses: &FontUses,
+            dirs: Vec<String>,
+            media: &str,
+            dest: &str,
+        ) -> Result<String>;
         fn new_session() -> Box<Session>;
         fn open(self: &mut Session, path: &str) -> Result<()>;
         /// `encoding`: an encoding label (Aegisub's "Open with charset").
@@ -506,12 +516,8 @@ pub mod ffi {
         fn overlapping(self: &Session, row: usize) -> Vec<usize>;
         fn rows_at(self: &Session, ms: i64) -> Vec<usize>;
         fn resample(self: &mut Session, spec: &ResampleSpec);
-        fn collect_fonts(
-            self: &Session,
-            dirs: Vec<String>,
-            media: &str,
-            dest: &str,
-        ) -> Result<String>;
+        /// The fonts and characters the script uses, for [`collect_fonts`] on another thread.
+        fn font_uses(self: &Session) -> Box<FontUses>;
         fn copy_rows(self: &Session, rows: &[usize]) -> String;
         fn paste_rows(self: &mut Session, at: usize, text: &str) -> Vec<usize>;
         fn paste_over(self: &mut Session, rows: &[usize], text: &str, fields: u16) -> Vec<usize>;

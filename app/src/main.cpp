@@ -142,7 +142,9 @@ int main(int argc, char **argv) {
     const QLocale locale = lang.isEmpty() ? QLocale() : QLocale(lang);
     QTranslator own, qt;
     if (own.load(locale, "fsed", "_", ":/i18n")) app.installTranslator(&own);
-    if (qt.load(locale, "qtbase", "_", QLibraryInfo::path(QLibraryInfo::TranslationsPath))) app.installTranslator(&qt);
+    if (qt.load(locale, "qtbase", "_", ":/i18n") ||
+        qt.load(locale, "qtbase", "_", QLibraryInfo::path(QLibraryInfo::TranslationsPath)))
+        app.installTranslator(&qt);
     MainWindow w;
     g_main = &w;
     w.show();

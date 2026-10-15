@@ -2,9 +2,9 @@
 //! translation-mode row mapping. Grid rows are logical rows: in TL mode an
 //! original/translation event pair is one row, otherwise one event.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use encoding_rs::Encoding;
 use fs_core::ass::SectionKind;
@@ -1364,70 +1364,8 @@ impl Session {
             .collect()
     }
 
-    /// Font collector report (one line per face). Fonts attached to `media`
-    /// are unpacked to a temp folder and searched too; a non-empty `dest`
-    /// receives a copy of every found file.
-    pub fn collect_fonts(
-        &self,
-        dirs: Vec<String>,
-        media: &str,
-        dest: &str,
-    ) -> Result<String, String> {
-        use std::fmt::Write;
-        let mut db = fontdb::Database::new();
-        db.load_system_fonts();
-        for d in &dirs {
-            db.load_fonts_dir(d);
-        }
-        if !media.is_empty() {
-            let tmp = std::env::temp_dir().join("fs-editor-attached-fonts");
-            let _ = std::fs::remove_dir_all(&tmp);
-            std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
-            for (name, data) in
-                fs_media::attached_fonts(std::path::Path::new(media)).unwrap_or_default()
-            {
-                // attachment names come from the file: keep only the last path component
-                let name = std::path::Path::new(&name)
-                    .file_name()
-                    .map(|n| n.to_owned())
-                    .unwrap_or_default();
-                if !name.is_empty() {
-                    std::fs::write(tmp.join(name), data).map_err(|e| e.to_string())?;
-                }
-            }
-            db.load_fonts_dir(&tmp);
-        }
-        if !dest.is_empty() {
-            std::fs::create_dir_all(dest).map_err(|e| format!("{dest}: {e}"))?;
-        }
-        let mut out = String::new();
-        for (f, found) in fs_core::fonts::locate(&db, &fs_core::fonts::used_fonts(&self.ed.doc)) {
-            let face = format!(
-                "{} ({}{})",
-                f.family,
-                f.weight,
-                if f.italic { ", italic" } else { "" }
-            );
-            let Some(loc) = found else {
-                let _ = writeln!(out, "MISSING  {face}");
-                continue;
-            };
-            let tag = if loc.synthetic { "FAUX   " } else { "OK     " };
-            let _ = write!(out, "{tag}  {face}: {}", loc.path.display());
-            if !loc.missing_glyphs.is_empty() {
-                let _ = write!(
-                    out,
-                    "  missing glyphs: {}",
-                    loc.missing_glyphs.iter().collect::<String>()
-                );
-            }
-            out.push('\n');
-            if let (false, Some(name)) = (dest.is_empty(), loc.path.file_name()) {
-                std::fs::copy(&loc.path, std::path::Path::new(dest).join(name))
-                    .map_err(|e| format!("{}: {e}", loc.path.display()))?;
-            }
-        }
-        Ok(out)
+    pub fn font_uses(&self) -> Box<FontUses> {
+        Box::new(FontUses(fs_core::fonts::used_fonts(&self.ed.doc)))
     }
 
     pub fn resample(&mut self, spec: &ResampleSpec) {
@@ -2009,6 +1947,112 @@ fn fix_overlaps(d: &mut Document, evs: &[usize]) {
             d.event_mut(e).unwrap().end = n;
         }
     }
+}
+
+/// What [`collect_fonts`] looks for: the script's faces and the characters drawn with each.
+pub struct FontUses(BTreeMap<fs_core::fonts::FontUse, BTreeSet<char>>);
+
+/// The system's fonts, scanned once: a scan takes seconds and they rarely change while editing.
+fn system_fonts() -> fontdb::Database {
+    static DB: OnceLock<fontdb::Database> = OnceLock::new();
+    DB.get_or_init(|| {
+        let mut db = fontdb::Database::new();
+        db.load_system_fonts();
+        db
+    })
+    .clone()
+}
+
+pub fn collect_fonts(
+    uses: &FontUses,
+    dirs: Vec<String>,
+    media: &str,
+    dest: &str,
+) -> Result<String, String> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let mut db = system_fonts();
+    for d in &dirs {
+        db.load_fonts_dir(d);
+    }
+    if media.is_empty() {
+        return fonts_report(&db, uses, dest, None);
+    }
+    // a folder per run: two collectors may run at once
+    static RUN: AtomicUsize = AtomicUsize::new(0);
+    let tmp = std::env::temp_dir().join(format!(
+        "fs-editor-fonts-{}-{}",
+        std::process::id(),
+        RUN.fetch_add(1, Ordering::Relaxed)
+    ));
+    let unpack = || -> Result<(), String> {
+        std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+        for (name, data) in fs_media::attached_fonts(Path::new(media)).unwrap_or_default() {
+            // attachment names come from the file: keep only the last path component
+            let name = Path::new(&name)
+                .file_name()
+                .map(|n| n.to_owned())
+                .unwrap_or_default();
+            if !name.is_empty() {
+                std::fs::write(tmp.join(name), data).map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(())
+    };
+    let report = unpack().and_then(|()| {
+        db.load_fonts_dir(&tmp);
+        fonts_report(&db, uses, dest, Some(&tmp))
+    });
+    let _ = std::fs::remove_dir_all(&tmp);
+    report
+}
+
+/// One line per face; fonts found in `attached` (the unpacked video attachments) are named
+/// by file, as that folder is gone afterwards.
+fn fonts_report(
+    db: &fontdb::Database,
+    uses: &FontUses,
+    dest: &str,
+    attached: Option<&Path>,
+) -> Result<String, String> {
+    use std::fmt::Write;
+    if !dest.is_empty() {
+        std::fs::create_dir_all(dest).map_err(|e| format!("{dest}: {e}"))?;
+    }
+    let mut out = String::new();
+    for (f, found) in fs_core::fonts::locate(db, &uses.0) {
+        let face = format!(
+            "{} ({}{})",
+            f.family,
+            f.weight,
+            if f.italic { ", italic" } else { "" }
+        );
+        let Some(loc) = found else {
+            let _ = writeln!(out, "MISSING  {face}");
+            continue;
+        };
+        let tag = if loc.synthetic { "FAUX   " } else { "OK     " };
+        match (attached, loc.path.file_name()) {
+            (Some(a), Some(name)) if loc.path.starts_with(a) => {
+                let _ = write!(out, "{tag}  {face}: {} (attached)", name.to_string_lossy());
+            }
+            _ => {
+                let _ = write!(out, "{tag}  {face}: {}", loc.path.display());
+            }
+        }
+        if !loc.missing_glyphs.is_empty() {
+            let _ = write!(
+                out,
+                "  missing glyphs: {}",
+                loc.missing_glyphs.iter().collect::<String>()
+            );
+        }
+        out.push('\n');
+        if let (false, Some(name)) = (dest.is_empty(), loc.path.file_name()) {
+            std::fs::copy(&loc.path, std::path::Path::new(dest).join(name))
+                .map_err(|e| format!("{}: {e}", loc.path.display()))?;
+        }
+    }
+    Ok(out)
 }
 
 /// The parts of `a` and `b` outside their longest common subsequence of characters, as

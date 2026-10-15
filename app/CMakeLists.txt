@@ -56,6 +56,12 @@ qt_add_shaders(fsed "shaders"
 qt_add_translations(fsed TS_FILES translations/fsed_pl.ts RESOURCE_PREFIX /i18n NO_GENERATE_PLURALS_TS_FILE
     IMMEDIATE_CALL # deferred, the call breaks on a space in the build path
     LUPDATE_OPTIONS -no-obsolete -locations none)
+# Qt's own strings (standard buttons, file dialogs) beside ours: a dev-build or deployed exe has Qt's
+# DLLs but no translations folder for QLibraryInfo to find
+set(FS_QT_TRANSLATIONS "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_TRANSLATIONS}")
+if(EXISTS "${FS_QT_TRANSLATIONS}/qtbase_pl.qm")
+    qt_add_resources(fsed "qt_i18n" PREFIX "/i18n" BASE "${FS_QT_TRANSLATIONS}" FILES "${FS_QT_TRANSLATIONS}/qtbase_pl.qm")
+endif()
 file(GLOB FS_ICONS CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} icons/*.svg)
 qt_add_resources(fsed "icons" PREFIX "/" FILES ${FS_ICONS})
 target_include_directories(fsed PRIVATE ${FS_BRIDGE_INCLUDE_DIR})

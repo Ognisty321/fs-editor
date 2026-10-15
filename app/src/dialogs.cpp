@@ -15,19 +15,20 @@
 #include <QColorDialog>
 #include <QComboBox>
 #include <QCompleter>
-#include <QDialogButtonBox>
-#include <QDirIterator>
-#include <QRegularExpression>
-#include <QDoubleSpinBox>
 #include <QDateTime>
+#include <QDialogButtonBox>
 #include <QDir>
+#include <QDirIterator>
+#include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileDialog>
 #include <QFontDatabase>
 #include <QFontDialog>
 #include <QFormLayout>
+#include <QFutureWatcher>
 #include <QGridLayout>
 #include <QGroupBox>
+#include <QHeaderView>
 #include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
@@ -39,17 +40,19 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QTabWidget>
-#include <QToolButton>
+#include <QtConcurrentRun>
 #include <QTimer>
+#include <QToolButton>
 #include <QTreeWidget>
-#include <QHeaderView>
 #include <QVBoxLayout>
 
 #include <array>
+#include <memory>
 #include <numeric>
 
 // ---- tag buttons --------------------------------------------------------------
@@ -1444,25 +1447,39 @@ FontCollectorDialog::FontCollectorDialog(TabPanel *tab) : QDialog(tab) {
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, this);
     auto *check = bb->addButton(tr("Check"), QDialogButtonBox::ActionRole);
     auto *copy = bb->addButton(tr("Copy"), QDialogButtonBox::ActionRole);
-    // shortcut: runs on the GUI thread (scanning system fonts takes a few seconds), move to a worker if it gets slow
+    // the script's fonts are read here, the font files on a worker (the first scan of the system's takes seconds)
     auto run = [=, this](bool doCopy) {
         if (doCopy && dest->text().isEmpty()) return report->setPlainText(tr("Choose a destination folder first."));
         QSettings s;
         s.setValue("fonts/extraDir", extra->text());
         s.setValue("fonts/destDir", dest->text());
-        rust::Vec<rust::String> dirs;
-        if (!extra->text().isEmpty()) dirs.push_back(fs::rs(extra->text()));
-        QApplication::setOverrideCursor(Qt::WaitCursor);
-        try {
-            const QString r = fs::q(tab->s().collect_fonts(std::move(dirs), fs::Utf8(attached->isChecked() ? media : QString()),
-                                                          fs::Utf8(doCopy ? dest->text() : QString())));
+        auto uses = std::make_shared<rust::Box<fsb::FontUses>>(tab->s().font_uses());
+        const QString dir = extra->text(), from = attached->isChecked() ? media : QString(),
+                      to = doCopy ? dest->text() : QString();
+        check->setEnabled(false);
+        copy->setEnabled(false);
+        report->setPlainText(tr("Searching for fonts..."));
+        using Result = std::pair<bool, QString>; // ok, report or error
+        auto *watch = new QFutureWatcher<Result>(this);
+        connect(watch, &QFutureWatcher<Result>::finished, this, [=, this] {
+            const auto [ok, r] = watch->result();
             const int missing = r.count("MISSING") + r.count("missing glyphs");
-            report->setPlainText(r + "\n" + (missing ? tr("%n problem(s) found.", nullptr, missing) : tr("All fonts found.")) +
-                                 (doCopy ? "\n" + tr("Copied to %1").arg(dest->text()) : QString()));
-        } catch (const std::exception &e) {
-            report->setPlainText(QString::fromUtf8(e.what()));
-        }
-        QApplication::restoreOverrideCursor();
+            report->setPlainText(!ok ? r
+                                     : r + "\n" + (missing ? tr("%n problem(s) found.", nullptr, missing) : tr("All fonts found.")) +
+                                           (to.isEmpty() ? QString() : "\n" + tr("Copied to %1").arg(to)));
+            check->setEnabled(true);
+            copy->setEnabled(true);
+            watch->deleteLater();
+        });
+        watch->setFuture(QtConcurrent::run([uses, dir, from, to]() -> Result {
+            rust::Vec<rust::String> dirs;
+            if (!dir.isEmpty()) dirs.push_back(fs::rs(dir));
+            try {
+                return {true, fs::q(fsb::collect_fonts(**uses, std::move(dirs), fs::Utf8(from), fs::Utf8(to)))};
+            } catch (const std::exception &e) {
+                return {false, QString::fromUtf8(e.what())};
+            }
+        }));
     };
     connect(check, &QPushButton::clicked, this, [run] { run(false); });
     connect(copy, &QPushButton::clicked, this, [run] { run(true); });

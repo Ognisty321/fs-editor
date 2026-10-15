@@ -597,6 +597,10 @@
         <source>Choose a destination folder first.</source>
         <translation>Najpierw wybierz folder docelowy.</translation>
     </message>
+    <message>
+        <source>Searching for fonts...</source>
+        <translation>Szukanie czcionek...</translation>
+    </message>
     <message numerus="yes">
         <source>%n problem(s) found.</source>
         <translation>
