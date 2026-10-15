@@ -929,11 +929,26 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
                                                  .arg(c.name(), c.lightness() > 140 ? "black" : "white"));
         };
         paint();
+        // the transparency picked too, and the preview follows the picker; Cancel puts it back (Aegisub)
         connect(b, &QToolButton::clicked, this, [this, k, paint] {
-            QColor c = QColorDialog::getColor(assColor(m_colors[k]), this);
-            if (!c.isValid()) return;
-            c.setAlpha(255 - m_alpha[k]->value());
-            m_colors[k] = assColorString(c);
+            const QString before = m_colors[k];
+            const int alphaBefore = m_alpha[k]->value();
+            QColor start = assColor(m_colors[k]);
+            start.setAlpha(255 - alphaBefore);
+            QColorDialog d(start, this);
+            d.setOption(QColorDialog::ShowAlphaChannel);
+            connect(&d, &QColorDialog::currentColorChanged, this, [&](const QColor &c) {
+                m_colors[k] = assColorString(c);
+                {
+                    const QSignalBlocker block(m_alpha[k]);
+                    m_alpha[k]->setValue(255 - c.alpha());
+                }
+                paint();
+                preview();
+            });
+            if (d.exec() == QDialog::Accepted) return;
+            m_colors[k] = before;
+            m_alpha[k]->setValue(alphaBefore);
             paint();
             preview();
         });
