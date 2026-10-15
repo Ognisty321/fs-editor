@@ -802,26 +802,35 @@ void AudioBox::writeProposedSplit() {
 }
 
 // Split a line without \k tags into syllables: words, and vowel-ended chunks inside words
-// (romaji). "" when it can't: a line with tags keeps them, so it is left to split by hand.
+// (romaji). Tags stay where they are and count for nothing (Kainote); one at a cut starts the next
+// syllable. "" when there is nothing to split, or the line has \k tags already.
 QString AudioBox::autoSplitText(const QString &text, qint64 duration) const {
-    if (text.contains('{')) return {};
-    const QString &plain = text;
+    static const QRegularExpression kara("\\{[^}]*\\\\[kK]");
+    if (text.contains(kara)) return {};
+    QString plain; // the visible characters, and where each one is in the text
+    std::vector<int> at;
+    for (int i = 0, tag = 0; i < text.size(); ++i) {
+        if (text[i] == '{') tag = 1;
+        else if (tag && text[i] == '}') tag = 0;
+        else if (!tag) plain += text[i], at.push_back(i);
+    }
     if (plain.trimmed().isEmpty()) return {};
     static const QRegularExpression syl("[^aeiouAEIOU\\s]*[aeiouAEIOU]+n?(?![aeiouAEIOU])|\\S+?(?=\\s|$)|\\s+");
-    QStringList parts;
-    for (auto it = syl.globalMatch(plain); it.hasNext();) {
-        const QString m = it.next().captured();
-        if (m.trimmed().isEmpty() && !parts.isEmpty()) parts.last() += m;
-        else parts << m;
-    }
-    if (parts.size() < 2) return {};
+    std::vector<int> cuts{0}; // where each syllable starts in plain; spaces end the one before
+    for (auto it = syl.globalMatch(plain); it.hasNext();)
+        if (const auto m = it.next(); m.capturedStart() > 0 && !m.captured().trimmed().isEmpty())
+            cuts.push_back(int(m.capturedStart()));
+    const int n = int(cuts.size());
+    if (n < 2) return {};
     const qint64 cs = duration / 10;
     QString out;
     qint64 used = 0;
-    for (int k = 0; k < parts.size(); ++k) {
-        const qint64 d = k + 1 == parts.size() ? cs - used : cs / parts.size();
+    for (int k = 0; k < n; ++k) {
+        const qint64 d = k + 1 == n ? cs - used : cs / n;
         used += d;
-        out += QString("{\\k%1}").arg(d) + parts[k];
+        const int from = k == 0 ? 0 : at[cuts[k] - 1] + 1;
+        const int to = k + 1 == n ? int(text.size()) : at[cuts[k + 1] - 1] + 1;
+        out += QString("{\\k%1}").arg(d) + text.mid(from, to - from);
     }
     return out;
 }
