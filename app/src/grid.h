@@ -5,6 +5,7 @@
 #include "bridge.h"
 
 #include <QAbstractScrollArea>
+#include <QHash>
 #include <set>
 
 class TabPanel;
@@ -66,6 +67,7 @@ private:
     int colAt(int x) const;
     int rowHeight() const;
     QString cell(const fsb::Row &r, int col, size_t index) const;
+    void underlineMisspelled(QPainter &p, const fsb::Row &r, const QString &shown, const QRect &rect);
     void clickRow(int vi, Qt::KeyboardModifiers mods);
 
     TabPanel *m_tab;
@@ -81,4 +83,6 @@ private:
     int m_marker = -1;
     int m_anchor = 0;
     int m_dragFrom = -1;         // Alt+drag moving rows
+    QHash<QString, std::vector<size_t>> m_misspelled; // by line text: (start, length) pairs
+    int m_spellGen = -1;
 };

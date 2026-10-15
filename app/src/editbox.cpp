@@ -115,6 +115,7 @@ protected:
 
 std::optional<rust::Box<fsb::Speller>> g_speller;
 bool g_spellLoaded = false;
+int g_spellGen = 0;
 QString g_spellLang; // the dictionary actually loaded
 
 const QStringList kTags = {
@@ -161,12 +162,18 @@ fsb::Speller *spell::get() {
     return g_speller ? &**g_speller : nullptr;
 }
 
+int spell::generation() { return g_spellGen; }
+
 void spell::reload() {
     g_speller.reset();
     g_spellLoaded = false;
+    ++g_spellGen;
     for (QWidget *w : QApplication::allWidgets())
-        if (auto *e = qobject_cast<SubsTextEdit *>(w))
+        if (auto *e = qobject_cast<SubsTextEdit *>(w)) {
             if (auto *h = e->document()->findChild<QSyntaxHighlighter *>()) h->rehighlight();
+        } else if (auto *g = qobject_cast<Grid *>(w)) {
+            g->viewport()->update(); // it underlines misspellings too
+        }
 }
 
 namespace {

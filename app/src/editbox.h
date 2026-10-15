@@ -28,6 +28,7 @@ void reload();       // after a settings change: reload the dictionary, re-highl
 QString dir();
 QStringList languages();
 void addWord(const QString &word); // to the user dictionary of the loaded language
+int generation();                  // changes on every reload, for caches of results
 } // namespace spell
 
 // Character counter limits from Settings (subs/maxCps, subs/maxLineLength, subs/maxLines).

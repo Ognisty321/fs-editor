@@ -222,6 +222,51 @@ QString Grid::cell(const fsb::Row &r, int col, size_t index) const {
     return {};
 }
 
+// Kainote's spell check in the grid: the text column's misspelled words get a red line. Words come
+// from the full line (a drawing after \p1 is no words), mapped onto the shown text, whose tag blocks
+// may be a ☀ or gone.
+void Grid::underlineMisspelled(QPainter &p, const fsb::Row &r, const QString &shown, const QRect &rect) {
+    auto *sp = spell::get();
+    if (!sp) return;
+    if (m_spellGen != spell::generation()) {
+        m_misspelled.clear();
+        m_spellGen = spell::generation();
+    }
+    const QString raw = fs::q(r.text);
+    auto it = m_misspelled.constFind(raw);
+    if (it == m_misspelled.cend()) {
+        if (m_misspelled.size() > 20000) m_misspelled.clear();
+        it = m_misspelled.insert(raw, fs::vec(sp->misspelled(r.text)));
+    }
+    if (it->empty()) return;
+    const auto shownAt = [&raw, mode = m_tagMode](size_t at) {
+        int out = 0;
+        bool block = false;
+        for (size_t k = 0; k < at && k < size_t(raw.size()); ++k) {
+            if (block) block = raw[k] != '}';
+            else if (mode && raw[k] == '{') {
+                block = true;
+                out += mode == 1;
+            } else {
+                ++out;
+            }
+        }
+        return out;
+    };
+    const QFontMetrics fm = p.fontMetrics();
+    p.save();
+    p.setPen(QPen(QColor(0xe0, 0x40, 0x40), 1));
+    p.setClipRect(rect);
+    const int y = rect.center().y() + (fm.ascent() - fm.descent()) / 2 + 2; // under the baseline
+    for (size_t k = 0; k + 1 < it->size(); k += 2) {
+        const int s = shownAt((*it)[k]), e = shownAt((*it)[k] + (*it)[k + 1]);
+        if (s >= shown.size()) break;
+        const int x = rect.left() + fm.horizontalAdvance(shown.left(s));
+        p.drawLine(x, y, x + fm.horizontalAdvance(shown.mid(s, e - s)), y);
+    }
+    p.restore();
+}
+
 void Grid::paintEvent(QPaintEvent *) {
     QPainter p(viewport());
     const int rh = rowHeight(), w = viewport()->width();
@@ -275,8 +320,10 @@ void Grid::paintEvent(QPaintEvent *) {
             }
             const bool collide = (c == Text || c == Original) && m_collisions.contains(i);
             p.setPen(collide ? T.collision : T.text);
+            const QString shown = cell(r, c, i);
             p.drawText(cr.adjusted(Pad, 0, -Pad, 0), Qt::AlignVCenter | Qt::AlignLeft,
-                       p.fontMetrics().elidedText(cell(r, c, i), Qt::ElideRight, cr.width() - 2 * Pad));
+                       p.fontMetrics().elidedText(shown, Qt::ElideRight, cr.width() - 2 * Pad));
+            if (c == Text) underlineMisspelled(p, r, shown, cr.adjusted(Pad, 0, -Pad, 0));
             p.setPen(T.lines);
             p.drawLine(cr.right(), cr.top(), cr.right(), cr.bottom());
             x += m_widths[k];
