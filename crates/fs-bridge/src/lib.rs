@@ -165,6 +165,8 @@ pub mod ffi {
         regex: bool,
         match_case: bool,
         skip_tags: bool,
+        /// Only inside `{...}` blocks (Kainote's "Skip text").
+        skip_text: bool,
         /// 0 text, 1 style, 2 actor, 3 effect.
         field: u8,
         include_comments: bool,

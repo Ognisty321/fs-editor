@@ -463,6 +463,14 @@
         <translation>Pomiń tagi</translation>
     </message>
     <message>
+        <source>Skip text</source>
+        <translation>Pomiń tekst</translation>
+    </message>
+    <message>
+        <source>Search only inside the {} blocks</source>
+        <translation>Szukaj tylko wewnątrz bloków {}</translation>
+    </message>
+    <message>
         <source>Start of text</source>
         <translation>Początek tekstu</translation>
     </message>

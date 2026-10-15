@@ -124,12 +124,16 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
     m_regex = new QCheckBox(tr("Regular expressions"), this);
     m_comments = new QCheckBox(tr("Include comments"), this);
     m_skipTags = new QCheckBox(tr("Skip tags"), this);
+    m_skipText = new QCheckBox(tr("Skip text"), this);
+    m_skipText->setToolTip(tr("Search only inside the {} blocks"));
     m_atStart = new QCheckBox(tr("Start of text"), this);
     m_atEnd = new QCheckBox(tr("End of text"), this);
-    for (int i = 0; auto *c : {m_case, m_regex, m_comments, m_skipTags, m_atStart, m_atEnd}) {
-        checks->addWidget(c, i / 3, i % 3);
+    for (int i = 0; auto *c : {m_case, m_regex, m_comments, m_skipTags, m_skipText, m_atStart, m_atEnd}) {
+        checks->addWidget(c, i / 4, i % 4);
         ++i;
     }
+    connect(m_skipTags, &QCheckBox::toggled, m_skipText, [this](bool on) { if (on) m_skipText->setChecked(false); });
+    connect(m_skipText, &QCheckBox::toggled, m_skipTags, [this](bool on) { if (on) m_skipTags->setChecked(false); });
     v->addLayout(checks);
     auto *groups = new QHBoxLayout;
     auto *fg = new QGroupBox(tr("In field"), this);
@@ -239,6 +243,7 @@ fsb::FindSpec FindDialog::spec() const {
     s.regex = m_regex->isChecked();
     s.match_case = m_case->isChecked();
     s.skip_tags = m_skipTags->isChecked();
+    s.skip_text = m_skipText->isChecked();
     for (int k = 0; k < 4; ++k)
         if (m_field[k]->isChecked()) s.field = uint8_t(k);
     s.include_comments = m_comments->isChecked();

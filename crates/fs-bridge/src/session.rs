@@ -1207,7 +1207,7 @@ impl Session {
     }
 
     fn matcher(spec: &FindSpec) -> Result<TextMatcher, String> {
-        // shortcut: with Skip tags a replacement anchors to each text block, not the whole line;
+        // shortcut: with Skip tags/text a replacement anchors to each block, not the whole line;
         // anchor to the stripped line if people combine the two
         let anchored = spec.at_start || spec.at_end;
         let pattern = if anchored {
@@ -1223,6 +1223,7 @@ impl Session {
         )
         .map_err(|e| e.to_string())?;
         m.strip_tags = spec.skip_tags;
+        m.only_tags = spec.skip_text;
         m.is_regex = spec.regex;
         Ok(m)
     }

@@ -55,7 +55,7 @@ private:
     MainWindow *m_main;
     QTabWidget *m_tabs;
     QComboBox *m_find, *m_replace;
-    QCheckBox *m_case, *m_regex, *m_comments, *m_skipTags, *m_atStart, *m_atEnd, *m_subdirs;
+    QCheckBox *m_case, *m_regex, *m_comments, *m_skipTags, *m_skipText, *m_atStart, *m_atEnd, *m_subdirs;
     QRadioButton *m_field[4], *m_lines[3];
     QLineEdit *m_dir, *m_filter;
     QDialog *m_results = nullptr;

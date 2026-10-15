@@ -463,6 +463,23 @@ pub fn strip_tags(text: &str) -> String {
     s
 }
 
+/// Byte ranges of what is inside the closed `{...}` blocks: what [`strip_tags`] removes.
+pub fn block_spans(text: &str) -> Vec<std::ops::Range<usize>> {
+    let mut out = Vec::new();
+    let mut open = None;
+    for (i, c) in text.char_indices() {
+        match (c, open) {
+            ('{', None) => open = Some(i + 1),
+            ('}', Some(s)) => {
+                out.push(s..i);
+                open = None;
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// The text shown as characters: without override blocks and without the
 /// drawing commands between `\pN` (N > 0) and `\p0`.
 pub fn visible_text(text: &str) -> String {

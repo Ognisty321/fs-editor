@@ -302,6 +302,8 @@ pub struct TextMatcher {
     pub field: Field,
     /// Match against text with tags stripped.
     pub strip_tags: bool,
+    /// Match only inside the `{...}` blocks (Kainote's "Skip text"); wins over `strip_tags`.
+    pub only_tags: bool,
     /// The user wrote a regex: `$1` in a replacement refers to its groups. Otherwise
     /// replacements are literal.
     pub is_regex: bool,
@@ -334,6 +336,7 @@ impl TextMatcher {
             regex,
             field,
             strip_tags: false,
+            only_tags: false,
             is_regex,
         })
     }
@@ -349,6 +352,11 @@ impl TextMatcher {
     }
 
     pub fn is_match(&self, ev: &Event) -> bool {
+        if self.field == Field::Text && self.only_tags {
+            return tags::block_spans(&ev.text)
+                .into_iter()
+                .any(|b| self.regex.is_match(&ev.text[b]));
+        }
         self.regex.is_match(&self.haystack(ev))
     }
 }
@@ -484,6 +492,20 @@ pub fn replace(doc: &mut Document, rows: &Rows, r: &Replace) -> usize {
             })
         };
         let new: Option<String> = match r.matcher.field {
+            Field::Text if r.matcher.only_tags => {
+                let (mut out, mut last) = (String::new(), 0);
+                for b in tags::block_spans(&ev.text) {
+                    if let Some(n) = apply(&ev.text[b.clone()], &mut count) {
+                        out.push_str(&ev.text[last..b.start]);
+                        out.push_str(&n);
+                        last = b.end;
+                        if r.first_only {
+                            break;
+                        }
+                    }
+                }
+                (last > 0).then(|| out + &ev.text[last..])
+            }
             Field::Text if r.matcher.strip_tags => {
                 let mut line = Line::parse(&ev.text);
                 let mut changed = false;
@@ -1584,6 +1606,19 @@ mod tests {
         assert_eq!(replace(&mut d, &Rows::All, &r), 1);
         assert_eq!(d.event(0).unwrap().text, r"{\i1}$o$ is\N{\i0}$1");
         assert_eq!(anchored("a.", true, false, true), "(?:a.)$");
+        // Skip text: only inside the blocks, where the text's "o" is not
+        let mut m = TextMatcher::new("i", false, true, Field::Text).unwrap();
+        m.only_tags = true;
+        assert!(m.is_match(d.event(0).unwrap()));
+        let r = Replace {
+            matcher: m,
+            replacement: "b".into(),
+            first_only: false,
+            keep_case: false,
+        };
+        assert_eq!(replace(&mut d, &Rows::All, &r), 2);
+        assert_eq!(d.event(0).unwrap().text, r"{\b1}$o$ is\N{\b0}$1");
+        assert_eq!(tags::block_spans("a{b}c{d"), vec![2..3]);
     }
 
     #[test]
