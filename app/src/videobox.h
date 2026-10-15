@@ -90,6 +90,9 @@ private:
     QRectF m_zoom{0, 0, 1, 1};
     QPointF m_zoomDragStart;
     bool m_zoomDragging = false;
+    QPointF m_panFrom; // a zoomed frame dragged (Kainote moves its zoom rectangle)
+    QRectF m_panZoom;
+    bool m_panning = false;
     RhiQuad m_frameQuad, m_overlayQuad;
     std::unique_ptr<QRhiTexture> m_frameTex, m_overlayTex;
     QRhiResourceUpdateBatch *m_pendingInit = nullptr;

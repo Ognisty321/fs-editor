@@ -219,16 +219,39 @@ void VideoView::mousePressEvent(QMouseEvent *e) {
         m_zoomDragStart = e->position();
         return;
     }
+    if (m_box->m_tools->tool() == VisualTools::Pointer && e->button() == Qt::LeftButton &&
+        !(e->modifiers() & Qt::ControlModifier) && m_zoom != QRectF(0, 0, 1, 1)) {
+        m_panning = true;
+        m_panFrom = e->position();
+        m_panZoom = m_zoom;
+        setCursor(Qt::ClosedHandCursor);
+        return;
+    }
     if (m_box->m_tools->press(e)) updateOverlay();
 }
 
 void VideoView::mouseMoveEvent(QMouseEvent *e) {
+    if (m_panning) {
+        const QRectF d = displayRect();
+        const QPointF by = e->position() - m_panFrom;
+        QRectF z = m_panZoom.translated(-by.x() / d.width() * m_panZoom.width(), -by.y() / d.height() * m_panZoom.height());
+        z.moveLeft(std::clamp(z.left(), 0.0, 1 - z.width()));
+        z.moveTop(std::clamp(z.top(), 0.0, 1 - z.height()));
+        m_zoom = z;
+        updateOverlay(); // the frame and the handles with it
+        return;
+    }
     if (m_zoomDragging || m_box->m_tools->move(e)) updateOverlay();
 }
 
 void VideoView::leaveEvent(QEvent *) { updateOverlay(); } // the crosshair goes with the mouse
 
 void VideoView::mouseReleaseEvent(QMouseEvent *e) {
+    if (m_panning) {
+        m_panning = false;
+        unsetCursor();
+        return;
+    }
     if (m_zoomDragging) {
         m_zoomDragging = false;
         m_box->m_zoomMode = false;

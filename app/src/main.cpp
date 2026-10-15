@@ -258,10 +258,16 @@ int main(int argc, char **argv) {
                     QKeyEvent e(QEvent::KeyPress, k[0].key(), k[0].keyboardModifiers());
                     QApplication::sendEvent(view, &e);
                 }
-                // FSED_SMOKE_DRAG="x1,y1,x2,y2": a left-button drag on the video, in view fractions 0..1
+                // FSED_SMOKE_DRAG="x1,y1,x2,y2": a left-button drag on the video, in view fractions 0..1;
+                // "x1,y1,x2,y2,z" zooms in a step first
                 const QStringList d = qEnvironmentVariable("FSED_SMOKE_DRAG").split(',');
-                if (d.size() != 4) return;
+                if (d.size() < 4) return;
                 QWidget *view = w.current()->video()->view();
+                if (d.size() > 4) {
+                    const QPointF c(view->width() / 2.0, view->height() / 2.0);
+                    QWheelEvent e(c, view->mapToGlobal(c), {}, {0, 120}, Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+                    QApplication::sendEvent(view, &e);
+                }
                 const auto at = [&](int k) { return QPointF(d[k].toDouble() * view->width(), d[k + 1].toDouble() * view->height()); };
                 auto send = [view](QEvent::Type t, QPointF p, Qt::MouseButtons held) {
                     QMouseEvent e(t, p, view->mapToGlobal(p), Qt::LeftButton, held, Qt::NoModifier);
