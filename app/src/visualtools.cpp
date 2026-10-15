@@ -526,6 +526,16 @@ QString VisualTools::clipTag() const {
     return QString("\\%1(%2%3)").arg(name, scale, m_vec.toString());
 }
 
+void VisualTools::writeRectClip() {
+    const QString tag = clipTag(), rect = tag.mid(tag.indexOf('('));
+    QStringList tags;
+    for (const auto &v : m_starts) tags << (v.inverse ? "\\iclip" : "\\clip") + rect;
+    const auto t = fs::rvec(tags);
+    auto *tab = m_box->tab();
+    tab->s().set_each_tags(fs::slice(m_rows), {t.data(), t.size()}, fs::Utf8(m_amend));
+    tab->changed(TabPanel::FromVideo);
+}
+
 void VisualTools::writeVector() {
     auto *tab = m_box->tab();
     if (m_tool == VClip) {
@@ -802,11 +812,22 @@ bool VisualTools::press(QMouseEvent *e) {
         } else if (m_tool == RotZ && m_twoPoints) m_drag = 4;
         break;
     case RClip:
+        grabLines();
         if (m_v.clip == 1) {
-            const QRectF r(w({m_v.clip_x1, m_v.clip_y1}), w({m_v.clip_x2, m_v.clip_y2}));
-            const QPointF cs[] = {r.topLeft(), r.topRight(), r.bottomLeft(), r.bottomRight()};
+            // a corner, else an edge, else inside moves the whole rectangle; outside starts a new one (Kainote)
+            const QRectF r = QRectF(w({m_v.clip_x1, m_v.clip_y1}), w({m_v.clip_x2, m_v.clip_y2})).normalized();
+            const QPointF cs[] = {w({m_v.clip_x1, m_v.clip_y1}), w({m_v.clip_x2, m_v.clip_y1}),
+                                  w({m_v.clip_x1, m_v.clip_y2}), w({m_v.clip_x2, m_v.clip_y2})};
+            const QPointF at = m_pressW;
+            const bool inX = at.x() > r.left() - 5 && at.x() < r.right() + 5;
+            const bool inY = at.y() > r.top() - 5 && at.y() < r.bottom() + 5;
+            const double ex[] = {cs[0].x(), cs[1].x()}, ey[] = {cs[0].y(), cs[2].y()};
             for (int k = 0; k < 4; ++k)
-                if (near(cs[k], m_pressW)) m_drag = 10 + k;
+                if (near(cs[k], at)) m_drag = 10 + k;
+            for (int k = 0; k < 2 && m_drag == 1; ++k)
+                if (inY && std::abs(at.x() - ex[k]) <= 5) m_drag = 20 + k; // the x1 or x2 edge
+                else if (inX && std::abs(at.y() - ey[k]) <= 5) m_drag = 22 + k; // y1 or y2
+            if (m_drag == 1 && r.contains(at)) m_drag = 30;
         }
         break;
     case VClip:
@@ -1018,12 +1039,21 @@ bool VisualTools::move(QMouseEvent *e) {
             m_v.clip_y1 = std::min(m_pressS.y(), now.y());
             m_v.clip_x2 = std::max(m_pressS.x(), now.x());
             m_v.clip_y2 = std::max(m_pressS.y(), now.y());
+        } else if (m_drag == 30) {
+            m_v.clip_x1 = m_start.clip_x1 + delta.x();
+            m_v.clip_x2 = m_start.clip_x2 + delta.x();
+            m_v.clip_y1 = m_start.clip_y1 + delta.y();
+            m_v.clip_y2 = m_start.clip_y2 + delta.y();
+        } else if (m_drag >= 20) {
+            const int k = m_drag - 20;
+            if (k < 2) (k ? m_v.clip_x2 : m_v.clip_x1) = (k ? m_start.clip_x2 : m_start.clip_x1) + delta.x();
+            else (k == 3 ? m_v.clip_y2 : m_v.clip_y1) = (k == 3 ? m_start.clip_y2 : m_start.clip_y1) + delta.y();
         } else {
             const int k = m_drag - 10;
             (k % 2 ? m_v.clip_x2 : m_v.clip_x1) = (k % 2 ? m_start.clip_x2 : m_start.clip_x1) + delta.x();
             (k / 2 ? m_v.clip_y2 : m_v.clip_y1) = (k / 2 ? m_start.clip_y2 : m_start.clip_y1) + delta.y();
         }
-        apply(clipTag(), true);
+        writeRectClip();
         break;
     }
     case VClip:
@@ -1116,8 +1146,9 @@ bool VisualTools::doubleClick(QMouseEvent *e) {
 }
 
 bool VisualTools::key(QKeyEvent *e) {
-    if (!shown() || (m_tool != Pos && m_tool != Move)) return false;
-    const double st = e->modifiers() & Qt::ShiftModifier ? 0.1 : 1;
+    const bool rect = m_tool == RClip && m_v.clip == 1;
+    if (!shown() || (m_tool != Pos && m_tool != Move && !rect)) return false;
+    const double st = e->modifiers() & Qt::ShiftModifier ? (rect ? 10 : 0.1) : 1;
     QPointF d;
     switch (e->key()) {
     case Qt::Key_W: d = {0, -st}; break;
@@ -1127,7 +1158,11 @@ bool VisualTools::key(QKeyEvent *e) {
     default: return false;
     }
     m_amend = QString("visual-nudge-%1").arg(m_box->tab()->active());
-    if (m_tool == Pos) applyPos(QPointF(m_v.x, m_v.y) + d);
+    if (rect) {
+        grabLines();
+        m_v.clip_x1 += d.x(), m_v.clip_x2 += d.x(), m_v.clip_y1 += d.y(), m_v.clip_y2 += d.y();
+        writeRectClip();
+    } else if (m_tool == Pos) applyPos(QPointF(m_v.x, m_v.y) + d);
     else {
         QString t = QString("\\move(%1,%2,%3,%4").arg(n2(m_v.x + d.x()), n2(m_v.y + d.y()), n2(m_v.x2), n2(m_v.y2));
         if (m_v.t2 > m_v.t1) t += QString(",%1,%2").arg(m_v.t1).arg(m_v.t2);

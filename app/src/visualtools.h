@@ -66,6 +66,7 @@ private:
     void toggleMove();
     void applyAllTags(double value); // all-tags tool, from the texts in m_tagBase
     QString clipTag() const;
+    void writeRectClip(); // m_v's rectangle to the grabbed lines, each keeping its own \iclip (Aegisub)
     void writeVector();
     // how far libass moves \p drawing points for the line's alignment
     QPointF alignShift(const Drawing &d) const;
