@@ -888,11 +888,7 @@ impl Session {
             ops::change_fps(&mut doc, &rate(fps_from)?, &rate(fps_to)?);
         }
         let p = Path::new(path);
-        let format = p
-            .extension()
-            .and_then(|e| e.to_str())
-            .and_then(Format::from_name)
-            .unwrap_or(Format::Ass);
+        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
         let opts = SaveOptions {
             encoding: Encoding::for_label(encoding.as_bytes()).unwrap_or(self.encoding),
             bom: self.bom,
@@ -902,6 +898,13 @@ impl Session {
                 .unwrap_or_else(|| Framerate::from_rational(24000, 1001, false).unwrap()),
             ..Default::default()
         };
+        if ext.eq_ignore_ascii_case("txt") {
+            // Aegisub's plain text export; TMP and MPL2 come from converting the subtitles
+            let text = fs_formats::write_plain_text(&doc);
+            let bytes = fs_formats::encoding::encode(&text, opts.encoding, opts.bom);
+            return std::fs::write(p, bytes).map_err(|e| format!("{path}: {e}"));
+        }
+        let format = Format::from_name(ext).unwrap_or(Format::Ass);
         fs_formats::save_file(&doc, p, format, &opts).map_err(|e| format!("{path}: {e}"))
     }
 

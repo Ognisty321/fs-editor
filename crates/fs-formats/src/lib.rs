@@ -259,6 +259,34 @@ pub fn load_plain_text(bytes: &[u8], opts: &LoadOptions) -> Result<Loaded, Error
     })
 }
 
+/// Aegisub's plain text export: "Actor: text" when most dialogue lines name one, comments as
+/// "# text", without tags and drawings; lines left with no text are skipped.
+pub fn write_plain_text(doc: &Document) -> String {
+    let events: Vec<&Event> = (0..doc.event_count())
+        .filter_map(|i| doc.event(i))
+        .collect();
+    let dialogue = events.iter().filter(|e| e.kind != EventKind::Comment);
+    let named = dialogue.clone().filter(|e| !e.actor.is_empty()).count();
+    let actors = named > dialogue.count() / 2;
+    let mut out = String::new();
+    for e in events {
+        let text = fs_core::tags::visible_text(&e.text);
+        if text.is_empty() {
+            continue;
+        }
+        if e.kind == EventKind::Comment {
+            out += "# ";
+        }
+        if actors {
+            out += &e.actor;
+            out += ": ";
+        }
+        out += &text;
+        out += "\r\n";
+    }
+    out
+}
+
 /// Build an ASS document (default style, 1920×1080) from simple subtitles.
 pub fn from_subs(subs: Vec<Sub>) -> Document {
     let mut doc = Document::new();
@@ -419,6 +447,11 @@ mod tests {
             ]
         );
         assert!(load_plain_text(b"# timecode format v2\n0\n", &LoadOptions::default()).is_err());
+        // and back, as Aegisub writes it (an actor column on every line, empty lines left out)
+        assert_eq!(
+            write_plain_text(d),
+            "Anna: Hi there\r\nAnna: and more\r\n# : a note\r\nBob: Yes: sure\r\n"
+        );
     }
 
     #[test]
