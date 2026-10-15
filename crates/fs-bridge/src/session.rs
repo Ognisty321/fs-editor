@@ -303,8 +303,19 @@ impl Session {
             encoding: Encoding::for_label(encoding.as_bytes()),
             ..LoadOptions::default()
         };
-        let l =
-            fs_formats::load_file(Path::new(path), &opts).map_err(|e| format!("{path}: {e}"))?;
+        let l = match fs_formats::load_file(Path::new(path), &opts) {
+            // plain text as Aegisub imports it: a new script, so saving never overwrites the text
+            Err(fs_formats::Error::UnknownFormat)
+                if path.to_ascii_lowercase().ends_with(".txt") =>
+            {
+                let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+                let l = fs_formats::load_plain_text(&bytes, &opts)
+                    .map_err(|e| format!("{path}: {e}"))?;
+                self.load(l, None);
+                return Ok(());
+            }
+            l => l.map_err(|e| format!("{path}: {e}"))?,
+        };
         self.load(l, Some(PathBuf::from(path)));
         Ok(())
     }

@@ -217,6 +217,48 @@ pub fn load_bytes(bytes: &[u8], ext: Option<&str>, opts: &LoadOptions) -> Result
     })
 }
 
+/// Aegisub's plain text import: an event per line, timed 0; "Actor: text" names the actor (kept
+/// for the indented lines after it), a line starting with "#" or left empty is a comment.
+// shortcut: Aegisub's default separators (":" and "#") without its import dialog; add the dialog if people use others.
+pub fn load_plain_text(bytes: &[u8], opts: &LoadOptions) -> Result<Loaded, Error> {
+    let (text, dec) = encoding::decode(bytes, opts.encoding);
+    if text.starts_with("# timecode") {
+        return Err(Error::UnknownFormat); // a timecodes file, not subtitles
+    }
+    let mut doc = Document::new();
+    doc.remove_event(0);
+    let mut actor = "";
+    for line in text.lines().filter(|l| !l.is_empty()) {
+        let (mut value, comment) = match line.strip_prefix('#') {
+            Some(v) => (v, true),
+            None => (line, false),
+        };
+        if !comment
+            && !value.starts_with([' ', '\t'])
+            && let Some((a, rest)) = value.split_once(':')
+        {
+            actor = a.trim();
+            value = rest;
+        }
+        let value = value.trim_start();
+        let mut ev = Event::dialogue(Time(0), Time(0), "Default", value);
+        if comment || value.is_empty() {
+            ev.kind = EventKind::Comment;
+        } else {
+            ev.actor = actor.to_string();
+        }
+        doc.push_event(ev);
+    }
+    Ok(Loaded {
+        doc,
+        format: Format::Ass,
+        encoding: dec.encoding,
+        bom: dec.bom,
+        declared_fps: None,
+        warnings: Vec::new(),
+    })
+}
+
 /// Build an ASS document (default style, 1920×1080) from simple subtitles.
 pub fn from_subs(subs: Vec<Sub>) -> Document {
     let mut doc = Document::new();
@@ -350,6 +392,34 @@ pub fn to_ssa(doc: &Document) -> Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plain_text_import() {
+        let text = "Anna: Hi there\n  and more\n\n# a note\nBob:   Yes: sure\n:\n";
+        let l = load_plain_text(text.as_bytes(), &LoadOptions::default()).unwrap();
+        let d = &l.doc;
+        let evs: Vec<_> = (0..d.event_count())
+            .map(|i| d.event(i).unwrap())
+            .map(|e| {
+                (
+                    e.kind == EventKind::Comment,
+                    e.actor.as_str(),
+                    e.text.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            evs,
+            [
+                (false, "Anna", "Hi there"),
+                (false, "Anna", "and more"), // indented: the actor goes on
+                (true, "", "a note"),
+                (false, "Bob", "Yes: sure"),
+                (true, "", ""),
+            ]
+        );
+        assert!(load_plain_text(b"# timecode format v2\n0\n", &LoadOptions::default()).is_err());
+    }
 
     #[test]
     fn detection() {
