@@ -170,6 +170,9 @@ pub mod ffi {
         include_comments: bool,
         /// Restrict to these rows (empty = all).
         rows: Vec<usize>,
+        /// Only at the start / the end of the field (Kainote).
+        at_start: bool,
+        at_end: bool,
     }
 
     #[derive(Debug, Clone, Default)]

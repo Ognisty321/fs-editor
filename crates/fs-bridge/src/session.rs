@@ -1207,14 +1207,23 @@ impl Session {
     }
 
     fn matcher(spec: &FindSpec) -> Result<TextMatcher, String> {
+        // shortcut: with Skip tags a replacement anchors to each text block, not the whole line;
+        // anchor to the stripped line if people combine the two
+        let anchored = spec.at_start || spec.at_end;
+        let pattern = if anchored {
+            ops::anchored(&spec.pattern, spec.regex, spec.at_start, spec.at_end)
+        } else {
+            spec.pattern.clone()
+        };
         let mut m = TextMatcher::new(
-            &spec.pattern,
-            spec.regex,
+            &pattern,
+            spec.regex || anchored,
             spec.match_case,
             field_of(spec.field),
         )
         .map_err(|e| e.to_string())?;
         m.strip_tags = spec.skip_tags;
+        m.is_regex = spec.regex;
         Ok(m)
     }
 

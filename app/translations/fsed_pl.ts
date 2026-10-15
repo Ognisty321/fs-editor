@@ -463,6 +463,14 @@
         <translation>Pomiń tagi</translation>
     </message>
     <message>
+        <source>Start of text</source>
+        <translation>Początek tekstu</translation>
+    </message>
+    <message>
+        <source>End of text</source>
+        <translation>Koniec tekstu</translation>
+    </message>
+    <message>
         <source>In field</source>
         <translation>W polu</translation>
     </message>

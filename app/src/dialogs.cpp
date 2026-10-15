@@ -119,12 +119,18 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
     m_subdirs->setChecked(st.value("find/subdirs", true).toBool());
     ff->addRow(m_subdirs);
     v->addWidget(filesBox);
-    auto *checks = new QHBoxLayout;
+    auto *checks = new QGridLayout;
     m_case = new QCheckBox(tr("Match case"), this);
     m_regex = new QCheckBox(tr("Regular expressions"), this);
     m_comments = new QCheckBox(tr("Include comments"), this);
     m_skipTags = new QCheckBox(tr("Skip tags"), this);
-    for (auto *c : {m_case, m_regex, m_comments, m_skipTags}) checks->addWidget(c);
+    m_atStart = new QCheckBox(tr("Start of text"), this);
+    m_atEnd = new QCheckBox(tr("End of text"), this);
+    int k = 0;
+    for (auto *c : {m_case, m_regex, m_comments, m_skipTags, m_atStart, m_atEnd}) {
+        checks->addWidget(c, k / 3, k % 3);
+        ++k;
+    }
     v->addLayout(checks);
     auto *groups = new QHBoxLayout;
     auto *fg = new QGroupBox(tr("In field"), this);
@@ -237,6 +243,8 @@ fsb::FindSpec FindDialog::spec() const {
     for (int k = 0; k < 4; ++k)
         if (m_field[k]->isChecked()) s.field = uint8_t(k);
     s.include_comments = m_comments->isChecked();
+    s.at_start = m_atStart->isChecked();
+    s.at_end = m_atEnd->isChecked();
     auto *tab = m_main->current();
     if (m_lines[1]->isChecked())
         for (size_t r : tab->selection()) s.rows.push_back(r);

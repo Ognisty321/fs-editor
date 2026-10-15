@@ -302,6 +302,9 @@ pub struct TextMatcher {
     pub field: Field,
     /// Match against text with tags stripped.
     pub strip_tags: bool,
+    /// The user wrote a regex: `$1` in a replacement refers to its groups. Otherwise
+    /// replacements are literal.
+    pub is_regex: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -331,6 +334,7 @@ impl TextMatcher {
             regex,
             field,
             strip_tags: false,
+            is_regex,
         })
     }
 
@@ -397,10 +401,25 @@ impl Filter {
 // Find & replace
 // ---------------------------------------------------------------------------
 
+/// `pattern` as a regex matching only at the start and/or the end of the field (Kainote's
+/// "Start of text" and "End of text").
+pub fn anchored(pattern: &str, is_regex: bool, start: bool, end: bool) -> String {
+    let p = if is_regex {
+        format!("(?:{pattern})")
+    } else {
+        regex::escape(pattern)
+    };
+    format!(
+        "{}{p}{}",
+        if start { "^" } else { "" },
+        if end { "$" } else { "" }
+    )
+}
+
 #[derive(Debug, Clone)]
 pub struct Replace {
     pub matcher: TextMatcher,
-    /// Replacement; `$1`/`${name}` references groups when using a regex.
+    /// Replacement; `$1`/`${name}` references groups when the matcher is a user's regex.
     pub replacement: String,
     /// Replace only the first match per line.
     pub first_only: bool,
@@ -435,7 +454,7 @@ pub fn follow_case(matched: &str, rep: String) -> String {
 /// the plain-text blocks only, so override tags are never damaged.
 pub fn replace(doc: &mut Document, rows: &Rows, r: &Replace) -> usize {
     let mut count = 0;
-    let literal = !r.replacement.contains('$');
+    let literal = !r.matcher.is_regex || !r.replacement.contains('$');
     for i in rows.resolve(doc) {
         let ev = doc.event(i).unwrap();
         let apply = |s: &str, count: &mut usize| -> Option<String> {
@@ -449,7 +468,11 @@ pub fn replace(doc: &mut Document, rows: &Rows, r: &Replace) -> usize {
             Some(if r.keep_case {
                 re.replacen(s, n, |c: &regex::Captures| {
                     let mut out = String::new();
-                    c.expand(&r.replacement, &mut out);
+                    if literal {
+                        out.push_str(&r.replacement);
+                    } else {
+                        c.expand(&r.replacement, &mut out);
+                    }
                     follow_case(&c[0], out)
                 })
                 .into_owned()
@@ -1543,6 +1566,24 @@ mod tests {
             },
         );
         assert_eq!(d.event(0).unwrap().text, r"{\i1}$o$ is\N{\i0}$o$");
+        // without a regex "$1" is just text, also for a matcher anchored by the find options
+        let mut m = TextMatcher::new(
+            &anchored("$o$", false, false, true),
+            true,
+            true,
+            Field::Text,
+        )
+        .unwrap();
+        m.is_regex = false;
+        let r = Replace {
+            matcher: m,
+            replacement: "$1".into(),
+            first_only: false,
+            keep_case: false,
+        };
+        assert_eq!(replace(&mut d, &Rows::All, &r), 1);
+        assert_eq!(d.event(0).unwrap().text, r"{\i1}$o$ is\N{\i0}$1");
+        assert_eq!(anchored("a.", true, false, true), "(?:a.)$");
     }
 
     #[test]
