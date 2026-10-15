@@ -12,6 +12,7 @@
 #include <QSettings>
 #include <QScrollBar>
 #include <QSplitter>
+#include <QTimer>
 #include <QVBoxLayout>
 
 TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fsb::new_session()) {
@@ -42,9 +43,15 @@ TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fs
     m_right->setSizes({st.value("layout/audioHeight", 170).toInt(), 300});
     m_vsplit->setSizes({st.value("layout/topHeight", 380).toInt(), 400});
     m_top->setSizes({st.value("layout/videoWidth", 560).toInt(), 700});
-    connect(m_vsplit, &QSplitter::splitterMoved, this, [this] { QSettings().setValue("layout/topHeight", m_vsplit->sizes()[0]); });
+    connect(m_vsplit, &QSplitter::splitterMoved, this, [this] {
+        QSettings().setValue("layout/topHeight", m_vsplit->sizes()[0]);
+        fitVideo();
+    });
     connect(m_right, &QSplitter::splitterMoved, this, [this] { QSettings().setValue("layout/audioHeight", m_right->sizes()[0]); });
-    connect(m_top, &QSplitter::splitterMoved, this, [this] { QSettings().setValue("layout/videoWidth", m_top->sizes()[0]); });
+    connect(m_top, &QSplitter::splitterMoved, this, [this] {
+        QSettings().setValue("layout/videoWidth", m_top->sizes()[0]);
+        fitVideo(true);
+    });
 
     auto *l = new QVBoxLayout(this);
     l->setContentsMargins(0, 0, 0, 0);
@@ -74,6 +81,7 @@ TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fs
         auto sizes = m_vsplit->sizes();
         sizes[0] = std::max(150, sizes[0] + dy);
         m_vsplit->setSizes(sizes);
+        fitVideo();
     });
     connect(m_audio, &AudioBox::opened, this, [this] {
         if (!m_audio->path().isEmpty()) s().set_project_value("Audio File", fs::Utf8(m_audio->path()));
@@ -87,7 +95,10 @@ TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fs
     setActive(0);
 }
 
-TabPanel::~TabPanel() = default;
+TabPanel::~TabPanel() {
+    // a detached or full screen video is no child of the tab; it goes while the tab is whole
+    if (!m_video->parentWidget()) delete m_video;
+}
 
 QString TabPanel::path() const { return fs::q(m_session->file_info().path); }
 bool TabPanel::modified() const { return m_session->file_info().modified; }
@@ -381,4 +392,39 @@ void TabPanel::applyLayout() {
     m_bottom->setVisible(editor);
     m_top->setVisible(video || editor || audio);
     m_shift->setVisible(editor && QSettings().value("layout/shiftTimes", true).toBool());
+    fitVideo();
+}
+
+void TabPanel::resizeEvent(QResizeEvent *e) {
+    QWidget::resizeEvent(e);
+    fitVideo();
+}
+
+void TabPanel::fitVideo(bool byWidth) {
+    QTimer::singleShot(0, this, [this, byWidth] {
+        auto *view = m_video->view();
+        const QRectF d = view->displayRect();
+        // a detached or full screen video, or one alone in its row, has no neighbour to give way
+        if (!m_video->hasVideo() || !m_video->isVisible() || m_video->parentWidget() != m_top ||
+            !m_right->isVisible() || d.isEmpty() || view->height() <= 0)
+            return;
+        const double ar = d.width() / d.height();
+        QList<int> top = m_top->sizes();
+        int viewW = view->width();
+        if (!byWidth) {
+            const int lo = m_video->minimumSizeHint().width();
+            const int hi = std::max(lo, top[0] + top[1] - m_right->minimumSizeHint().width());
+            const int w = std::clamp(top[0] + qRound(view->height() * ar) - viewW, lo, hi);
+            viewW += w - top[0];
+            top = {w, top[0] + top[1] - w};
+            m_top->setSizes(top);
+        }
+        // the height this width needs: all of it after a drag of the side, else what a limit left over
+        const int dh = qRound(viewW / ar) - view->height();
+        if (std::abs(dh) > 1) {
+            QList<int> v = m_vsplit->sizes();
+            v = {v[0] + dh, v[1] - dh};
+            m_vsplit->setSizes(v);
+        }
+    });
 }

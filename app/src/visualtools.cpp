@@ -328,8 +328,16 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     rh->addWidget(two);
     rh->addStretch();
     m_sub->addWidget(rot);
-    h->addWidget(m_sub);
-    h->addStretch();
+    // A stack wants the width of its widest page, shown or not: only the shown page counts, and
+    // a narrow video clips it rather than widening the window.
+    m_sub->setMinimumWidth(1);
+    connect(m_sub, &QStackedWidget::currentChanged, m_sub, [sub = m_sub](int shown) {
+        for (int i = 0; i < sub->count(); ++i)
+            sub->widget(i)->setSizePolicy(i == shown ? QSizePolicy::Preferred : QSizePolicy::Ignored,
+                                          QSizePolicy::Preferred);
+    });
+    emit m_sub->currentChanged(0);
+    h->addWidget(m_sub, 1);
     m_invert = invert;
     return row;
 }

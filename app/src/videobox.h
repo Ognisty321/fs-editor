@@ -134,6 +134,9 @@ public:
     void lineChanged();
     void setPlayerMode(bool on);
     void setFullscreen(bool on);
+    // Aegisub's detached video: the box in a window of its own; closing that window docks it back
+    void setDetached(bool on);
+    bool detached() const { return m_detached; }
     void zoomMode() { m_zoomMode = true; }
     void resetZoom();
     int seekOn() const;
@@ -149,8 +152,11 @@ signals:
 
 protected:
     void wheelEvent(QWheelEvent *) override;
+    void closeEvent(QCloseEvent *) override;
 
 private:
+    void undock(); // out of the tab, into a window of its own
+    void dock();
     void request();
     void loadScript(bool shownFrameOnly);
     void ensureScript();
@@ -185,4 +191,5 @@ private:
     QComboBox *m_seekOn, *m_playOn;
     QWidget *m_fsParent = nullptr;
     int m_fsIndex = -1;
+    bool m_detached = false;
 };

@@ -1372,6 +1372,10 @@ Dekoder: BestSource</translation>
         <translation>Wyłącz powiększenie wideo</translation>
     </message>
     <message>
+        <source>Detach video</source>
+        <translation>Odłącz wideo</translation>
+    </message>
+    <message>
         <source>&amp;Audio</source>
         <translation>&amp;Audio</translation>
     </message>
@@ -2926,6 +2930,14 @@ do czasu audio</translation>
     <message>
         <source>Full screen</source>
         <translation>Pełny ekran</translation>
+    </message>
+    <message>
+        <source>Attach video</source>
+        <translation>Przyłącz wideo</translation>
+    </message>
+    <message>
+        <source>Detach video</source>
+        <translation>Odłącz wideo</translation>
     </message>
     <message>
         <source>Open editor</source>

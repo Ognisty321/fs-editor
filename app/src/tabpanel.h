@@ -84,12 +84,19 @@ public:
     void setHideOriginal(bool on);
     // the video context the core needs for frame shifting and automation
     void updateVideoContext();
+    // Kainote: the video panel takes the picture's shape, with no bars. The width follows the
+    // height, or the height the width (after the panel's side is dragged); an axis held at its
+    // limit leaves the rest to the other one. Runs from the event loop, once layouts are done.
+    void fitVideo(bool byWidth = false);
 
 signals:
     void docChanged(int source);
     void activeChanged(int row);
     void titleChanged();
     void statusChanged();
+
+protected:
+    void resizeEvent(QResizeEvent *e) override;
 
 private:
     void applyLayout();

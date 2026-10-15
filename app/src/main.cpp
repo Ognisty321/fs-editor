@@ -98,12 +98,16 @@ static void fatalSignal(int sig) {
     std::raise(sig);
 }
 
-// The dialog a smoke action opened: a modal one, else the newest visible modeless one.
+// The dialog a smoke action opened: a modal one, else the newest visible modeless one, else
+// another window (a detached video).
 static QWidget *smokeDialog(QWidget &w) {
     QWidget *top = QApplication::activeModalWidget();
     if (!top)
         for (auto *d : w.findChildren<QDialog *>())
             if (d->isVisible()) top = d;
+    if (!top)
+        for (auto *t : QApplication::topLevelWidgets())
+            if (t != &w && t->isVisible() && t->windowType() == Qt::Window) top = t;
     return top;
 }
 
@@ -167,10 +171,12 @@ int main(int argc, char **argv) {
                 for (int k = 1; k <= 4; ++k) send(QEvent::MouseMove, at(0) + (at(2) - at(0)) * k / 4, Qt::LeftButton);
                 send(QEvent::MouseButtonRelease, at(2), Qt::NoButton);
             });
-    // FSED_SMOKE_ACTION runs a menu command by id; a modal dialog it opens is grabbed instead.
-    if (const QString id = qEnvironmentVariable("FSED_SMOKE_ACTION"); !id.isEmpty())
-        QTimer::singleShot(std::max(700, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 2 / 3), &w, [&w, id] {
-            if (auto *a = w.action(id)) a->trigger();
+    // FSED_SMOKE_ACTION runs a menu command by id ("a;b" one after the other); a modal dialog
+    // it opens is grabbed instead.
+    if (const QString ids = qEnvironmentVariable("FSED_SMOKE_ACTION"); !ids.isEmpty())
+        QTimer::singleShot(std::max(700, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 2 / 3), &w, [&w, ids] {
+            for (const QString &id : ids.split(';'))
+                if (auto *a = w.action(id)) a->trigger();
         });
     // FSED_SMOKE_DROP=file drops it onto the line edit box, like a file dragged from the desktop.
     if (const QString f = qEnvironmentVariable("FSED_SMOKE_DROP"); !f.isEmpty())

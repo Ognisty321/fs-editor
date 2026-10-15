@@ -10,6 +10,7 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QCloseEvent>
 #include <QComboBox>
 #include <QContextMenuEvent>
 #include <QDir>
@@ -283,6 +284,8 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
     });
     m.addAction(m_box->isFullScreen() ? tr("Exit full screen") : tr("Full screen"), m_box,
                 [this] { m_box->setFullscreen(!m_box->isFullScreen()); });
+    m.addAction(m_box->detached() ? tr("Attach video") : tr("Detach video"), m_box,
+                [this] { m_box->setDetached(!m_box->detached()); });
     if (m_box->tab()->playerMode())
         m.addAction(tr("Open editor"), m_box, [this] { m_box->tab()->setPlayerMode(false); });
     m.addMenu(mw->recentMenu("subs"));
@@ -425,6 +428,8 @@ VideoBox::VideoBox(TabPanel *tab) : QWidget(tab), m_tab(tab), m_media(std::make_
     m_playOn->setCurrentIndex(st.value("video/playOn", PlayNothing).toInt());
     connect(m_seekOn, &QComboBox::currentIndexChanged, this, [](int i) { QSettings().setValue("video/seekOn", i); });
     connect(m_playOn, &QComboBox::currentIndexChanged, this, [](int i) { QSettings().setValue("video/playOn", i); });
+    // as wide as their texts when there is room, else down to ten characters (the list shows them whole)
+    for (auto *c : {m_seekOn, m_playOn}) c->setMinimumWidth(10 * c->fontMetrics().averageCharWidth());
     tr_->addWidget(m_playOn); // Kainote order: play mode, then seek mode
     tr_->addWidget(m_seekOn);
     v->addWidget(m_toolRow);
@@ -533,6 +538,7 @@ void VideoBox::setAspect(double ar) {
         m_info.sar_den = own.sar_den;
     }
     m_view->updateOverlay();
+    m_tab->fitVideo();
 }
 
 double VideoBox::aspectOfMode(int mode, double custom) {
@@ -728,23 +734,55 @@ void VideoBox::updateTimeField() {
 
 void VideoBox::setPlayerMode(bool on) { m_toolRow->setVisible(!on); }
 
+void VideoBox::undock() {
+    auto *sp = qobject_cast<QSplitter *>(parentWidget());
+    m_fsParent = parentWidget();
+    m_fsIndex = sp ? sp->indexOf(this) : -1;
+    setParent(nullptr);
+    setAttribute(Qt::WA_QuitOnClose, false); // closing the main window still quits
+}
+
+void VideoBox::dock() {
+    if (auto *sp = qobject_cast<QSplitter *>(m_fsParent)) sp->insertWidget(m_fsIndex, this);
+    else setParent(m_fsParent);
+    show();
+}
+
 void VideoBox::setFullscreen(bool on) {
     if (on == isFullScreen()) return;
     if (on) {
-        auto *sp = qobject_cast<QSplitter *>(parentWidget());
-        m_fsParent = parentWidget();
-        m_fsIndex = sp ? sp->indexOf(this) : -1;
-        setParent(nullptr);
+        if (!m_detached) undock();
         m_toolRow->hide();
         showFullScreen();
     } else {
         showNormal();
-        if (auto *sp = qobject_cast<QSplitter *>(m_fsParent)) sp->insertWidget(m_fsIndex, this);
-        else setParent(m_fsParent);
+        if (!m_detached) dock();
         m_toolRow->setVisible(!m_tab->playerMode());
-        show();
     }
     m_view->updateOverlay();
+}
+
+void VideoBox::setDetached(bool on) {
+    if (on == m_detached) return;
+    setFullscreen(false);
+    QSettings st;
+    if (on) {
+        undock();
+        setWindowTitle(m_tab->title() + " - FS Editor");
+        if (!restoreGeometry(st.value("video/detachedGeometry").toByteArray())) resize(800, 520);
+        show();
+    } else {
+        st.setValue("video/detachedGeometry", saveGeometry());
+        dock();
+    }
+    m_detached = on;
+    m_view->updateOverlay();
+}
+
+void VideoBox::closeEvent(QCloseEvent *e) {
+    if (!m_detached) return QWidget::closeEvent(e);
+    e->ignore();
+    QTimer::singleShot(0, this, [this] { setDetached(false); }); // not while the window is closing
 }
 
 void VideoBox::resetZoom() { m_view->setZoom({0, 0, 1, 1}); }

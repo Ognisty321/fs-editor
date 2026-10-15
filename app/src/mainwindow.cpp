@@ -863,6 +863,11 @@ void MainWindow::buildMenus() {
     video->addSeparator();
     add("zoomVideo", tr("Zoom video"), {}, video, [=] { tab()->video()->zoomMode(); });
     add("resetZoom", tr("Turn off video zoom"), QKeySequence("Ctrl+Shift+Z"), video, [=] { tab()->video()->resetZoom(); });
+    auto *detach = add("detachVideo", tr("Detach video"), {}, video, [=] {
+        tab()->video()->setDetached(!tab()->video()->detached());
+    });
+    detach->setCheckable(true);
+    connect(video, &QMenu::aboutToShow, this, [=] { detach->setChecked(tab()->video()->detached()); });
 
     // Audio
     auto *audio = menu(tr("&Audio"));
