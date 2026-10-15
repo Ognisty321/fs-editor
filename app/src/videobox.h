@@ -73,6 +73,7 @@ protected:
     void mousePressEvent(QMouseEvent *) override;
     void mouseMoveEvent(QMouseEvent *) override;
     void mouseReleaseEvent(QMouseEvent *) override;
+    void leaveEvent(QEvent *) override;
     void mouseDoubleClickEvent(QMouseEvent *) override;
     void wheelEvent(QWheelEvent *) override;
     void keyPressEvent(QKeyEvent *) override;
@@ -200,6 +201,7 @@ private:
 
     VideoView *m_view;
     VisualTools *m_tools;
+    bool m_toolsShown = false; // whether the tool's handles were on the last frame
     QSlider *m_seek, *m_volume;
     QLineEdit *m_timeField;
     QWidget *m_controls, *m_toolRow;

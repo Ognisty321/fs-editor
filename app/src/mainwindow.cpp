@@ -973,10 +973,11 @@ void MainWindow::buildMenus() {
     // Aegisub's video/frame/*/large with its default Fast Jump Step of 10
     add("prevFrames", tr("Back 10 frames"), QKeySequence("Alt+Left"), video, [=] { tab()->video()->stepFrames(-10); });
     add("nextFrames", tr("Forward 10 frames"), QKeySequence("Alt+Right"), video, [=] { tab()->video()->stepFrames(10); });
-    add("goStart", tr("Go to start time of line"), {}, video, [=] {
+    // Aegisub's keys
+    add("goStart", tr("Go to start time of line"), QKeySequence("Ctrl+1"), video, [=] {
         if (tab()->active() >= 0) tab()->video()->seekStart(tab()->s().row(size_t(tab()->active())).start);
     });
-    add("goEnd", tr("Go to end time of line"), {}, video, [=] {
+    add("goEnd", tr("Go to end time of line"), QKeySequence("Ctrl+2"), video, [=] {
         if (tab()->active() >= 0) tab()->seekVideo(tab()->s().row(size_t(tab()->active())).end - 1);
     });
     add("playPause", tr("Play / Pause"), QKeySequence("Alt+Space"), video, [=] { tab()->video()->togglePlay(); });

@@ -18,11 +18,13 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QSettings>
+#include <QSlider>
 #include <QTabBar>
 #include <QTextEdit>
 #include <QTimer>
 #include <QTranslator>
 #include <QUrl>
+#include <QWheelEvent>
 
 #include <atomic>
 #include <csignal>
@@ -275,6 +277,24 @@ int main(int argc, char **argv) {
         QTimer::singleShot(std::max(700, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 2 / 3), &w, [&w, ids] {
             for (const QString &id : ids.split(';'))
                 if (auto *a = w.action(id)) a->trigger();
+        });
+    // FSED_SMOKE_SEEK="0.5" clicks the video's seek bar halfway ("0.5,s": with Shift); "w,-1" turns
+    // the wheel over it a notch down ("w,-1,s": with Shift)
+    if (const QStringList a = qEnvironmentVariable("FSED_SMOKE_SEEK").split(','); !a[0].isEmpty())
+        QTimer::singleShot(std::max(700, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 2 / 3), &w, [&w, a] {
+            auto *bar = w.current()->video()->findChild<QSlider *>(QString(), Qt::FindDirectChildrenOnly);
+            const auto mods = a.back() == "s" ? Qt::ShiftModifier : Qt::NoModifier;
+            const QPointF p(a[0] == "w" ? bar->width() / 2.0 : a[0].toDouble() * bar->width(), bar->height() / 2.0);
+            if (a[0] == "w" && a.size() > 1) {
+                QWheelEvent e(p, bar->mapToGlobal(p), {}, {0, 120 * a[1].toInt()}, Qt::NoButton, mods, Qt::NoScrollPhase,
+                              false);
+                QApplication::sendEvent(bar, &e);
+                return;
+            }
+            QMouseEvent press(QEvent::MouseButtonPress, p, bar->mapToGlobal(p), Qt::LeftButton, Qt::LeftButton, mods);
+            QApplication::sendEvent(bar, &press);
+            QMouseEvent release(QEvent::MouseButtonRelease, p, bar->mapToGlobal(p), Qt::LeftButton, Qt::NoButton, mods);
+            QApplication::sendEvent(bar, &release);
         });
     // FSED_SMOKE_DROP=file drops it onto the line edit box, like a file dragged from the desktop.
     if (const QString f = qEnvironmentVariable("FSED_SMOKE_DROP"); !f.isEmpty())

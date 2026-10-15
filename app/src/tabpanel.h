@@ -76,7 +76,7 @@ public:
     void openBlankAudio(qint64 ms);
     void closeAudio();
     void openKeyframes(const QString &path);
-    std::vector<std::int64_t> keyframes() const { return m_keyframes; }
+    const std::vector<std::int64_t> &keyframes() const { return m_keyframes; }
     void setKeyframes(std::vector<std::int64_t> kf);
     void closeKeyframes(); // back to the video's own
     void openTimecodes(const QString &path); // empty: the video's own; applied when a video opens

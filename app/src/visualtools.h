@@ -39,6 +39,7 @@ struct Drawing {
 class VisualTools : public QObject {
     Q_OBJECT
 public:
+    bool shown() const; // the active line is on the video frame
     enum Tool { Pointer, Pos, Move, Scale, RotZ, RotXY, RClip, VClip, Draw, Shifter, AllTags, ToolCount };
     enum VecMode { VecMove, VecLine, VecBezier, VecNewFigure, VecDelete, VecFreehand, VecInsert, VecConvert, VecSpline };
 
@@ -76,7 +77,6 @@ private:
     // the l/b command whose segment passes near the point (t: where on it), or -1
     int hitSegment(QPointF widgetPos, double &t) const;
     // the active line is on the video's frame and not a comment: only then the tools work (Aegisub)
-    bool shown() const;
     void grabLines();         // the selected lines, as they are, for moveLines
     void moveLines(QPointF d); // the grabbed lines moved by d
 

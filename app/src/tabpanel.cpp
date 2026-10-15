@@ -481,6 +481,7 @@ void TabPanel::openTimecodes(const QString &path) {
 void TabPanel::setKeyframes(std::vector<std::int64_t> kf) {
     m_keyframes = std::move(kf);
     updateVideoContext();
+    m_video->update(); // the seek bar marks them
     m_audio->docChanged();
 }
 

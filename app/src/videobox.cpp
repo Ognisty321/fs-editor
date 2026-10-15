@@ -35,6 +35,8 @@
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
+#include <climits>
+
 // ---- worker -------------------------------------------------------------------
 
 void FrameWorker::render(quint64 id, qint64 frame, qint64 ms, bool subs) {
@@ -208,6 +210,8 @@ void VideoView::mouseMoveEvent(QMouseEvent *e) {
     if (m_zoomDragging || m_box->m_tools->move(e)) updateOverlay();
 }
 
+void VideoView::leaveEvent(QEvent *) { updateOverlay(); } // the crosshair goes with the mouse
+
 void VideoView::mouseReleaseEvent(QMouseEvent *e) {
     if (m_zoomDragging) {
         m_zoomDragging = false;
@@ -374,19 +378,37 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
 // ---- box ----------------------------------------------------------------------
 
 namespace {
-// The seek bar with the chapters marked and named in tooltips (Kainote)
+// The seek bar with the keyframes and chapters marked, the chapters named in tooltips (Kainote).
+// A click jumps there, Shift+click to the nearest keyframe; the wheel steps a frame, with Shift a
+// keyframe (Aegisub)
 class SeekBar : public QSlider {
 public:
-    explicit SeekBar(VideoBox *box) : QSlider(Qt::Horizontal, box), m_box(box) {}
+    explicit SeekBar(VideoBox *box) : QSlider(Qt::Horizontal, box), m_box(box) {
+        setFocusPolicy(Qt::NoFocus); // its keys would move it without the video; the window's keys seek
+    }
 
 protected:
     void paintEvent(QPaintEvent *e) override {
         QSlider::paintEvent(e);
-        if (m_box->chapters().empty()) return;
         QPainter p(this);
+        const auto t = track();
+        const auto &kf = m_box->tab()->keyframes();
+        // shortcut: a video's own keyframes (a thousand an episode) would fill the bar, so they show only when
+        // a few pixels apart, as a loaded scene-change list is; a zoomed bar if people want them all
+        if (!kf.empty() && kf.size() * 4 <= size_t(std::max(0, t.second))) {
+            QColor c = palette().color(QPalette::Text);
+            c.setAlpha(110);
+            p.setPen(c);
+            int last = INT_MIN;
+            for (const auto f : kf)
+                if (const int x = xAt(f, t); x != last) { // one line a pixel
+                    p.drawLine(x, height() - height() / 4, x, height());
+                    last = x;
+                }
+        }
         p.setPen(QPen(palette().color(QPalette::Highlight), 2));
         for (const auto &c : m_box->chapters()) {
-            const int x = xOf(c.first);
+            const int x = xAt(c.first, t);
             p.drawLine(x, 0, x, height() / 3);
             p.drawLine(x, height() - height() / 3, x, height());
         }
@@ -394,23 +416,55 @@ protected:
     bool event(QEvent *e) override {
         if (e->type() != QEvent::ToolTip) return QSlider::event(e);
         const auto *h = static_cast<QHelpEvent *>(e);
+        const auto t = track();
         for (const auto &[f, title] : m_box->chapters())
-            if (std::abs(xOf(f) - h->pos().x()) <= 4) {
+            if (std::abs(xAt(f, t) - h->pos().x()) <= 4) {
                 QToolTip::showText(h->globalPos(), QString("%1 [%2]").arg(title, fs::fmtTime(m_box->timeAt(f))), this);
                 return true;
             }
         QToolTip::hideText();
         return true;
     }
-
-private:
-    int xOf(qint64 frame) const { // the handle's centre at that frame, whatever the style
+    void mousePressEvent(QMouseEvent *e) override {
         QStyleOptionSlider o;
         initStyleOption(&o);
-        o.sliderPosition = o.sliderValue = int(frame);
-        return style()->subControlRect(QStyle::CC_Slider, &o, QStyle::SC_SliderHandle, this).center().x();
+        const bool onHandle =
+            style()->subControlRect(QStyle::CC_Slider, &o, QStyle::SC_SliderHandle, this).contains(e->position().toPoint());
+        const bool shift = e->modifiers() & Qt::ShiftModifier;
+        if (e->button() != Qt::LeftButton || (onHandle && !shift)) return QSlider::mousePressEvent(e);
+        const auto t = track();
+        const qint64 f = QStyle::sliderValueFromPosition(minimum(), maximum(), e->position().toPoint().x() - t.first, t.second);
+        if (shift) {
+            const auto &kf = m_box->tab()->keyframes();
+            if (kf.empty()) return;
+            auto it = std::lower_bound(kf.begin(), kf.end(), f);
+            if (it == kf.end() || (it != kf.begin() && f - *std::prev(it) < *it - f)) --it;
+            return m_box->seekFrame(*it);
+        }
+        m_box->seekFrame(f);
+        QSlider::mousePressEvent(e); // the handle is under the mouse now: dragging on goes on seeking
     }
-    const VideoBox *m_box;
+    void wheelEvent(QWheelEvent *e) override {
+        const int d = e->angleDelta().y() ? e->angleDelta().y() : e->angleDelta().x();
+        if (!d) return;
+        if (e->modifiers() & Qt::ShiftModifier)
+            m_box->tab()->main()->action(d > 0 ? "prevKeyframe" : "nextKeyframe")->trigger();
+        else m_box->stepFrames(d > 0 ? -1 : 1);
+    }
+
+private:
+    // where the handle's centre runs: the left end and the length, asked of the style once
+    std::pair<int, int> track() const {
+        QStyleOptionSlider o;
+        initStyleOption(&o);
+        const QRect g = style()->subControlRect(QStyle::CC_Slider, &o, QStyle::SC_SliderGroove, this);
+        const QRect h = style()->subControlRect(QStyle::CC_Slider, &o, QStyle::SC_SliderHandle, this);
+        return {g.x() + h.width() / 2, g.width() - h.width()};
+    }
+    int xAt(qint64 frame, std::pair<int, int> t) const {
+        return t.first + QStyle::sliderPositionFromValue(minimum(), maximum(), int(frame), t.second);
+    }
+    VideoBox *m_box;
 };
 
 QToolButton *button(QWidget *parent, const char *name, const QString &tip) {
@@ -430,6 +484,11 @@ VideoBox::VideoBox(TabPanel *tab) : QWidget(tab), m_tab(tab), m_media(std::make_
     m_thread.start();
     connect(m_worker, &FrameWorker::ready, this, [this](quint64, qint64, QImage img) {
         m_view->setFrame(img);
+        // a tool's handles come and go with the line's frames (Aegisub redraws them on each frame)
+        if (const bool shown = m_tools->shown(); shown != m_toolsShown) {
+            m_toolsShown = shown;
+            m_view->updateOverlay();
+        }
         m_busy = false;
         if (m_pending) {
             m_pending = false;
