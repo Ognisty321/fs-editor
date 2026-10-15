@@ -1516,6 +1516,78 @@ Dekoder: BestSource</translation>
         <translation>Pomocnik stylizowania...</translation>
     </message>
     <message>
+        <source>Translation matching...</source>
+        <translation>Dopasowywanie tłumaczenia...</translation>
+    </message>
+    <message>
+        <source>Translation matching</source>
+        <translation>Dopasowywanie tłumaczenia</translation>
+    </message>
+    <message>
+        <source>Original text</source>
+        <translation>Tekst oryginału</translation>
+    </message>
+    <message>
+        <source>Translation text</source>
+        <translation>Tekst tłumaczenia</translation>
+    </message>
+    <message>
+        <source>Insert line</source>
+        <translation>Dodaj linię</translation>
+    </message>
+    <message>
+        <source>Inserts an empty line before the selected one.
+The original moves down.
+Set the times of the inserted line.</source>
+        <translation>Dodaje pustą linijkę przed zaznaczoną.
+Oryginał idzie w dół.
+Dodanej linii należy ustawić czasy.</translation>
+    </message>
+    <message>
+        <source>Inserts an empty translation at the selected line.
+The translation moves down.</source>
+        <translation>Dodaje puste tłumaczenie w zaznaczonej linijce.
+Tłumaczenie idzie w dół.</translation>
+    </message>
+    <message>
+        <source>Join lines</source>
+        <translation>Złącz linie</translation>
+    </message>
+    <message>
+        <source>Joins the next line with the selected one.
+The original moves up.</source>
+        <translation>Złącza następną linijkę z zaznaczoną.
+Oryginał idzie do góry.</translation>
+    </message>
+    <message>
+        <source>Joins the next translation with the selected one.
+The translation moves up.</source>
+        <translation>Złącza następne tłumaczenie z zaznaczonym.
+Tłumaczenie idzie do góry.</translation>
+    </message>
+    <message>
+        <source>Delete line</source>
+        <translation>Usuń linię</translation>
+    </message>
+    <message>
+        <source>Deletes the selected line.
+The original moves up.</source>
+        <translation>Usuwa zaznaczoną linijkę.
+Oryginał idzie do góry.</translation>
+    </message>
+    <message>
+        <source>Deletes the translation of the selected line.
+The translation moves up.</source>
+        <translation>Usuwa tłumaczenie zaznaczonej linijki.
+Tłumaczenie idzie do góry.</translation>
+    </message>
+    <message>
+        <source>Original: the timed subtitles the pasted dialogue is matched against, removed afterwards.
+Translation: the pasted text, which takes the original&apos;s timing.</source>
+        <translation>Oryginał: napisy z właściwym timingiem, do których dopasowuje się wklejone dialogi; później są usuwane.
+Tłumaczenie: wklejony tekst, który przejmuje timing oryginału.</translation>
+    </message>
+    <message>
         <source>Spell checker...</source>
         <translation>Sprawdzanie pisowni...</translation>
     </message>

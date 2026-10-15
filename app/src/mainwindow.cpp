@@ -28,6 +28,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -1070,6 +1071,50 @@ void MainWindow::buildMenus() {
     add("stylingAssistant", tr("Styling assistant..."), {}, subs, [=, this] {
         if (tab()->s().row_count()) (new StylingAssistant(this, tab()))->show();
     });
+    // Kainote's window for lining a pasted translation up with the timed original; non-modal,
+    // it acts on the grid selection
+    add("translationMatching", tr("Translation matching..."), {}, subs, [this] {
+        if (auto *open = findChild<QDialog *>("translationMatching")) return open->activateWindow();
+        auto *d = new QDialog(this);
+        d->setObjectName("translationMatching");
+        d->setAttribute(Qt::WA_DeleteOnClose);
+        d->setWindowTitle(tr("Translation matching"));
+        auto *g = new QGridLayout(d);
+        g->addWidget(new QLabel(tr("Original text"), d), 0, 0);
+        g->addWidget(new QLabel(tr("Translation text"), d), 0, 1);
+        const std::pair<const char *, const char *> buttons[] = {
+            {QT_TR_NOOP("Insert line"),
+             QT_TR_NOOP("Inserts an empty line before the selected one.\nThe original moves down.\n"
+                        "Set the times of the inserted line.")},
+            {QT_TR_NOOP("Insert line"),
+             QT_TR_NOOP("Inserts an empty translation at the selected line.\nThe translation moves down.")},
+            {QT_TR_NOOP("Join lines"), QT_TR_NOOP("Joins the next line with the selected one.\nThe original moves up.")},
+            {QT_TR_NOOP("Join lines"),
+             QT_TR_NOOP("Joins the next translation with the selected one.\nThe translation moves up.")},
+            {QT_TR_NOOP("Delete line"), QT_TR_NOOP("Deletes the selected line.\nThe original moves up.")},
+            {QT_TR_NOOP("Delete line"),
+             QT_TR_NOOP("Deletes the translation of the selected line.\nThe translation moves up.")}};
+        const uint8_t ops[] = {4, 1, 5, 2, 3, 0}; // fsb::tl_shift order
+        for (int k = 0; k < 6; ++k) {
+            auto *b = new QPushButton(tr(buttons[k].first), d);
+            b->setToolTip(tr(buttons[k].second));
+            g->addWidget(b, 1 + k / 2, k % 2);
+            connect(b, &QPushButton::clicked, this, [this, op = ops[k]] {
+                auto *t = current();
+                const auto sel = t->selection();
+                if (sel.empty() || !t->s().file_info().tl_mode) return;
+                t->s().tl_shift(sel.front(), sel.size(), op);
+                t->changed();
+            });
+        }
+        auto *note = new QLabel(tr("Original: the timed subtitles the pasted dialogue is matched against, "
+                                   "removed afterwards.\nTranslation: the pasted text, which takes the original's "
+                                   "timing."),
+                                d);
+        note->setWordWrap(true);
+        g->addWidget(note, 4, 0, 1, 2);
+        d->show();
+    });
     add("spellChecker", tr("Spell checker..."), {}, subs, [=, this] {
         auto *d = new SpellCheckDialog(this, tab());
         if (d->findNext()) d->show();
@@ -1395,6 +1440,7 @@ void MainWindow::updateActions() {
         {"toASS", "ASS"}, {"toSRT", "SRT"}, {"toMDVD", "MICRODVD"}, {"toMPL2", "MPL2"}, {"toTMP", "TMP"}};
     for (auto [id, f] : conv) action(id)->setEnabled(fmt != f);
     action("saveTranslation")->setEnabled(fi.tl_mode);
+    action("translationMatching")->setEnabled(fi.tl_mode);
     const char *views[] = {"viewAll", "viewVideoSubs", "viewAudioSubs", "viewOnlyVideo", "viewOnlySubs"};
     action(views[std::clamp(tab->viewMode() - 1, 0, 4)])->setChecked(true);
     action("editor")->setChecked(!tab->playerMode());

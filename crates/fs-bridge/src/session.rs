@@ -1691,6 +1691,22 @@ impl Session {
         })
     }
 
+    pub fn tl_shift(&mut self, first: usize, count: usize, op: u8) {
+        use tlmode::Shift::*;
+        let ops = [
+            DeleteTranslation,
+            InsertTranslation,
+            JoinTranslation,
+            DeleteOriginal,
+            InsertOriginal,
+            JoinOriginal,
+        ];
+        let Some(&op) = ops.get(op as usize) else {
+            return;
+        };
+        self.edit("Move translation", |d| tlmode::shift(d, first, count, op));
+    }
+
     // ---- visual tools -----------------------------------------------------
 
     pub fn visual(&self, row: usize) -> Visual {

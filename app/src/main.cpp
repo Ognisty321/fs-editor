@@ -193,11 +193,13 @@ int main(int argc, char **argv) {
             QApplication::sendEvent(target, &drop);
         });
     // FSED_SMOKE_CLICK="Check" presses that button in the open dialog, else in the main window;
-    // "Replace;Close" presses one after the other.
+    // "Replace;Close" presses one after the other, a button with no text goes by its tooltip;
+    // "^" closes the dialog (to shoot the main window after a non-modal one).
     if (const QString texts = qEnvironmentVariable("FSED_SMOKE_CLICK"); !texts.isEmpty())
         QTimer::singleShot(std::max(800, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 5 / 6), &w, [&w, texts] {
             for (const QString &text : texts.split(';')) {
                 QWidget *top = smokeDialog(w);
+                if (text == "^" && top) top->close();
                 for (auto *b : (top ? top : &w)->findChildren<QAbstractButton *>())
                     if ((b->text() == text || (b->text().isEmpty() && b->toolTip() == text)) && b->isVisible()) {
                         b->click();

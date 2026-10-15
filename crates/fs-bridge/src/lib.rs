@@ -474,6 +474,9 @@ pub mod ffi {
         fn next_doubtful(self: &Session, from: usize) -> i64;
         fn next_untranslated(self: &Session, from: usize) -> i64;
         fn paste_translation(self: &mut Session, first: usize, text: &str) -> usize;
+        /// Kainote's translation matching: `op` 0 delete, 1 insert, 2 join the translation;
+        /// 3 delete, 4 insert, 5 join the original (`tlmode::Shift` order).
+        fn tl_shift(self: &mut Session, first: usize, count: usize, op: u8);
 
         fn visual(self: &Session, row: usize) -> Visual;
         fn set_tags(self: &mut Session, rows: &[usize], tags: &str, amend: &str);

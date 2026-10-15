@@ -226,6 +226,154 @@ pub fn paste_translation(doc: &mut Document, first_row: usize, lines: &[&str]) -
     filled
 }
 
+/// Kainote's translation matching window: line the pasted translation up with
+/// the timed originals by moving one against the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shift {
+    /// Drop the translation of the rows; the translation below moves up.
+    DeleteTranslation,
+    /// Insert empty translations at the rows; the translation moves down.
+    InsertTranslation,
+    /// Join the following translation into the first row; the rest moves up.
+    JoinTranslation,
+    /// Delete the rows (original and timing); the translation stays in place.
+    DeleteOriginal,
+    /// Insert untimed empty rows before the first; the translation stays.
+    InsertOriginal,
+    /// Join the following original into the first row; the translation stays.
+    JoinOriginal,
+}
+
+/// Apply `op` to the `count` rows from `first`; a join of one row takes the
+/// next one with it. No translation text is lost: what moves past the end
+/// gets new rows, and rows a move up leaves blank at the end are removed.
+pub fn shift(doc: &mut Document, first: usize, count: usize, op: Shift) {
+    let n = rows(doc).len();
+    if !is_tl_mode(doc) || first >= n || count == 0 {
+        return;
+    }
+    let count = count.min(n - first);
+    let joined = (count.max(2) - 1).min(n - 1 - first);
+    match op {
+        Shift::DeleteTranslation => move_translations(doc, first, -(count as isize)),
+        Shift::InsertTranslation => move_translations(doc, first, count as isize),
+        Shift::DeleteOriginal => {
+            move_translations(doc, first, count as isize);
+            remove_rows(doc, first, count);
+        }
+        Shift::InsertOriginal => {
+            let rs = rows(doc);
+            let mut ev = doc.event(rs[first].main()).unwrap().clone();
+            ev.text.clear();
+            ev.effect = strip_doubtful(&ev.effect).to_string();
+            doc.insert_events(vec![(rs[first].original, ev); count]);
+            move_translations(doc, first, -(count as isize));
+        }
+        Shift::JoinTranslation | Shift::JoinOriginal if joined == 0 => {}
+        Shift::JoinTranslation => {
+            let rs = rows(doc);
+            let text = join_texts((first..=first + joined).map(|r| translation_text(doc, rs[r])));
+            set_translation(doc, rs[first], &text);
+            move_translations(doc, first + 1, -(joined as isize));
+        }
+        Shift::JoinOriginal => {
+            let rs = rows(doc);
+            let text = join_texts((first..=first + joined).map(|r| original_text(doc, rs[r])));
+            let end = doc.event(rs[first + joined].main()).unwrap().end;
+            doc.event_mut(rs[first].original).unwrap().text = text;
+            for e in [Some(rs[first].original), rs[first].translation]
+                .into_iter()
+                .flatten()
+            {
+                doc.event_mut(e).unwrap().end = end;
+            }
+            move_translations(doc, first + 1, joined as isize);
+            remove_rows(doc, first + 1, joined);
+        }
+    }
+}
+
+fn join_texts<'a>(texts: impl Iterator<Item = &'a str>) -> String {
+    texts
+        .filter(|t| !t.is_empty())
+        .collect::<Vec<_>>()
+        .join("\\N")
+}
+
+fn remove_rows(doc: &mut Document, first: usize, count: usize) {
+    let rs = rows(doc);
+    let gone: Vec<usize> = rs[first..first + count]
+        .iter()
+        .flat_map(|r| std::iter::once(r.original).chain(r.translation))
+        .collect();
+    doc.remove_events(&gone);
+}
+
+/// Move the translations (text and doubtful mark) of rows `from..` by `delta`
+/// rows, down if positive; each row keeps its original and timing.
+fn move_translations(doc: &mut Document, from: usize, delta: isize) {
+    let rs = rows(doc);
+    let n = rs.len();
+    let old: Vec<(String, bool)> = rs
+        .iter()
+        .map(|r| {
+            r.translation
+                .map(|t| {
+                    let e = doc.event(t).unwrap();
+                    (e.text.clone(), is_doubtful(&e.effect))
+                })
+                .unwrap_or_default()
+        })
+        .collect();
+    let new = |r: usize| -> (String, bool) {
+        let src = r as isize - delta;
+        if src < from as isize {
+            Default::default()
+        } else {
+            old.get(src as usize).cloned().unwrap_or_default()
+        }
+    };
+    // overflow rows only while they carry text; rows a move up blanks at the end go
+    let mut len = n + delta.max(0) as usize;
+    let floor = if delta > 0 {
+        n
+    } else {
+        from.max(n - delta.unsigned_abs().min(n))
+    };
+    while len > floor
+        && new(len - 1).0.is_empty()
+        && (len > n || original_text(doc, rs[len - 1]).is_empty())
+    {
+        len -= 1;
+    }
+    let base = doc.event(rs[n - 1].main()).unwrap().clone();
+    if len < n {
+        remove_rows(doc, len, n - len);
+    }
+    // backwards, so creating a translation event does not move rows still to do
+    for r in (from..len.min(n)).rev() {
+        let (text, doubtful) = new(r);
+        if (&text, doubtful) == (&old[r].0, old[r].1) {
+            continue;
+        }
+        let row = set_translation(doc, rs[r], &text);
+        set_doubtful(doc, row, doubtful);
+    }
+    let style = tl_style(doc).unwrap_or_else(|| DEFAULT_TL_STYLE.into());
+    for r in n..len {
+        let (text, doubtful) = new(r);
+        let mut orig = base.clone();
+        orig.style = style.clone();
+        orig.text.clear();
+        orig.effect = strip_doubtful(&base.effect).to_string();
+        let mut tl = base.clone();
+        tl.text = text;
+        tl.effect = orig.effect.clone() + if doubtful { DOUBTFUL_MARK } else { "" };
+        doc.push_event(orig);
+        doc.push_event(tl);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Kainote actor-field prefixes
 // ---------------------------------------------------------------------------
@@ -320,6 +468,94 @@ mod tests {
         assert_eq!(translation_text(&d, rs[0]), "Cześć");
         assert_eq!(translation_text(&d, rs[1]), "Świecie");
         assert_eq!(d.event(rs[1].main()).unwrap().start, Time(1000));
+    }
+
+    fn view(d: &Document) -> Vec<(String, String)> {
+        rows(d)
+            .into_iter()
+            .map(|r| (original_text(d, r).into(), translation_text(d, r).into()))
+            .collect()
+    }
+
+    fn pairs(v: &[(&str, &str)]) -> Vec<(String, String)> {
+        v.iter()
+            .map(|(o, t)| (o.to_string(), t.to_string()))
+            .collect()
+    }
+
+    fn shifted(op: Shift, first: usize, count: usize) -> Document {
+        let mut s = doc().to_ass_string();
+        s.push_str("Dialogue: 0,0:00:02.00,0:00:03.00,Default,,0,0,0,,C\n");
+        s.push_str("Dialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,D\n");
+        let mut d = Document::parse(&s.replace("Hello", "A").replace("World", "B"));
+        enable(&mut d);
+        paste_translation(&mut d, 0, &["a", "b", "c", "d"]);
+        let b = rows(&d)[1];
+        set_doubtful(&mut d, b, true);
+        shift(&mut d, first, count, op);
+        d
+    }
+
+    #[test]
+    fn shift_translation() {
+        let d = shifted(Shift::DeleteTranslation, 1, 1);
+        assert_eq!(
+            view(&d),
+            pairs(&[("A", "a"), ("B", "c"), ("C", "d"), ("D", "")])
+        );
+        let mut d = shifted(Shift::InsertTranslation, 1, 1);
+        assert_eq!(
+            view(&d),
+            pairs(&[("A", "a"), ("B", ""), ("C", "b"), ("D", "c"), ("", "d")])
+        );
+        let rs = rows(&d);
+        assert!(is_doubtful(
+            &d.event(rs[2].translation.unwrap()).unwrap().effect
+        ));
+        assert!(!is_doubtful(
+            &d.event(rs[1].translation.unwrap()).unwrap().effect
+        ));
+        // and back: the blank row added at the end goes again
+        shift(&mut d, 1, 1, Shift::DeleteTranslation);
+        assert_eq!(
+            view(&d),
+            pairs(&[("A", "a"), ("B", "b"), ("C", "c"), ("D", "d")])
+        );
+        let d = shifted(Shift::JoinTranslation, 0, 1);
+        assert_eq!(
+            view(&d),
+            pairs(&[("A", "a\\Nb"), ("B", "c"), ("C", "d"), ("D", "")])
+        );
+    }
+
+    #[test]
+    fn shift_original() {
+        let d = shifted(Shift::DeleteOriginal, 1, 1);
+        assert_eq!(
+            view(&d),
+            pairs(&[("A", "a"), ("C", "b"), ("D", "c"), ("", "d")])
+        );
+        let d = shifted(Shift::InsertOriginal, 1, 2);
+        assert_eq!(
+            view(&d),
+            pairs(&[
+                ("A", "a"),
+                ("", "b"),
+                ("", "c"),
+                ("B", "d"),
+                ("C", ""),
+                ("D", "")
+            ])
+        );
+        assert_eq!(d.event(rows(&d)[1].main()).unwrap().start, Time(1000));
+        let d = shifted(Shift::JoinOriginal, 0, 2);
+        assert_eq!(
+            view(&d),
+            pairs(&[("A\\NB", "a"), ("C", "b"), ("D", "c"), ("", "d")])
+        );
+        let r = rows(&d)[0];
+        assert_eq!(d.event(r.original).unwrap().end, Time(2000));
+        assert_eq!(d.event(r.main()).unwrap().end, Time(2000));
     }
 
     #[test]

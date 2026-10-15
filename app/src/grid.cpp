@@ -673,6 +673,7 @@ void Grid::contextMenu(const QPoint &global) {
     if (tl) {
         m.addSeparator();
         m.addAction(tr("Paste translation text"), mw, [mw] { mw->pasteTranslation(); });
+        m.addAction(mw->action("translationMatching"));
     }
     m.addSeparator();
     m.addAction(mw->action("deleteText"));
