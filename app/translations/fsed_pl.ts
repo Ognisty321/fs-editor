@@ -606,12 +606,20 @@
         <translation>Osadza znalezione czcionki w sekcji [Fonts] skryptu (Aegisub)</translation>
     </message>
     <message>
+        <source>Pack into ZIP...</source>
+        <translation>Spakuj do ZIP...</translation>
+    </message>
+    <message>
         <source>Choose a destination folder first.</source>
         <translation>Najpierw wybierz folder docelowy.</translation>
     </message>
     <message>
         <source>Searching for fonts...</source>
         <translation>Szukanie czcionek...</translation>
+    </message>
+    <message>
+        <source>Packed into %1</source>
+        <translation>Spakowano do %1</translation>
     </message>
     <message>
         <source>Attached %1 font file(s) to the subtitles</source>
@@ -628,6 +636,14 @@
     <message>
         <source>All fonts found.</source>
         <translation>Znaleziono wszystkie czcionki.</translation>
+    </message>
+    <message>
+        <source>Pack fonts into a ZIP archive</source>
+        <translation>Spakuj czcionki do archiwum ZIP</translation>
+    </message>
+    <message>
+        <source>ZIP archives (*.zip)</source>
+        <translation>Archiwa ZIP (*.zip)</translation>
     </message>
     <message>
         <source>Copied to %1</source>
