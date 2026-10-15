@@ -14,8 +14,8 @@ pub use kanji::KanjiTimer;
 use kanji::new_kanji_timer;
 pub use media::{Audio, Renderer, Video};
 pub use session::Session;
-pub use spell::Speller;
-use spell::new_speller;
+pub use spell::{Speller, Thesaurus};
+use spell::{new_speller, new_thesaurus, text_words, thesaurus_word};
 
 // the export functions mirror Aegisub's Export dialog options one to one
 #[allow(clippy::too_many_arguments)]
@@ -263,6 +263,12 @@ pub mod ffi {
     struct Chapter {
         start: i64,
         title: String,
+    }
+
+    /// One meaning in a thesaurus: `(part of speech) word`, and further synonyms.
+    struct ThesEntry {
+        meaning: String,
+        synonyms: Vec<String>,
     }
 
     /// A text subtitle stream inside a media file.
@@ -608,6 +614,14 @@ pub mod ffi {
         fn check(self: &Speller, word: &str) -> bool;
         fn suggest(self: &Speller, word: &str) -> Vec<String>;
         fn add_word(self: &mut Speller, word: &str);
+        /// Words as flat [start, len, ...] in UTF-16 units; tags and drawings skipped.
+        fn text_words(text: &str) -> Vec<usize>;
+
+        type Thesaurus;
+        fn new_thesaurus(idx_path: &str, dat_path: &str) -> Result<Box<Thesaurus>>;
+        fn lookup(self: &Thesaurus, word: &str) -> Vec<ThesEntry>;
+        /// What a suggestion inserts: without "(noun) " before or " (note)" after the word.
+        fn thesaurus_word(suggestion: &str) -> String;
 
         type Audio;
         fn open_audio(path: &str, cache_dir: &str, progress: &Progress) -> Result<Box<Audio>>;

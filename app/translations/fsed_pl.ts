@@ -3084,6 +3084,22 @@ do czasu audio</translation>
         <translation>Dodaj „%1” do słownika</translation>
     </message>
     <message>
+        <source>No thesaurus suggestions</source>
+        <translation>Brak synonimów</translation>
+    </message>
+    <message>
+        <source>Thesaurus suggestions for &quot;%1&quot;</source>
+        <translation>Synonimy dla „%1”</translation>
+    </message>
+    <message>
+        <source>Thesaurus language</source>
+        <translation>Język tezaurusa</translation>
+    </message>
+    <message>
+        <source>Disable</source>
+        <translation>Wyłącz</translation>
+    </message>
+    <message>
         <source>Split at cursor (estimate times)</source>
         <translation>Podziel na kursorze (oszacuj czasy)</translation>
     </message>

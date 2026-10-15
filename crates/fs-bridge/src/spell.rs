@@ -1,7 +1,11 @@
-//! Spell checking with Hunspell dictionaries (spellbook), plus the word
-//! scanner that skips override blocks, `\N`/`\h` and `\p` drawings.
+//! Spell checking with Hunspell dictionaries (spellbook), MyThes thesauri,
+//! and the word scanner that skips override blocks, `\N`/`\h` and `\p` drawings.
+
+use std::collections::HashMap;
 
 use spellbook::Dictionary;
+
+use crate::ffi::ThesEntry;
 
 pub struct Speller(Dictionary);
 
@@ -94,6 +98,111 @@ pub fn words(text: &str) -> Vec<(usize, usize, String)> {
     out
 }
 
+/// Words of subtitle text as flat [start, len, start, len, ...] in UTF-16 units.
+pub fn text_words(text: &str) -> Vec<usize> {
+    words(text)
+        .into_iter()
+        .flat_map(|(s, l, _)| [s, l])
+        .collect()
+}
+
+/// A MyThes thesaurus (`th_<lang>.idx` + `.dat`, as LibreOffice ships them), read like Aegisub.
+pub struct Thesaurus {
+    dat: Vec<u8>,
+    enc: &'static encoding_rs::Encoding,
+    /// Byte offsets of the entries in `dat`.
+    offsets: HashMap<String, usize>,
+}
+
+/// The index starts with the files' charset and the entry count, then `word|offset` lines.
+pub fn new_thesaurus(idx_path: &str, dat_path: &str) -> Result<Box<Thesaurus>, String> {
+    let read = |p: &str| std::fs::read(p).map_err(|e| format!("{p}: {e}"));
+    let idx = read(idx_path)?;
+    let label = idx.split(|&b| b == b'\n').next().unwrap_or_default();
+    let enc = encoding_rs::Encoding::for_label(label.trim_ascii()).unwrap_or(encoding_rs::UTF_8);
+    let offsets = enc
+        .decode_with_bom_removal(&idx)
+        .0
+        .lines()
+        .skip(2)
+        .filter_map(|l| {
+            let (word, off) = l.split_once('|')?;
+            Some((word.to_owned(), off.trim().parse().ok()?))
+        })
+        .collect();
+    Ok(Box::new(Thesaurus {
+        dat: read(dat_path)?,
+        enc,
+        offsets,
+    }))
+}
+
+impl Thesaurus {
+    /// The meanings of `word` (lowercased, else as written): an entry's `(part of speech) word`
+    /// line, then its other synonyms.
+    pub fn lookup(&self, word: &str) -> Vec<ThesEntry> {
+        let Some(&off) = self
+            .offsets
+            .get(&word.to_lowercase())
+            .or_else(|| self.offsets.get(word))
+        else {
+            return Vec::new();
+        };
+        let mut lines = self
+            .dat
+            .get(off..)
+            .unwrap_or_default()
+            .split(|&b| b == b'\n')
+            .map(|l| {
+                let l = l.strip_suffix(b"\r").unwrap_or(l);
+                self.enc.decode_without_bom_handling(l).0.into_owned()
+            });
+        let count = lines
+            .next()
+            .and_then(|h| match h.split('|').collect::<Vec<_>>()[..] {
+                [_, n] => n.trim().parse().ok(),
+                _ => None,
+            });
+        lines
+            .take(count.unwrap_or(0))
+            .filter_map(|l| {
+                let f: Vec<&str> = l.split('|').collect();
+                let (pos, head) = (f.first()?, f.get(1)?);
+                Some(ThesEntry {
+                    meaning: if pos.is_empty() {
+                        head.to_string()
+                    } else {
+                        format!("{pos} {head}")
+                    },
+                    synonyms: f[2..]
+                        .iter()
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string())
+                        .collect(),
+                })
+            })
+            .collect()
+    }
+}
+
+/// What a thesaurus suggestion inserts (Aegisub): the word without a leading `(noun) ` or a
+/// trailing ` (usage note)`.
+pub fn thesaurus_word(suggestion: &str) -> String {
+    let mut s = suggestion.to_owned();
+    while let Some(pos) = s.rfind('(') {
+        if pos == 0 {
+            if let Some(end) = s.find(')') {
+                s.drain(..=end);
+                s = s.trim_start().to_owned();
+            }
+            break;
+        }
+        s.truncate(pos);
+        s.truncate(s.trim_end().len());
+    }
+    s
+}
+
 impl Speller {
     /// Misspelled words as flat [start, len, start, len, ...] in UTF-16 units.
     pub fn misspelled(&self, text: &str) -> Vec<usize> {
@@ -132,6 +241,39 @@ mod tests {
         let (s, l, _) = &words(t)[2];
         let u: Vec<u16> = t.encode_utf16().collect();
         assert_eq!(String::from_utf16(&u[*s..s + l]).unwrap(), "jaźń");
+    }
+
+    #[test]
+    fn thesaurus_entries() {
+        let dir = std::env::temp_dir().join(format!("fsb-thes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let enc = encoding_rs::ISO_8859_2;
+        let dat = enc
+            .encode("ISO8859-2\nżaba|2\n(rzeczownik)|płaz|ropucha (potocznie)|\r\n(przenośnie)|dziewczyna\nkot|1\n|mruczek\n")
+            .0;
+        let kot = dat.windows(4).position(|w| w == b"kot|").unwrap();
+        let idx = format!("ISO8859-2\n2\nżaba|10\nkot|{kot}\nzły|9999\n");
+        let idx = enc.encode(&idx).0;
+        let (i, d) = (dir.join("th_pl.idx"), dir.join("th_pl.dat"));
+        std::fs::write(&i, idx).unwrap();
+        std::fs::write(&d, dat).unwrap();
+        let t = new_thesaurus(i.to_str().unwrap(), d.to_str().unwrap()).unwrap();
+        let e = t.lookup("Żaba");
+        let got: Vec<_> = e
+            .iter()
+            .map(|e| (e.meaning.as_str(), e.synonyms.len()))
+            .collect();
+        assert_eq!(
+            got,
+            [("(rzeczownik) płaz", 1), ("(przenośnie) dziewczyna", 0)]
+        );
+        assert_eq!(e[0].synonyms, ["ropucha (potocznie)"]);
+        assert_eq!(t.lookup("kot")[0].meaning, "mruczek");
+        assert!(t.lookup("pies").is_empty() && t.lookup("zły").is_empty());
+        assert_eq!(thesaurus_word("(przenośnie) dziewczyna"), "dziewczyna");
+        assert_eq!(thesaurus_word("ropucha (potocznie)"), "ropucha");
+        assert_eq!(text_words(r"{\i1}Ala ma"), [5, 3, 9, 2]);
+        std::fs::remove_dir_all(dir).ok();
     }
 
     /// A real Polish Hunspell dictionary when available: FS_DICT=path/to/pl_PL

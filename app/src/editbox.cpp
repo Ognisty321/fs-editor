@@ -119,6 +119,8 @@ std::optional<rust::Box<fsb::Speller>> g_speller;
 bool g_spellLoaded = false;
 int g_spellGen = 0;
 QString g_spellLang; // the dictionary actually loaded
+std::optional<rust::Box<fsb::Thesaurus>> g_thes;
+QString g_thesLang = "?"; // the language g_thes was loaded for; none tried yet
 
 const QStringList kTags = {
     "an", "b", "i", "u", "s", "bord", "xbord", "ybord", "shad", "xshad", "yshad", "be", "blur", "fn", "fs",
@@ -169,6 +171,7 @@ int spell::generation() { return g_spellGen; }
 void spell::reload() {
     g_speller.reset();
     g_spellLoaded = false;
+    g_thesLang = "?"; // the folder may have changed
     ++g_spellGen;
     for (QWidget *w : QApplication::allWidgets())
         if (auto *e = qobject_cast<SubsTextEdit *>(w)) {
@@ -210,25 +213,68 @@ void spell::addWord(const QString &word) {
     reload(); // reload applies the user list
 }
 
-// Suggestions and "Add to dictionary" for a misspelled word under the mouse.
+// MyThes thesauri (th_<lang>.idx + .dat) in the dictionary folder, as Aegisub finds them.
+namespace {
+namespace thesaurus {
+QStringList languages() {
+    QStringList out;
+    for (const QFileInfo &fi : QDir(spell::dir()).entryInfoList({"th_*.idx"}, QDir::Files, QDir::Name))
+        if (QFileInfo::exists(fi.absolutePath() + "/" + fi.completeBaseName() + ".dat")) out << fi.completeBaseName().mid(3);
+    return out;
+}
+
+// The chosen one ("" disabled); until one is chosen, the first of the spell checker's language.
+QString language() {
+    QSettings st;
+    if (st.contains("thesaurus/lang")) return st.value("thesaurus/lang").toString();
+    for (const QString &l : languages())
+        if (!g_spellLang.isEmpty() && l.startsWith(g_spellLang)) return l;
+    return {};
+}
+
+fsb::Thesaurus *get() {
+    if (const QString lang = language(); lang != g_thesLang) {
+        g_thesLang = lang;
+        g_thes.reset();
+        const QString base = spell::dir() + "/th_" + lang;
+        if (!lang.isEmpty()) {
+            try {
+                g_thes.emplace(fsb::new_thesaurus(fs::Utf8(base + ".idx"), fs::Utf8(base + ".dat")));
+            } catch (const std::exception &e) {
+                qWarning("thesaurus: %s", e.what());
+            }
+        }
+    }
+    return g_thes ? &**g_thes : nullptr;
+}
+} // namespace thesaurus
+} // namespace
+
+// Suggestions and "Add to dictionary" for a misspelled word under the mouse, and Aegisub's thesaurus.
 void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
     std::unique_ptr<QMenu> m(createStandardContextMenu(e->pos()));
+    QAction *const first = m->actions().value(0); // the standard actions follow ours
+    const QTextCursor at = cursorForPosition(e->pos());
+    const QTextBlock block = at.block();
+    const QString t = block.text();
+    // replaces t's [s, s + l) and selects the new text
+    auto replacer = [this, block](int s, int l) {
+        return [this, block, s, l](const QString &with) {
+            QTextCursor c(block);
+            c.setPosition(block.position() + s);
+            c.setPosition(block.position() + s + l, QTextCursor::KeepAnchor);
+            c.insertText(with);
+            c.setPosition(block.position() + s, QTextCursor::KeepAnchor);
+            setTextCursor(c);
+        };
+    };
     if (auto *sp = spell::get()) {
-        const QTextCursor at = cursorForPosition(e->pos());
-        const QTextBlock block = at.block();
-        const QString t = block.text();
         const auto bad = sp->misspelled(fs::Utf8(t));
         for (size_t i = 0; i + 1 < bad.size(); i += 2) {
             const int s = int(bad[i]), l = int(bad[i + 1]);
             if (at.positionInBlock() < s || at.positionInBlock() > s + l) continue;
             const QString word = t.mid(s, l);
-            QAction *first = m->actions().value(0);
-            auto replace = [this, block, s, l](const QString &with) {
-                QTextCursor c(block);
-                c.setPosition(block.position() + s);
-                c.setPosition(block.position() + s + l, QTextCursor::KeepAnchor);
-                c.insertText(with);
-            };
+            const auto replace = replacer(s, l);
             const auto sugg = sp->suggest(fs::Utf8(word));
             for (size_t k = 0; k < std::min<size_t>(sugg.size(), 8); ++k) {
                 const QString w = fs::q(sugg[k]);
@@ -251,6 +297,48 @@ void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
             break;
         }
     }
+    const auto words = fsb::text_words(fs::Utf8(t));
+    if (const QStringList langs = thesaurus::languages(); !langs.isEmpty())
+        for (size_t i = 0; i + 1 < words.size(); i += 2) {
+            const int s = int(words[i]), l = int(words[i + 1]);
+            if (at.positionInBlock() < s || at.positionInBlock() > s + l) continue;
+            const QString word = t.mid(s, l);
+            const auto replace = replacer(s, l);
+            const auto use = [this, replace](QMenu *menu, const QString &suggestion) {
+                menu->addAction(suggestion, this, [replace, suggestion] {
+                    replace(fs::q(fsb::thesaurus_word(fs::Utf8(suggestion))));
+                });
+            };
+            auto *th = thesaurus::get();
+            const auto entries = th ? th->lookup(fs::Utf8(word)) : rust::Vec<fsb::ThesEntry>();
+            if (entries.empty()) {
+                auto *none = new QAction(tr("No thesaurus suggestions"), m.get());
+                none->setEnabled(false);
+                m->insertAction(first, none);
+            } else {
+                auto *menu = new QMenu(tr("Thesaurus suggestions for \"%1\"").arg(word), m.get());
+                for (const auto &en : entries) {
+                    if (en.synonyms.empty()) {
+                        use(menu, fs::q(en.meaning));
+                        continue;
+                    }
+                    auto *sub = menu->addMenu(fs::q(en.meaning));
+                    for (const auto &syn : en.synonyms) use(sub, fs::q(syn));
+                }
+                m->insertMenu(first, menu);
+            }
+            auto *langMenu = new QMenu(tr("Thesaurus language"), m.get());
+            const QString cur = thesaurus::language();
+            for (const QString &lang : QStringList{QString()} + langs) {
+                auto *a = langMenu->addAction(lang.isEmpty() ? tr("Disable") : lang,
+                                              [lang] { QSettings().setValue("thesaurus/lang", lang); });
+                a->setCheckable(true);
+                a->setChecked(lang == cur);
+            }
+            m->insertMenu(first, langMenu);
+            m->insertSeparator(first);
+            break;
+        }
     // Aegisub's split commands
     m->addSeparator();
     m->addAction(tr("Split at cursor (estimate times)"), this, [this] { emit splitRequested(-1); });
