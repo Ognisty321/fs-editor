@@ -499,8 +499,8 @@
         <translation>Zamknij</translation>
     </message>
     <message>
-        <source>Replaced %1 lines</source>
-        <translation>Zamienione linijki: %1</translation>
+        <source>Replacements: %1</source>
+        <translation>Zamiany: %1</translation>
     </message>
     <message>
         <source>Nothing found</source>

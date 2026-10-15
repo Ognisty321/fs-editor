@@ -156,7 +156,7 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
         try {
             const size_t n = tab->s().replace_all(spec());
             tab->changed();
-            m_main->status(tr("Replaced %1 lines").arg(n));
+            m_main->status(tr("Replacements: %1").arg(n));
         } catch (const rust::Error &e) {
             m_main->error(QString::fromUtf8(e.what()));
         }
@@ -175,7 +175,7 @@ FindDialog::FindDialog(MainWindow *main) : QDialog(main), m_main(main) {
             }
             tab->changed();
         }
-        m_main->status(tr("Replaced %1 lines").arg(n));
+        m_main->status(tr("Replacements: %1").arg(n));
     });
     connect(m_tabs, &QTabWidget::currentChanged, this, [=, this](int i) {
         for (QWidget *w : std::initializer_list<QWidget *>{replLabel, m_replace, replNext, replAll, replOpen})
