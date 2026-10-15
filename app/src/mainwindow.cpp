@@ -1018,6 +1018,16 @@ void MainWindow::buildMenus() {
     };
     add("prevKeyframe", tr("Go to previous keyframe"), {}, video, [=] { stepKeyframe(-1); });
     add("nextKeyframe", tr("Go to next keyframe"), {}, video, [=] { stepKeyframe(1); });
+    // the frame shown as a picture: saved beside the video, or copied
+    const std::tuple<const char *, const char *, const char *, VideoBox::Grab> grabs[] = {
+        {"saveFrameSubs", QT_TR_NOOP("Save frame with subtitles as PNG"), QT_TR_NOOP("Copy frame with subtitles to clipboard"), VideoBox::WithSubs},
+        {"saveFrame", QT_TR_NOOP("Save frame as PNG"), QT_TR_NOOP("Copy frame to clipboard"), VideoBox::Raw},
+        {"saveFrameSubsOnly", QT_TR_NOOP("Save subtitles only as PNG"), QT_TR_NOOP("Copy subtitles only to clipboard"), VideoBox::SubsOnly}};
+    for (auto [id, save, copy, mode] : grabs) {
+        add(id, tr(save), {}, video, [=] { tab()->video()->saveFrame(mode); });
+        add(QString(id).replace("save", "copy"), tr(copy), {}, video,
+            [=] { QApplication::clipboard()->setImage(tab()->video()->grabFrame(mode)); });
+    }
     add("prevChapter", tr("Go to previous chapter"), {}, video, [=] { tab()->video()->stepChapter(-1); });
     add("nextChapter", tr("Go to next chapter"), {}, video, [=] { tab()->video()->stepChapter(1); });
     // Aegisub: video/frame/prev|next/boundary - the active line's start or end, then the neighbour line

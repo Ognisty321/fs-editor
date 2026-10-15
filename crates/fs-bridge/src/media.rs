@@ -109,6 +109,20 @@ impl Renderer {
             .blend(ms, width, height, (video_w, video_h), rgba)
             .map_err(|e| e.to_string())
     }
+
+    pub fn overlay(
+        &mut self,
+        ms: i64,
+        width: usize,
+        height: usize,
+        video_w: usize,
+        video_h: usize,
+        rgba: &mut [u8],
+    ) -> Result<bool, String> {
+        self.0
+            .overlay(ms, width, height, (video_w, video_h), rgba)
+            .map_err(|e| e.to_string())
+    }
 }
 
 pub struct Audio {

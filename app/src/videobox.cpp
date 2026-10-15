@@ -405,16 +405,9 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
         a->setChecked(i == cur);
     }
     m.addSeparator();
-    auto saveFrame = [this](bool subs) {
-        const QString f = QFileDialog::getSaveFileName(this, tr("Save frame"), {}, "PNG (*.png)");
-        if (!f.isEmpty()) m_box->grabFrame(subs).save(f, "PNG");
-    };
-    m.addAction(tr("Save frame with subtitles as PNG"), this, [saveFrame] { saveFrame(true); });
-    m.addAction(tr("Copy frame with subtitles to clipboard"), this,
-                [this] { QApplication::clipboard()->setImage(m_box->grabFrame(true)); });
-    m.addAction(tr("Save frame as PNG"), this, [saveFrame] { saveFrame(false); });
-    m.addAction(tr("Copy frame to clipboard"), this,
-                [this] { QApplication::clipboard()->setImage(m_box->grabFrame(false)); });
+    for (const char *id : {"saveFrameSubs", "copyFrameSubs", "saveFrame", "copyFrame", "saveFrameSubsOnly",
+                           "copyFrameSubsOnly"})
+        m.addAction(mw->action(id));
     m.addSeparator();
     m.addAction(tr("Remove video"), this, [this, mw] {
         const QString p = m_box->path();
@@ -1047,24 +1040,45 @@ void VideoBox::closeEvent(QCloseEvent *e) {
 
 void VideoBox::resetZoom() { m_view->setZoom({0, 0, 1, 1}); }
 
-QImage VideoBox::grabFrame(bool withSubs) {
+QImage VideoBox::grabFrame(Grab mode) {
     if (!hasVideo()) return {};
     ensureScript();
     std::lock_guard g(m_media->m);
     QImage img;
     try {
-        img = decode(*m_media, m_frame);
-        if (withSubs && m_media->renderer) {
+        if (mode == SubsOnly) {
+            img = QImage(m_media->width, m_media->height, QImage::Format_RGBA8888_Premultiplied);
+            img.fill(Qt::transparent);
+        } else {
+            img = decode(*m_media, m_frame);
+        }
+        if (mode != Raw && m_media->renderer) {
             const rust::Slice<uint8_t> px(img.bits(), size_t(img.sizeInBytes()));
+            const size_t w = size_t(img.width()), h = size_t(img.height());
             (*m_media->renderer)->set_script(m_media->script);
             m_media->scriptDirty = false;
-            (*m_media->renderer)->blend(time(), size_t(img.width()), size_t(img.height()), size_t(img.width()),
-                                        size_t(img.height()), px);
+            if (mode == SubsOnly) (*m_media->renderer)->overlay(time(), w, h, w, h, px);
+            else (*m_media->renderer)->blend(time(), w, h, w, h, px);
         }
     } catch (const rust::Error &e) {
         m_tab->main()->error(QString::fromUtf8(e.what()));
     }
     return img;
+}
+
+void VideoBox::saveFrame(Grab mode) {
+    const QImage img = grabFrame(mode);
+    if (img.isNull()) return;
+    // a dummy has no folder: the script's, else home (Aegisub)
+    const QString script = m_tab->path();
+    const QString base = !m_path.isEmpty() ? QFileInfo(m_path).absolutePath() + "/" + QFileInfo(m_path).completeBaseName()
+                         : !script.isEmpty() ? QFileInfo(script).absolutePath() + "/dummy"
+                                             : QDir::homePath() + "/dummy";
+    QString f;
+    for (int n = 1; QFileInfo::exists(f = QString("%1_%2_%3.png").arg(base).arg(n, 3, 10, QChar('0')).arg(m_frame)); ++n) {
+    }
+    if (img.save(f, "PNG")) m_tab->main()->status(tr("Saved %1").arg(QDir::toNativeSeparators(f)));
+    else m_tab->main()->error(tr("Could not save %1").arg(QDir::toNativeSeparators(f)));
 }
 
 void VideoBox::openSibling(int dir) {

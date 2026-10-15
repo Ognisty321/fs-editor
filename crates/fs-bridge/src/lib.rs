@@ -746,6 +746,16 @@ pub mod ffi {
             video_h: usize,
             rgba: &mut [u8],
         ) -> Result<bool>;
+        /// The subtitles alone, onto a transparent premultiplied RGBA8 image.
+        fn overlay(
+            self: &mut Renderer,
+            ms: i64,
+            width: usize,
+            height: usize,
+            video_w: usize,
+            video_h: usize,
+            rgba: &mut [u8],
+        ) -> Result<bool>;
 
         type Speller;
         fn new_speller(aff_path: &str, dic_path: &str) -> Result<Box<Speller>>;

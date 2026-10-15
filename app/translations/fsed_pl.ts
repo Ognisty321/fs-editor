@@ -1638,6 +1638,30 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Przejdź do następnej klatki kluczowej</translation>
     </message>
     <message>
+        <source>Save frame with subtitles as PNG</source>
+        <translation>Zapisz klatkę z napisami jako PNG</translation>
+    </message>
+    <message>
+        <source>Copy frame with subtitles to clipboard</source>
+        <translation>Kopiuj klatkę z napisami do schowka</translation>
+    </message>
+    <message>
+        <source>Save frame as PNG</source>
+        <translation>Zapisz klatkę jako PNG</translation>
+    </message>
+    <message>
+        <source>Copy frame to clipboard</source>
+        <translation>Kopiuj klatkę do schowka</translation>
+    </message>
+    <message>
+        <source>Save subtitles only as PNG</source>
+        <translation>Zapisz same napisy jako PNG</translation>
+    </message>
+    <message>
+        <source>Copy subtitles only to clipboard</source>
+        <translation>Kopiuj same napisy do schowka</translation>
+    </message>
+    <message>
         <source>Go to previous chapter</source>
         <translation>Przejdź do poprzedniego rozdziału</translation>
     </message>
@@ -3786,6 +3810,14 @@ Dopasować rozdzielczość napisów do wideo?</translation>
         <source>Chapter %1</source>
         <translation>Rozdział %1</translation>
     </message>
+    <message>
+        <source>Saved %1</source>
+        <translation>Zapisano %1</translation>
+    </message>
+    <message>
+        <source>Could not save %1</source>
+        <translation>Nie udało się zapisać %1</translation>
+    </message>
 </context>
 <context>
     <name>VideoView</name>
@@ -3872,26 +3904,6 @@ Dopasować rozdzielczość napisów do wideo?</translation>
     <message>
         <source>Display aspect ratio (width / height)</source>
         <translation>Proporcje wyświetlania (szerokość / wysokość)</translation>
-    </message>
-    <message>
-        <source>Save frame</source>
-        <translation>Zapisz klatkę</translation>
-    </message>
-    <message>
-        <source>Save frame with subtitles as PNG</source>
-        <translation>Zapisz klatkę z napisami jako PNG</translation>
-    </message>
-    <message>
-        <source>Copy frame with subtitles to clipboard</source>
-        <translation>Kopiuj klatkę z napisami do schowka</translation>
-    </message>
-    <message>
-        <source>Save frame as PNG</source>
-        <translation>Zapisz klatkę jako PNG</translation>
-    </message>
-    <message>
-        <source>Copy frame to clipboard</source>
-        <translation>Kopiuj klatkę do schowka</translation>
     </message>
     <message>
         <source>Remove video</source>

@@ -171,7 +171,9 @@ public:
     int playOn() const;
     VisualTools *tools() const { return m_tools; }
     VideoView *view() const { return m_view; }
-    QImage grabFrame(bool withSubs);
+    enum Grab { Raw, WithSubs, SubsOnly }; // SubsOnly: on a transparent picture (Aegisub)
+    QImage grabFrame(Grab mode);
+    void saveFrame(Grab mode); // beside the video, <name>_NNN_<frame>.png (Aegisub, Kainote)
 
 signals:
     void opened();
