@@ -1186,8 +1186,9 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     auto *sb = new QVBoxLayout;
     auto *sNew = new QPushButton(tr("New"), this), *sCopy = new QPushButton(tr("Copy"), this),
          *sEdit = new QPushButton(tr("Edit"), this), *sDel = new QPushButton(tr("Delete"), this),
-         *sSort = new QPushButton(tr("Sort"), this);
-    for (auto *b : {sNew, sCopy, sEdit, sDel, sSort}) sb->addWidget(b);
+         *sSort = new QPushButton(tr("Sort"), this), *sImport = new QPushButton(tr("Import..."), this);
+    sImport->setToolTip(tr("Import styles from a subtitle file into the catalog"));
+    for (auto *b : {sNew, sCopy, sEdit, sDel, sSort, sImport}) sb->addWidget(b);
     sb->addStretch();
     g->addLayout(sb, 2, 1);
     auto *mid = new QHBoxLayout;
@@ -1343,8 +1344,9 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         session().reorder_styles({order.data(), order.size()});
         edited();
     });
-    // Aegisub's "Import from script": pick styles of another file, asking before overwriting
-    connect(fImport, &QPushButton::clicked, this, [=, this] {
+    // Aegisub's "Import from script": pick styles of another file, asking before overwriting;
+    // Kainote's "Load" does the same for the catalog
+    const auto importStyles = [=, this](bool storage) {
         const QString path = QFileDialog::getOpenFileName(this, tr("Import styles"),
                                                           QSettings().value("main/lastDir").toString(),
                                                           tr("ASS/SSA subtitles (*.ass *.ssa);;All files (*)"));
@@ -1376,11 +1378,14 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         std::vector<fsb::StyleData> picked;
         for (int r = 0; r < list->count(); ++r)
             if (list->item(r)->isSelected()) picked.push_back(styles[size_t(r)]);
+        if (storage) return addToStorage(picked);
         const auto chosen = askOverwrite(picked, namesOf(session().styles()));
         if (chosen.empty()) return;
         session().add_styles({chosen.data(), chosen.size()});
         edited();
-    });
+    };
+    connect(fImport, &QPushButton::clicked, this, [importStyles] { importStyles(false); });
+    connect(sImport, &QPushButton::clicked, this, [importStyles] { importStyles(true); });
     connect(toStore, &QPushButton::clicked, this, [=, this] {
         const auto styles = session().styles();
         std::vector<fsb::StyleData> picked;

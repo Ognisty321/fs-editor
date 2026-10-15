@@ -3444,6 +3444,10 @@ do czasu audio</translation>
         <translation>Importuj...</translation>
     </message>
     <message>
+        <source>Import styles from a subtitle file into the catalog</source>
+        <translation>Importuj style z pliku napisów do katalogu</translation>
+    </message>
+    <message>
         <source>Delete unused styles</source>
         <translation>Usuń nieużywane style</translation>
     </message>
