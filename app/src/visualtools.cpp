@@ -9,6 +9,7 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -219,11 +220,60 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     vh->addWidget(invert);
     m_shapeBox = new QComboBox(vec);
     m_shapeBox->setToolTip(tr("Ready shape: pick one, then drag a rectangle on the video (Shift keeps it square)"));
-    m_shapeBox->addItem(tr("Shape..."));
-    for (auto [name, path] : kShapes) m_shapeBox->addItem(tr(name), QString(path));
+    // the ready shapes, then the saved ones by name
+    const int ready = 1 + int(std::size(kShapes));
+    auto fill = [this] {
+        m_shapeBox->clear();
+        m_shapeBox->addItem(tr("Shape..."));
+        for (auto [name, path] : kShapes) m_shapeBox->addItem(tr(name), QString(path));
+        const QVariantMap own = QSettings().value("visual/shapes").toMap();
+        for (auto it = own.begin(); it != own.end(); ++it) m_shapeBox->addItem(it.key(), it.value());
+    };
+    fill();
+    auto *keep = new QToolButton(vec), *drop = new QToolButton(vec);
+    connect(m_shapeBox, &QComboBox::currentIndexChanged, this, [drop, ready](int k) {
+        QSettings().setValue("visual/shape", k);
+        drop->setEnabled(k >= ready);
+    });
     m_shapeBox->setCurrentIndex(QSettings().value("visual/shape", 0).toInt());
-    connect(m_shapeBox, &QComboBox::currentIndexChanged, this, [](int k) { QSettings().setValue("visual/shape", k); });
+    drop->setEnabled(m_shapeBox->currentIndex() >= ready);
     vh->addWidget(m_shapeBox);
+    // Kainote's "Get shape from line": the line's drawing (or vector clip) joins the shapes, fitted
+    // into the same 0..100 box with its proportions kept
+    keep->setIcon(icon("device-floppy", QColor(0xb48cff)));
+    keep->setToolTip(tr("Save the line's drawing as a shape"));
+    keep->setAutoRaise(true);
+    vh->addWidget(keep);
+    connect(keep, &QToolButton::clicked, this, [this, fill, ready] {
+        const QRectF r = m_vec.bounds();
+        if (!m_valid || m_vec.cmds.empty() || std::max(r.width(), r.height()) <= 0) return;
+        bool ok = false;
+        const QString name =
+            QInputDialog::getText(m_box, tr("Save shape"), tr("Shape name:"), QLineEdit::Normal, {}, &ok).trimmed();
+        if (!ok || name.isEmpty()) return;
+        Drawing d = m_vec;
+        d.translate(-r.topLeft());
+        for (auto &c : d.cmds)
+            for (QPointF &q : c.pts) q *= 100 / std::max(r.width(), r.height());
+        QSettings st;
+        QVariantMap own = st.value("visual/shapes").toMap();
+        own[name] = d.toString();
+        st.setValue("visual/shapes", own);
+        fill();
+        m_shapeBox->setCurrentIndex(ready + int(std::distance(own.begin(), own.find(name))));
+    });
+    drop->setIcon(icon("trash", QColor(0xf2665c)));
+    drop->setToolTip(tr("Remove the saved shape"));
+    drop->setAutoRaise(true);
+    vh->addWidget(drop);
+    connect(drop, &QToolButton::clicked, this, [this, fill, ready] {
+        if (m_shapeBox->currentIndex() < ready) return;
+        QSettings st;
+        QVariantMap own = st.value("visual/shapes").toMap();
+        own.remove(m_shapeBox->currentText());
+        st.setValue("visual/shapes", own);
+        fill(); // back on "Shape..."
+    });
     vh->addStretch();
     // \pos / \move tools: Aegisub's "Toggle between \move and \pos" for the selected lines
     auto *drag = new QWidget(m_sub);
@@ -337,16 +387,20 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
                                           QSizePolicy::Preferred);
     });
     emit m_sub->currentChanged(0);
-    h->addWidget(m_sub, 1);
+    m_sub->hide(); // the pointer has no options
+    h->addStretch();
     m_invert = invert;
     return row;
 }
+
+QWidget *VisualTools::options() const { return m_sub; }
 
 void VisualTools::setTool(int t) {
     m_tool = t;
     if (t < int(m_buttons.size())) m_buttons[t]->setChecked(true);
     if (m_sub) {
         m_sub->setCurrentIndex(t == VClip || t == Draw || t == RClip ? 1 : t == Pos || t == Move ? 2 : t == Shifter ? 3 : t == AllTags ? 4 : t == Scale ? 5 : t == RotZ ? 6 : 0);
+        m_sub->setVisible(m_sub->currentIndex() != 0);
         m_invert->setVisible(t == VClip || t == RClip);
         for (auto *b : m_sub->widget(1)->findChildren<QToolButton *>())
             if (b != m_invert) b->setVisible(t != RClip);

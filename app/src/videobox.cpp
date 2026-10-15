@@ -477,8 +477,11 @@ VideoBox::VideoBox(TabPanel *tab) : QWidget(tab), m_tab(tab), m_media(std::make_
 
     m_tools = new VisualTools(this);
     m_toolRow = new QWidget(this);
-    auto *tr_ = new QHBoxLayout(m_toolRow);
-    tr_->setContentsMargins(2, 0, 2, 0);
+    auto *rows = new QVBoxLayout(m_toolRow);
+    rows->setContentsMargins(2, 0, 2, 0);
+    rows->setSpacing(0);
+    auto *tr_ = new QHBoxLayout;
+    rows->addLayout(tr_);
     tr_->addWidget(m_tools->toolRow(m_toolRow), 1);
     m_seekOn = new QComboBox(m_toolRow);
     m_seekOn->setToolTip(tr("Move video to selected line on:"));
@@ -497,6 +500,9 @@ VideoBox::VideoBox(TabPanel *tab) : QWidget(tab), m_tab(tab), m_media(std::make_
     for (auto *c : {m_seekOn, m_playOn}) c->setMinimumWidth(10 * c->fontMetrics().averageCharWidth());
     tr_->addWidget(m_playOn); // Kainote order: play mode, then seek mode
     tr_->addWidget(m_seekOn);
+    // the tool's options below, like Aegisub's sub-toolbar: one row next to the modes did not fit
+    // a video in the default layout
+    rows->addWidget(m_tools->options());
     v->addWidget(m_toolRow);
 
     m_timer = new QTimer(this);

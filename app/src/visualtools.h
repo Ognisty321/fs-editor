@@ -45,7 +45,8 @@ public:
     explicit VisualTools(VideoBox *box);
     int tool() const { return m_tool; }
     void setTool(int t);
-    QWidget *toolRow(QWidget *parent); // tool buttons + sub-toolbar
+    QWidget *toolRow(QWidget *parent); // tool buttons
+    QWidget *options() const; // the tool's own options, a row of its own (made by toolRow)
 
     void reload(); // active line changed or edited
     void paint(QPainter &p);

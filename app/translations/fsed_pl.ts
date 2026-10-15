@@ -3593,6 +3593,22 @@ Dopasować rozdzielczość napisów do wideo?</translation>
         <translation>Kształt...</translation>
     </message>
     <message>
+        <source>Save the line&apos;s drawing as a shape</source>
+        <translation>Zapisz rysunek linii jako kształt</translation>
+    </message>
+    <message>
+        <source>Save shape</source>
+        <translation>Zapisz kształt</translation>
+    </message>
+    <message>
+        <source>Shape name:</source>
+        <translation>Nazwa kształtu:</translation>
+    </message>
+    <message>
+        <source>Remove the saved shape</source>
+        <translation>Usuń zapisany kształt</translation>
+    </message>
+    <message>
         <source>Toggle between \move and \pos</source>
         <translation>Przełącz między \move a \pos</translation>
     </message>
