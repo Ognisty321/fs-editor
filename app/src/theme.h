@@ -62,6 +62,8 @@ enum Role : int {
     AudioMark,
     AudioKeyframe,
     AudioCursor,
+    AudioPrevFrame, // Aegisub's previous and current video frame spans
+    AudioCurFrame,
     AudioSyllable,
     VisualHandle,
     VisualLine,

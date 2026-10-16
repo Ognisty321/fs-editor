@@ -4059,7 +4059,18 @@ bool TranslationAssistant::eventFilter(QObject *o, QEvent *e) {
     return QDialog::eventFilter(o, e);
 }
 
-StylingAssistant::StylingAssistant(QWidget *parent, TabPanel *tab) : QDialog(parent), m_tab(tab) {
+static const PanelKey kStylingKeys[] = {
+    {"styCommit", QT_TRANSLATE_NOOP("StylingAssistant", "Accept changes"), "Return"},
+    {"styPreview", QT_TRANSLATE_NOOP("StylingAssistant", "Preview changes"), "F8"},
+    {"styPrev", QT_TRANSLATE_NOOP("StylingAssistant", "Previous line"), "PgUp"},
+    {"styNext", QT_TRANSLATE_NOOP("StylingAssistant", "Next line"), "PgDown"},
+    {"styPlayVideo", QT_TRANSLATE_NOOP("StylingAssistant", "Play video"), "Home"},
+    {"styPlayAudio", QT_TRANSLATE_NOOP("StylingAssistant", "Play audio"), "End"},
+};
+
+std::span<const PanelKey> StylingAssistant::keys() { return kStylingKeys; }
+
+StylingAssistant::StylingAssistant(MainWindow *main, TabPanel *tab) : QDialog(main), m_main(main), m_tab(tab) {
     setWindowTitle(tr("Styling assistant"));
     setAttribute(Qt::WA_DeleteOnClose);
     auto *g = new QGridLayout(this);
@@ -4080,20 +4091,32 @@ StylingAssistant::StylingAssistant(QWidget *parent, TabPanel *tab) : QDialog(par
     m_seek->setChecked(QSettings().value("styling/seek", true).toBool());
     auto *playAudio = new QPushButton(tr("Play audio"), this), *playVideo = new QPushButton(tr("Play video"), this);
     for (auto *b : {playAudio, playVideo}) b->setAutoDefault(false);
+    playAudio->setEnabled(tab->audio()->hasAudio());
+    playVideo->setEnabled(tab->video()->hasVideo());
+    // Aegisub's Keys box: the keys as bound now
+    auto *keysBox = new QGroupBox(tr("Keys"), this);
+    auto *kv = new QFormLayout(keysBox);
+    for (const auto &k : kStylingKeys) {
+        const QAction *a = main->action(k.id);
+        kv->addRow(QCoreApplication::translate("StylingAssistant", k.name),
+                   new QLabel(a ? QKeySequence::listToString(a->shortcuts(), QKeySequence::NativeText) : QString(), keysBox));
+    }
+    kv->addRow(tr("Click on list"), new QLabel(tr("Select style"), keysBox));
+    kv->addRow(m_seek);
     g->addWidget(new QLabel(tr("Current line"), this), 0, 0, 1, 2);
     g->addWidget(m_text, 1, 0, 1, 2);
     g->addWidget(new QLabel(tr("Styles available"), this), 2, 0);
     g->addWidget(m_styles, 3, 0, 4, 1);
-    g->addWidget(new QLabel(tr("Set style (Enter: set and go to the next line)"), this), 2, 1);
+    g->addWidget(new QLabel(tr("Set style"), this), 2, 1);
     g->addWidget(m_name, 3, 1);
-    g->addWidget(m_seek, 4, 1);
+    g->addWidget(keysBox, 4, 1);
     auto *h = new QHBoxLayout;
     h->addWidget(playAudio);
     h->addWidget(playVideo);
     g->addLayout(h, 5, 1);
     g->setRowStretch(6, 1);
+    m_name->installEventFilter(this);
 
-    connect(m_name, &QLineEdit::returnPressed, this, [this] { commit(true); });
     connect(m_name, &QLineEdit::textChanged, this, [this](const QString &t) {
         const bool known = !m_styles->findItems(t, Qt::MatchFixedString).isEmpty();
         m_name->setStyleSheet(t.isEmpty() || known ? QString() : "background: #803030");
@@ -4107,18 +4130,39 @@ StylingAssistant::StylingAssistant(QWidget *parent, TabPanel *tab) : QDialog(par
         commit(true);
     });
     connect(m_seek, &QCheckBox::toggled, this, [](bool on) { QSettings().setValue("styling/seek", on); });
-    connect(playAudio, &QPushButton::clicked, this, [this] {
-        if (!m_tab) return;
-        const fsb::Row r = m_tab->s().row(size_t(m_tab->active()));
-        m_tab->audio()->play(r.start, r.end);
-        m_name->setFocus();
-    });
-    connect(playVideo, &QPushButton::clicked, this, [this] {
-        if (m_tab) m_tab->playLine(m_tab->active());
-        m_name->setFocus();
-    });
+    connect(playAudio, &QPushButton::clicked, this, [this] { runCommand("styPlayAudio"); });
+    connect(playVideo, &QPushButton::clicked, this, [this] { runCommand("styPlayVideo"); });
     connect(tab, &TabPanel::activeChanged, this, &StylingAssistant::lineChanged);
     lineChanged();
+}
+
+void StylingAssistant::runCommand(const QString &id) {
+    if (!m_tab || m_tab->active() < 0) {
+        close();
+        return;
+    }
+    const int row = m_tab->active();
+    if (id == "styCommit") commit(true);
+    else if (id == "styPreview") commit(false);
+    else if (id == "styPrev" && row > 0) m_tab->setActive(row - 1);
+    else if (id == "styNext" && size_t(row + 1) < m_tab->s().row_count()) m_tab->setActive(row + 1);
+    else if (id == "styPlayVideo") m_tab->playLine(row);
+    else if (id == "styPlayAudio") {
+        const fsb::Row r = m_tab->s().row(size_t(row));
+        m_tab->audio()->play(r.start, r.end);
+    }
+    if (isVisible()) m_name->setFocus();
+}
+
+bool StylingAssistant::eventFilter(QObject *o, QEvent *e) {
+    if (o == m_name && (e->type() == QEvent::KeyPress || e->type() == QEvent::ShortcutOverride)) {
+        if (const char *id = m_main->panelCommand(static_cast<QKeyEvent *>(e), keys())) {
+            e->accept();
+            if (e->type() == QEvent::KeyPress) runCommand(id);
+            return true;
+        }
+    }
+    return QDialog::eventFilter(o, e);
 }
 
 void StylingAssistant::lineChanged() {

@@ -342,11 +342,17 @@ private:
 class StylingAssistant : public QDialog {
     Q_OBJECT
 public:
-    StylingAssistant(QWidget *parent, TabPanel *tab);
+    StylingAssistant(MainWindow *main, TabPanel *tab);
+    static std::span<const struct PanelKey> keys(); // its own keys (Aegisub's Styling Assistant)
+    void runCommand(const QString &id);
+
+protected:
+    bool eventFilter(QObject *o, QEvent *e) override;
 
 private:
     void lineChanged();
     void commit(bool next);
+    MainWindow *m_main;
     QPointer<TabPanel> m_tab;
     QPlainTextEdit *m_text;
     QListWidget *m_styles;

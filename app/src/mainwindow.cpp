@@ -1776,8 +1776,13 @@ void MainWindow::buildMenus() {
         if (tab()->s().row_count()) (new KanjiTimerDialog(this, tab()))->show();
     });
     add("stylingAssistant", tr("Styling assistant..."), {}, subs, [=, this] {
+        if (auto *d = findChild<StylingAssistant *>()) return d->raise(), d->activateWindow();
         if (tab()->s().row_count()) (new StylingAssistant(this, tab()))->show();
     });
+    panelKeys(sub(subs, tr("Styling assistant keys")), StylingAssistant::keys(), "StylingAssistant",
+              [=, this](const char *id) {
+                  if (auto *d = findChild<StylingAssistant *>()) d->runCommand(id);
+              });
     // Aegisub's tool/translation_assistant, one at a time; its keys run in it while it is open
     add("translationAssistant", tr("Translation assistant..."), {}, subs, [=, this] {
         if (auto *d = findChild<TranslationAssistant *>()) return d->raise(), d->activateWindow();

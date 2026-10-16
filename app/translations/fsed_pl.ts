@@ -571,6 +571,14 @@
         <translation>Klatki</translation>
     </message>
     <message>
+        <source>Show original</source>
+        <translation>Pokaż oryginał</translation>
+    </message>
+    <message>
+        <source>Show the contents of the subtitle line when it was first selected above the edit box. This is sometimes useful when editing subtitles or translating subtitles into another language.</source>
+        <translation>Pokazuje nad polem edycji treść linii z chwili, gdy została zaznaczona po raz pierwszy. Przydaje się przy poprawianiu napisów albo tłumaczeniu ich na inny język.</translation>
+    </message>
+    <message>
         <source>Turning translation mode off deletes the original text. Continue?</source>
         <translation>Wyłączenie trybu tłumacza usunie tekst oryginału. Kontynuować?</translation>
     </message>
@@ -717,6 +725,14 @@
     <message>
         <source>Insert original</source>
         <translation>Wstaw oryginał</translation>
+    </message>
+    <message>
+        <source>Clear</source>
+        <translation>Wyczyść</translation>
+    </message>
+    <message>
+        <source>Clear text</source>
+        <translation>Wyczyść tekst</translation>
     </message>
     <message>
         <source>No unconfirmed lines found</source>
@@ -2090,6 +2106,10 @@ Macierz kolorów: %12</translation>
     <message>
         <source>Show toolbar</source>
         <translation>Pokaż pasek narzędzi</translation>
+    </message>
+    <message>
+        <source>Styling assistant keys</source>
+        <translation>Klawisze asystenta stylów</translation>
     </message>
     <message>
         <source>Translation assistant...</source>
@@ -5201,8 +5221,36 @@ do czasu audio</translation>
         <translation>Odtwarzaj audio</translation>
     </message>
     <message>
+        <source>Accept changes</source>
+        <translation>Zatwierdź zmiany</translation>
+    </message>
+    <message>
+        <source>Preview changes</source>
+        <translation>Podgląd zmian</translation>
+    </message>
+    <message>
+        <source>Previous line</source>
+        <translation>Poprzednia linijka</translation>
+    </message>
+    <message>
+        <source>Next line</source>
+        <translation>Następna linijka</translation>
+    </message>
+    <message>
         <source>Play video</source>
         <translation>Odtwarzaj wideo</translation>
+    </message>
+    <message>
+        <source>Keys</source>
+        <translation>Klawisze</translation>
+    </message>
+    <message>
+        <source>Click on list</source>
+        <translation>Kliknięcie na liście</translation>
+    </message>
+    <message>
+        <source>Select style</source>
+        <translation>Wybiera styl</translation>
     </message>
     <message>
         <source>Current line</source>
@@ -5213,8 +5261,8 @@ do czasu audio</translation>
         <translation>Dostępne style</translation>
     </message>
     <message>
-        <source>Set style (Enter: set and go to the next line)</source>
-        <translation>Ustaw styl (Enter: ustaw i przejdź do następnej linijki)</translation>
+        <source>Set style</source>
+        <translation>Ustaw styl</translation>
     </message>
 </context>
 <context>
@@ -6805,6 +6853,14 @@ albo nie trwa wcale</translation>
     <message>
         <source>Play cursor</source>
         <translation>Kursor odtwarzania</translation>
+    </message>
+    <message>
+        <source>Previous frame range</source>
+        <translation>Zakres poprzedniej klatki</translation>
+    </message>
+    <message>
+        <source>Current frame range</source>
+        <translation>Zakres bieżącej klatki</translation>
     </message>
     <message>
         <source>Syllable boundaries</source>

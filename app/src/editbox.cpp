@@ -797,6 +797,10 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     m_timeRadio = new QRadioButton(tr("Time"), this);
     m_frameRadio = new QRadioButton(tr("Frames"), this);
     m_timeRadio->setChecked(true);
+    m_showInitial = new QCheckBox(tr("Show original"), this);
+    m_showInitial->setToolTip(tr("Show the contents of the subtitle line when it was first selected above the edit "
+                                 "box. This is sometimes useful when editing subtitles or translating subtitles into "
+                                 "another language."));
     for (QWidget *w : {static_cast<QWidget *>(m_lineLabel), static_cast<QWidget *>(m_wrapsLabel),
                        static_cast<QWidget *>(m_cpsLabel)})
         info->addWidget(w);
@@ -804,6 +808,7 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     info->addWidget(m_tlMode);
     info->addWidget(m_timeRadio);
     info->addWidget(m_frameRadio);
+    info->addWidget(m_showInitial);
     info->addStretch();
     v->addLayout(info);
     connect(m_tlMode, &QCheckBox::clicked, this, [this](bool on) {
@@ -853,9 +858,30 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     connect(m_doubtful, &QCheckBox::clicked, this, [this] { commit("doubtful"); });
     connect(m_original, &QPlainTextEdit::textChanged, this, [this] { commit("original"); });
 
+    m_initialView = new QPlainTextEdit(this);
+    m_initialView->setReadOnly(true);
+    m_initialView->setFont(QSettings().value("edit/font", m_initialView->font()).value<QFont>());
+    v->addWidget(m_initialView, 1);
     m_text = new SubsTextEdit(this);
     m_text->setFont(QSettings().value("edit/font", m_text->font()).value<QFont>());
     v->addWidget(m_text, 2);
+    m_initialButtons = new QWidget(this);
+    auto *ib = new QHBoxLayout(m_initialButtons);
+    ib->setContentsMargins(0, 0, 0, 0);
+    for (const char *id : {"editRevert", "editClear", "editClearText", "editInsertOriginal"}) {
+        const auto k = std::ranges::find_if(keys(), [id](const PanelKey &p) { return qstrcmp(p.id, id) == 0; });
+        auto *b = new QPushButton(tr(k->name), m_initialButtons);
+        ib->addWidget(b);
+        connect(b, &QPushButton::clicked, this, [this, id] { runCommand(id); });
+    }
+    ib->addStretch();
+    v->addWidget(m_initialButtons);
+    connect(m_showInitial, &QCheckBox::toggled, this, [this](bool on) {
+        QSettings().setValue("edit/showOriginal", on);
+        m_initialView->setPlainText(m_initial);
+        m_initialView->setVisible(on);
+        m_initialButtons->setVisible(on);
+    });
     connect(m_text, &QPlainTextEdit::textChanged, this, [this] { commit("text"); });
     for (auto *e : {m_text, m_original})
         connect(e->document(), &QTextDocument::contentsChange, this, [this](int pos, int removed, int added) {
@@ -962,6 +988,9 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
         m_tab->main()->editStyle(m_style->currentText());
     });
     m_tlBox->setVisible(false);
+    m_showInitial->setChecked(QSettings().value("edit/showOriginal", false).toBool());
+    m_initialView->setVisible(m_showInitial->isChecked());
+    m_initialButtons->setVisible(m_showInitial->isChecked());
 }
 
 bool EditBox::eventFilter(QObject *o, QEvent *e) {
@@ -1114,7 +1143,10 @@ void EditBox::load(int row) {
     const bool moved = row != m_row;
     m_row = row;
     reload();
-    if (moved && m_row >= 0) m_initial = fs::q(m_tab->s().row(size_t(m_row)).text);
+    if (moved) {
+        m_initial = m_row >= 0 ? fs::q(m_tab->s().row(size_t(m_row)).text) : QString();
+        if (m_showInitial->isChecked()) m_initialView->setPlainText(m_initial);
+    }
 }
 
 void EditBox::updateTextInfo() {
@@ -1369,6 +1401,9 @@ static const PanelKey kEditKeys[] = {
     {"editSplitVideo", QT_TRANSLATE_NOOP("EditBox", "Split at cursor (at video frame)"), ""},
     {"editRevert", QT_TRANSLATE_NOOP("EditBox", "Revert"), ""},
     {"editInsertOriginal", QT_TRANSLATE_NOOP("EditBox", "Insert original"), ""},
+    // Aegisub's edit/clear and edit/clear/text
+    {"editClear", QT_TRANSLATE_NOOP("EditBox", "Clear"), ""},
+    {"editClearText", QT_TRANSLATE_NOOP("EditBox", "Clear text"), ""},
 };
 
 std::span<const PanelKey> EditBox::keys() { return kEditKeys; }
@@ -1419,6 +1454,10 @@ void EditBox::runCommand(const QString &id, SubsTextEdit *e) {
         emit m_text->revertRequested();
     } else if (id == "editInsertOriginal") {
         emit m_text->insertOriginalRequested();
+    } else if (id == "editClear") {
+        m_text->setText({});
+    } else if (id == "editClearText") {
+        m_text->setText(fs::q(fsb::without_plain_text(fs::Utf8(m_text->text()))));
     } else if (id == "editCommit") {
         // the text is applied as it is typed: what follows is an undo step of its own, and the
         // audio's selection goes to the line

@@ -285,6 +285,9 @@ void VideoView::mouseReleaseEvent(QMouseEvent *e) {
 }
 
 void VideoView::mouseDoubleClickEvent(QMouseEvent *e) {
+    // full screen is left (Kainote); else the cross puts the lines there (Aegisub), or with no line goes full screen
+    const bool pointer = m_box->m_tools->tool() == VisualTools::Pointer && e->button() == Qt::LeftButton;
+    if (pointer && m_box->isFullScreen()) return m_box->setFullscreen(false);
     if (m_box->m_tools->doubleClick(e)) return updateOverlay();
     if (m_box->m_tools->tool() == VisualTools::Pointer && e->button() == Qt::LeftButton)
         m_box->setFullscreen(!m_box->isFullScreen());

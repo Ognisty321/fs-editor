@@ -295,6 +295,14 @@ int main(int argc, char **argv) {
                         QKeyEvent e(QEvent::KeyPress, k[i].key(), k[i].keyboardModifiers()); // "F, Esc": in turn
                         QApplication::sendEvent(view, &e);
                     }
+                // FSED_SMOKE_DBLCLICK="x,y": a left double-click on the video, in view fractions
+                if (const QStringList d = qEnvironmentVariable("FSED_SMOKE_DBLCLICK").split(','); d.size() == 2) {
+                    QWidget *view = w.current()->video()->view();
+                    const QPointF p(d[0].toDouble() * view->width(), d[1].toDouble() * view->height());
+                    QMouseEvent e(QEvent::MouseButtonDblClick, p, view->mapToGlobal(p), Qt::LeftButton,
+                                  Qt::LeftButton, Qt::NoModifier);
+                    QApplication::sendEvent(view, &e);
+                }
                 // FSED_SMOKE_DRAG="x1,y1,x2,y2": a left-button drag on the video, in view fractions 0..1;
                 // "x1,y1,x2,y2,z" zooms in a step first; "...;x1,y1,x2,y2" drags again; more pairs drag
                 // through each point

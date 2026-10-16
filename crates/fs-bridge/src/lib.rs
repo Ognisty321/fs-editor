@@ -912,6 +912,8 @@ pub mod ffi {
         fn fmt_time(ms: i64) -> String;
         fn parse_time(s: &str) -> i64;
         fn strip_tags(s: &str) -> String;
+        /// The text with only its override blocks, comments and drawings (Aegisub's Clear Text).
+        fn without_plain_text(s: &str) -> String;
         /// The line's text to translate as UTF-16 start and length pairs: its plain text
         /// blocks, without tags, comments, drawings or blocks of only whitespace.
         fn translatable_blocks(text: &str) -> Vec<u32>;
@@ -1250,6 +1252,10 @@ fn translatable_blocks(text: &str) -> Vec<u32> {
 
 fn strip_tags(s: &str) -> String {
     fs_core::tags::strip_tags(s)
+}
+
+fn without_plain_text(s: &str) -> String {
+    fs_core::tags::without_plain_text(s)
 }
 
 fn load_keyframes(path: &str) -> Result<Vec<i64>, String> {

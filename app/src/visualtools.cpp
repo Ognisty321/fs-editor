@@ -1006,8 +1006,16 @@ void VisualTools::paint(QPainter &p) {
         if (!d.contains(m)) return;
         line(p, {d.left(), m.y()}, {d.right(), m.y()}, QColor(255, 255, 255, 120), Qt::DashLine);
         line(p, {m.x(), d.top()}, {m.x(), d.bottom()}, QColor(255, 255, 255, 120), Qt::DashLine);
-        const QPointF sp = s(m);
-        const QString t = QString("%1, %2").arg(qRound(sp.x())).arg(qRound(sp.y()));
+        // Aegisub's cross: Shift reads from the right and bottom edges, and a video shown bigger than
+        // the script's resolution gets three decimals
+        const bool fromEnd = QApplication::keyboardModifiers() & Qt::ShiftModifier;
+        const QPointF sp = s(fromEnd ? d.topLeft() + d.bottomRight() - m : m);
+        const bool fine = d.width() > s(d.bottomRight()).x() - s(d.topLeft()).x();
+        const auto num = [fine](double v) {
+            const double r = fine ? std::round(v * 1000) / 1000 : std::round(v);
+            return QString::number(r == 0 ? 0.0 : r, 'g', 12);
+        };
+        const QString t = QString("%1, %2").arg(num(sp.x()), num(sp.y()));
         p.setPen(kShadow);
         p.drawText(m + QPointF(9, -7), t);
         p.setPen(handleColor());
@@ -1828,7 +1836,9 @@ bool VisualTools::wheel(QWheelEvent *e) {
 // Aegisub's drag tool: a double-click puts the active line there, the other selected lines go
 // along by as much.
 bool VisualTools::doubleClick(QMouseEvent *e) {
-    if ((m_tool != Pos && m_tool != Move) || e->button() != Qt::LeftButton || !shown()) return false;
+    // the cross moves the active line there wherever it is, the other selected lines by as much (Aegisub)
+    const bool ok = m_tool == Pointer ? m_valid : (m_tool == Pos || m_tool == Move) && shown();
+    if (!ok || e->button() != Qt::LeftButton) return false;
     m_amend = QString("visual-%1").arg(++m_dragId);
     applyPos(s(e->position()));
     reload();

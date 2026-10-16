@@ -506,6 +506,13 @@ pub fn strip_tags(text: &str) -> String {
     s
 }
 
+/// The text without its plain text: override blocks, comments and drawings kept (Aegisub's edit/clear/text).
+pub fn without_plain_text(text: &str) -> String {
+    let mut line = Line::parse(text);
+    line.blocks.retain(|b| !matches!(b, Block::Text(_)));
+    line.to_text()
+}
+
 /// Byte ranges of what is inside the closed `{...}` blocks: what [`strip_tags`] removes.
 pub fn block_spans(text: &str) -> Vec<std::ops::Range<usize>> {
     let mut out = Vec::new();
@@ -972,6 +979,15 @@ mod tests {
         assert_eq!(d.len(), 5);
         assert_eq!(write_drawing(&d), "m 0 0 l 100 0 100 100 b 1 2 3 4 5 6 c");
         assert_eq!(drawing_bounds(&d), Some((0.0, 0.0, 100.0, 100.0)));
+    }
+
+    #[test]
+    fn clearing_plain_text() {
+        assert_eq!(
+            without_plain_text(r"{\b1}Hel{x}lo\N{\p1}m 0 0 l 1 1{\p0}x"),
+            r"{\b1}{x}{\p1}m 0 0 l 1 1{\p0}"
+        );
+        assert_eq!(without_plain_text("plain"), "");
     }
 
     #[test]

@@ -158,6 +158,10 @@ private:
     QRadioButton *m_timeRadio, *m_frameRadio;
     QWidget *m_tlBox;
     SubsTextEdit *m_original, *m_text;
+    // Aegisub's Show Original: the line's text when it became active, above the text, with its buttons
+    QCheckBox *m_showInitial;
+    QPlainTextEdit *m_initialView;
+    QWidget *m_initialButtons;
     QCheckBox *m_hideOriginal, *m_doubtful, *m_movingTags;
     QCheckBox *m_comment;
     QSpinBox *m_layer, *m_ml, *m_mr, *m_mv;

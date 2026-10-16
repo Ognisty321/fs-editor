@@ -249,6 +249,18 @@ void AudioView::paintOverlay(QPainter &p) {
         p.setPen(QColor(230, 230, 230));
         p.drawText(QRect(tx, ty, tw, 15), Qt::AlignCenter, at);
     }
+    // the video's previous and current frame, as Aegisub shades them with the video position
+    if (video->hasVideo() && st.value("audio/drawVideoPosition", true).toBool()) {
+        const qint64 f = video->frame();
+        const qint64 t0 = video->timeAt(f - 1), t1 = video->timeAt(f), t2 = video->timeAt(f + 1);
+        const auto shade = [&](qint64 from, qint64 to, theme::Role role) {
+            if (to < l || from > r) return;
+            const int x0 = b.xOf(from);
+            p.fillRect(x0, RulerH, std::max(1, b.xOf(to) - x0), h - RulerH, col(role));
+        };
+        if (f > 0) shade(t0, t1, theme::AudioPrevFrame);
+        shade(t1, t2, theme::AudioCurFrame);
+    }
     // play cursor or video position
     const qint64 cur = b.playing()                                                               ? b.positionMs()
                        : video->hasVideo() && st.value("audio/drawVideoPosition", true).toBool() ? video->time()
