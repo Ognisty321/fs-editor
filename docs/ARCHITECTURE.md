@@ -170,7 +170,7 @@ Kodowanie: UTF-8/UTF-16 z BOM jest rozpoznawane deterministycznie, w pozostałyc
 * **`fs-audio` (Rust)**
   * cache szczytów min/max per piksel w kilku poziomach zoomu (waveform). Sumy |x| poziomu są dzielone przez 4^poziom, więc mieszczą się w `u32` na każdym poziomie. Dekodowane PCM trafia od razu do współdzielonego `Arc<[i16]>`, bez drugiej kopii ścieżki. Puste audio (2h30m jak w Aegisub) ma 1 kHz: 18 MB zamiast 800;
   * spektrogram: STFT przez `realfft` (okno Hanna, rozmiar 2^n zależny od zoomu), wynik w dB jako tekstury kolumnowe. Próbkowane kolumny leżą na wielokrotnościach jednego kroku dla całego widoku, więc przewinięty widok czyta kolumny z cache. Brakujące liczą się na wszystkich rdzeniach, a cache (64 MB) usuwa najdawniej czytane;
-  * odtwarzanie: `cpal` (WASAPI, ALSA/Pulse/PipeWire, CoreAudio), ring buffer, pozycja playheadu raportowana do GUI, resampling do częstotliwości urządzenia.
+  * odtwarzanie: `cpal` (WASAPI, ALSA/Pulse/PipeWire, CoreAudio), ring buffer, pozycja playheadu raportowana do GUI, resampling do częstotliwości urządzenia; urządzenie wyjścia można wybrać w ustawieniach (brakujące wraca do domyślnego).
 * **GUI**: `VideoWidget` i `AudioWidget` dziedziczą po `QRhiWidget`. Działa to na D3D11/D3D12, Vulkan i Metal, a OpenGL jest fallbackiem.
 
 ## 6. Automatyzacja (`fs-automation`)

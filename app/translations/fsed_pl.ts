@@ -3636,6 +3636,18 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Preferowane ścieżki audio</translation>
     </message>
     <message>
+        <source>Default</source>
+        <translation>Domyślne</translation>
+    </message>
+    <message>
+        <source>For audio opened after it is changed</source>
+        <translation>Dla audio otwartego po zmianie</translation>
+    </message>
+    <message>
+        <source>Audio output device</source>
+        <translation>Urządzenie wyjścia audio</translation>
+    </message>
+    <message>
         <source>Audio lead-in</source>
         <translation>Wstęp audio</translation>
     </message>

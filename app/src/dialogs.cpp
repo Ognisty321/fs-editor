@@ -1555,8 +1555,10 @@ QStringList styleCatalogs() {
     return cats;
 }
 
-// Kainote's external fonts folder: libass renders from it and the font lists show its fonts
-void applyFontsDir() {
+// Kainote's external fonts folder (libass renders from it and the font lists show its fonts) and
+// the audio output device
+void applyMediaSettings() {
+    fsb::set_audio_device(fs::Utf8(QSettings().value("audio/device").toString()));
     const QString dir = QSettings().value("fonts/externalDir").toString();
     fsb::set_fonts_dir(fs::Utf8(dir));
     static QSet<QString> added; // Qt cannot take an application font back; one left is harmless
@@ -2239,6 +2241,12 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     tracks->setToolTip(tr("Languages or parts of track names, in order of preference, separated by \";\". A file "
                           "with several audio tracks loads the first one that matches, or asks."));
     audio->addRow(tr("Preferred audio tracks"), tracks);
+    auto *device = new QComboBox(this);
+    device->addItem(tr("Default"), "");
+    for (const auto &n : fsb::audio_devices()) device->addItem(fs::q(n), fs::q(n));
+    device->setCurrentIndex(std::max(0, device->findData(st.value("audio/device", ""))));
+    device->setToolTip(tr("For audio opened after it is changed"));
+    audio->addRow(tr("Audio output device"), device);
     audio->addRow(tr("Audio lead-in"), leadIn);
     audio->addRow(tr("Audio lead-out"), leadOut);
     auto *autosave = new QSpinBox(this);
@@ -2362,7 +2370,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
           {tr("Never"), tr("When aspect ratio changes"), tr("Always")});
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(bb, &QDialogButtonBox::accepted, this,
-            [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs, trace, tracks, fontsDir,
+            [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs, trace, tracks, fontsDir, device,
              types] {
         QSettings st;
         QSettings classes(assoc::kClasses, QSettings::NativeFormat);
@@ -2384,7 +2392,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         st.setValue("audio/leadIn", leadIn->value());
         st.setValue("audio/preferredTracks", tracks->text().trimmed());
         st.setValue("fonts/externalDir", QDir::fromNativeSeparators(fontsDir->text().trimmed()));
-        applyFontsDir();
+        st.setValue("audio/device", device->currentData());
+        applyMediaSettings();
         st.setValue("audio/leadOut", leadOut->value());
         st.setValue("main/autosaveSeconds", autosave->value());
         for (auto &[k, s] : spins) st.setValue(k, s->value());

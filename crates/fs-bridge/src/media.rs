@@ -7,14 +7,29 @@ use std::sync::{Arc, RwLock};
 /// Kainote's external fonts folder: its fonts render without being installed. Read by each new
 /// renderer, so it applies to videos opened after it is set.
 static FONTS_DIR: RwLock<String> = RwLock::new(String::new());
+/// The output device audio plays on (Aegisub's and Kainote's choice), "" the system's default;
+/// for audio opened after it is set.
+static AUDIO_DEVICE: RwLock<String> = RwLock::new(String::new());
+
+fn put(lock: &RwLock<String>, v: &str) {
+    *lock.write().unwrap_or_else(|e| e.into_inner()) = v.to_string();
+}
+
+fn get(lock: &RwLock<String>) -> Option<String> {
+    let v = lock.read().unwrap_or_else(|e| e.into_inner());
+    (!v.is_empty()).then(|| v.clone())
+}
 
 pub fn set_fonts_dir(dir: &str) {
-    *FONTS_DIR.write().unwrap_or_else(|e| e.into_inner()) = dir.to_string();
+    put(&FONTS_DIR, dir);
 }
 
 fn fonts_dir() -> Option<PathBuf> {
-    let d = FONTS_DIR.read().unwrap_or_else(|e| e.into_inner());
-    (!d.is_empty()).then(|| PathBuf::from(&*d))
+    get(&FONTS_DIR).map(PathBuf::from)
+}
+
+pub fn set_audio_device(name: &str) {
+    put(&AUDIO_DEVICE, name);
 }
 
 use fs_audio::{
@@ -314,7 +329,7 @@ impl Audio {
     fn from_pcm(pcm: PcmBuffer) -> Self {
         // opening the output device takes ~200 ms (WASAPI): meanwhile build the peaks
         std::thread::scope(|sc| {
-            let player = sc.spawn(|| Player::new(pcm.clone(), None).ok());
+            let player = sc.spawn(|| Player::new(pcm.clone(), get(&AUDIO_DEVICE).as_deref()).ok());
             Audio {
                 peaks: PeakCache::new(pcm.clone()),
                 spectrum: Spectrogram::new(pcm.clone(), SpectrumConfig::default()),

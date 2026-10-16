@@ -971,6 +971,9 @@ pub mod ffi {
         ) -> Result<Box<Audio>>;
         /// Kainote's external fonts folder ("" none), for renderers made after this.
         fn set_fonts_dir(dir: &str);
+        /// The output device for audio opened after this ("" the default; one not found too).
+        fn set_audio_device(name: &str);
+        fn audio_devices() -> Vec<String>;
         /// The audio streams; empty when the file cannot be read.
         fn audio_tracks(path: &str) -> Vec<SubTrack>;
         /// The track Kainote's preferred names (";"-separated languages or title parts) pick, -1 none.
@@ -1245,6 +1248,14 @@ fn open_audio(
 
 fn set_fonts_dir(dir: &str) {
     media::set_fonts_dir(dir);
+}
+
+fn set_audio_device(name: &str) {
+    media::set_audio_device(name);
+}
+
+fn audio_devices() -> Vec<String> {
+    fs_audio::player::output_devices()
 }
 
 fn audio_tracks(path: &str) -> Vec<ffi::SubTrack> {
