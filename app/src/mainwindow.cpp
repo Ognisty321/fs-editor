@@ -512,8 +512,13 @@ void MainWindow::openFile(const QString &path, const QString &encoding) {
 
 namespace {
 void showHotkey(QAction *a) {
-    const QString key = a->shortcut().toString(QKeySequence::NativeText);
+    const QString key = QKeySequence::listToString(a->shortcuts(), QKeySequence::NativeText);
     a->setToolTip(key.isEmpty() ? a->text() : QString("%1 (%2)").arg(a->text(), key));
+}
+
+QList<QKeySequence> defaultKeys(const QAction *a) {
+    const auto k = a->property("defaultKey").value<QKeySequence>();
+    return k.isEmpty() ? QList<QKeySequence>{} : QList{k};
 }
 } // namespace
 
@@ -523,7 +528,11 @@ QAction *MainWindow::add(const QString &id, const QString &text, const QKeySeque
     a->setObjectName(id);
     if (auto it = kIcons.constFind(id); it != kIcons.cend()) a->setIcon(icon(it->first, it->second));
     a->setProperty("defaultKey", key);
-    a->setShortcut(QKeySequence(QSettings().value("hotkeys/" + id, key.toString()).toString()));
+    // any number of keys per command, as Aegisub binds them; "" when all were taken off
+    QList<QKeySequence> keys;
+    for (const QString &k : QSettings().value("hotkeys/" + id, key.toString()).toStringList())
+        if (!k.isEmpty()) keys << QKeySequence(k);
+    a->setShortcuts(keys);
     a->setShortcutContext(Qt::ApplicationShortcut);
     showHotkey(a);
     if (fn) connect(a, &QAction::triggered, this, [fn = std::move(fn)] { fn(); });
@@ -2172,38 +2181,64 @@ void MainWindow::assignHotkey(QAction *a) {
     QDialog d(this);
     d.setWindowTitle(tr("Hotkey for \"%1\"").arg(QString(a->text()).remove('&')));
     auto *v = new QVBoxLayout(&d);
-    auto *edit = new QKeySequenceEdit(a->shortcut(), &d);
-    edit->setMaximumSequenceLength(1);
-    v->addWidget(edit);
+    v->addWidget(new QLabel(tr("Each of these keys runs the command:"), &d));
+    auto *rows = new QVBoxLayout;
+    v->addLayout(rows);
+    std::vector<QKeySequenceEdit *> edits;
+    std::function<void(const QKeySequence &)> addEdit = [&](const QKeySequence &k) {
+        auto *e = new QKeySequenceEdit(k, &d);
+        e->setMaximumSequenceLength(1);
+        e->setClearButtonEnabled(true);
+        rows->addWidget(e);
+        edits.push_back(e);
+        // a free row stays last, for one more key
+        connect(e, &QKeySequenceEdit::keySequenceChanged, &d, [&, e](const QKeySequence &s) {
+            if (!s.isEmpty() && e == edits.back()) addEdit({});
+        });
+    };
+    for (const auto &k : a->shortcuts()) addEdit(k);
+    addEdit({});
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Reset, &d);
     bb->button(QDialogButtonBox::Reset)->setText(tr("Clear"));
-    connect(bb->button(QDialogButtonBox::Reset), &QPushButton::clicked, edit, &QKeySequenceEdit::clear);
+    connect(bb->button(QDialogButtonBox::Reset), &QPushButton::clicked, &d, [&] {
+        for (auto *e : edits) e->clear();
+    });
     connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
     connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
     v->addWidget(bb);
-    edit->setFocus();
-    if (d.exec() == QDialog::Accepted) setHotkey(a, edit->keySequence());
+    edits.front()->setFocus(); // a typed key replaces the first, as with one key per command
+    if (d.exec() != QDialog::Accepted) return;
+    QList<QKeySequence> keys;
+    for (auto *e : edits)
+        if (!e->keySequence().isEmpty() && !keys.contains(e->keySequence())) keys << e->keySequence();
+    setHotkey(a, keys);
 }
 
-// Takes the key over from another command after asking; a default key is not stored, so a new
-// default applies.
-bool MainWindow::setHotkey(QAction *a, const QKeySequence &key) {
+// Takes each key over from another command after asking (that one keeps its other keys); default
+// keys are not stored, so a new default applies.
+bool MainWindow::setHotkey(QAction *a, const QList<QKeySequence> &keys) {
     const auto store = [](QAction *x) {
         QSettings st;
-        if (x->shortcut() == x->property("defaultKey").value<QKeySequence>()) st.remove("hotkeys/" + x->objectName());
-        else st.setValue("hotkeys/" + x->objectName(), x->shortcut().toString());
+        QStringList l;
+        for (const auto &k : x->shortcuts()) l << k.toString();
+        if (x->shortcuts() == defaultKeys(x)) st.remove("hotkeys/" + x->objectName());
+        else if (l.isEmpty()) st.setValue("hotkeys/" + x->objectName(), QString()); // an empty list reads back as unset
+        else st.setValue("hotkeys/" + x->objectName(), l);
         showHotkey(x);
     };
-    if (!key.isEmpty())
+    for (const auto &key : keys)
         for (auto *other : std::as_const(m_actions)) {
             // the audio's keys and the window's are apart
-            if (other == a || other->shortcut() != key || other->property("context") != a->property("context")) continue;
+            if (other == a || !other->shortcuts().contains(key) || other->property("context") != a->property("context"))
+                continue;
             if (!confirm(tr("%1 is used by \"%2\". Take it over?").arg(key.toString(), QString(other->text()).remove('&'))))
                 return false;
-            other->setShortcut({});
+            auto left = other->shortcuts();
+            left.removeAll(key);
+            other->setShortcuts(left);
             store(other);
         }
-    a->setShortcut(key);
+    a->setShortcuts(keys);
     store(a);
     return true;
 }
@@ -2244,14 +2279,17 @@ void MainWindow::editHotkeys() {
         for (int i = 0; i < list->topLevelItemCount(); ++i) {
             auto *it = list->topLevelItem(i);
             auto *a = it->data(0, Qt::UserRole).value<QAction *>();
-            it->setText(2, a->shortcut().toString(QKeySequence::NativeText));
+            it->setText(2, QKeySequence::listToString(a->shortcuts(), QKeySequence::NativeText));
             QFont f = it->font(0);
-            f.setBold(a->shortcut() != a->property("defaultKey").value<QKeySequence>());
+            f.setBold(a->shortcuts() != defaultKeys(a));
             it->setFont(2, f);
         }
     };
     refresh();
-    for (int c = 0; c < 3; ++c) list->resizeColumnToContents(c);
+    // the keys stay in sight next to a long macro name
+    list->header()->setStretchLastSection(false);
+    list->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    for (int c : {1, 2}) list->header()->setSectionResizeMode(c, QHeaderView::ResizeToContents);
     connect(filter, &QLineEdit::textChanged, &d, [list](const QString &s) {
         for (int i = 0; i < list->topLevelItemCount(); ++i) {
             auto *it = list->topLevelItem(i);
@@ -2271,7 +2309,7 @@ void MainWindow::editHotkeys() {
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, &d);
     connect(bb->addButton(tr("Change..."), QDialogButtonBox::ActionRole), &QPushButton::clicked, &d, change);
     connect(bb->addButton(tr("Default"), QDialogButtonBox::ActionRole), &QPushButton::clicked, &d, [=, this] {
-        if (auto *a = current()) setHotkey(a, a->property("defaultKey").value<QKeySequence>());
+        if (auto *a = current()) setHotkey(a, defaultKeys(a));
         refresh();
     });
     connect(bb->addButton(tr("All defaults"), QDialogButtonBox::ResetRole), &QPushButton::clicked, &d, [=, this] {
@@ -2406,7 +2444,7 @@ const char *MainWindow::panelCommand(const QKeyEvent *e, std::span<const PanelKe
     for (const auto mods : {e->modifiers(), e->modifiers() & ~Qt::KeypadModifier}) {
         const QKeySequence pressed(QKeyCombination(mods, key));
         for (const auto &k : keys)
-            if (auto *a = action(k.id); a && a->shortcut() == pressed) return k.id;
+            if (auto *a = action(k.id); a && a->shortcuts().contains(pressed)) return k.id;
     }
     return nullptr;
 }

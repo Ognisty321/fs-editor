@@ -1980,6 +1980,10 @@ Macierz kolorów: %12</translation>
         <translation>Klawisze asystenta tłumaczenia</translation>
     </message>
     <message>
+        <source>Each of these keys runs the command:</source>
+        <translation>Każdy z tych klawiszy uruchamia komendę:</translation>
+    </message>
+    <message>
         <source>Automation Script referenced with unknown location specifier character.
 Location specifier found: %1
 Filename specified: %2</source>

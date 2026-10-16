@@ -191,7 +191,8 @@ int main(int argc, char **argv) {
         st.setValue("main/askSession", false);
         // FSED_SMOKE_SET="audio/spectrum=true;audio/karaoke=true"
         for (const QString &kv : qEnvironmentVariable("FSED_SMOKE_SET").split(';', Qt::SkipEmptyParts))
-            st.setValue(kv.section('=', 0, 0), kv.section('=', 1));
+            if (const QString v = kv.section('=', 1); v.contains('|')) st.setValue(kv.section('=', 0, 0), v.split('|')); // a list
+            else st.setValue(kv.section('=', 0, 0), v);
     }
     // UI language: main/language ("" follows the system), applied at startup
     const QString lang = QSettings().value("main/language").toString();

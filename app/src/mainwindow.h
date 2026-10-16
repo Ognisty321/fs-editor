@@ -74,7 +74,7 @@ private:
     void buildStatusBar();
     void buildAutomationMenu();
     void assignHotkey(QAction *a);
-    bool setHotkey(QAction *a, const QKeySequence &key);
+    bool setHotkey(QAction *a, const QList<QKeySequence> &keys);
     void editHotkeys();
     bool closeTab(int index);
     TabPanel *panel(int index) const;

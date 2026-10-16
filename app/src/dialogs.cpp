@@ -3101,7 +3101,7 @@ TranslationAssistant::TranslationAssistant(MainWindow *main, TabPanel *tab) : QD
     // the keys as bound now, with the window's Delete lines (Aegisub lists its edit/line/delete)
     const auto keyOf = [main](const char *id) {
         const QAction *a = main->action(id);
-        return a ? a->shortcut().toString(QKeySequence::NativeText) : QString();
+        return a ? QKeySequence::listToString(a->shortcuts(), QKeySequence::NativeText) : QString();
     };
     for (const auto &k : kTranslationKeys)
         kv->addRow(QCoreApplication::translate("TranslationAssistant", k.name), new QLabel(keyOf(k.id), keysBox));
