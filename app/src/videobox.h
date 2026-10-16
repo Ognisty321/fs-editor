@@ -80,6 +80,7 @@ public:
     void setZoom(QRectF uv, double shrink = 1);
     // the zoomed part moved back to the frame's centre, the zoom kept (Aegisub's video/reset_pan)
     void resetPan();
+    bool zoomed() const { return m_zoom != QRectF(0, 0, 1, 1) || m_shrink != 1; }
     // f < 1 zooms in, keeping the frame's point under the widget point at in place
     void zoomBy(double f, QPointF at);
     // the video's own pixels at that scale (Aegisub's 50/100/200%), around the view's centre
@@ -185,7 +186,7 @@ public:
     // Aegisub's detached video: the box in a window of its own; closing that window docks it back
     void setDetached(bool on);
     bool detached() const { return m_detached; }
-    void zoomMode() { m_zoomMode = true; }
+    void zoomMode(); // Kainote's: zooms in on the centre by the percent set, or turns the zoom off
     void resetZoom();
     void focusSeek();
     int seekOn() const;

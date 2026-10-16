@@ -477,6 +477,26 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
             a->setChecked(f <= m_box->frame() && (i + 1 == ch.size() || ch[i + 1].first > m_box->frame()));
         }
     }
+    // Kainote's streams: the video's audio tracks, the one heard checked, and the subtitles in it
+    if (const QString path = m_box->path(); !path.isEmpty()) {
+        const auto audio = fsb::audio_tracks(fs::Utf8(path));
+        auto *au = m_box->tab()->audio();
+        if (audio.size() > 1) {
+            auto *aMenu = m.addMenu(tr("Audio streams"));
+            for (const auto &t : audio) {
+                auto *a = aMenu->addAction(MainWindow::trackName(t), m_box, [au, path, i = t.index] { au->open(path, true, i); });
+                a->setCheckable(true);
+                a->setChecked(au->path() == path && au->track() == t.index);
+            }
+        }
+        if (const auto subs = fsb::subtitle_tracks(fs::Utf8(path)); !subs.empty()) {
+            auto *sMenu = m.addMenu(tr("Subtitle streams"));
+            for (const auto &t : subs)
+                sMenu->addAction(MainWindow::trackName(t), m_box, [mw, tab = m_box->tab(), path, i = t.index] {
+                    if (mw->maybeSave(tab)) tab->openEmbedded(path, i);
+                });
+        }
+    }
     // Aegisub's aspect ratio modes, kept in the script's Video AR Mode/Value
     auto *arMenu = m.addMenu(tr("Change aspect ratio"));
     const int cur = fs::q(m_box->tab()->s().project_value("Video AR Mode")).toInt();
@@ -643,6 +663,12 @@ VideoBox::VideoBox(TabPanel *tab) : QWidget(tab), m_tab(tab), m_media(std::make_
     auto *stop = button(m_controls, "player-stop-filled", tr("Stop"));
     auto *next = button(m_controls, "player-skip-forward", tr("Next file"));
     for (auto *b : {prev, playBtn, playLine, stop, next}) row->addWidget(b);
+    // Shift+click assigns the key of the command the button runs (Kainote)
+    prev->setProperty("command", "videoPrevFile");
+    playBtn->setProperty("command", "videoPlay");
+    playLine->setProperty("command", "playVideoLine");
+    stop->setProperty("command", "videoStop");
+    next->setProperty("command", "videoNextFile");
     connect(prev, &QToolButton::clicked, this, [this] { openSibling(-1); });
     connect(next, &QToolButton::clicked, this, [this] { openSibling(1); });
     connect(playBtn, &QToolButton::clicked, this, &VideoBox::togglePlay);
@@ -1164,6 +1190,14 @@ void VideoBox::closeEvent(QCloseEvent *e) {
 }
 
 void VideoBox::resetZoom() { m_view->setZoom({0, 0, 1, 1}); }
+
+void VideoBox::zoomMode() {
+    if (m_view->zoomed()) return resetZoom();
+    // the zoom starts at video/zoomPercent of the frame's size; a drag then picks another part
+    const double f = std::clamp(QSettings().value("video/zoomPercent", 200).toInt(), 100, 1000) / 100.0;
+    m_view->zoomBy(1 / f, m_view->displayRect().center());
+    m_zoomMode = true;
+}
 
 void VideoView::resetPan() {
     QRectF z = m_zoom;

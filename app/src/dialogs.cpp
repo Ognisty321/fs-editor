@@ -511,6 +511,8 @@ public:
 };
 } // namespace
 
+QAbstractItemDelegate *matchDelegate(QObject *parent) { return new MatchDelegate(parent); }
+
 void FindDialog::clearResults() {
     if (!m_results) {
         m_results = new QDialog(m_main);
@@ -2276,6 +2278,7 @@ PropertiesDialog::PropertiesDialog(TabPanel *tab) : QDialog(tab), m_tab(tab) {
         b->setEnabled(m_tab->video()->hasVideo());
         connect(b, &QPushButton::clicked, this, set);
         row->addWidget(b);
+        return b;
     };
     fromVideo(res, [this] {
         m_w->setValue(m_tab->video()->info().width);
@@ -2288,10 +2291,34 @@ PropertiesDialog::PropertiesDialog(TabPanel *tab) : QDialog(tab), m_tab(tab) {
     lres->addWidget(m_lw);
     lres->addWidget(new QLabel("x", this));
     lres->addWidget(m_lh);
-    fromVideo(lres, [this] {
+    auto *layoutFromVideo = fromVideo(lres, [this] {
         m_lw->setValue(m_tab->video()->info().width);
         m_lh->setValue(m_tab->video()->info().height);
     });
+    // Kainote's linked resolutions: a layout resolution set follows the script's
+    auto *link = new QToolButton(this);
+    link->setIcon(icon("link"));
+    link->setCheckable(true);
+    link->setChecked(QSettings().value("subs/linkResolutions", false).toBool());
+    link->setToolTip(tr("Link the layout resolution to the script resolution: one that is set follows it"));
+    lres->addWidget(link);
+    const auto follow = [this, link, layoutFromVideo] {
+        const bool on = link->isChecked();
+        m_lw->setEnabled(!on);
+        m_lh->setEnabled(!on);
+        layoutFromVideo->setEnabled(!on && m_tab->video()->hasVideo());
+        if (on && (m_lw->value() || m_lh->value())) {
+            m_lw->setValue(m_w->value());
+            m_lh->setValue(m_h->value());
+        }
+    };
+    follow();
+    connect(link, &QToolButton::toggled, this, [follow](bool on) {
+        QSettings().setValue("subs/linkResolutions", on);
+        follow();
+    });
+    connect(m_w, &QSpinBox::valueChanged, this, follow);
+    connect(m_h, &QSpinBox::valueChanged, this, follow);
     f->addRow(tr("Layout resolution"), lres);
     m_matrix = new QComboBox(this);
     m_matrix->addItems({"None", "TV.601", "PC.601", "TV.709", "PC.709", "TV.FCC", "PC.FCC", "TV.240M", "PC.240M"});
@@ -2821,6 +2848,12 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"subs/defaultResAuto", QT_TR_NOOP("New files use the resolution of the first video opened"), true, subs},
         {"subs/cpsIgnoreWhitespace", QT_TR_NOOP("Ignore whitespace in characters per second"), true, subs},
         {"subs/cpsIgnorePunctuation", QT_TR_NOOP("Ignore punctuation in characters per second"), true, subs},
+        {"subs/wrapsCountAll", QT_TR_NOOP("Count spaces and punctuation in the lengths of wraps"), true, subs},
+        {"grid/ctrlClickActive", QT_TR_NOOP("A line added to the selection with Ctrl becomes active"), true, subs},
+        {"audio/mergeN", QT_TR_NOOP("Automatic karaoke splitting merges every \"n\" with the syllable before"), true,
+         audio},
+        {"audio/karaokeMoveOnClick", QT_TR_NOOP("A click on a syllable next to the one picked moves their boundary"),
+         false, audio},
         {"video/openAudio", QT_TR_NOOP("Open audio together with video"), true, video},
         {"video/askResolution", QT_TR_NOOP("Ask to resample the subtitles to a video of another resolution"), true,
          video},
@@ -2931,7 +2964,9 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"find/recentCount", 20, 0, 99, editor, QT_TR_NOOP("Find and replace history entries")},
         // Kainote's max autosave files (also those of the files as opened), counted at startup
         {"main/autosaveMax", 1000, 2, 1000000, editor, QT_TR_NOOP("Autosave files kept")},
-        {"main/tabTitleChars", 40, 20, 150, editor, QT_TR_NOOP("Characters of a tab's title")}};
+        {"main/tabTitleChars", 40, 20, 150, editor, QT_TR_NOOP("Characters of a tab's title")},
+        // Kainote's start video zoom in percent
+        {"video/zoomPercent", 200, 100, 1000, video, QT_TR_NOOP("Video zoom starts at (%)")}};
     for (auto [key, def, lo, hi, form, label] : moreSpins) {
         auto *s = new QSpinBox(this);
         s->setRange(lo, hi);
@@ -2974,6 +3009,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         (form ? form : editor)->addRow(label, b);
     };
     fontButton("grid/font", QFont("Tahoma", 10), tr("Grid font (applies to new tabs)"));
+    // Kainote's program font
+    fontButton("main/programFont", QApplication::font(), tr("Program font (applies from the next start)"));
     // Aegisub's Subtitle/Edit Box/Font Face and Font Size
     fontButton("edit/font", QApplication::font(), tr("Edit box font (applies to new tabs)"));
     // Aegisub's Audio/Karaoke font
@@ -3326,6 +3363,29 @@ AutosaveDialog::AutosaveDialog(QWidget *parent) : QDialog(parent) {
     (new QVBoxLayout(versions))->addWidget(m_versions);
     h->addWidget(files);
     h->addWidget(versions);
+    // Kainote's Find files: the names with all (or any) of the words typed
+    auto *find = new QGroupBox(tr("Find files"), this);
+    auto *fh = new QHBoxLayout(find);
+    auto *words = new QLineEdit(find);
+    auto *allWords = new QCheckBox(tr("All words"), find);
+    allWords->setChecked(true);
+    fh->addWidget(words, 1);
+    fh->addWidget(allWords);
+    v->addWidget(find);
+    const auto filter = [this, words, allWords] {
+        const QStringList ws = words->text().split(' ', Qt::SkipEmptyParts);
+        int first = -1;
+        for (int i = 0; i < m_files->count(); ++i) {
+            const QString name = m_files->item(i)->text();
+            const auto has = [&name](const QString &w) { return name.contains(w, Qt::CaseInsensitive); };
+            const bool shown = ws.isEmpty() || (allWords->isChecked() ? std::ranges::all_of(ws, has) : std::ranges::any_of(ws, has));
+            m_files->item(i)->setHidden(!shown);
+            if (shown && first < 0) first = i;
+        }
+        if (!m_files->currentItem() || m_files->currentItem()->isHidden()) m_files->setCurrentRow(first);
+    };
+    connect(words, &QLineEdit::textChanged, this, filter);
+    connect(allWords, &QCheckBox::toggled, this, filter);
     v->addLayout(h, 1);
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     bb->button(QDialogButtonBox::Ok)->setText(tr("Open"));
@@ -3435,6 +3495,30 @@ SpellCheckDialog::SpellCheckDialog(MainWindow *main, TabPanel *tab) : QDialog(ma
     });
     m_remove->setEnabled(false);
     connect(m_with, &QLineEdit::textChanged, this, [this](const QString &w) { m_remove->setEnabled(spell::userWords().contains(w)); });
+    // Kainote's: the words added to the dictionary, those ticked removed
+    button(tr("Words added to dictionary..."), [this] {
+        QDialog d(this);
+        d.setWindowTitle(tr("Words added to dictionary"));
+        auto *v = new QVBoxLayout(&d);
+        auto *list = new QListWidget(&d);
+        for (const QString &w : spell::userWords()) {
+            auto *it = new QListWidgetItem(w, list);
+            it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
+            it->setCheckState(Qt::Unchecked);
+        }
+        v->addWidget(list);
+        auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+        bb->button(QDialogButtonBox::Ok)->setText(tr("Remove ticked"));
+        connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+        v->addWidget(bb);
+        if (d.exec() != QDialog::Accepted) return;
+        QStringList gone;
+        for (int i = 0; i < list->count(); ++i)
+            if (list->item(i)->checkState() == Qt::Checked) gone << list->item(i)->text();
+        spell::removeWords(gone);
+        m_remove->setEnabled(spell::userWords().contains(m_with->text()));
+    });
     buttons->addStretch();
     button(tr("Close"), [this] { close(); });
     g->addLayout(buttons, 0, 2, 6, 1);

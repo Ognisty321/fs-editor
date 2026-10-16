@@ -178,6 +178,8 @@ private:
 
 // An undo step's description as the user reads it: the core's steps translated, a macro's name as it is
 QString undoStepName(const QString &description);
+// draws the match, its item's Qt::UserRole QPoint(start, end), over the text (Kainote's results)
+class QAbstractItemDelegate *matchDelegate(QObject *parent);
 
 class HistoryDialog : public QDialog {
     Q_OBJECT

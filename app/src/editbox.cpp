@@ -208,6 +208,7 @@ Limits loadLimits() {
     QSettings st;
     fsb::set_cps_ignore(st.value("subs/cpsIgnoreWhitespace", true).toBool(),
                         st.value("subs/cpsIgnorePunctuation", true).toBool());
+    fsb::set_wraps_ignore(!st.value("subs/wrapsCountAll", true).toBool());
     return {st.value("subs/maxCps", 15).toInt(), st.value("subs/cpsError", 30).toInt(),
             st.value("subs/maxLineLength", 43).toInt(), st.value("subs/maxLines", 2).toInt()};
 }
@@ -242,9 +243,13 @@ void spell::addWord(const QString &word) {
 
 QStringList spell::userWords() { return QSettings().value("spell/user/" + g_spellLang).toStringList(); }
 
-void spell::removeWord(const QString &word) {
+void spell::removeWord(const QString &word) { removeWords({word}); }
+
+void spell::removeWords(const QStringList &gone) {
     QStringList words = userWords();
-    if (!words.removeAll(word)) return;
+    qsizetype n = 0;
+    for (const QString &w : gone) n += words.removeAll(w);
+    if (!n) return;
     QSettings().setValue("spell/user/" + g_spellLang, words);
     reload(); // a speller can't forget a word, so it is built again without it
 }
@@ -382,6 +387,14 @@ void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
         m->insertMenu(first, langMenu);
         m->insertSeparator(first);
     }
+    // Kainote's: the line under the text with its length and the cursor's place, shown or not
+    auto *bar = m->addAction(tr("Show status bar"));
+    bar->setCheckable(true);
+    bar->setChecked(QSettings().value("edit/statusBar", true).toBool());
+    connect(bar, &QAction::toggled, this, [this](bool on) {
+        QSettings().setValue("edit/statusBar", on);
+        for (auto *info : window()->findChildren<QLabel *>("textInfo")) info->setVisible(on);
+    });
     if (const QStringList langs = thesaurus::languages(); !langs.isEmpty())
         for (size_t i = 0; i + 1 < words.size(); i += 2) {
             const int s = int(words[i]), l = int(words[i + 1]);
@@ -700,6 +713,7 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
         return b;
     };
     m_fontButton = tool("F", tr("Font selection"));
+    m_fontButton->setProperty("command", "editFont");
     connect(m_fontButton, &QToolButton::clicked, this, [this] {
         // Aegisub: start from the font in effect at the cursor and set only what changed
         const auto st = lineStyle();
@@ -729,10 +743,13 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
         for (int k = 0; k < 4; ++k)
             if (now[k] != was[k]) m_text->insertTag(QString("\\%1%2").arg(QLatin1Char("bius"[k])).arg(int(now[k])));
     });
-    const char *toggles[][2] = {{"b", QT_TR_NOOP("Bold")}, {"i", QT_TR_NOOP("Italic")}, {"u", QT_TR_NOOP("Underline")},
-                                {"s", QT_TR_NOOP("Strikethrough")}};
+    const char *toggles[][3] = {{"b", QT_TR_NOOP("Bold"), "editBold"},
+                                {"i", QT_TR_NOOP("Italic"), "editItalic"},
+                                {"u", QT_TR_NOOP("Underline"), "editUnderline"},
+                                {"s", QT_TR_NOOP("Strikethrough"), "editStrikeout"}};
     for (auto &t : toggles) {
         auto *b = tool(QString(t[0]).toUpper(), tr(t[1]));
+        b->setProperty("command", t[2]);
         QFont f = b->font();
         f.setBold(t[0][0] == 'b');
         f.setItalic(t[0][0] == 'i');
@@ -747,6 +764,7 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
                            QColor(0x80, 0x80, 0x80)};
     for (int k = 0; k < 4; ++k) {
         auto *b = tool(QString(), tr(colors[k]) + QString(" (\\%1c)").arg(k + 1));
+        b->setProperty("command", QStringLiteral("editColor%1").arg(k + 1));
         QPixmap px(40, 40);
         px.fill(Qt::transparent);
         QPainter p(&px);
@@ -839,6 +857,8 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     auto *pasteAll = new QPushButton(tr("Paste all"), m_tlBox);
     m_pasteSelected = pasteSel;
     m_pasteAll = pasteAll;
+    pasteSel->setProperty("command", "editPasteSelected");
+    pasteAll->setProperty("command", "editPasteAll");
     m_hideOriginal = new QCheckBox(tr("Hide original"), m_tlBox);
     m_doubtful = new QCheckBox(tr("Not confirmed"), m_tlBox);
     m_movingTags = new QCheckBox(tr("Moving tags"), m_tlBox);
@@ -874,6 +894,7 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     for (const char *id : {"editRevert", "editClear", "editClearText", "editInsertOriginal"}) {
         const auto k = std::ranges::find_if(keys(), [id](const PanelKey &p) { return qstrcmp(p.id, id) == 0; });
         auto *b = new QPushButton(tr(k->name), m_initialButtons);
+        b->setProperty("command", id);
         ib->addWidget(b);
         connect(b, &QPushButton::clicked, this, [this, id] { runCommand(id); });
     }
@@ -898,6 +919,8 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
             m_editPos = kind == 1 ? pos + added : pos;
         });
     m_textInfo = new QLabel(this);
+    m_textInfo->setObjectName("textInfo"); // the text fields' menus show and hide it
+    m_textInfo->setVisible(QSettings().value("edit/statusBar", true).toBool());
     m_textInfo->setTextFormat(Qt::PlainText);
     v->addWidget(m_textInfo);
     connect(m_text, &QPlainTextEdit::cursorPositionChanged, this, &EditBox::updateTextInfo);
@@ -1036,6 +1059,7 @@ void EditBox::rebuildTagButtons() {
         b->setText(parts.value(0, QString("T%1").arg(k + 1)));
         b->setToolTip(parts.value(1));
         b->setAutoRaise(true);
+        if (k < 20) b->setProperty("command", QStringLiteral("editTag%1").arg(k + 1));
         b->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(b, &QToolButton::customContextMenuRequested, this, [this, k] { configureTagButton(k); });
         connect(b, &QToolButton::clicked, this, [this, parts] {
@@ -1411,7 +1435,7 @@ static const PanelKey kEditKeys[] = {
     {"editFont", QT_TRANSLATE_NOOP("EditBox", "Font selection"), ""},
     {"editPasteAll", QT_TRANSLATE_NOOP("EditBox", "Paste all to translation"), ""},
     {"editPasteSelected", QT_TRANSLATE_NOOP("EditBox", "Paste the selection to translation"), ""},
-    {"editHideOriginal", QT_TRANSLATE_NOOP("EditBox", "Hide original"), ""},
+    {"editHideOriginal", QT_TRANSLATE_NOOP("EditBox", "Hide the line's original (in braces)"), ""},
     {"editTag1", QT_TRANSLATE_NOOP("EditBox", "Tag button 1"), ""},
     {"editTag2", QT_TRANSLATE_NOOP("EditBox", "Tag button 2"), ""},
     {"editTag3", QT_TRANSLATE_NOOP("EditBox", "Tag button 3"), ""},
@@ -1487,7 +1511,12 @@ void EditBox::runCommand(const QString &id, SubsTextEdit *e) {
     } else if (id == "editPasteAll" || id == "editPasteSelected") {
         if (tl) (id == "editPasteAll" ? m_pasteAll : m_pasteSelected)->click();
     } else if (id == "editHideOriginal") {
-        if (tl) m_hideOriginal->toggle();
+        // Kainote's: the line's original put in braces, so that it does not show
+        if (const QString o = m_original->text();
+            tl && !o.isEmpty() && !(o.startsWith('{') && o.endsWith('}') && o.count('}') == 1)) {
+            m_original->setPlainText('{' + o + '}');
+            m_text->setFocus();
+        }
     } else if (id.startsWith("editTag")) {
         // the tag buttons in order; the last button of the row is "+", which adds one
         const int k = id.mid(7).toInt() - 1;

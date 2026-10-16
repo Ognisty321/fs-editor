@@ -607,8 +607,20 @@ pub struct Replace {
     pub replacement: String,
     /// Replace only the first match per line.
     pub first_only: bool,
-    /// Write each replacement in the case of its match ([`follow_case`]).
-    pub keep_case: bool,
+    /// The case each replacement is written in.
+    pub case: CaseRule,
+}
+
+/// The case of a replacement (Kainote's multireplacer options).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CaseRule {
+    /// As the replacement is written.
+    #[default]
+    Written,
+    /// In the case of its match ([`follow_case`]).
+    Follow,
+    Lower,
+    Upper,
 }
 
 /// `rep` in the case of `matched`, so a case-insensitive "sie" -> "się" turns "Sie" into
@@ -650,10 +662,11 @@ impl Replace {
             Some(c) => c.expand(rep, &mut out),
             None => out.push_str(rep),
         }
-        if self.keep_case {
-            follow_case(matched, out)
-        } else {
-            out
+        match self.case {
+            CaseRule::Written => out,
+            CaseRule::Follow => follow_case(matched, out),
+            CaseRule::Lower => out.to_lowercase(),
+            CaseRule::Upper => out.to_uppercase(),
         }
     }
 
@@ -1925,7 +1938,7 @@ mod tests {
                 matcher: m,
                 replacement: "$".into(),
                 first_only: false,
-                keep_case: false,
+                case: CaseRule::Written,
             },
         );
         assert_eq!(n, 4);
@@ -1938,7 +1951,7 @@ mod tests {
                 matcher: m,
                 replacement: "${1}!".into(),
                 first_only: true,
-                keep_case: false,
+                case: CaseRule::Written,
             },
         );
         assert_eq!(d.event(0).unwrap().text, r"{\i1}$o$ is\N{\i0}$o$");
@@ -1955,7 +1968,7 @@ mod tests {
             matcher: m,
             replacement: "$1".into(),
             first_only: false,
-            keep_case: false,
+            case: CaseRule::Written,
         };
         assert_eq!(replace(&mut d, &Rows::All, &r), 1);
         assert_eq!(d.event(0).unwrap().text, r"{\i1}$o$ is\N{\i0}$1");
@@ -1968,7 +1981,7 @@ mod tests {
             matcher: m,
             replacement: "b".into(),
             first_only: false,
-            keep_case: false,
+            case: CaseRule::Written,
         };
         assert_eq!(replace(&mut d, &Rows::All, &r), 2);
         assert_eq!(d.event(0).unwrap().text, r"{\b1}$o$ is\N{\b0}$1");
@@ -1984,7 +1997,7 @@ mod tests {
                 matcher: m,
                 replacement: with.into(),
                 first_only: false,
-                keep_case: false,
+                case: CaseRule::Written,
             };
             let (out, n) = r.apply(&r.rep(), text, 0, false);
             if n == 0 { text.to_string() } else { out }
@@ -2011,7 +2024,7 @@ mod tests {
             matcher: TextMatcher::new(r"(\w)o", true, true, Field::Text).unwrap(),
             replacement: "$1$1".into(),
             first_only: false,
-            keep_case: false,
+            case: CaseRule::Written,
         };
         assert_eq!(r.replace_one("bo go", 3..5), Some(("bo gg".into(), 5)));
         assert_eq!(r.replace_one("bo go", 2..4), None);
@@ -2022,7 +2035,7 @@ mod tests {
                 matcher: m.clone(),
                 replacement: "-".into(),
                 first_only: false,
-                keep_case: false,
+                case: CaseRule::Written,
             };
             let re = Regex::new(find).unwrap();
             assert_eq!(r.apply("-", text, 0, false).0, re.replace_all(text, "-"));
@@ -2040,7 +2053,7 @@ mod tests {
             matcher: TextMatcher::new(r"(\w+) (\w+)", true, true, Field::Text).unwrap(),
             replacement: r"{\1c&HFF&}\2\N\1".into(),
             first_only: false,
-            keep_case: false,
+            case: CaseRule::Written,
         };
         assert_eq!(r.apply(&r.rep(), "ab cd", 0, false).0, r"{\1c&HFF&}cd\Nab");
     }
@@ -2059,7 +2072,7 @@ mod tests {
             matcher: m,
             replacement: "się".into(),
             first_only: false,
-            keep_case: true,
+            case: CaseRule::Follow,
         };
         assert_eq!(replace(&mut d, &Rows::All, &r), 4);
         assert_eq!(d.event(0).unwrap().text, r"Się się SIĘ {\i1}się");

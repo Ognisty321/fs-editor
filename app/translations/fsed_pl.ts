@@ -369,6 +369,14 @@
         <translation>Wersje</translation>
     </message>
     <message>
+        <source>Find files</source>
+        <translation>Szukaj plików</translation>
+    </message>
+    <message>
+        <source>All words</source>
+        <translation>Wszystkie słowa</translation>
+    </message>
+    <message>
         <source>Open</source>
         <translation>Otwórz</translation>
     </message>
@@ -741,6 +749,10 @@
     <message>
         <source>Paste the selection to translation</source>
         <translation>Wklej zaznaczenie do tłumaczenia</translation>
+    </message>
+    <message>
+        <source>Hide the line&apos;s original (in braces)</source>
+        <translation>Ukryj oryginał linii (w nawiasach klamrowych)</translation>
     </message>
     <message>
         <source>Tag button 1</source>
@@ -1674,12 +1686,6 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Usuń pliki tymczasowe</translation>
     </message>
     <message>
-        <source>Remove the video and audio index cache in
-%1?</source>
-        <translation>Usunąć pamięć podręczną indeksów wideo i audio w
-%1?</translation>
-    </message>
-    <message>
         <source>Log</source>
         <translation>Log</translation>
     </message>
@@ -2262,6 +2268,110 @@ Macierz kolorów: %12</translation>
         <translation>Przeładowano %1</translation>
     </message>
     <message>
+        <source>Only tags</source>
+        <translation>Tylko w tagach</translation>
+    </message>
+    <message>
+        <source>Case</source>
+        <translation>Wielkość liter</translation>
+    </message>
+    <message>
+        <source>Like the match</source>
+        <translation>Jak w znalezionym</translation>
+    </message>
+    <message>
+        <source>As written</source>
+        <translation>Jak wpisano</translation>
+    </message>
+    <message>
+        <source>Lower case</source>
+        <translation>Małe litery</translation>
+    </message>
+    <message>
+        <source>Upper case</source>
+        <translation>Wielkie litery</translation>
+    </message>
+    <message>
+        <source>Lines:</source>
+        <translation>Linie:</translation>
+    </message>
+    <message>
+        <source>From the selected line</source>
+        <translation>Od zaznaczonej linii</translation>
+    </message>
+    <message>
+        <source>Lines of the styles</source>
+        <translation>Linie ze stylów</translation>
+    </message>
+    <message>
+        <source>Styles, separated by commas</source>
+        <translation>Style, oddzielone przecinkami</translation>
+    </message>
+    <message>
+        <source>Choose styles</source>
+        <translation>Wybierz style</translation>
+    </message>
+    <message>
+        <source>Line</source>
+        <translation>Linia</translation>
+    </message>
+    <message>
+        <source>Text</source>
+        <translation>Tekst</translation>
+    </message>
+    <message>
+        <source>Rule</source>
+        <translation>Reguła</translation>
+    </message>
+    <message>
+        <source>No lines to correct</source>
+        <translation>Brak linii do poprawienia</translation>
+    </message>
+    <message>
+        <source>Errors found: %1</source>
+        <translation>Znalezione błędy: %1</translation>
+    </message>
+    <message>
+        <source>Nothing found</source>
+        <translation>Nic nie znaleziono</translation>
+    </message>
+    <message>
+        <source>Find errors</source>
+        <translation>Znajdź błędy</translation>
+    </message>
+    <message>
+        <source>Find errors in all tabs</source>
+        <translation>Znajdź błędy we wszystkich kartach</translation>
+    </message>
+    <message>
+        <source>Replace in all tabs</source>
+        <translation>Zamień we wszystkich kartach</translation>
+    </message>
+    <message>
+        <source>Check all</source>
+        <translation>Zaznacz wszystko</translation>
+    </message>
+    <message>
+        <source>Uncheck all</source>
+        <translation>Odznacz wszystko</translation>
+    </message>
+    <message>
+        <source>Replace ticked</source>
+        <translation>Zamień zaznaczone</translation>
+    </message>
+    <message>
+        <source>No matches ticked</source>
+        <translation>Nie zaznaczono żadnego wyniku</translation>
+    </message>
+    <message>
+        <source>Replaced %1 of %2 matches ticked</source>
+        <translation>Zamieniono %1 z %2 zaznaczonych wyników</translation>
+    </message>
+    <message>
+        <source>; the lines changed since the search were left</source>
+        <translation>; linie zmienione od wyszukania pominięto</translation>
+    </message>
+    <message>
         <source>Edit</source>
         <translation>Edytuj</translation>
     </message>
@@ -2456,6 +2566,64 @@ Pełna ścieżka: %3</translation>
         <translation>Wszystkie pliki (*)</translation>
     </message>
     <message>
+        <source>Compare by selected styles</source>
+        <translation>Porównaj według wybranych stylów</translation>
+    </message>
+    <message>
+        <source>Files older than</source>
+        <translation>Pliki starsze niż</translation>
+    </message>
+    <message>
+        <source>Autosave files</source>
+        <translation>Pliki autozapisu</translation>
+    </message>
+    <message>
+        <source>Video and audio index files</source>
+        <translation>Pliki indeksów wideo i audio</translation>
+    </message>
+    <message>
+        <source>Backups of files replaced in</source>
+        <translation>Kopie plików, w których zamieniano</translation>
+    </message>
+    <message>
+        <source>Files removed: %1</source>
+        <translation>Usunięte pliki: %1</translation>
+    </message>
+    <message>
+        <source>Remove all files</source>
+        <translation>Usuń wszystkie pliki</translation>
+    </message>
+    <message>
+        <source>Remove all older files</source>
+        <translation>Usuń wszystkie starsze pliki</translation>
+    </message>
+    <message>
+        <source>Remove every autosave, index and backup file?</source>
+        <translation>Usunąć wszystkie pliki autozapisu, indeksów i kopii?</translation>
+    </message>
+    <message>
+        <source>Remove chosen...</source>
+        <translation>Usuń wybrane...</translation>
+    </message>
+    <message>
+        <source>Remove all</source>
+        <translation>Usuń wszystkie</translation>
+    </message>
+    <message>
+        <source>Remove older</source>
+        <translation>Usuń starsze</translation>
+    </message>
+    <message>
+        <source>Choose files to remove</source>
+        <translation>Wybierz pliki do usunięcia</translation>
+    </message>
+    <message>
+        <source>Remove every file in
+%1?</source>
+        <translation>Usunąć wszystkie pliki z
+%1?</translation>
+    </message>
+    <message>
         <source>Filters</source>
         <translation>Filtry</translation>
     </message>
@@ -2496,6 +2664,10 @@ Można nim też dopasować napisy do wideo o innej prędkości, np. przy przyspi
     <message>
         <source>Select &amp;None</source>
         <translation>&amp;Odznacz wszystkie</translation>
+    </message>
+    <message>
+        <source>Remove temporary files...</source>
+        <translation>Usuń pliki tymczasowe...</translation>
     </message>
     <message>
         <source>Duration</source>
@@ -3270,10 +3442,6 @@ Tłumaczenie: wklejony tekst, który przejmuje timing oryginału.</translation>
         <translation>Nie zaznaczono żadnej reguły</translation>
     </message>
     <message>
-        <source>No lines selected</source>
-        <translation>Nie zaznaczono żadnych linijek</translation>
-    </message>
-    <message>
         <source>Replacements: %1</source>
         <translation>Zamiany: %1</translation>
     </message>
@@ -3401,6 +3569,10 @@ Filtry eksportu: %8</translation>
     <message>
         <source>Resolution</source>
         <translation>Rozdzielczość</translation>
+    </message>
+    <message>
+        <source>Link the layout resolution to the script resolution: one that is set follows it</source>
+        <translation>Połącz rozdzielczość układu z rozdzielczością napisów: ustawiona podąża za nią</translation>
     </message>
     <message>
         <source>Layout resolution</source>
@@ -4010,6 +4182,22 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Ignoruj interpunkcję w znakach na sekundę</translation>
     </message>
     <message>
+        <source>Count spaces and punctuation in the lengths of wraps</source>
+        <translation>Licz spacje i interpunkcję w długości łamań</translation>
+    </message>
+    <message>
+        <source>A line added to the selection with Ctrl becomes active</source>
+        <translation>Linia dodana do zaznaczenia z Ctrl staje się aktywna</translation>
+    </message>
+    <message>
+        <source>Automatic karaoke splitting merges every &quot;n&quot; with the syllable before</source>
+        <translation>Automatyczny podział karaoke łączy każde "n" z poprzednią sylabą</translation>
+    </message>
+    <message>
+        <source>A click on a syllable next to the one picked moves their boundary</source>
+        <translation>Kliknięcie sylaby obok wybranej przesuwa granicę między nimi</translation>
+    </message>
+    <message>
         <source>Ask to resample the subtitles to a video of another resolution</source>
         <translation>Pytaj o przeskalowanie napisów do wideo o innej rozdzielczości</translation>
     </message>
@@ -4198,6 +4386,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Znaki tytułu karty</translation>
     </message>
     <message>
+        <source>Video zoom starts at (%)</source>
+        <translation>Początkowe powiększenie wideo (%)</translation>
+    </message>
+    <message>
         <source>Line boundaries thickness</source>
         <translation>Grubość granic linijki</translation>
     </message>
@@ -4224,6 +4416,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Grid font (applies to new tabs)</source>
         <translation>Czcionka siatki (dla nowych zakładek)</translation>
+    </message>
+    <message>
+        <source>Program font (applies from the next start)</source>
+        <translation>Czcionka programu (od następnego uruchomienia)</translation>
     </message>
     <message>
         <source>Edit box font (applies to new tabs)</source>
@@ -4932,6 +5128,18 @@ do czasu audio</translation>
         <translation>Usuń ze słownika</translation>
     </message>
     <message>
+        <source>Words added to dictionary...</source>
+        <translation>Słowa dodane do słownika...</translation>
+    </message>
+    <message>
+        <source>Words added to dictionary</source>
+        <translation>Słowa dodane do słownika</translation>
+    </message>
+    <message>
+        <source>Remove ticked</source>
+        <translation>Usuń zaznaczone</translation>
+    </message>
+    <message>
         <source>Close</source>
         <translation>Zamknij</translation>
     </message>
@@ -5428,6 +5636,10 @@ do czasu audio</translation>
     <message>
         <source>Spell checker language</source>
         <translation>Język sprawdzania pisowni</translation>
+    </message>
+    <message>
+        <source>Show status bar</source>
+        <translation>Pokaż pasek stanu</translation>
     </message>
     <message>
         <source>Look up the translation of the word on ling.pl</source>
@@ -6293,6 +6505,14 @@ Dopasować rozdzielczość napisów do wideo?</translation>
     <message>
         <source>Chapters</source>
         <translation>Rozdziały</translation>
+    </message>
+    <message>
+        <source>Audio streams</source>
+        <translation>Strumienie audio</translation>
+    </message>
+    <message>
+        <source>Subtitle streams</source>
+        <translation>Strumienie napisów</translation>
     </message>
     <message>
         <source>Change aspect ratio</source>

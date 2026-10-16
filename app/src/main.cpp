@@ -207,6 +207,8 @@ int main(int argc, char **argv) {
         qt.load(locale, "qtbase", "_", QLibraryInfo::path(QLibraryInfo::TranslationsPath)))
         app.installTranslator(&qt);
     theme::apply(theme::current(), false); // its window palette
+    // Kainote's program font, when one is set
+    if (const QVariant f = QSettings().value("main/programFont"); f.isValid()) QApplication::setFont(f.value<QFont>());
     MainWindow w;
     g_main = &w;
     w.show();

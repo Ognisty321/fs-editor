@@ -517,7 +517,8 @@ void Grid::clickRow(int vi, Qt::KeyboardModifiers mods) {
     m_anchor = vi;
     if (mods & Qt::ControlModifier) {
         m_tab->toggleSelected(row);
-        m_tab->setActive(int(row), false);
+        // Kainote's "Change active line after add to selection"
+        if (QSettings().value("grid/ctrlClickActive", true).toBool()) m_tab->setActive(int(row), false);
     } else {
         m_tab->setActive(int(row));
     }

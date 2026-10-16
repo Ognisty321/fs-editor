@@ -383,8 +383,20 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
             }
             return;
         }
+        int at = -1; // the syllable clicked
         for (size_t k = 0; k < b.m_syl.size(); ++k)
-            if (t >= b.m_syl[k].start && t < b.m_syl[k].end) b.m_activeSyl = int(k);
+            if (t >= b.m_syl[k].start && t < b.m_syl[k].end) at = int(k);
+        // Kainote's "Move syllable line after click": a click on the syllable picked or one next to
+        // it moves their boundary there
+        if (const int act = b.m_activeSyl, edge = at < act ? act : act + 1;
+            QSettings().value("audio/karaokeMoveOnClick", false).toBool() && at >= 0 && std::abs(at - act) <= 1 &&
+            edge > 0 && edge < int(b.m_syl.size())) {
+            ++b.m_dragId;
+            m_drag = 10 + edge;
+            mouseMoveEvent(e);
+            return;
+        }
+        if (at >= 0) b.m_activeSyl = at;
         // a click only picks the syllable (Aegisub, Kainote), a right click plays it too; the
         // line's own markers still drag
         if (std::abs(b.xOf(b.m_selStart) - x) >= 6 && std::abs(b.xOf(b.m_selEnd) - x) >= 6) {
@@ -580,13 +592,15 @@ QWidget *AudioBox::buttonRow() {
     auto *h = new QHBoxLayout(row);
     h->setContentsMargins(0, 0, 0, 0);
     h->setSpacing(1);
-    auto btn = [&](const QString &text, const QString &tip, auto f, bool gap = false) {
+    // each button runs its bindable command (Shift+click assigns its key, as in Kainote)
+    auto btn = [&](const QString &text, const QString &tip, const char *id, bool gap = false) {
         if (gap) h->addSpacing(8);
         auto *b = new QToolButton(row);
         b->setText(text);
         b->setToolTip(tip);
         b->setAutoRaise(true);
-        connect(b, &QToolButton::clicked, this, f);
+        b->setProperty("command", id);
+        connect(b, &QToolButton::clicked, this, [this, id] { runCommand(id); });
         h->addWidget(b);
         return b;
     };
@@ -607,29 +621,22 @@ QWidget *AudioBox::buttonRow() {
     };
     // icon-only buttons; the text stays as the accessible name
     const QColor teal(0x36c5d0), green(0x4cc38a);
-    btn("◀▶", tr("Play the previous line"), [this] { stepLine(-1); })->setIcon(icon("player-track-prev-filled", teal));
-    btn("▶◀", tr("Play the next line"), [this] { stepLine(1); })->setIcon(icon("player-track-next-filled", teal));
-    btn("▷", tr("Play the current syllable / line"), [this] {
-        if (m_karaoke && size_t(m_activeSyl) < m_syl.size()) play(m_syl[m_activeSyl].start, m_syl[m_activeSyl].end);
-        else playSelection();
-    })->setIcon(icon("player-play", green));
-    btn("▶", tr("Play the current line"), [this] { playSelection(); })->setIcon(icon("player-play-filled", green));
-    btn("■", tr("Stop playback"), [this] { m_tab->video()->pause(), stop(); })->setIcon(icon("player-stop-filled", teal));
-    btn("|◀", tr("Play before the mark"), [this] { if (m_mark >= 0) play(std::max<qint64>(0, m_mark - markPlayMs()), m_mark); }, true)->setIcon(icon("arrow-bar-left", teal));
-    btn("▶|", tr("Play after the mark"), [this] { if (m_mark >= 0) play(m_mark, m_mark + markPlayMs()); })->setIcon(icon("arrow-bar-right", teal));
-    btn("◁s", tr("Play 500 ms before the start time"), [this] { play(std::max<qint64>(0, m_selStart - 500), m_selStart); }, true);
-    btn("s▷", tr("Play 500 ms after the start time"), [this] { play(m_selStart, std::min(m_selEnd, m_selStart + 500)); });
-    btn("◁e", tr("Play 500 ms before the end time"), [this] { play(std::max(m_selStart, m_selEnd - 500), m_selEnd); });
-    btn("e▷", tr("Play 500 ms after the end time"), [this] { play(m_selEnd, m_selEnd + 500); });
-    btn("▶▶", tr("Play to the end"), [this] { play(m_selStart, m_duration); })->setIcon(icon("player-skip-forward", teal));
-    btn("+in", tr("Add lead-in to the active line"), [this] {
-        setSelection(std::max<qint64>(0, m_selStart - QSettings().value("audio/leadIn", 200).toInt()), m_selEnd, false);
-    }, true)->setIcon(icon("arrow-autofit-left", green));
-    btn("+out", tr("Add lead-out to the active line"), [this] {
-        setSelection(m_selStart, m_selEnd + QSettings().value("audio/leadOut", 300).toInt(), false);
-    })->setIcon(icon("arrow-autofit-right", green));
-    btn("✓", tr("Apply changes (commit)"), [this] { commitAndNext(); }, true)->setIcon(icon("check", green));
-    btn("⌖", tr("Go to selection"), [this] { ensureVisible(m_selStart, m_selEnd); })->setIcon(icon("focus-centered", teal));
+    btn("◀▶", tr("Play the previous line"), "audioPrevAlt")->setIcon(icon("player-track-prev-filled", teal));
+    btn("▶◀", tr("Play the next line"), "audioNextAlt")->setIcon(icon("player-track-next-filled", teal));
+    btn("▷", tr("Play the current syllable / line"), "audioPlay")->setIcon(icon("player-play", green));
+    btn("▶", tr("Play the current line"), "audioPlayLine")->setIcon(icon("player-play-filled", green));
+    btn("■", tr("Stop playback"), "audioStop")->setIcon(icon("player-stop-filled", teal));
+    btn("|◀", tr("Play before the mark"), "audioBeforeMark", true)->setIcon(icon("arrow-bar-left", teal));
+    btn("▶|", tr("Play after the mark"), "audioAfterMark")->setIcon(icon("arrow-bar-right", teal));
+    btn("◁s", tr("Play 500 ms before the start time"), "audioBefore500", true);
+    btn("s▷", tr("Play 500 ms after the start time"), "audioFirst500");
+    btn("◁e", tr("Play 500 ms before the end time"), "audioLast500");
+    btn("e▷", tr("Play 500 ms after the end time"), "audioAfter500");
+    btn("▶▶", tr("Play to the end"), "audioToEnd")->setIcon(icon("player-skip-forward", teal));
+    btn("+in", tr("Add lead-in to the active line"), "audioLeadIn", true)->setIcon(icon("arrow-autofit-left", green));
+    btn("+out", tr("Add lead-out to the active line"), "audioLeadOut")->setIcon(icon("arrow-autofit-right", green));
+    btn("✓", tr("Apply changes (commit)"), "audioCommit", true)->setIcon(icon("check", green));
+    btn("⌖", tr("Go to selection"), "audioGoTo")->setIcon(icon("focus-centered", teal));
     h->addSpacing(8);
     toggle("K", tr("Enable / disable karaoke creation"), &m_karaoke, "karaoke", [this] { karaokeChanged(); })->setIcon(icon("microphone", teal));
     toggle("Ks", tr("Enable / disable automatic splitting of syllables"), &m_autoSplit, "autoSplit", [] {})->setIcon(icon("wave-saw-tool", teal));
@@ -645,12 +652,11 @@ QWidget *AudioBox::buttonRow() {
 
 void AudioBox::setSpectrum(bool on) { m_spectrumToggle->setChecked(on); }
 
-void AudioBox::open(const QString &path, bool withVideo) {
+void AudioBox::open(const QString &path, bool withVideo, int track) {
     // several audio tracks: Kainote's preferred one, else the one picked, as Aegisub asks
-    int track = -1;
     const auto tracks = fsb::audio_tracks(fs::Utf8(path));
     if (withVideo && tracks.empty()) return;
-    if (tracks.size() > 1) {
+    if (tracks.size() > 1 && track < 0) {
         track = fsb::preferred_track({tracks.data(), tracks.size()},
                                      fs::Utf8(QSettings().value("audio/preferredTracks").toString()));
         if (track < 0)
@@ -679,7 +685,7 @@ void AudioBox::open(const QString &path, bool withVideo) {
             err = QString::fromUtf8(e.what());
         }
         auto holder = std::make_shared<std::optional<rust::Box<fsb::Audio>>>(std::move(a));
-        QMetaObject::invokeMethod(qApp, [self, holder, err, path, cancel] {
+        QMetaObject::invokeMethod(qApp, [self, holder, err, path, cancel, track] {
             if (!self) return;
             if (*cancel) { // closed, or replaced by a newer open (which has its own status)
                 if (cancel == self->m_openCancel) self->m_tab->main()->status(QString());
@@ -691,6 +697,7 @@ void AudioBox::open(const QString &path, bool withVideo) {
             }
             self->m_audio = std::move(*holder);
             self->m_path = path;
+            self->m_track = track;
             self->loaded();
         });
     }).detach();
@@ -1028,7 +1035,11 @@ QString AudioBox::autoSplitText(const QString &text, qint64 duration) const {
         else if (!tag) plain += text[i], at.push_back(i);
     }
     if (plain.trimmed().isEmpty()) return {};
-    static const QRegularExpression syl("[^aeiouAEIOU\\s]*[aeiouAEIOU]+n?(?![aeiouAEIOU])|\\S+?(?=\\s|$)|\\s+");
+    // Kainote's "Merge all the n with the previous syllable"; else an n before a consonant is one
+    static const QRegularExpression merged("[^aeiouAEIOU\\s]*[aeiouAEIOU]+n?(?![aeiouAEIOU])|\\S+?(?=\\s|$)|\\s+");
+    static const QRegularExpression apart(
+        "[nN](?=[^aeiouyAEIOUY\\s])|[^aeiouAEIOU\\s]*[aeiouAEIOU]+(?:n(?=\\s|$))?(?![aeiouAEIOU])|\\S+?(?=\\s|$)|\\s+");
+    const QRegularExpression &syl = QSettings().value("audio/mergeN", true).toBool() ? merged : apart;
     std::vector<int> cuts{0}; // where each syllable starts in plain; spaces end the one before
     for (auto it = syl.globalMatch(plain); it.hasNext();)
         if (const auto m = it.next(); m.capturedStart() > 0 && !m.captured().trimmed().isEmpty())

@@ -147,7 +147,7 @@ fn wraps(text: &str) -> String {
     tags::visible_text(text)
         .split("\\N")
         .flat_map(|l| l.split("\\n"))
-        .map(|l| l.replace("\\h", " ").chars().count().to_string())
+        .map(|l| tags::wrap_len(&l.replace("\\h", " ")).to_string())
         .collect::<Vec<_>>()
         .join("/")
 }
@@ -2156,7 +2156,7 @@ impl Session {
             matcher: m,
             replacement: spec.replacement.clone(),
             first_only: true,
-            keep_case: false,
+            case: ops::CaseRule::Written,
         };
         let Some((new, end)) = r.replace_one(text, at) else {
             return Ok(-1);
@@ -2176,54 +2176,103 @@ impl Session {
         spec: &FindSpec,
         matches: &[FindMatch],
     ) -> Result<usize, String> {
-        let m = Self::matcher(spec)?;
-        if !Self::searchable(spec) {
-            return Ok(0);
-        }
-        let r = ops::Replace {
-            matcher: m,
-            replacement: spec.replacement.clone(),
-            first_only: true,
-            keep_case: false,
-        };
+        self.replace_ticked(std::slice::from_ref(spec), matches, &[], "Replace")
+    }
+
+    /// Kainote's multireplacer results: each match ticked replaced by its rule, `specs[rules[i]]`
+    /// for `matches[i]`, in the case the rule asks for; otherwise as [`Self::replace_matches`].
+    pub fn replace_rule_matches(
+        &mut self,
+        specs: &[FindSpec],
+        matches: &[FindMatch],
+        rules: &[usize],
+    ) -> Result<usize, String> {
+        self.replace_ticked(specs, matches, rules, "Correct minor errors")
+    }
+
+    /// `rules` empty: every match by `specs[0]`, its replacement as written.
+    fn replace_ticked(
+        &mut self,
+        specs: &[FindSpec],
+        matches: &[FindMatch],
+        rules: &[usize],
+        step: &str,
+    ) -> Result<usize, String> {
+        let reps = specs
+            .iter()
+            .map(|s| {
+                Ok(ops::Replace {
+                    matcher: Self::matcher(s)?,
+                    replacement: s.replacement.clone(),
+                    first_only: true,
+                    case: if rules.is_empty() {
+                        ops::CaseRule::Written
+                    } else {
+                        Self::rule_case(s)
+                    },
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
         // field by field, the last match first: the earlier ones keep their places
-        let mut todo: Vec<&FindMatch> =
-            matches.iter().filter(|x| x.row < self.rows.len()).collect();
-        todo.sort_by(|a, b| (a.row, a.original, b.start).cmp(&(b.row, b.original, a.start)));
-        todo.dedup_by(|a, b| (a.row, a.original, a.start) == (b.row, b.original, b.start));
-        let mut edits: Vec<(usize, String)> = Vec::new();
+        let mut todo: Vec<(&FindMatch, usize)> = matches
+            .iter()
+            .enumerate()
+            .map(|(i, x)| (x, rules.get(i).copied().unwrap_or(0)))
+            .filter(|&(x, r)| {
+                x.row < self.rows.len() && r < specs.len() && Self::searchable(&specs[r])
+            })
+            .collect();
+        let key = |(x, r): &(&FindMatch, usize)| (x.row, x.original, specs[*r].field);
+        todo.sort_by(|a, b| (key(a), b.0.start).cmp(&(key(b), a.0.start)));
+        todo.dedup_by(|a, b| (key(a), a.0.start) == (key(b), b.0.start));
+        let mut edits: Vec<(usize, String, usize)> = Vec::new();
         let mut count = 0;
-        for field in todo.chunk_by(|a, b| a.row == b.row && a.original == b.original) {
+        for field in todo.chunk_by(|a, b| key(a) == key(b)) {
+            let (first, rule) = field[0];
             let Some((e, _)) = self
-                .search_events(spec, field[0].row)
-                .find(|&(_, o)| o == field[0].original)
+                .search_events(&specs[rule], first.row)
+                .find(|&(_, o)| o == first.original)
             else {
                 continue;
             };
-            let text = r.matcher.field_value(self.ed.doc.event(e).unwrap());
-            if text != field[0].text {
+            let text = reps[rule]
+                .matcher
+                .field_value(self.ed.doc.event(e).unwrap());
+            if text != first.text {
                 continue;
             }
             let mut new = text.to_string();
-            for x in field {
+            for &(x, r) in field {
                 let at = byte_at(&new, x.start)..byte_at(&new, x.end);
-                if let Some((t, _)) = r.replace_one(&new, at) {
+                if let Some((t, _)) = reps[r].replace_one(&new, at) {
                     new = t;
                     count += 1;
                 }
             }
             if new != text {
-                edits.push((e, new));
+                edits.push((e, new, rule));
             }
         }
         if !edits.is_empty() {
-            self.edit("Replace", |d| {
-                for (e, new) in edits {
-                    r.matcher.set_field(d.event_mut(e).unwrap(), new);
+            self.edit(step, |d| {
+                for (e, new, rule) in edits {
+                    reps[rule].matcher.set_field(d.event_mut(e).unwrap(), new);
                 }
             });
         }
         Ok(count)
+    }
+
+    /// The case a multireplacer rule writes its replacement in ([`FindSpec::case_rule`]).
+    fn rule_case(spec: &FindSpec) -> ops::CaseRule {
+        match spec.case_rule {
+            1 => ops::CaseRule::Follow,
+            2 => ops::CaseRule::Written,
+            3 => ops::CaseRule::Lower,
+            4 => ops::CaseRule::Upper,
+            _ if spec.match_case => ops::CaseRule::Written,
+            _ => ops::CaseRule::Follow,
+        }
     }
 
     /// Every row whose field matches, in order (Kainote's Find all).
@@ -2276,7 +2325,7 @@ impl Session {
     fn replace_job(
         &self,
         spec: &FindSpec,
-        keep_case: bool,
+        case: ops::CaseRule,
     ) -> Result<(Rows, ops::Replace), String> {
         let m = Self::matcher(spec)?;
         let n = if Self::searchable(spec) {
@@ -2302,23 +2351,24 @@ impl Session {
             matcher: m,
             replacement: spec.replacement.clone(),
             first_only: false,
-            keep_case,
+            case,
         };
         Ok((Rows::Selected(evs), r))
     }
 
     pub fn replace_all(&mut self, spec: &FindSpec) -> Result<usize, String> {
-        let (rows, r) = self.replace_job(spec, false)?;
+        let (rows, r) = self.replace_job(spec, ops::CaseRule::Written)?;
         Ok(self.edit("Replace", |d| ops::replace(d, &rows, &r)))
     }
 
-    /// Kainote's minor error corrector: every rule in turn, one undo step. A rule that
-    /// ignores case writes its replacement in the case of each match ("Sie" -> "Się").
+    /// Kainote's minor error corrector: every rule in turn, one undo step. A rule writes its
+    /// replacement in the case it asks for; by default one that ignores case in the case of
+    /// each match ("Sie" -> "Się").
     pub fn replace_rules(&mut self, specs: &[FindSpec]) -> Result<usize, String> {
         let jobs = specs
             .iter()
             .map(|s| {
-                self.replace_job(s, !s.match_case)
+                self.replace_job(s, Self::rule_case(s))
                     .map_err(|e| format!("{}: {e}", s.pattern))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -4746,6 +4796,36 @@ mod tests {
         assert_eq!(s.replace_rules(&rules), Ok(3));
         let texts = |s: &Session| (0..3).map(|i| s.row(i).text).collect::<Vec<_>>();
         assert_eq!(texts(&s), ["One?", "two", "three"]);
+        assert!(s.undo());
+        assert_eq!(texts(&s), ["one", "two", "three"]);
+    }
+
+    #[test]
+    fn replacing_the_rule_matches_ticked() {
+        let mut s = session(ASS);
+        let rule = |pattern: &str, replacement: &str, case_rule: u8| FindSpec {
+            pattern: pattern.into(),
+            replacement: replacement.into(),
+            regex: true,
+            case_rule,
+            ..Default::default()
+        };
+        // two rules in one line, each in its case: "one" -> "ONE" upper, "e" -> "x" written
+        let rules = [rule("o", "a", 4), rule("e", "x", 2), rule("t", "Q", 3)];
+        let mut ticked = Vec::new();
+        let mut of = Vec::new();
+        for (k, r) in rules.iter().enumerate() {
+            for m in s.find_matches(r, 99).unwrap() {
+                ticked.push(m);
+                of.push(k);
+            }
+        }
+        // the "t" of "three", found last, left unticked
+        ticked.pop();
+        of.pop();
+        assert_eq!(s.replace_rule_matches(&rules, &ticked, &of), Ok(6));
+        let texts = |s: &Session| (0..3).map(|i| s.row(i).text).collect::<Vec<_>>();
+        assert_eq!(texts(&s), ["Anx", "qwA", "thrxx"]);
         assert!(s.undo());
         assert_eq!(texts(&s), ["one", "two", "three"]);
     }

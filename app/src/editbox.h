@@ -37,6 +37,7 @@ QStringList languages();
 void fillLanguages(QComboBox *box, const QString &current); // "polski (pl_PL)", the code as data
 void addWord(const QString &word); // to the user dictionary of the loaded language
 void removeWord(const QString &word);
+void removeWords(const QStringList &words); // several at once (Kainote), one reload
 QStringList userWords();
 int generation();                  // changes on every reload, for caches of results
 } // namespace spell

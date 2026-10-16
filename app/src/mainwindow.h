@@ -33,6 +33,8 @@ class MainWindow : public QMainWindow {
 public:
     // -1: cancelled
     int pickTrack(const rust::Vec<fsb::SubTrack> &tracks, const QString &question, const QString &title = {});
+    static QString trackName(const fsb::SubTrack &t); // "#index  codec [language]  title"
+    bool maybeSave(TabPanel *tab); // false: cancelled
     MainWindow();
     ~MainWindow() override;
 
@@ -91,7 +93,6 @@ private:
     void setSplit(TabPanel *second);
     void compareTabs(bool on);
     void followActive();
-    bool maybeSave(TabPanel *tab);
     // the tabs' files (a script, else its video) and the index of the front one among them
     QStringList sessionFiles(int *front) const;
     void openSession(const QStringList &files, int front);
@@ -105,6 +106,7 @@ private:
     void runScript(fsb::ScriptJob &job); // on a worker, with the progress window
     void automationManager();
     void correctErrors();
+    void removeTemporary();
     void updateActions();
     void withRow(const std::function<void(TabPanel *, fsb::Row &)> &fn);
 

@@ -12,7 +12,7 @@ mod visual;
 
 use automation::{AutoloadJob, autoload_done, run_script_job};
 pub use automation::{Automation, ScriptJob};
-use fs_core::tags::set_cps_ignore;
+use fs_core::tags::{set_cps_ignore, set_wraps_ignore};
 pub use kanji::KanjiTimer;
 use kanji::new_kanji_timer;
 pub use media::{Audio, Renderer, Video};
@@ -218,6 +218,9 @@ pub mod ffi {
         /// Only at the start / the end of the field (Kainote).
         at_start: bool,
         at_end: bool,
+        /// A multireplacer rule's case of the replacement: 1 that of the match, 2 as written,
+        /// 3 lower, 4 upper case; 0 that of the match when ignoring case, else as written.
+        case_rule: u8,
     }
 
     /// One match of Find all (Kainote's results list): where it is, as [`FindHit`], and the
@@ -747,6 +750,13 @@ pub mod ffi {
             matches: &[FindMatch],
         ) -> Result<usize>;
         fn replace_rules(self: &mut Session, specs: &[FindSpec]) -> Result<usize>;
+        /// Kainote's multireplacer results: `matches[i]` ticked, replaced by `specs[rules[i]]`.
+        fn replace_rule_matches(
+            self: &mut Session,
+            specs: &[FindSpec],
+            matches: &[FindMatch],
+            rules: &[usize],
+        ) -> Result<usize>;
         fn overlapping(self: &Session, row: usize) -> Vec<usize>;
         fn rows_at(self: &Session, ms: i64) -> Vec<usize>;
         /// Kainote's line for a time: one showing then, else the nearest start; -1 for none.
@@ -1013,6 +1023,8 @@ pub mod ffi {
         fn calltip(text: &str, pos: usize, tip: &mut String) -> Vec<usize>;
         /// What characters per second leaves out (both by default).
         fn set_cps_ignore(whitespace: bool, punctuation: bool);
+        /// Kainote's wraps counted without spaces and punctuation.
+        fn set_wraps_ignore(ignore: bool);
 
         type Thesaurus;
         fn new_thesaurus(idx_path: &str, dat_path: &str) -> Result<Box<Thesaurus>>;

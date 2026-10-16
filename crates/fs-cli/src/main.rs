@@ -949,7 +949,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     matcher: m,
                     replacement: replace,
                     first_only: false,
-                    keep_case: false,
+                    case: ops::CaseRule::Written,
                 },
             );
             eprintln!("{n} replacement(s)");

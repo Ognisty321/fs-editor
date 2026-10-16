@@ -78,7 +78,9 @@ public:
 
     bool hasAudio() const { return m_audio.has_value(); }
     const fsb::Audio *source() const { return m_audio ? &**m_audio : nullptr; }
-    void open(const QString &path, bool withVideo = false); // withVideo: a file with no audio is no error
+    // withVideo: a file with no audio is no error; track: that one of several, else the preferred or asked
+    void open(const QString &path, bool withVideo = false, int track = -1);
+    int track() const { return m_track; } // of the file open, -1 when it has one
     void openBlank(qint64 ms, bool noise = false);
     void close();
     QString path() const { return m_path; }
@@ -138,6 +140,7 @@ private:
     TabPanel *m_tab;
     std::optional<rust::Box<fsb::Audio>> m_audio;
     QString m_path;
+    int m_track = -1;
     // set to stop a load still decoding (close, a newer open, destruction)
     std::shared_ptr<std::atomic_bool> m_openCancel = std::make_shared<std::atomic_bool>(false);
     qint64 m_duration = 0;

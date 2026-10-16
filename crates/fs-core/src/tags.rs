@@ -612,6 +612,23 @@ pub fn set_cps_ignore(whitespace: bool, punctuation: bool) {
     CPS_IGNORE_PUNCTUATION.store(punctuation, Ordering::Relaxed);
 }
 
+static WRAPS_IGNORE: AtomicBool = AtomicBool::new(false);
+
+/// Kainote's "Calculate spaces and punctuation characters for wraps" turned off: the lengths of
+/// a line's wraps count neither. A user preference, so process-wide.
+pub fn set_wraps_ignore(ignore: bool) {
+    WRAPS_IGNORE.store(ignore, Ordering::Relaxed);
+}
+
+/// The length of one wrap of visible text, by [`set_wraps_ignore`].
+pub fn wrap_len(line: &str) -> usize {
+    if WRAPS_IGNORE.load(Ordering::Relaxed) {
+        char_count(line, true, true)
+    } else {
+        line.chars().count()
+    }
+}
+
 /// Characters per second as Aegisub computes it (0 for zero-length lines).
 pub fn cps(text: &str, duration_ms: i64) -> f64 {
     if duration_ms <= 0 {

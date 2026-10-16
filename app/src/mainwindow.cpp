@@ -39,6 +39,8 @@
 #include <QFormLayout>
 #include <QFutureWatcher>
 #include <QGridLayout>
+#include <QDateEdit>
+#include <QDirIterator>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -72,6 +74,7 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QToolTip>
 #include <QTreeWidget>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -283,6 +286,27 @@ MainWindow::MainWindow() {
             a->setCheckable(true);
             a->setChecked(m_compareOn && by & 1 << k);
         }
+        // Kainote's Compare by selected styles: only the lines of the styles ticked, of both tabs
+        auto *stMenu = cmp->addMenu(tr("Compare by selected styles"));
+        QSet<QString> mine;
+        for (const auto &s : t->s().styles()) mine.insert(fs::q(s.name));
+        const QStringList chosen = QSettings().value("compare/styles").toStringList();
+        for (const auto &s : other->s().styles()) {
+            const QString name = fs::q(s.name);
+            if (!mine.contains(name)) continue;
+            auto *a = stMenu->addAction(name, this, [this, other, by, name] {
+                QStringList now = QSettings().value("compare/styles").toStringList();
+                if (!now.removeAll(name)) now << name;
+                QSettings().setValue("compare/styles", now);
+                const int mode = now.isEmpty() ? by & ~16 : (m_compareOn ? by : 0) | 16;
+                if (mode) QSettings().setValue("compare/by", mode);
+                if (mode && !m_second) setSplit(other);
+                compareTabs(mode != 0);
+            });
+            a->setCheckable(true);
+            a->setChecked(m_compareOn && by & 16 && chosen.contains(name));
+        }
+        stMenu->setEnabled(!stMenu->isEmpty() && other != t);
         cmp->addSeparator();
         cmp->addAction(tr("Turn off comparison"), this, [this] { compareTabs(false); })->setEnabled(m_compareOn);
         m.exec(m_tabs->tabBar()->mapToGlobal(pos));
@@ -426,16 +450,19 @@ void MainWindow::compareTabs(bool on) {
     if (auto *a = action("compareTabs")) a->setChecked(m_compareOn);
     for (auto *t : tabs()) t->grid()->setCompare({});
     if (!m_compareOn) return;
-    auto rows = [by](TabPanel *t) {
+    // 16: only the lines of the styles chosen (Kainote's Compare by selected styles), matched by style
+    const QStringList styles = by & 16 ? QSettings().value("compare/styles").toStringList() : QStringList();
+    auto rows = [by, &styles](TabPanel *t) {
         std::vector<size_t> r = by & 2 ? t->grid()->visibleRows() : std::vector<size_t>(t->s().row_count());
         if (!(by & 2)) std::iota(r.begin(), r.end(), size_t(0));
         if (by & 4) std::erase_if(r, [t](size_t i) { return !t->isSelected(i); });
+        if (by & 16) std::erase_if(r, [t, &styles](size_t i) { return !styles.contains(fs::q(t->s().row(i).style)); });
         return r;
     };
     const auto a = rows(current()), b = rows(m_second);
     std::map<size_t, std::vector<size_t>> x, y;
     for (const auto &p : current()->s().compare(m_second->s(), {a.data(), a.size()}, {b.data(), b.size()}, by & 1,
-                                                by & 8)) {
+                                                by & 24)) {
         x[p.row] = fs::vec(p.spans);
         y[p.other] = fs::vec(p.other_spans);
     }
@@ -514,18 +541,98 @@ static bool untouched(TabPanel *tab) {
            (tab->s().row_count() == 0 || (tab->s().row_count() == 1 && tab->s().row(0).text.empty()));
 }
 
+QString MainWindow::trackName(const fsb::SubTrack &t) {
+    return QString("#%1  %2%3%4")
+        .arg(t.index)
+        .arg(fs::q(t.codec))
+        .arg(t.language.empty() ? QString() : " [" + fs::q(t.language) + "]")
+        .arg(t.title.empty() ? QString() : "  " + fs::q(t.title));
+}
+
 int MainWindow::pickTrack(const rust::Vec<fsb::SubTrack> &tracks, const QString &question, const QString &title) {
     QStringList items;
-    for (const auto &t : tracks)
-        items << QString("#%1  %2%3%4")
-                     .arg(t.index)
-                     .arg(fs::q(t.codec))
-                     .arg(t.language.empty() ? QString() : " [" + fs::q(t.language) + "]")
-                     .arg(t.title.empty() ? QString() : "  " + fs::q(t.title));
+    for (const auto &t : tracks) items << trackName(t);
     bool ok = false;
     const QString pick = QInputDialog::getItem(this, title.isEmpty() ? tr("Subtitles in the video") : title, question,
                                                items, 0, false, &ok);
     return ok ? tracks[size_t(std::max(0, int(items.indexOf(pick))))].index : -1;
+}
+
+// Kainote's Remove temporary files: the autosaves, the index cache and the backups of replacing in
+// files, picked by hand, all of them, or those last changed before a date; with Remove all, of every
+// kind at once
+void MainWindow::removeTemporary() {
+    QDialog d(this);
+    d.setWindowTitle(tr("Remove temporary files"));
+    auto *v = new QVBoxLayout(&d);
+    auto *dateRow = new QHBoxLayout;
+    v->addLayout(dateRow);
+    dateRow->addWidget(new QLabel(tr("Files older than"), &d));
+    auto *before = new QDateEdit(QDate::currentDate().addMonths(-1), &d);
+    before->setCalendarPopup(true);
+    dateRow->addWidget(before);
+    dateRow->addStretch();
+    const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const std::vector<std::pair<QString, QString>> kinds = {
+        {tr("Autosave files"), autosaveDir()},
+        {tr("Video and audio index files"), QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex"},
+        {tr("Backups of files replaced in"), appData + "/ReplaceBackup"}};
+    auto *done = new QLabel(&d);
+    // the files in dir and below, all or those last changed before the date; how many went
+    const auto removeIn = [before](const QString &dir, bool older) {
+        int n = 0;
+        for (QDirIterator it(dir, QDir::Files, QDirIterator::Subdirectories); it.hasNext();) {
+            const QFileInfo f(it.next());
+            if (!older || f.lastModified().date() < before->date()) n += QFile::remove(f.filePath());
+        }
+        return n;
+    };
+    const auto report = [done](int n) { done->setText(tr("Files removed: %1").arg(n)); };
+    const auto sure = [&d](const QString &what) {
+        return QMessageBox::question(&d, tr("Remove temporary files"), what) == QMessageBox::Yes;
+    };
+    auto *everything = new QHBoxLayout;
+    v->addLayout(everything);
+    auto *allButton = new QPushButton(tr("Remove all files"), &d);
+    auto *allOlder = new QPushButton(tr("Remove all older files"), &d);
+    everything->addWidget(allButton);
+    everything->addWidget(allOlder);
+    connect(allButton, &QPushButton::clicked, &d, [=] {
+        if (!sure(tr("Remove every autosave, index and backup file?"))) return;
+        int n = 0;
+        for (const auto &[name, dir] : kinds) n += removeIn(dir, false);
+        report(n);
+    });
+    connect(allOlder, &QPushButton::clicked, &d, [=] {
+        int n = 0;
+        for (const auto &[name, dir] : kinds) n += removeIn(dir, true);
+        report(n);
+    });
+    for (const auto &[name, dir] : kinds) {
+        auto *box = new QGroupBox(name, &d);
+        box->setToolTip(QDir::toNativeSeparators(dir));
+        auto *h = new QHBoxLayout(box);
+        auto *picked = new QPushButton(tr("Remove chosen..."), box);
+        auto *all = new QPushButton(tr("Remove all"), box);
+        auto *older = new QPushButton(tr("Remove older"), box);
+        for (auto *b : {picked, all, older}) h->addWidget(b);
+        connect(picked, &QPushButton::clicked, &d, [&d, dir, report] {
+            int n = 0;
+            for (const QString &f : QFileDialog::getOpenFileNames(&d, tr("Choose files to remove"), dir)) n += QFile::remove(f);
+            report(n);
+        });
+        connect(all, &QPushButton::clicked, &d, [=] {
+            if (sure(tr("Remove every file in\n%1?").arg(QDir::toNativeSeparators(dir)))) report(removeIn(dir, false));
+        });
+        connect(older, &QPushButton::clicked, &d, [=] { report(removeIn(dir, true)); });
+        v->addWidget(box);
+    }
+    v->addWidget(done);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, &d);
+    bb->button(QDialogButtonBox::Close)->setDefault(true); // Enter never removes files
+    connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    v->addWidget(bb);
+    d.exec();
 }
 
 // Kainote's: a file next to it with the same name (up to the last dot) and one of these extensions
@@ -967,10 +1074,7 @@ void MainWindow::buildMenus() {
             updateActions();
         }
     });
-    add("removeTemp", tr("Remove temporary files"), {}, file, [this] {
-        const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex";
-        if (confirm(tr("Remove the video and audio index cache in\n%1?").arg(dir))) QDir(dir).removeRecursively();
-    });
+    add("removeTemp", tr("Remove temporary files..."), {}, file, [this] { removeTemporary(); });
     // Log window: automation output and errors.
     auto *logDlg = new QDialog(this);
     logDlg->setWindowTitle(tr("Log"));
@@ -2635,6 +2739,26 @@ bool MainWindow::eventFilter(QObject *o, QEvent *e) {
                 }
             }
         }
+    // Kainote: Shift+click on a button assigns the key of its command; its tooltip names the key
+    if (e->type() == QEvent::MouseButtonPress || e->type() == QEvent::MouseButtonDblClick || e->type() == QEvent::ToolTip)
+        if (auto *b = qobject_cast<QAbstractButton *>(o); b && b->window() == this) {
+            QString id = b->property("command").toString();
+            if (auto *tb = qobject_cast<QToolButton *>(b); id.isEmpty() && tb && tb->defaultAction())
+                id = tb->defaultAction()->objectName();
+            if (QAction *a = id.isEmpty() ? nullptr : action(id)) {
+                if (e->type() == QEvent::ToolTip) {
+                    const QString key = a->shortcut().toString(QKeySequence::NativeText);
+                    if (key.isEmpty() || b->toolTip().isEmpty()) return false;
+                    QToolTip::showText(static_cast<QHelpEvent *>(e)->globalPos(), b->toolTip() + " (" + key + ")", b);
+                    return true;
+                }
+                auto *me = static_cast<QMouseEvent *>(e);
+                if (me->button() == Qt::LeftButton && (me->modifiers() & Qt::ShiftModifier)) {
+                    QTimer::singleShot(0, this, [this, a] { assignHotkey(a); });
+                    return true;
+                }
+            }
+        }
     // a click in the split view's right half makes that tab active (the sides swap)
     if (e->type() == QEvent::MouseButtonPress && m_second)
         if (auto *w = qobject_cast<QWidget *>(o); w && m_second->isAncestorOf(w))
@@ -2825,9 +2949,16 @@ void MainWindow::watchScripts() {
 }
 
 // Aegisub's Automation Manager: G(lobal, autoload) / L(oaded by hand) scripts, failed ones in red.
-// Kainote's minor error corrector: checked regex rules, run in one undo step. Rules
-// live in corrector/rules; a case-insensitive rule keeps the case of what it replaces.
+// Kainote's multireplacer (its minor error corrector): the regex rules ticked replaced in the lines
+// chosen of this tab or every tab, one undo step per tab, or their matches listed first to tick the
+// ones to replace. Rules live in corrector/rules, each with the case it writes its replacement in.
 void MainWindow::correctErrors() {
+    static QPointer<QDialog> open; // one, left open beside the editor
+    if (open) {
+        open->raise();
+        open->activateWindow();
+        return;
+    }
     struct Rule {
         QString description, find, replace;
     };
@@ -2850,68 +2981,177 @@ void MainWindow::correctErrors() {
                          {tr("Fix misspellings of \"w ogóle\""), "\\b(w ?og[uo]le|wogóle)\\b", "w ogóle"},
                          {tr("Fix misspellings of \"będę\""), "\\b(bed[eę]|będe)\\b", "będę"}});
 
-    QDialog d(this);
-    d.setWindowTitle(tr("Correct minor errors"));
-    d.resize(1000, 420);
-    auto *v = new QVBoxLayout(&d);
-    auto *list = new QTreeWidget(&d);
-    list->setHeaderLabels(
-        {tr("Description"), tr("Find (regular expression)"), tr("Replace with"), tr("Match case"), tr("Only text")});
+    auto *d = new QDialog(this);
+    open = d;
+    d->setAttribute(Qt::WA_DeleteOnClose);
+    d->setWindowTitle(tr("Correct minor errors"));
+    d->resize(1000, 640);
+    auto *v = new QVBoxLayout(d);
+    auto *list = new QTreeWidget(d);
+    list->setHeaderLabels({tr("Description"), tr("Find (regular expression)"), tr("Replace with"), tr("Match case"),
+                           tr("Only text"), tr("Only tags"), tr("Case")});
     list->setRootIsDecorated(false);
     list->setEditTriggers(QAbstractItemView::NoEditTriggers);
     list->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    v->addWidget(list);
-    auto addRule = [list](const QString &desc, const QString &find, const QString &repl, bool on, bool matchCase,
-                          bool onlyText) {
+    v->addWidget(list, 2);
+    // Kainote's case options; the replacement's case as FindSpec::case_rule, from 1
+    const QStringList cases = {tr("Like the match"), tr("As written"), tr("Lower case"), tr("Upper case")};
+    auto addRule = [list, cases](const QString &desc, const QString &find, const QString &repl, bool on,
+                                 bool matchCase, bool onlyText, bool onlyTags, int caseRule) {
         auto *it = new QTreeWidgetItem(list, {desc, find, repl});
         it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
         it->setCheckState(0, on ? Qt::Checked : Qt::Unchecked);
         it->setCheckState(3, matchCase ? Qt::Checked : Qt::Unchecked);
         it->setCheckState(4, onlyText ? Qt::Checked : Qt::Unchecked);
+        it->setCheckState(5, onlyTags ? Qt::Checked : Qt::Unchecked);
+        it->setData(6, Qt::UserRole, std::clamp(caseRule, 1, 4));
+        it->setText(6, cases[std::clamp(caseRule, 1, 4) - 1]);
         return it;
     };
-    QSettings st;
-    const int n = st.beginReadArray("corrector/rules");
-    for (int i = 0; i < n; ++i) {
-        st.setArrayIndex(i);
-        addRule(st.value("description").toString(), st.value("find").toString(), st.value("replace").toString(),
-                st.value("enabled").toBool(), st.value("matchCase").toBool(), st.value("onlyText", true).toBool());
+    {
+        QSettings st;
+        const int n = st.beginReadArray("corrector/rules");
+        for (int i = 0; i < n; ++i) {
+            st.setArrayIndex(i);
+            const bool matchCase = st.value("matchCase").toBool();
+            addRule(st.value("description").toString(), st.value("find").toString(), st.value("replace").toString(),
+                    st.value("enabled").toBool(), matchCase, st.value("onlyText", true).toBool(),
+                    st.value("onlyTags").toBool(), st.value("case", matchCase ? 2 : 1).toInt());
+        }
+        st.endArray();
+        if (!n)
+            for (const Rule &r : defaults) addRule(r.description, r.find, r.replace, false, false, true, false, 1);
     }
-    st.endArray();
-    auto restore = [&] {
+    auto restore = [list, defaults, addRule] {
         for (const Rule &r : defaults)
             if (list->findItems(r.find, Qt::MatchExactly, 1).isEmpty())
-                addRule(r.description, r.find, r.replace, false, false, true);
+                addRule(r.description, r.find, r.replace, false, false, true, false, 1);
     };
-    if (!n) restore();
-    for (int c = 1; c < 5; ++c) list->resizeColumnToContents(c);
-    // text columns edit on a double click, the check columns toggle
-    connect(list, &QTreeWidget::itemDoubleClicked, &d, [list](QTreeWidgetItem *it, int col) {
+    for (int c = 1; c < 7; ++c) list->resizeColumnToContents(c);
+    // text columns edit on a double click, the case cycles; only text and only tags exclude each other
+    connect(list, &QTreeWidget::itemDoubleClicked, d, [list, cases](QTreeWidgetItem *it, int col) {
         if (col < 3) list->editItem(it, col);
+        if (col != 6) return;
+        const int c = it->data(6, Qt::UserRole).toInt() % 4 + 1;
+        it->setData(6, Qt::UserRole, c);
+        it->setText(6, cases[c - 1]);
     });
+    connect(list, &QTreeWidget::itemChanged, d, [](QTreeWidgetItem *it, int col) {
+        if ((col == 4 || col == 5) && it->checkState(col) == Qt::Checked) it->setCheckState(9 - col, Qt::Unchecked);
+    });
+    // the rules saved as they change, so closing the editor with the window open keeps them
+    const auto save = [list] {
+        QSettings st;
+        st.beginWriteArray("corrector/rules", list->topLevelItemCount());
+        for (int i = 0; i < list->topLevelItemCount(); ++i) {
+            const auto *it = list->topLevelItem(i);
+            st.setArrayIndex(i);
+            st.setValue("description", it->text(0));
+            st.setValue("find", it->text(1));
+            st.setValue("replace", it->text(2));
+            st.setValue("enabled", it->checkState(0) == Qt::Checked);
+            st.setValue("matchCase", it->checkState(3) == Qt::Checked);
+            st.setValue("onlyText", it->checkState(4) == Qt::Checked);
+            st.setValue("onlyTags", it->checkState(5) == Qt::Checked);
+            st.setValue("case", it->data(6, Qt::UserRole).toInt());
+        }
+        st.endArray();
+    };
+    connect(list->model(), &QAbstractItemModel::dataChanged, d, save);
+    connect(list->model(), &QAbstractItemModel::rowsInserted, d, save);
+    connect(list->model(), &QAbstractItemModel::rowsRemoved, d, save);
 
-    auto *h = new QHBoxLayout;
-    v->addLayout(h);
-    auto button = [&](const QString &text, auto fn) {
-        auto *b = new QPushButton(text, &d);
-        connect(b, &QPushButton::clicked, &d, fn);
+    auto row = [&] {
+        auto *h = new QHBoxLayout;
+        v->addLayout(h);
+        return h;
+    };
+    auto button = [d](QHBoxLayout *h, const QString &text, auto fn) {
+        auto *b = new QPushButton(text, d);
+        connect(b, &QPushButton::clicked, d, fn);
         h->addWidget(b);
         return b;
     };
-    button(tr("Add"), [&] {
-        auto *it = addRule(tr("New rule"), {}, {}, true, false, true);
+    auto *edits = row();
+    button(edits, tr("Add"), [list, addRule] {
+        auto *it = addRule(tr("New rule"), {}, {}, true, false, true, false, 1);
         list->setCurrentItem(it);
         list->editItem(it, 1);
     });
-    button(tr("Remove"), [&] { delete list->currentItem(); });
-    button(tr("Restore defaults"), restore);
-    h->addStretch();
-    auto *scope = new QComboBox(&d);
-    scope->addItems({tr("All lines"), tr("Selected lines")});
-    h->addWidget(scope);
-    auto *run = button(tr("Replace"), [&, this] {
-        auto *t = current();
-        if (!t) return;
+    button(edits, tr("Remove"), [list] { delete list->currentItem(); });
+    button(edits, tr("Restore defaults"), restore);
+    edits->addStretch();
+
+    // Kainote's "Which lines": all, the selected, from the first selected on, or of the styles named
+    auto *which = row();
+    which->addWidget(new QLabel(tr("Lines:"), d));
+    auto *scope = new QComboBox(d);
+    scope->addItems({tr("All lines"), tr("Selected lines"), tr("From the selected line"), tr("Lines of the styles")});
+    which->addWidget(scope);
+    auto *styles = new QLineEdit(d);
+    styles->setPlaceholderText(tr("Styles, separated by commas"));
+    auto *pick = new QToolButton(d);
+    pick->setText("+");
+    pick->setToolTip(tr("Choose styles"));
+    which->addWidget(pick);
+    which->addWidget(styles, 1);
+    const auto byStyles = [styles, pick](int i) {
+        styles->setEnabled(i == 3);
+        pick->setEnabled(i == 3);
+    };
+    byStyles(0);
+    connect(scope, &QComboBox::currentIndexChanged, d, byStyles);
+    connect(pick, &QToolButton::clicked, d, [this, d, styles] {
+        if (!current()) return;
+        QDialog pickD(d);
+        pickD.setWindowTitle(tr("Choose styles"));
+        auto *pv = new QVBoxLayout(&pickD);
+        auto *names = new QListWidget(&pickD);
+        const QStringList chosen = styles->text().split(',', Qt::SkipEmptyParts);
+        for (const auto &style : current()->s().styles()) {
+            auto *it = new QListWidgetItem(fs::q(style.name), names);
+            it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
+            it->setCheckState(chosen.contains(it->text()) ? Qt::Checked : Qt::Unchecked);
+        }
+        pv->addWidget(names);
+        auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &pickD);
+        connect(bb, &QDialogButtonBox::accepted, &pickD, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &pickD, &QDialog::reject);
+        pv->addWidget(bb);
+        if (pickD.exec() != QDialog::Accepted) return;
+        QStringList out;
+        for (int i = 0; i < names->count(); ++i)
+            if (names->item(i)->checkState() == Qt::Checked) out << names->item(i)->text();
+        styles->setText(out.join(','));
+    });
+    // the rows of a tab the scope chooses (empty: every line); none when it chooses no line
+    const auto rowsOf = [scope, styles](TabPanel *t) -> std::optional<std::vector<size_t>> {
+        std::vector<size_t> rows;
+        const size_t count = t->s().row_count();
+        switch (scope->currentIndex()) {
+        case 0:
+            return rows;
+        case 1:
+            rows = t->selection();
+            break;
+        case 2: {
+            const auto sel = t->selection();
+            const size_t first = sel.empty() ? size_t(std::max(0, t->active())) : std::ranges::min(sel);
+            for (size_t r = first; r < count; ++r) rows.push_back(r);
+            break;
+        }
+        default: {
+            QSet<QString> names;
+            for (const QString &n : styles->text().split(',', Qt::SkipEmptyParts)) names.insert(n.trimmed());
+            for (size_t r = 0; r < count; ++r)
+                if (names.contains(fs::q(t->s().row(r).style))) rows.push_back(r);
+        }
+        }
+        if (rows.empty()) return std::nullopt;
+        return rows;
+    };
+    // the rules ticked, as searches over the rows; `ruleRows` gets the list row of each
+    const auto specsFor = [list](const std::vector<size_t> &rows, std::vector<int> *ruleRows) {
         std::vector<fsb::FindSpec> specs;
         for (int i = 0; i < list->topLevelItemCount(); ++i) {
             const auto *it = list->topLevelItem(i);
@@ -2922,36 +3162,164 @@ void MainWindow::correctErrors() {
             s.regex = true;
             s.match_case = it->checkState(3) == Qt::Checked;
             s.skip_tags = it->checkState(4) == Qt::Checked;
-            if (scope->currentIndex() == 1)
-                for (size_t r : t->selection()) s.rows.push_back(r);
+            s.skip_text = it->checkState(5) == Qt::Checked;
+            s.case_rule = uint8_t(it->data(6, Qt::UserRole).toInt());
+            for (size_t r : rows) s.rows.push_back(r);
+            if (ruleRows) ruleRows->push_back(i);
         }
-        if (specs.empty()) return status(tr("No rule is checked"));
-        // nothing selected must not mean every line
-        if (scope->currentIndex() == 1 && t->selection().empty()) return status(tr("No lines selected"));
-        try {
-            const size_t count = t->s().replace_rules({specs.data(), specs.size()});
-            t->changed();
-            status(tr("Replacements: %1").arg(count));
-        } catch (const rust::Error &e) {
-            error(QString::fromUtf8(e.what()));
-        }
-    });
-    run->setDefault(true);
-    button(tr("Close"), [&] { d.accept(); });
-    d.exec();
+        return specs;
+    };
 
-    st.beginWriteArray("corrector/rules", list->topLevelItemCount());
-    for (int i = 0; i < list->topLevelItemCount(); ++i) {
-        const auto *it = list->topLevelItem(i);
-        st.setArrayIndex(i);
-        st.setValue("description", it->text(0));
-        st.setValue("find", it->text(1));
-        st.setValue("replace", it->text(2));
-        st.setValue("enabled", it->checkState(0) == Qt::Checked);
-        st.setValue("matchCase", it->checkState(3) == Qt::Checked);
-        st.setValue("onlyText", it->checkState(4) == Qt::Checked);
-    }
-    st.endArray();
+    auto *runs = row();
+    auto *results = new QTreeWidget(d);
+    results->setHeaderLabels({tr("Line"), tr("Text"), tr("Rule")});
+    results->setUniformRowHeights(true);
+    results->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    results->header()->setSectionResizeMode(1, QHeaderView::Stretch);
+    results->setItemDelegateForColumn(1, matchDelegate(results));
+    v->addWidget(results, 3);
+    auto *resultRow = row();
+    // per file in the results: its tab and the searches its matches come from
+    struct Found {
+        QPointer<TabPanel> tab;
+        std::vector<fsb::FindSpec> specs;
+    };
+    auto found = std::make_shared<std::vector<Found>>();
+    // Kainote's Find errors: every match of the rules ticked, listed to tick the ones to replace
+    const auto findIn = [=, this](const QList<TabPanel *> &tabs) {
+        results->clear();
+        found->clear();
+        size_t total = 0;
+        bool chosen = false;
+        for (auto *t : tabs) {
+            const auto rows = rowsOf(t);
+            if (!rows) continue;
+            chosen = true;
+            std::vector<int> ruleRows;
+            auto specs = specsFor(*rows, &ruleRows);
+            if (specs.empty()) return status(tr("No rule is checked"));
+            struct Hit {
+                fsb::FindMatch m;
+                size_t rule;
+            };
+            std::vector<Hit> hits;
+            try {
+                for (size_t k = 0; k < specs.size() && total + hits.size() < 20000; ++k)
+                    for (auto &m : t->s().find_matches(specs[k], 20000 - total - hits.size())) hits.push_back({m, k});
+            } catch (const rust::Error &e) {
+                return error(QString::fromUtf8(e.what()));
+            }
+            if (hits.empty()) continue;
+            std::ranges::stable_sort(hits, {}, [](const Hit &h) { return std::pair(h.m.row, h.m.start); });
+            auto *file = new QTreeWidgetItem(results, {t->title()});
+            file->setFirstColumnSpanned(true);
+            file->setFlags(file->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsAutoTristate);
+            file->setData(0, Qt::UserRole, int(found->size()));
+            file->setToolTip(0, t->path());
+            for (const auto &h : hits) {
+                auto *it = new QTreeWidgetItem(file, {QString::number(h.m.row + 1), fs::q(h.m.text),
+                                                      list->topLevelItem(ruleRows[h.rule])->text(0)});
+                it->setData(0, Qt::UserRole, qulonglong(h.m.row));
+                it->setData(0, Qt::UserRole + 1, h.m.original);
+                it->setData(1, Qt::UserRole, QPoint(int(h.m.start), int(h.m.end)));
+                it->setData(2, Qt::UserRole, qulonglong(h.rule));
+                it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
+                it->setCheckState(0, Qt::Checked);
+            }
+            file->setExpanded(true);
+            found->push_back({t, std::move(specs)});
+            total += hits.size();
+        }
+        if (!chosen) return status(tr("No lines to correct"));
+        status(total ? tr("Errors found: %1").arg(total) : tr("Nothing found"));
+    };
+    // the rules ticked replaced in the lines chosen, one undo step per tab
+    const auto replaceIn = [=, this](const QList<TabPanel *> &tabs) {
+        size_t count = 0;
+        bool chosen = false;
+        for (auto *t : tabs) {
+            const auto rows = rowsOf(t);
+            if (!rows) continue;
+            chosen = true;
+            const auto specs = specsFor(*rows, nullptr);
+            if (specs.empty()) return status(tr("No rule is checked"));
+            try {
+                const size_t n = t->s().replace_rules({specs.data(), specs.size()});
+                if (n) t->changed();
+                count += n;
+            } catch (const rust::Error &e) {
+                return error(QString::fromUtf8(e.what()));
+            }
+        }
+        if (!chosen) return status(tr("No lines to correct"));
+        results->clear(); // its places are stale now
+        found->clear();
+        status(tr("Replacements: %1").arg(count));
+    };
+    button(runs, tr("Find errors"), [=, this] { if (current()) findIn({current()}); });
+    button(runs, tr("Find errors in all tabs"), [=, this] { findIn(tabs()); });
+    button(runs, tr("Replace"), [=, this] { if (current()) replaceIn({current()}); })->setDefault(true);
+    button(runs, tr("Replace in all tabs"), [=, this] { replaceIn(tabs()); });
+    runs->addStretch();
+    button(runs, tr("Close"), [d] { d->close(); });
+
+    connect(results, &QTreeWidget::itemActivated, d, [this, found](QTreeWidgetItem *it) {
+        auto *file = it->parent();
+        if (!file) return;
+        TabPanel *t = (*found)[file->data(0, Qt::UserRole).toInt()].tab;
+        const auto r = it->data(0, Qt::UserRole).toULongLong();
+        if (!t || r >= t->s().row_count()) return;
+        showPanel(t);
+        t->setActive(int(r));
+        const QPoint at = it->data(1, Qt::UserRole).toPoint();
+        t->edit()->selectText(at.x(), at.y() - at.x(), it->data(0, Qt::UserRole + 1).toBool());
+    });
+    const auto tickAll = [results](Qt::CheckState state) {
+        for (int f = 0; f < results->topLevelItemCount(); ++f) results->topLevelItem(f)->setCheckState(0, state);
+    };
+    button(resultRow, tr("Check all"), [tickAll] { tickAll(Qt::Checked); });
+    button(resultRow, tr("Uncheck all"), [tickAll] { tickAll(Qt::Unchecked); });
+    // each match ticked replaced by its rule where it was found; lines changed since are left
+    button(resultRow, tr("Replace ticked"), [=, this] {
+        size_t replaced = 0, ticked = 0;
+        for (int f = 0; f < results->topLevelItemCount(); ++f) {
+            auto *file = results->topLevelItem(f);
+            const Found &in = (*found)[file->data(0, Qt::UserRole).toInt()];
+            std::vector<fsb::FindMatch> matches;
+            std::vector<size_t> rules;
+            for (int i = 0; i < file->childCount(); ++i) {
+                auto *it = file->child(i);
+                if (it->checkState(0) != Qt::Checked) continue;
+                const QPoint at = it->data(1, Qt::UserRole).toPoint();
+                fsb::FindMatch m;
+                m.row = size_t(it->data(0, Qt::UserRole).toULongLong());
+                m.original = it->data(0, Qt::UserRole + 1).toBool();
+                m.start = size_t(at.x());
+                m.end = size_t(at.y());
+                m.text = fs::rs(it->text(1));
+                matches.push_back(std::move(m));
+                rules.push_back(size_t(it->data(2, Qt::UserRole).toULongLong()));
+            }
+            ticked += matches.size();
+            if (matches.empty() || !in.tab) continue;
+            try {
+                const size_t n = in.tab->s().replace_rule_matches({in.specs.data(), in.specs.size()},
+                                                                  {matches.data(), matches.size()},
+                                                                  {rules.data(), rules.size()});
+                if (n) in.tab->changed();
+                replaced += n;
+            } catch (const rust::Error &e) {
+                error(QString::fromUtf8(e.what()));
+            }
+        }
+        if (!ticked) return status(tr("No matches ticked"));
+        results->clear(); // the places found are stale now: a new search before the next replacing
+        found->clear();
+        const QString done = tr("Replaced %1 of %2 matches ticked").arg(replaced).arg(ticked);
+        status(replaced < ticked ? done + tr("; the lines changed since the search were left") : done);
+    });
+    resultRow->addStretch();
+    d->show();
 }
 
 void MainWindow::automationManager() {
