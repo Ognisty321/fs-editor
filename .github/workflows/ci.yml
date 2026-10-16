@@ -28,6 +28,15 @@ jobs:
       - name: ALSA headers (cpal)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      # rust-toolchain.toml's toolchain; a runner with a component's files but not its record
+      # fails to add it ("detected conflict: 'bin/cargo-clippy'"), so it is installed afresh
+      - name: Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install || {
+            rustup toolchain uninstall "$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
+            rustup toolchain install
+          }
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --locked -- -D warnings
@@ -81,6 +90,15 @@ jobs:
           cache: true
           # shortcut: aqtinstall 3.3.0 (latest release) cannot read the per-compiler Windows repos of Qt >= 6.10; drop when a release can.
           aqtsource: git+https://github.com/miurahr/aqtinstall.git@076e1659807d0b362a3ed684d54c2e9c775eb9c7
+      # rust-toolchain.toml's toolchain; a runner with a component's files but not its record
+      # fails to add it ("detected conflict: 'bin/cargo-clippy'"), so it is installed afresh
+      - name: Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install || {
+            rustup toolchain uninstall "$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
+            rustup toolchain install
+          }
       - uses: Swatinem/rust-cache@v2
       - name: vcpkg
         shell: bash
