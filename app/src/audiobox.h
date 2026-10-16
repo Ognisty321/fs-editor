@@ -11,6 +11,7 @@
 
 #include <QRhiWidget>
 #include <QSettings>
+#include <QTimer>
 #include <QWidget>
 #include <atomic>
 #include <memory>
@@ -58,6 +59,10 @@ private:
     qint64 m_pressT = 0;
     qint64 m_pressLeft = 0;
     int m_hoverX = -1;
+    // a drag held past an edge goes on scrolling with the mouse still (Aegisub)
+    QTimer m_edgeTimer;
+    QPointF m_edgePos;
+    Qt::KeyboardModifiers m_edgeMods;
 };
 
 class AudioBox : public QWidget {
@@ -148,6 +153,7 @@ private:
     int m_activeSyl = 0;
     QString m_autoText; // the automatic split shown, not written until edited or committed
     mutable std::vector<std::pair<qint64, qint64>> m_inactive;
+    mutable std::vector<size_t> m_inactiveRows; // the row of each
     mutable std::tuple<quint64, int, int> m_inactiveKey{~quint64(0), -1, -1};
     // read on every overlay repaint and snap; values set anywhere in the app show here at once
     QSettings m_settings;

@@ -7,6 +7,7 @@
 #include <QAbstractScrollArea>
 #include <QHash>
 #include <QSet>
+#include <QTimer>
 #include <algorithm>
 #include <map>
 #include <set>
@@ -120,6 +121,8 @@ private:
     int m_anchor = 0;
     int m_dragFrom = -1;         // Alt+drag moving rows
     int m_selectTo = -1;         // the row a left-button drag selects to
+    QTimer m_edgeTimer;          // that drag held past an edge scrolls on with the mouse still
+    QPointF m_edgePos;
     quint64 m_styleGen = ~quint64(0); // the generation m_styleNames was read at
     QSet<QString> m_styleNames;
     QHash<QString, std::vector<size_t>> m_misspelled; // by line text: (start, length) pairs

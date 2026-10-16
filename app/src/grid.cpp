@@ -63,6 +63,12 @@ void eachSpan(const std::vector<size_t> &spans, const QString &raw, const QStrin
 Grid::Grid(TabPanel *tab) : QAbstractScrollArea(tab), m_tab(tab) {
     setFocusPolicy(Qt::StrongFocus);
     viewport()->setMouseTracking(true);
+    connect(&m_edgeTimer, &QTimer::timeout, this, [this] {
+        if (m_selectTo < 0) return m_edgeTimer.stop();
+        QMouseEvent e(QEvent::MouseMove, m_edgePos, viewport()->mapToGlobal(m_edgePos), Qt::NoButton, Qt::LeftButton,
+                      Qt::NoModifier);
+        mouseMoveEvent(&e);
+    });
     QSettings st;
     setFont(st.value("grid/font", QFont("Tahoma", 10)).value<QFont>());
     for (const auto &v : st.value("grid/hiddenColumns").toList()) m_userHidden.insert(v.toInt());
@@ -535,12 +541,15 @@ void Grid::mousePressEvent(QMouseEvent *e) {
 
 void Grid::mouseMoveEvent(QMouseEvent *e) {
     if (m_selectTo >= 0 && (e->buttons() & Qt::LeftButton)) {
-        // a drag selects the lines it passes, the grid scrolling on past its edges (Aegisub)
-        // shortcut: one line per mouse move out there, a timer if a still mouse should scroll too
+        // a drag selects the lines it passes, the grid scrolling on past its edges (Aegisub), on a
+        // timer while the mouse stays there, faster the farther it is
         auto *sb = verticalScrollBar();
         const int y = int(e->position().y());
-        if (y < rowHeight()) sb->setValue(sb->value() - 1);
-        else if (y >= viewport()->height()) sb->setValue(sb->value() + 1);
+        const int past = y < rowHeight() ? y - rowHeight() : std::max(0, y - viewport()->height() + 1);
+        if (past) sb->setValue(sb->value() + (past < 0 ? -1 : 1) * (1 + std::abs(past) / rowHeight()));
+        m_edgePos = e->position();
+        if (!past) m_edgeTimer.stop();
+        else if (!m_edgeTimer.isActive()) m_edgeTimer.start(50);
         int vi = rowAt(std::clamp(y, rowHeight(), viewport()->height() - 1));
         if (vi < 0) vi = int(m_vis.size()) - 1;
         if (vi >= 0 && vi != m_selectTo) {
@@ -559,7 +568,10 @@ void Grid::mouseMoveEvent(QMouseEvent *e) {
     if (!rows.empty()) m_tab->setSelection(rows, int(rows.front()));
 }
 
-void Grid::mouseReleaseEvent(QMouseEvent *) { m_dragFrom = m_selectTo = -1; }
+void Grid::mouseReleaseEvent(QMouseEvent *) {
+    m_dragFrom = m_selectTo = -1;
+    m_edgeTimer.stop();
+}
 
 void Grid::mouseDoubleClickEvent(QMouseEvent *e) {
     const int vi = rowAt(int(e->position().y()));

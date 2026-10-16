@@ -35,6 +35,11 @@ AudioView::AudioView(AudioBox *box) : QRhiWidget(box), m_box(box) {
     setMouseTracking(true);
     setFocusPolicy(Qt::ClickFocus);
     setMinimumHeight(80);
+    connect(&m_edgeTimer, &QTimer::timeout, this, [this] {
+        if (!m_drag) return m_edgeTimer.stop();
+        QMouseEvent e(QEvent::MouseMove, m_edgePos, mapToGlobal(m_edgePos), Qt::NoButton, m_button, m_edgeMods);
+        mouseMoveEvent(&e);
+    });
 }
 
 void AudioView::initialize(QRhiCommandBuffer *) {
@@ -160,9 +165,18 @@ void AudioView::paintOverlay(QPainter &p) {
         if (t < l || t > r) continue;
         p.drawLine(b.xOf(t), RulerH, b.xOf(t), h);
     }
-    // inactive lines: shaded, with dotted boundaries
+    // inactive lines: shaded, with dotted boundaries; those a Ctrl+drag takes along go with the marker
     p.setPen(QPen(col(theme::AudioInactive), 1, Qt::DotLine));
-    for (const auto &[start, end] : b.inactiveLines()) {
+    const auto &inactive = b.inactiveLines();
+    const qint64 linkedAt = b.m_linkMarker == 1 ? b.m_selStart : b.m_selEnd;
+    for (size_t k = 0; k < inactive.size(); ++k) {
+        auto [start, end] = inactive[k];
+        if (b.m_linkMarker) {
+            const size_t row = b.m_inactiveRows[k];
+            if (std::ranges::find(b.m_linkStarts, row) != b.m_linkStarts.end()) start = linkedAt;
+            if (std::ranges::find(b.m_linkEnds, row) != b.m_linkEnds.end()) end = linkedAt;
+            if (start > end) std::swap(start, end);
+        }
         if (end < l || start > r) continue;
         p.fillRect(QRect(QPoint(b.xOf(start), RulerH), QPoint(b.xOf(end), h)), QColor(0x80, 0x80, 0x90, 48));
         for (qint64 t : {start, end})
@@ -243,8 +257,7 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
     const int nearMarker = std::abs(b.xOf(b.m_selStart) - x) < 6 ? 1 : std::abs(b.xOf(b.m_selEnd) - x) < 6 ? 2 : 0;
     if (e->button() == Qt::LeftButton && ctrl && nearMarker) {
         // the other lines starting or ending on the marker move with it (Aegisub's Ctrl+drag), so a
-        // boundary two lines share stays shared
-        // shortcut: they move on the commit, not while dragging; draw them along if that confuses
+        // boundary two lines share stays shared; drawn along, written on the commit
         const qint64 at = nearMarker == 1 ? b.m_selStart : b.m_selEnd;
         b.m_linkStarts.clear();
         b.m_linkEnds.clear();
@@ -351,9 +364,14 @@ void AudioView::mouseMoveEvent(QMouseEvent *e) {
         overlayChanged();
         return;
     }
-    // a marker dragged past the edges scrolls the view along (Aegisub)
-    // shortcut: only while the mouse moves; a timer if holding it still out there should scroll too
-    if (m_drag != 3 && m_drag != 6 && (x < 0 || x >= width())) b.setLeft(b.m_left + qint64((x < 0 ? x : x - width() + 1) * b.m_msPerPx));
+    // a marker dragged past the edges scrolls the view along (Aegisub), on a timer while the mouse
+    // stays out there
+    const bool scrolls = m_drag != 3 && m_drag != 6 && (x < 0 || x >= width());
+    if (scrolls) b.setLeft(b.m_left + qint64((x < 0 ? x : x - width() + 1) * b.m_msPerPx));
+    m_edgePos = e->position();
+    m_edgeMods = e->modifiers();
+    if (!scrolls) m_edgeTimer.stop();
+    else if (!m_edgeTimer.isActive()) m_edgeTimer.start(30);
     const qint64 t = b.msAt(x);
     const bool snapToggle = e->modifiers() & Qt::ShiftModifier;
     if (m_drag == 3) {
@@ -385,6 +403,7 @@ void AudioView::mouseMoveEvent(QMouseEvent *e) {
 
 void AudioView::mouseReleaseEvent(QMouseEvent *) {
     auto &b = *m_box;
+    m_edgeTimer.stop();
     if ((m_drag == 1 || m_drag == 2 || m_drag == 4 || m_drag == 5) && b.m_autoCommit && b.m_selModified) b.commit();
     m_drag = 0;
 }
@@ -706,10 +725,14 @@ const std::vector<std::pair<qint64, qint64>> &AudioBox::inactiveLines() const {
     if (key == m_inactiveKey) return m_inactive;
     m_inactiveKey = key;
     m_inactive.clear();
+    m_inactiveRows.clear();
     const auto spans = s.row_spans();
     const int n = int(spans.size());
     const auto shown = [&](int i) { return i != act && (comments || !spans[size_t(i)].comment); };
-    const auto add = [&](int i) { m_inactive.emplace_back(spans[size_t(i)].start, spans[size_t(i)].end); };
+    const auto add = [&](int i) {
+        m_inactive.emplace_back(spans[size_t(i)].start, spans[size_t(i)].end);
+        m_inactiveRows.push_back(size_t(i));
+    };
     if (mode == 3)
         for (int i = 0; i < n; ++i)
             if (shown(i)) add(i);
