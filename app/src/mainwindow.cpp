@@ -461,7 +461,7 @@ static bool untouched(TabPanel *tab) {
            (tab->s().row_count() == 0 || (tab->s().row_count() == 1 && tab->s().row(0).text.empty()));
 }
 
-int MainWindow::pickEmbeddedTrack(const rust::Vec<fsb::SubTrack> &tracks, const QString &question) {
+int MainWindow::pickTrack(const rust::Vec<fsb::SubTrack> &tracks, const QString &question, const QString &title) {
     QStringList items;
     for (const auto &t : tracks)
         items << QString("#%1  %2%3%4")
@@ -470,7 +470,8 @@ int MainWindow::pickEmbeddedTrack(const rust::Vec<fsb::SubTrack> &tracks, const 
                      .arg(t.language.empty() ? QString() : " [" + fs::q(t.language) + "]")
                      .arg(t.title.empty() ? QString() : "  " + fs::q(t.title));
     bool ok = false;
-    const QString pick = QInputDialog::getItem(this, tr("Subtitles in the video"), question, items, 0, false, &ok);
+    const QString pick = QInputDialog::getItem(this, title.isEmpty() ? tr("Subtitles in the video") : title, question,
+                                               items, 0, false, &ok);
     return ok ? tracks[size_t(std::max(0, int(items.indexOf(pick))))].index : -1;
 }
 
@@ -479,7 +480,7 @@ void MainWindow::openFile(const QString &path, const QString &encoding) {
     if (kVideoExt.contains(ext)) {
         // like Kainote: an empty tab offers the subtitles stored in the video
         if (const auto tracks = fsb::subtitle_tracks(fs::Utf8(path)); !tracks.empty() && untouched(current()))
-            if (const int i = pickEmbeddedTrack(tracks, tr("The video contains subtitles. Load them?")); i >= 0)
+            if (const int i = pickTrack(tracks, tr("The video contains subtitles. Load them?")); i >= 0)
                 current()->openEmbedded(path, i);
         current()->openVideo(path);
         updateActions();
@@ -595,7 +596,7 @@ void MainWindow::buildMenus() {
         const auto tracks = fsb::subtitle_tracks(fs::Utf8(video));
         if (tracks.empty()) return status(tr("The video contains no subtitles"));
         if (!maybeSave(tab())) return;
-        if (const int i = pickEmbeddedTrack(tracks, tr("Subtitles to load:")); i >= 0) tab()->openEmbedded(video, i);
+        if (const int i = pickTrack(tracks, tr("Subtitles to load:")); i >= 0) tab()->openEmbedded(video, i);
     });
     add("saveTranslation", tr("Save translation"), {}, file, [=, this] {
         // a name of its own: Enter in the dialog must not replace the file with both texts

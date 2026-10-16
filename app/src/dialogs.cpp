@@ -2216,6 +2216,12 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     }
     leadIn->setValue(st.value("audio/leadIn", 200).toInt());
     leadOut->setValue(st.value("audio/leadOut", 300).toInt());
+    // Kainote's preferred audio tracks of a file with several
+    auto *tracks = new QLineEdit(st.value("audio/preferredTracks").toString(), this);
+    tracks->setPlaceholderText(tr("e.g. jpn;Japanese"));
+    tracks->setToolTip(tr("Languages or parts of track names, in order of preference, separated by \";\". A file "
+                          "with several audio tracks loads the first one that matches, or asks."));
+    audio->addRow(tr("Preferred audio tracks"), tracks);
     audio->addRow(tr("Audio lead-in"), leadIn);
     audio->addRow(tr("Audio lead-out"), leadOut);
     auto *autosave = new QSpinBox(this);
@@ -2335,7 +2341,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
           {tr("Never"), tr("When aspect ratio changes"), tr("Always")});
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(bb, &QDialogButtonBox::accepted, this,
-            [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs, trace,
+            [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs, trace, tracks,
              types] {
         QSettings st;
         QSettings classes(assoc::kClasses, QSettings::NativeFormat);
@@ -2355,6 +2361,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         for (auto &[k, b] : boxes) st.setValue(k, b->isChecked());
         st.setValue("audio/inactiveLines", inactive->currentIndex());
         st.setValue("audio/leadIn", leadIn->value());
+        st.setValue("audio/preferredTracks", tracks->text().trimmed());
         st.setValue("audio/leadOut", leadOut->value());
         st.setValue("main/autosaveSeconds", autosave->value());
         for (auto &[k, s] : spins) st.setValue(k, s->value());

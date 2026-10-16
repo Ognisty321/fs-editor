@@ -164,7 +164,7 @@ Kodowanie: UTF-8/UTF-16 z BOM jest rozpoznawane deterministycznie, w pozostałyc
 
 * **`fs-media` (C++ + cxx)**
   * `VideoSource`: BestSource `BestVideoSource`, z klatką RGBA dla dokładnego numeru klatki, tablicą timestampów (VFR), keyframes i rozdzielczością/SAR.
-  * `AudioSource`: `BestAudioSource`, z próbkami PCM `f32`/`i16` dla zakresu próbek.
+  * `AudioSource`: `BestAudioSource`, z próbkami PCM `f32`/`i16` dla zakresu próbek. Plik z kilkoma ścieżkami audio wczytuje pierwszą pasującą do preferowanych języków lub nazw z ustawień (Kainote, `fs-bridge::media::preferred_track`), a bez dopasowania pyta, którą wczytać, jak Aegisub.
   * `SubtitleRenderer`: libass (`ass_read_memory` z aktualnego dokumentu), `render(time) → Vec<AssImage>`. Kompozycja odbywa się w shaderze (bitmapy alfa + kolor). GUI przekazuje wątkowi renderu kopię dokumentu w O(1) (`RenderSubs`). Zapis skryptu dla libass i rejestracja czcionek z `[Fonts]` odbywają się w tym wątku, nie w GUI.
 * **`fs-audio` (Rust)**
   * cache szczytów min/max per piksel w kilku poziomach zoomu (waveform). Sumy |x| poziomu są dzielone przez 4^poziom, więc mieszczą się w `u32` na każdym poziomie. Dekodowane PCM trafia od razu do współdzielonego `Arc<[i16]>`, bez drugiej kopii ścieżki. Puste audio (2h30m jak w Aegisub) ma 1 kHz: 18 MB zamiast 800;

@@ -22,6 +22,21 @@ fn cache(dir: &str) -> PathBuf {
     }
 }
 
+/// Kainote's preferred audio tracks: the first name of `preferred` (";"-separated, in order) that is
+/// a track's language or part of its title picks it; -1 when none does.
+pub fn preferred_track<'a>(tracks: &[(i32, &'a str, &'a str)], preferred: &str) -> i32 {
+    preferred
+        .split(';')
+        .map(|p| p.trim().to_lowercase())
+        .filter(|p| !p.is_empty())
+        .find_map(|p| {
+            tracks.iter().find(|(_, lang, title)| {
+                lang.to_lowercase() == p || title.to_lowercase().contains(&p)
+            })
+        })
+        .map_or(-1, |t| t.0)
+}
+
 /// The header in Aegisub's spelling ("TV.601", "None"); empty when it is missing or invalid.
 pub fn ycbcr_header(header: &str) -> String {
     let h = header.trim().to_ascii_lowercase();
@@ -295,14 +310,15 @@ impl Audio {
     }
 
     /// `progress(done, total)` while indexing (first open only) and again while decoding;
-    /// false cancels.
+    /// false cancels. `track`: a stream index, -1 the first audio track.
     pub fn open(
         path: &str,
+        track: i32,
         cache_dir: &str,
         mut progress: impl FnMut(i64, i64) -> bool,
     ) -> Result<Self, String> {
         let open = |progress: &mut dyn FnMut(i64, i64) -> bool| {
-            fs_media::Audio::open(Path::new(path), -1, Some(&cache(cache_dir)), progress)
+            fs_media::Audio::open(Path::new(path), track, Some(&cache(cache_dir)), progress)
                 .map_err(|e| format!("{path}: {e}"))
         };
         // the first one indexes the file (once, cached) for the others
@@ -454,6 +470,20 @@ mod tests {
     }
 
     #[test]
+    fn preferred_audio_track_follows_the_order_of_the_names() {
+        let t = [
+            (1, "eng", "English 5.1"),
+            (2, "jpn", ""),
+            (3, "", "Commentary"),
+        ];
+        assert_eq!(super::preferred_track(&t, "JPN; eng"), 2);
+        assert_eq!(super::preferred_track(&t, "pol;english"), 1); // part of the title
+        assert_eq!(super::preferred_track(&t, " ;commentary"), 3);
+        assert_eq!(super::preferred_track(&t, "ger"), -1);
+        assert_eq!(super::preferred_track(&t, ""), -1);
+    }
+
+    #[test]
     fn ycbcr_headers_as_aegisub_reads_them() {
         use fs_media::{Matrix, Range};
         assert_eq!(super::ycbcr_header(" tv.709 "), "TV.709");
@@ -509,7 +539,7 @@ mod tests {
     fn spectrum_rows_and_playback() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/media/cfr.mkv");
         let cache = std::env::temp_dir().join("fs-bridge-test-cache");
-        let mut a = Audio::open(path, cache.to_str().unwrap(), |_, _| true).unwrap();
+        let mut a = Audio::open(path, -1, cache.to_str().unwrap(), |_, _| true).unwrap();
 
         let (w, h) = (8usize, 200usize);
         let mut out = vec![0f32; w * h];
@@ -618,7 +648,7 @@ mod tests {
         drop(fs_audio::player::Player::new(pcm, None));
         eprintln!("player: {:?}", t0.elapsed());
         let t0 = Instant::now();
-        let a = Audio::open(&path, cache, |_, _| true).unwrap();
+        let a = Audio::open(&path, -1, cache, |_, _| true).unwrap();
         eprintln!(
             "audio open: {:?} ({} ms of audio)",
             t0.elapsed(),

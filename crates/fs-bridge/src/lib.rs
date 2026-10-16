@@ -962,7 +962,17 @@ pub mod ffi {
         fn thesaurus_word(suggestion: &str) -> String;
 
         type Audio;
-        fn open_audio(path: &str, cache_dir: &str, progress: &Progress) -> Result<Box<Audio>>;
+        /// `track`: a stream index from `audio_tracks`, -1 the first audio track.
+        fn open_audio(
+            path: &str,
+            track: i32,
+            cache_dir: &str,
+            progress: &Progress,
+        ) -> Result<Box<Audio>>;
+        /// The audio streams; empty when the file cannot be read.
+        fn audio_tracks(path: &str) -> Vec<SubTrack>;
+        /// The track Kainote's preferred names (";"-separated languages or title parts) pick, -1 none.
+        fn preferred_track(tracks: &[SubTrack], preferred: &str) -> i32;
         /// Silent audio, or Aegisub's white noise.
         fn blank_audio(ms: i64, noise: bool) -> Box<Audio>;
         fn duration_ms(self: &Audio) -> i64;
@@ -1222,8 +1232,35 @@ fn new_renderer() -> Result<Box<Renderer>, String> {
     Renderer::new().map(Box::new)
 }
 
-fn open_audio(path: &str, cache_dir: &str, progress: &ffi::Progress) -> Result<Box<Audio>, String> {
-    Audio::open(path, cache_dir, |d, t| progress.report(d, t)).map(Box::new)
+fn open_audio(
+    path: &str,
+    track: i32,
+    cache_dir: &str,
+    progress: &ffi::Progress,
+) -> Result<Box<Audio>, String> {
+    Audio::open(path, track, cache_dir, |d, t| progress.report(d, t)).map(Box::new)
+}
+
+fn audio_tracks(path: &str) -> Vec<ffi::SubTrack> {
+    fs_media::list_tracks(std::path::Path::new(path))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|t| t.kind == "audio")
+        .map(|t| ffi::SubTrack {
+            index: t.index,
+            codec: t.codec,
+            language: t.language,
+            title: t.title,
+        })
+        .collect()
+}
+
+fn preferred_track(tracks: &[ffi::SubTrack], preferred: &str) -> i32 {
+    let t: Vec<_> = tracks
+        .iter()
+        .map(|t| (t.index, t.language.as_str(), t.title.as_str()))
+        .collect();
+    media::preferred_track(&t, preferred)
 }
 
 fn ycbcr_header(header: &str) -> String {

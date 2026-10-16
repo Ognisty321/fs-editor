@@ -30,6 +30,8 @@ struct PanelKey {
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
+    // -1: cancelled
+    int pickTrack(const rust::Vec<fsb::SubTrack> &tracks, const QString &question, const QString &title = {});
     MainWindow();
     ~MainWindow() override;
 
@@ -83,7 +85,6 @@ private:
     void compareTabs(bool on);
     void followActive();
     bool maybeSave(TabPanel *tab);
-    int pickEmbeddedTrack(const rust::Vec<fsb::SubTrack> &tracks, const QString &question); // -1: cancelled
     bool saveAs(TabPanel *tab);
     bool saveTab(TabPanel *tab);
     void checkDisk(TabPanel *t); // offers to read a file another program changed again

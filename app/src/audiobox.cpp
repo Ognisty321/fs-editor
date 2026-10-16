@@ -588,13 +588,23 @@ QWidget *AudioBox::buttonRow() {
 void AudioBox::setSpectrum(bool on) { m_spectrumToggle->setChecked(on); }
 
 void AudioBox::open(const QString &path) {
+    // several audio tracks: Kainote's preferred one, else the one picked, as Aegisub asks
+    int track = -1;
+    if (const auto tracks = fsb::audio_tracks(fs::Utf8(path)); tracks.size() > 1) {
+        track = fsb::preferred_track({tracks.data(), tracks.size()},
+                                     fs::Utf8(QSettings().value("audio/preferredTracks").toString()));
+        if (track < 0)
+            track = m_tab->main()->pickTrack(tracks, tr("The file has several audio tracks. Which one should be loaded?"),
+                                             tr("Audio tracks"));
+        if (track < 0) return;
+    }
     close(); // also stops a load still decoding
     m_openCancel = std::make_shared<std::atomic_bool>(false);
     m_tab->main()->status(tr("Loading audio %1…").arg(path));
     const QString cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex";
     QPointer<AudioBox> self(this);
     auto cancel = m_openCancel;
-    std::thread([self, path, cache, cancel] {
+    std::thread([self, path, track, cache, cancel] {
         std::optional<rust::Box<fsb::Audio>> a;
         QString err;
         try {
@@ -604,7 +614,7 @@ void AudioBox::open(const QString &path) {
                 });
                 return !*cancel;
             });
-            a.emplace(fsb::open_audio(fs::Utf8(path), fs::Utf8(cache), progress));
+            a.emplace(fsb::open_audio(fs::Utf8(path), track, fs::Utf8(cache), progress));
         } catch (const rust::Error &e) {
             err = QString::fromUtf8(e.what());
         }

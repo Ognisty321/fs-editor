@@ -179,6 +179,14 @@
         <translation>Uwydatnij częstotliwości głosu na spektrum</translation>
     </message>
     <message>
+        <source>The file has several audio tracks. Which one should be loaded?</source>
+        <translation>Plik ma kilka ścieżek audio. Którą wczytać?</translation>
+    </message>
+    <message>
+        <source>Audio tracks</source>
+        <translation>Ścieżki audio</translation>
+    </message>
+    <message>
         <source>Loading audio %1…</source>
         <translation>Wczytywanie audio %1…</translation>
     </message>
@@ -3614,6 +3622,18 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Inactive lines in the audio</source>
         <translation>Nieaktywne linijki w audio</translation>
+    </message>
+    <message>
+        <source>e.g. jpn;Japanese</source>
+        <translation>np. jpn;Japanese</translation>
+    </message>
+    <message>
+        <source>Languages or parts of track names, in order of preference, separated by &quot;;&quot;. A file with several audio tracks loads the first one that matches, or asks.</source>
+        <translation>Języki albo fragmenty nazw ścieżek w kolejności preferencji, rozdzielone „;”. Plik z kilkoma ścieżkami audio wczytuje pierwszą pasującą albo pyta.</translation>
+    </message>
+    <message>
+        <source>Preferred audio tracks</source>
+        <translation>Preferowane ścieżki audio</translation>
     </message>
     <message>
         <source>Audio lead-in</source>
