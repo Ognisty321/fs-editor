@@ -357,8 +357,10 @@ int main(int argc, char **argv) {
     // FSED_SMOKE_MENU="Automation" opens that menu of the window, or a submenu of it, by its title;
     // "video>Audio streams" opens the video's context menu with that submenu shown ("tabs>..." the
     // tab bar's, "edit:7>..." the line text's at its character 7), more ">" for submenus in it; an
-    // item at the end is picked, then the menu is shown again FSED_SMOKE_REOPEN ms later (1500)
+    // item at the end is picked, then the menu is shown again FSED_SMOKE_REOPEN ms later (1500), or
+    // the next of the paths "a>b|c>d" opened instead
     static std::function<void(QString)> contextMenu;
+    static QStringList nextMenus;
     static std::function<void(QString, int, int)> walk;
     // the menu shows once the main thread is free (a load reports progress): tried till then
     walk = [](const QString &path, int level, int tries) {
@@ -375,7 +377,8 @@ int main(int argc, char **argv) {
             for (int k = 0; k < 10 && QApplication::activePopupWidget(); ++k) QApplication::activePopupWidget()->close();
             a->trigger();
             const int wait = qEnvironmentVariableIsSet("FSED_SMOKE_REOPEN") ? qEnvironmentVariableIntValue("FSED_SMOKE_REOPEN") : 1500;
-            return QTimer::singleShot(wait, [back = parts.mid(0, level).join('>')] { contextMenu(back); });
+            const QString next = nextMenus.isEmpty() ? parts.mid(0, level).join('>') : nextMenus.takeFirst();
+            return QTimer::singleShot(wait, [next] { contextMenu(next); });
         }
         m->setActiveAction(a);
         QKeyEvent right(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
@@ -409,7 +412,10 @@ int main(int argc, char **argv) {
     };
     if (const QString title = qEnvironmentVariable("FSED_SMOKE_MENU"); !title.isEmpty())
         QTimer::singleShot(std::max(700, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 2 / 3), &w, [&w, title] {
-            if (title.startsWith("video") || title.startsWith("tabs") || title.startsWith("edit:")) return contextMenu(title);
+            if (title.startsWith("video") || title.startsWith("tabs") || title.startsWith("edit:")) {
+                nextMenus = title.split('|');
+                return contextMenu(nextMenus.takeFirst());
+            }
             for (auto *m : w.findChildren<QMenu *>())
                 if (fs::plainText(m->title()) == title) return m->popup(w.mapToGlobal(QPoint(0, 30)));
         });

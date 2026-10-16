@@ -820,9 +820,13 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     m_showInitial->setToolTip(tr("Show the contents of the subtitle line when it was first selected above the edit "
                                  "box. This is sometimes useful when editing subtitles or translating subtitles into "
                                  "another language."));
+    // two spaces of the program font apart: Kainote's fixed 6 px runs them together in a wide (monospaced) one
+    auto *counts = new QHBoxLayout;
+    counts->setSpacing(std::max(6, fontMetrics().horizontalAdvance(QStringLiteral("  "))));
     for (QWidget *w : {static_cast<QWidget *>(m_lineLabel), static_cast<QWidget *>(m_wrapsLabel),
                        static_cast<QWidget *>(m_cpsLabel)})
-        info->addWidget(w);
+        counts->addWidget(w);
+    info->addLayout(counts);
     info->addSpacing(8);
     info->addWidget(m_tlMode);
     info->addWidget(m_timeRadio);
