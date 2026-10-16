@@ -89,6 +89,10 @@ TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fs
         emit statusChanged();
         emit titleChanged();
     });
+    connect(m_video, &VideoBox::stepped, this, [this](qint64 f) {
+        if (QSettings().value("audio/playOnStep", false).toBool())
+            m_audio->play(m_video->timeAt(f), m_video->timeAt(f + 1));
+    });
     connect(m_video, &VideoBox::timeChanged, this, [this](qint64 ms) {
         m_grid->setVideoTime(ms);
         m_audio->videoMoved();

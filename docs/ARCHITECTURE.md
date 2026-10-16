@@ -130,7 +130,7 @@ Wszystkie operacje są wywoływalne z CLI, GUI i Lua:
 * post-processor timingu (lead-in/out, łączenie sąsiednich, snap do keyframes);
 * resample rozdzielczości (`PlayResX/Y`, `\pos`, `\clip`, rysunki, marginesy, rozmiary, obrys);
 * zmiana FPS (CFR→CFR, VFR→CFR);
-* kolizje i nakładanie, CPS/długość linii, czyszczenie tagów, łączenie i dzielenie linii;
+* kolizje i nakładanie, CPS/długość linii (komórka CPS w gridzie czerwienieje stopniowo od progu ostrzeżenia do progu błędu, jak w Aegisub), czyszczenie tagów, łączenie i dzielenie linii;
 * karaoke: podział `\k` na sylaby i ich zapis;
 * zmiana jednego tagu w wielu linijkach (`tag_adjust`, Hydra Kainote i „zmiana wszystkich tagów” narzędzi skali i obrotu): dodanie, ustawienie, mnożenie przez numer linijki, gradienty, wstawienie (w miejscu kursora albo na początku linijki; dla `\t` wokół zaznaczonych tagów), krok od aktywnej linijki oraz skalowanie wszystkich wystąpień. Tag ma 1–4 wartości: alfa jedną, kolor trzy (R, G, B), `\pos`, `\fad` i `\t` swoje początkowe liczby. Zmiany względne obejmują też tagi wewnątrz `\t`, a linijka bez tagu na początku dostaje go tam (od wartości stylu), żeby zmieniła się cała. Liczone są zawsze od tekstu sprzed przeciągania, więc nic się nie kumuluje;
 * „utrzymanie proporcji” (`transform_place`): pozycje, oba punkty `\move`, `\org` i clipy przekształcone tą samą skalą lub obrotem wokół jednego punktu. Przy obrocie linijka z `\org` przesuwa tylko `\org`, bo libass już obraca ją wokół niego;

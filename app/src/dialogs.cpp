@@ -2197,6 +2197,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"audio/inactiveComments", QT_TR_NOOP("Show inactive comments in the audio"), false, audio},
         {"audio/wheelZooms", QT_TR_NOOP("Mouse wheel zooms the audio (Shift scrolls)"), false, audio},
         {"audio/autoFocus", QT_TR_NOOP("Focus the audio when the mouse is over it"), true, audio},
+        {"audio/playOnStep", QT_TR_NOOP("Play audio when stepping in video"), false, audio},
     };
     std::vector<std::pair<QString, QCheckBox *>> boxes;
     for (const auto &c : checks) {
@@ -2224,15 +2225,17 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     autosave->setSpecialValueText(tr("off"));
     autosave->setValue(st.value("main/autosaveSeconds", 60).toInt());
     editor->addRow(tr("Autosave every"), autosave);
-    // the character counter's limits, red in the grid and the edit box (Aegisub's, Kainote's)
+    // the character counter's limits, red in the grid and the edit box (Aegisub's, Kainote's); the
+    // characters per second redden from the first to fully at the second (Aegisub's warning and error)
     const std::pair<const char *, int> limitKeys[] = {
-        {"subs/maxCps", 15}, {"subs/maxLineLength", 43}, {"subs/maxLines", 2}};
-    const char *limitLabels[] = {QT_TR_NOOP("Maximum characters per second"), QT_TR_NOOP("Maximum line length"),
+        {"subs/maxCps", 15}, {"subs/cpsError", 30}, {"subs/maxLineLength", 43}, {"subs/maxLines", 2}};
+    const char *limitLabels[] = {QT_TR_NOOP("Maximum characters per second"),
+                                 QT_TR_NOOP("Characters per second shown fully red"), QT_TR_NOOP("Maximum line length"),
                                  QT_TR_NOOP("Maximum lines")};
     std::vector<std::pair<QString, QSpinBox *>> spins;
-    for (int k = 0; k < 3; ++k) {
+    for (int k = 0; k < 4; ++k) {
         auto *s = new QSpinBox(this);
-        s->setRange(1, k == 2 ? 20 : 1000);
+        s->setRange(1, k == 3 ? 20 : 1000);
         s->setValue(st.value(limitKeys[k].first, limitKeys[k].second).toInt());
         subs->addRow(tr(limitLabels[k]), s);
         spins.emplace_back(limitKeys[k].first, s);
@@ -2250,17 +2253,27 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     fastJump->setValue(st.value("video/fastJump", 10).toInt());
     video->addRow(tr("Frames skipped by a fast jump"), fastJump);
     spins.emplace_back("video/fastJump", fastJump);
-    const auto fontName = [](const QFont &f) { return QString("%1, %2 pt").arg(f.family()).arg(f.pointSize()); };
-    auto *font = new QPushButton(fontName(st.value("grid/font", QFont("Tahoma", 10)).value<QFont>()), this);
-    connect(font, &QPushButton::clicked, this, [font, fontName] {
-        bool ok;
-        const QFont f = QFontDialog::getFont(&ok, QSettings().value("grid/font", QFont("Tahoma", 10)).value<QFont>());
-        if (ok) {
-            QSettings().setValue("grid/font", f);
-            font->setText(fontName(f));
-        }
-    });
-    editor->addRow(tr("Grid font (applies to new tabs)"), font);
+    auto *recent = new QSpinBox(this); // Aegisub's Limits/MRU
+    recent->setRange(1, 99);
+    recent->setValue(st.value("main/recentCount", 20).toInt());
+    editor->addRow(tr("Recently opened files listed"), recent);
+    spins.emplace_back("main/recentCount", recent);
+    const auto fontButton = [this, editor](const QString &key, const QFont &def, const QString &label) {
+        const auto name = [](const QFont &f) { return QString("%1, %2 pt").arg(f.family()).arg(f.pointSize()); };
+        auto *b = new QPushButton(name(QSettings().value(key, def).value<QFont>()), this);
+        connect(b, &QPushButton::clicked, this, [=] {
+            bool ok;
+            const QFont f = QFontDialog::getFont(&ok, QSettings().value(key, def).value<QFont>());
+            if (ok) {
+                QSettings().setValue(key, f);
+                b->setText(name(f));
+            }
+        });
+        editor->addRow(label, b);
+    };
+    fontButton("grid/font", QFont("Tahoma", 10), tr("Grid font (applies to new tabs)"));
+    // Aegisub's Subtitle/Edit Box/Font Face and Font Size
+    fontButton("edit/font", QApplication::font(), tr("Edit box font (applies to new tabs)"));
     auto *dictDir = new QLineEdit(QDir::toNativeSeparators(spell::dir()), this);
     dictDir->setMinimumWidth(dictDir->fontMetrics().averageCharWidth() * 48);
     editor->addRow(tr("Dictionary folder (Hunspell .aff/.dic)"), dictDir);

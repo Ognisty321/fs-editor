@@ -43,6 +43,7 @@ int generation();                  // changes on every reload, for caches of res
 // characters per second counts (subs/cpsIgnore*, applied by reload()).
 namespace limits {
 int cps();
+double cpsRed(int cps); // 0..1: how red a cell with these characters per second is
 bool wrapsOver(const QString &wraps); // "a/b/c" line lengths: too many lines or one too long
 void reload();                        // after a settings change
 } // namespace limits

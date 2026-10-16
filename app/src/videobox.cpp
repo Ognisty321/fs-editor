@@ -894,6 +894,12 @@ qint64 VideoBox::timeAt(qint64 frame) const {
 
 void VideoBox::seekMs(qint64 ms) { seekFrame(frameAt(ms)); }
 
+void VideoBox::stepFrames(int n) {
+    const qint64 from = m_frame;
+    seekFrame(m_frame + n);
+    if (std::abs(n) == 1 && m_frame != from) emit stepped(std::min(from, m_frame));
+}
+
 void VideoBox::seekFrame(qint64 n) {
     if (!hasVideo()) return;
     n = std::clamp<qint64>(n, 0, m_frames - 1);

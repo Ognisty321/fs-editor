@@ -173,7 +173,7 @@ public:
     void togglePlay();
     void playRange(qint64 from, qint64 to);
     bool playing() const { return m_playing; }
-    void stepFrames(int n) { seekFrame(m_frame + n); }
+    void stepFrames(int n);
 
     void subsChanged();
     void syncMatrix(); // decode with the script's YCbCr Matrix, when it changed (Aegisub)
@@ -199,6 +199,7 @@ public:
 signals:
     void opened();
     void timeChanged(qint64 ms, qint64 frame);
+    void stepped(qint64 frame); // a step of one frame passed over this one (Aegisub plays its audio)
     void heightDelta(int dy);
 
 protected:

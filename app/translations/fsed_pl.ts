@@ -3548,6 +3548,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Aktywuj audio po najechaniu myszą</translation>
     </message>
     <message>
+        <source>Play audio when stepping in video</source>
+        <translation>Odtwarzaj audio przy przechodzeniu wideo o klatkę</translation>
+    </message>
+    <message>
         <source>None</source>
         <translation>Brak</translation>
     </message>
@@ -3592,6 +3596,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Maksymalna długość linii</translation>
     </message>
     <message>
+        <source>Characters per second shown fully red</source>
+        <translation>Znaki na sekundę w pełni na czerwono</translation>
+    </message>
+    <message>
         <source>Maximum lines</source>
         <translation>Maksymalna liczba linii</translation>
     </message>
@@ -3608,8 +3616,16 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Klatki przeskakiwane szybkim skokiem</translation>
     </message>
     <message>
+        <source>Recently opened files listed</source>
+        <translation>Liczba ostatnio otwartych plików</translation>
+    </message>
+    <message>
         <source>Grid font (applies to new tabs)</source>
         <translation>Czcionka siatki (dla nowych zakładek)</translation>
+    </message>
+    <message>
+        <source>Edit box font (applies to new tabs)</source>
+        <translation>Czcionka pola edycji (w nowych kartach)</translation>
     </message>
     <message>
         <source>Dictionary folder (Hunspell .aff/.dic)</source>

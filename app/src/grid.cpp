@@ -437,8 +437,11 @@ void Grid::paintEvent(QPaintEvent *) {
                     p.drawText(QRect(cr.left(), cr.top() + 2, 8, 8), Qt::AlignCenter, fold);
                 }
                 if (int(i) == m_marker) p.fillRect(cr.right() - 4, cr.top(), 4, rh, T.collision);
-            } else if ((c == Cps && int(r.cps + 0.5) > limits::cps()) ||
-                       (c == Style && !styleNames.isEmpty() && !styleNames.contains(fs::q(r.style))) ||
+            } else if (const double red = c == Cps ? limits::cpsRed(int(r.cps + 0.5)) : 0; red > 0) {
+                QColor e = T.error;
+                e.setAlphaF(e.alphaF() * red);
+                p.fillRect(cr, e);
+            } else if ((c == Style && !styleNames.isEmpty() && !styleNames.contains(fs::q(r.style))) ||
                        (c == Wraps && limits::wrapsOver(fs::q(r.wraps)))) {
                 p.fillRect(cr, T.error);
             }

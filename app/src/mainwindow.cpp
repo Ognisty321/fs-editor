@@ -1784,7 +1784,8 @@ QMenu *MainWindow::recentMenu(const QString &kind) {
     m_recent.insert(kind, m);
     connect(m, &QMenu::aboutToShow, this, [this, m, kind] {
         m->clear();
-        for (const QString &f : QSettings().value("recent/" + kind).toStringList()) {
+        QSettings st;
+        for (const QString &f : st.value("recent/" + kind).toStringList().mid(0, st.value("main/recentCount", 20).toInt())) {
             m->addAction(QFileInfo(f).fileName(), this, [this, f, kind] {
                 if (kind == "subs") openFile(f);
                 else if (kind == "video") current()->openVideo(f);
@@ -1879,7 +1880,7 @@ void MainWindow::addRecent(const QString &kind, const QString &path) {
     QStringList l = st.value("recent/" + kind).toStringList();
     l.removeAll(path);
     l.prepend(path);
-    st.setValue("recent/" + kind, l.mid(0, 20));
+    st.setValue("recent/" + kind, l.mid(0, st.value("main/recentCount", 20).toInt()));
 }
 
 // ---- toolbar ------------------------------------------------------------------

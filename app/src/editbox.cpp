@@ -198,14 +198,14 @@ void spell::reload() {
 
 namespace {
 struct Limits {
-    int cps, length, lines;
+    int cps, cpsError, length, lines;
 };
 Limits loadLimits() {
     QSettings st;
     fsb::set_cps_ignore(st.value("subs/cpsIgnoreWhitespace", true).toBool(),
                         st.value("subs/cpsIgnorePunctuation", true).toBool());
-    return {st.value("subs/maxCps", 15).toInt(), st.value("subs/maxLineLength", 43).toInt(),
-            st.value("subs/maxLines", 2).toInt()};
+    return {st.value("subs/maxCps", 15).toInt(), st.value("subs/cpsError", 30).toInt(),
+            st.value("subs/maxLineLength", 43).toInt(), st.value("subs/maxLines", 2).toInt()};
 }
 Limits &g_limits() {
     static Limits l = loadLimits(); // read per painted cell, so cached
@@ -214,6 +214,12 @@ Limits &g_limits() {
 } // namespace
 
 int limits::cps() { return g_limits().cps; }
+
+// Aegisub's grid: from nothing at the warning to full at the error threshold
+double limits::cpsRed(int cps) {
+    const int lo = g_limits().cps, hi = std::max(lo, g_limits().cpsError);
+    return cps <= lo ? 0 : std::min(double(cps - lo + 1) / (hi - lo + 1), 1.0);
+}
 
 bool limits::wrapsOver(const QString &wraps) {
     const auto parts = wraps.split('/');
@@ -712,6 +718,7 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     auto *tlv = new QVBoxLayout(m_tlBox);
     tlv->setContentsMargins(0, 0, 0, 0);
     m_original = new SubsTextEdit(m_tlBox);
+    m_original->setFont(QSettings().value("edit/font", m_original->font()).value<QFont>());
     tlv->addWidget(m_original, 1);
     auto *tlb = new QHBoxLayout;
     auto *pasteSel = new QPushButton(tr("Paste the selected"), m_tlBox);
@@ -739,6 +746,7 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     connect(m_original, &QPlainTextEdit::textChanged, this, [this] { commit("original"); });
 
     m_text = new SubsTextEdit(this);
+    m_text->setFont(QSettings().value("edit/font", m_text->font()).value<QFont>());
     v->addWidget(m_text, 2);
     connect(m_text, &QPlainTextEdit::textChanged, this, [this] { commit("text"); });
     for (auto *e : {m_text, m_original})
