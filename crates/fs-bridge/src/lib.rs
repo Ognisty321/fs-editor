@@ -733,6 +733,13 @@ pub mod ffi {
         /// Every match, in order, up to `max` of them.
         fn find_matches(self: &Session, spec: &FindSpec, max: usize) -> Result<Vec<FindMatch>>;
         fn replace_all(self: &mut Session, spec: &FindSpec) -> Result<usize>;
+        /// Kainote's Replace in the search results: the matches ticked (of `find_matches`), in
+        /// one undo step; a field changed since the search is left. How many were replaced.
+        fn replace_matches(
+            self: &mut Session,
+            spec: &FindSpec,
+            matches: &[FindMatch],
+        ) -> Result<usize>;
         fn replace_rules(self: &mut Session, specs: &[FindSpec]) -> Result<usize>;
         fn overlapping(self: &Session, row: usize) -> Vec<usize>;
         fn rows_at(self: &Session, ms: i64) -> Vec<usize>;

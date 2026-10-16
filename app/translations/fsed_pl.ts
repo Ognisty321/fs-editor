@@ -902,6 +902,38 @@ Każdy zmieniany plik jest najpierw kopiowany do %2</translation>
         <translation>Linijka</translation>
     </message>
     <message>
+        <source>Check all</source>
+        <translation>Zaznacz wszystko</translation>
+    </message>
+    <message>
+        <source>Uncheck all</source>
+        <translation>Odznacz wszystko</translation>
+    </message>
+    <message>
+        <source>Replace</source>
+        <translation>Zamień</translation>
+    </message>
+    <message>
+        <source>Replace the matches ticked</source>
+        <translation>Zamień zaznaczone dopasowania</translation>
+    </message>
+    <message>
+        <source>%1 could not be copied to the backup folder, left as it was</source>
+        <translation>%1 nie dało się skopiować do folderu kopii, pozostawiono bez zmian</translation>
+    </message>
+    <message>
+        <source>No matches ticked</source>
+        <translation>Nie zaznaczono dopasowań</translation>
+    </message>
+    <message>
+        <source>Replaced %1 of %2 matches ticked</source>
+        <translation>Zamieniono %1 z %2 zaznaczonych dopasowań</translation>
+    </message>
+    <message>
+        <source>; the lines changed since the search were left</source>
+        <translation>; linijki zmienione od wyszukania pominięto</translation>
+    </message>
+    <message>
         <source>Nothing found</source>
         <translation>Nie znaleziono</translation>
     </message>

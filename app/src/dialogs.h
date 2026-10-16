@@ -60,6 +60,7 @@ private:
     void addResults(TabPanel *tab, const QString &title, const QString &path, const rust::Vec<fsb::FindMatch> &found);
     void showResults(const QString &summary);
     void goToResult(class QTreeWidgetItem *item);
+    void replaceChecked(); // Kainote's: the matches ticked in the results, each where it was found
     MainWindow *m_main;
     QTabWidget *m_tabs;
     QComboBox *m_find, *m_replace;
@@ -70,6 +71,9 @@ private:
     QDialog *m_results = nullptr;
     QTreeWidget *m_tree = nullptr;
     QLabel *m_summary = nullptr;
+    QPushButton *m_replaceChecked = nullptr;
+    QLineEdit *m_resultReplace = nullptr;
+    fsb::FindSpec m_resultSpec; // the search the results come from
     QList<QPointer<TabPanel>> m_resultTabs; // per file in the results; null: not open (yet)
     fsb::FindHit m_hit{-1, false, 0, 0}; // the match shown last, where Find and Replace next go on
     QPointer<TabPanel> m_hitTab;

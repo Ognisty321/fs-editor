@@ -337,6 +337,7 @@ void FindDialog::findAll(const QList<TabPanel *> &tabs) {
     if (!ready()) return;
     remember(false);
     clearResults();
+    m_resultSpec = spec(nullptr);
     size_t matches = 0;
     int files = 0;
     for (auto *tab : tabs) {
@@ -386,11 +387,12 @@ void FindDialog::findInFiles() {
     m_findFiles->setEnabled(false);
     m_main->status(tr("Searching in %1...").arg(dir));
     auto *watch = new QFutureWatcher<Found>(this);
-    connect(watch, &QFutureWatcher<Found>::finished, this, [this, watch, dir] {
+    connect(watch, &QFutureWatcher<Found>::finished, this, [this, watch, dir, s] {
         const Found f = watch->result();
         watch->deleteLater();
         m_findFiles->setEnabled(true);
         clearResults();
+        m_resultSpec = s;
         size_t matches = 0;
         for (const auto &[path, found] : f.files) {
             addResults(nullptr, QDir(dir).relativeFilePath(path), path, found);
@@ -523,16 +525,97 @@ void FindDialog::clearResults() {
         v->addWidget(m_summary);
         m_tree->setItemDelegateForColumn(1, new MatchDelegate(m_tree));
         connect(m_tree, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem *it) { goToResult(it); });
+        // Kainote's: the matches ticked are replaced, each where it was found
+        auto *row = new QHBoxLayout;
+        const auto tickAll = [this](Qt::CheckState state) {
+            for (int f = 0; f < m_tree->topLevelItemCount(); ++f) m_tree->topLevelItem(f)->setCheckState(0, state);
+        };
+        auto *all = new QPushButton(tr("Check all"), m_results);
+        connect(all, &QPushButton::clicked, this, [tickAll] { tickAll(Qt::Checked); });
+        auto *none = new QPushButton(tr("Uncheck all"), m_results);
+        connect(none, &QPushButton::clicked, this, [tickAll] { tickAll(Qt::Unchecked); });
+        m_replaceChecked = new QPushButton(tr("Replace"), m_results);
+        m_replaceChecked->setToolTip(tr("Replace the matches ticked"));
+        connect(m_replaceChecked, &QPushButton::clicked, this, &FindDialog::replaceChecked);
+        m_resultReplace = new QLineEdit(m_results);
+        m_resultReplace->setPlaceholderText(tr("Replace with"));
+        for (QWidget *w : std::initializer_list<QWidget *>{all, none, m_replaceChecked}) row->addWidget(w);
+        row->addWidget(m_resultReplace, 1);
+        v->addLayout(row);
         m_results->resize(700, 400);
     }
     m_tree->clear();
     m_resultTabs.clear();
+    m_replaceChecked->setEnabled(true);
+    m_resultReplace->setText(m_replace->currentText());
+}
+
+void FindDialog::replaceChecked() {
+    m_resultSpec.replacement = fs::rs(m_resultReplace->text());
+    size_t replaced = 0, ticked = 0;
+    const QString backup = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/ReplaceBackup/" +
+                           QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
+    for (int f = 0; f < m_tree->topLevelItemCount(); ++f) {
+        auto *file = m_tree->topLevelItem(f);
+        std::vector<fsb::FindMatch> matches;
+        for (int i = 0; i < file->childCount(); ++i) {
+            auto *it = file->child(i);
+            if (it->checkState(0) != Qt::Checked) continue;
+            const QPoint at = it->data(1, Qt::UserRole).toPoint();
+            fsb::FindMatch m;
+            m.row = size_t(it->data(0, Qt::UserRole).toULongLong());
+            m.original = it->data(0, Qt::UserRole + 1).toBool();
+            m.start = size_t(at.x());
+            m.end = size_t(at.y());
+            m.text = fs::rs(it->text(1));
+            matches.push_back(std::move(m));
+        }
+        if (matches.empty()) continue;
+        ticked += matches.size();
+        const rust::Slice<const fsb::FindMatch> ticks{matches.data(), matches.size()};
+        const QString path = file->data(0, Qt::UserRole + 1).toString();
+        QPointer<TabPanel> &tab = m_resultTabs[file->data(0, Qt::UserRole).toInt()];
+        if (!tab && !path.isEmpty()) // a file from the folder open in a tab: replaced there, unsaved
+            for (auto *t : m_main->tabs())
+                if (!t->path().isEmpty() && QFileInfo(t->path()) == QFileInfo(path)) tab = t;
+        try {
+            if (tab) {
+                const size_t n = tab->s().replace_matches(m_resultSpec, ticks);
+                if (n) tab->changed();
+                replaced += n;
+            } else if (!path.isEmpty()) {
+                auto session = fsb::new_session();
+                session->open(fs::Utf8(path));
+                const size_t n = session->replace_matches(m_resultSpec, ticks);
+                if (!n) continue;
+                // never saved without its copy (Kainote's ReplaceBackup)
+                const QString copy = backup + "/" + file->text(0);
+                if (!QDir().mkpath(QFileInfo(copy).path()) || !QFile::copy(path, copy)) {
+                    m_main->error(tr("%1 could not be copied to the backup folder, left as it was")
+                                      .arg(QDir::toNativeSeparators(path)));
+                    continue;
+                }
+                session->save(fs::Utf8(path)); // in its own format and encoding
+                replaced += n;
+            }
+        } catch (const rust::Error &e) {
+            m_main->error(QString::fromUtf8(e.what()));
+        }
+    }
+    if (!ticked) return m_main->status(tr("No matches ticked"));
+    // the places found are stale now: a new search before the next replacing
+    m_replaceChecked->setEnabled(false);
+    for (int f = 0; f < m_tree->topLevelItemCount(); ++f) m_tree->topLevelItem(f)->setCheckState(0, Qt::Unchecked);
+    const QString done = tr("Replaced %1 of %2 matches ticked").arg(replaced).arg(ticked);
+    m_main->status(replaced < ticked ? done + tr("; the lines changed since the search were left") : done);
 }
 
 void FindDialog::addResults(TabPanel *tab, const QString &title, const QString &path,
                             const rust::Vec<fsb::FindMatch> &found) {
     auto *file = new QTreeWidgetItem(m_tree, {title});
     file->setFirstColumnSpanned(true);
+    file->setFlags(file->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsAutoTristate);
+    file->setCheckState(0, Qt::Unchecked);
     file->setData(0, Qt::UserRole, int(m_resultTabs.size()));
     file->setData(0, Qt::UserRole + 1, path);
     file->setToolTip(0, path);
@@ -542,6 +625,8 @@ void FindDialog::addResults(TabPanel *tab, const QString &title, const QString &
         it->setData(0, Qt::UserRole, qulonglong(m.row));
         it->setData(0, Qt::UserRole + 1, m.original);
         it->setData(1, Qt::UserRole, QPoint(int(m.start), int(m.end)));
+        it->setFlags(it->flags() | Qt::ItemIsUserCheckable);
+        it->setCheckState(0, Qt::Unchecked);
     }
     file->setExpanded(true);
 }

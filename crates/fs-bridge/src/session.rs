@@ -2168,6 +2168,64 @@ impl Session {
         Ok(end)
     }
 
+    /// Kainote's Replace in the search results: the matches ticked, each where it was found, in
+    /// one undo step; a field whose text changed since the search is left as it is. Returns how
+    /// many were replaced.
+    pub fn replace_matches(
+        &mut self,
+        spec: &FindSpec,
+        matches: &[FindMatch],
+    ) -> Result<usize, String> {
+        let m = Self::matcher(spec)?;
+        if !Self::searchable(spec) {
+            return Ok(0);
+        }
+        let r = ops::Replace {
+            matcher: m,
+            replacement: spec.replacement.clone(),
+            first_only: true,
+            keep_case: false,
+        };
+        // field by field, the last match first: the earlier ones keep their places
+        let mut todo: Vec<&FindMatch> =
+            matches.iter().filter(|x| x.row < self.rows.len()).collect();
+        todo.sort_by(|a, b| (a.row, a.original, b.start).cmp(&(b.row, b.original, a.start)));
+        todo.dedup_by(|a, b| (a.row, a.original, a.start) == (b.row, b.original, b.start));
+        let mut edits: Vec<(usize, String)> = Vec::new();
+        let mut count = 0;
+        for field in todo.chunk_by(|a, b| a.row == b.row && a.original == b.original) {
+            let Some((e, _)) = self
+                .search_events(spec, field[0].row)
+                .find(|&(_, o)| o == field[0].original)
+            else {
+                continue;
+            };
+            let text = r.matcher.field_value(self.ed.doc.event(e).unwrap());
+            if text != field[0].text {
+                continue;
+            }
+            let mut new = text.to_string();
+            for x in field {
+                let at = byte_at(&new, x.start)..byte_at(&new, x.end);
+                if let Some((t, _)) = r.replace_one(&new, at) {
+                    new = t;
+                    count += 1;
+                }
+            }
+            if new != text {
+                edits.push((e, new));
+            }
+        }
+        if !edits.is_empty() {
+            self.edit("Replace", |d| {
+                for (e, new) in edits {
+                    r.matcher.set_field(d.event_mut(e).unwrap(), new);
+                }
+            });
+        }
+        Ok(count)
+    }
+
     /// Every row whose field matches, in order (Kainote's Find all).
     pub fn find_all(&self, spec: &FindSpec) -> Result<Vec<usize>, String> {
         let m = Self::matcher(spec)?;
@@ -4528,6 +4586,39 @@ mod tests {
         assert_eq!(
             (s.row(1).original.as_str(), s.row(1).text.as_str()),
             ("tw0", "tw0 t00")
+        );
+    }
+
+    #[test]
+    fn replace_the_matches_ticked() {
+        let mut s = session(ASS);
+        let e = FindSpec {
+            pattern: "e".into(),
+            replacement: "E".into(),
+            match_case: true,
+            ..Default::default()
+        };
+        // "one", "two", "three": the first and the last of three ticked
+        let found = s.find_matches(&e, 9).unwrap();
+        let ticked = [found[0].clone(), found[2].clone()];
+        assert_eq!(s.replace_matches(&e, &ticked), Ok(2));
+        assert_eq!(
+            (s.row(0).text.as_str(), s.row(2).text.as_str()),
+            ("onE", "threE")
+        );
+        assert!(s.undo());
+        assert_eq!(
+            (s.row(0).text.as_str(), s.row(2).text.as_str()),
+            ("one", "three")
+        );
+        // a line changed since the search is left
+        let mut r = s.row(0);
+        r.text = "one!".into();
+        s.set_row(0, &r, "");
+        assert_eq!(s.replace_matches(&e, &found), Ok(2));
+        assert_eq!(
+            (s.row(0).text.as_str(), s.row(2).text.as_str()),
+            ("one!", "thrEE")
         );
     }
 
