@@ -57,7 +57,14 @@ public:
     static std::span<const ToolInfo> tools(); // in Tool order
     bool shown() const; // the active line is on the video frame
     enum Tool { Pointer, Pos, Move, Scale, RotZ, RotXY, RClip, VClip, Draw, Shifter, AllTags, ToolCount };
-    enum VecMode { VecMove, VecLine, VecBezier, VecNewFigure, VecDelete, VecFreehand, VecInsert, VecConvert, VecSpline };
+    enum VecMode { VecMove, VecLine, VecBezier, VecNewFigure, VecDelete, VecFreehand, VecInsert, VecConvert, VecSpline, VecModeCount };
+    // the vector clip and drawing modes, in VecMode order (Aegisub's video/tool/vclip/*)
+    static constexpr const char *kVecModes[VecModeCount] = {
+        QT_TR_NOOP("Move points"), QT_TR_NOOP("Add line"), QT_TR_NOOP("Add Bézier curve"),
+        QT_TR_NOOP("Add separate point (move)"), QT_TR_NOOP("Delete point"), QT_TR_NOOP("Draw freehand"),
+        QT_TR_NOOP("Insert a point into a segment"), QT_TR_NOOP("Convert a segment between line and Bézier"),
+        QT_TR_NOOP("Add B-spline point")};
+    void setVecMode(int k); // a vector mode; it takes the vector clip tool unless a vector tool is on
 
     explicit VisualTools(VideoBox *box);
     int tool() const { return m_tool; }
@@ -141,6 +148,7 @@ private:
     VideoBox *m_box;
     int m_tool = Pointer;
     int m_vecMode = VecMove;
+    class QButtonGroup *m_vecModes = nullptr;
     fsb::Visual m_v{};
     bool m_valid = false;
     qint64 m_first = 0, m_last = -1; // the frames the active line is shown on

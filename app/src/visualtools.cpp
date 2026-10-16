@@ -205,17 +205,13 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     auto *vh = new QHBoxLayout(vec);
     vh->setContentsMargins(6, 0, 0, 0);
     vh->setSpacing(1);
-    auto *modes = new QButtonGroup(vec);
-    const char *mt[] = {QT_TR_NOOP("Move points"), QT_TR_NOOP("Add line"), QT_TR_NOOP("Add Bézier curve"),
-                        QT_TR_NOOP("Add separate point (move)"), QT_TR_NOOP("Delete point"),
-                        QT_TR_NOOP("Draw freehand"), QT_TR_NOOP("Insert a point into a segment"),
-                        QT_TR_NOOP("Convert a segment between line and Bézier"), QT_TR_NOOP("Add B-spline point")};
+    auto *modes = m_vecModes = new QButtonGroup(vec);
     const char *mi[] = {"arrows-move", "line",    "vector-bezier-2", "point",        "x",
                         "scribble",    "circle-plus", "replace",      "vector-spline"};
     for (int k = 0; k < 9; ++k) {
         auto *b = new QToolButton(vec);
         b->setIcon(icon(mi[k], QColor(k == 4 ? 0xf2665c : 0xb48cff)));
-        b->setToolTip(tr(mt[k]));
+        b->setToolTip(tr(kVecModes[k]));
         b->setCheckable(true);
         b->setAutoRaise(true);
         modes->addButton(b, k);
@@ -223,10 +219,7 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     }
     m_vecMode = std::clamp(QSettings().value("visual/vecMode", 0).toInt(), 0, 8);
     modes->button(m_vecMode)->setChecked(true);
-    connect(modes, &QButtonGroup::idClicked, this, [this](int k) {
-        m_vecMode = k;
-        QSettings().setValue("visual/vecMode", k);
-    });
+    connect(modes, &QButtonGroup::idClicked, this, &VisualTools::setVecMode);
     m_sub->addWidget(vec);
     auto *invert = new QToolButton(row);
     invert->setText(tr("Invert clip"));
@@ -548,6 +541,13 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
 }
 
 QWidget *VisualTools::options() const { return m_sub; }
+
+void VisualTools::setVecMode(int k) {
+    m_vecMode = std::clamp(k, 0, VecModeCount - 1);
+    QSettings().setValue("visual/vecMode", m_vecMode);
+    if (m_vecModes) m_vecModes->button(m_vecMode)->setChecked(true);
+    if (m_tool != VClip && m_tool != Draw) setTool(VClip);
+}
 
 void VisualTools::setTool(int t) {
     m_tool = t;

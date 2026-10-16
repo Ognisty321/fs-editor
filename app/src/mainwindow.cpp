@@ -892,6 +892,12 @@ void MainWindow::buildMenus() {
     add("redo", tr("Redo"), QKeySequence("Ctrl+Y"), edit, [=] { tab()->redo(); });
     add("history", tr("History"), QKeySequence("Ctrl+Shift+H"), edit, [=] { HistoryDialog(tab()).exec(); });
     edit->addSeparator();
+    // Aegisub's edit/line/copy, cut and paste: the grid's, as commands with keys of their own (the grid
+    // keeps Ctrl+C/X/V, which text boxes need everywhere else)
+    add("copyLines", tr("Copy lines"), {}, edit, [=] { tab()->grid()->copy(); });
+    add("cutLines", tr("Cut lines"), {}, edit, [=] { tab()->grid()->cut(); });
+    add("pasteLines", tr("Paste lines"), {}, edit, [=] { tab()->grid()->paste(); });
+    edit->addSeparator();
     auto findDlg = [this] {
         if (!m_find) m_find = new FindDialog(this);
         return m_find;
@@ -1305,6 +1311,11 @@ void MainWindow::buildMenus() {
     for (int t = 0; t < VisualTools::ToolCount; ++t)
         add(VisualTools::tools()[t].id, QCoreApplication::translate("VisualTools", VisualTools::tools()[t].name), {},
             visualTools, [=] { tab()->video()->tools()->setTool(t); });
+    // Aegisub's video/tool/vclip/*: each mode of the vector clip and drawing tools
+    auto *vecModes = sub(visualTools, tr("Vector clip modes"));
+    for (int k = 0; k < VisualTools::VecModeCount; ++k)
+        add(QString("vecMode%1").arg(k), QCoreApplication::translate("VisualTools", VisualTools::kVecModes[k]), {},
+            vecModes, [=] { tab()->video()->tools()->setVecMode(k); });
     add("resetZoom", tr("Turn off video zoom"), QKeySequence("Ctrl+Shift+Z"), video, [=] { tab()->video()->resetZoom(); });
     // Aegisub's video/zoom/* (its keys for in and out) and video/focus_seek
     add("zoomIn", tr("Zoom in"), QKeySequence("Ctrl+Num++"), video, [=] {
@@ -1369,6 +1380,14 @@ void MainWindow::buildMenus() {
 
     // View
     auto *view = menu(tr("Vie&w"));
+    // Aegisub's app/toggle/toolbar
+    auto *showToolbar = add("toggleToolbar", tr("Show toolbar"), {}, view, {});
+    showToolbar->setCheckable(true);
+    showToolbar->setChecked(QSettings().value("toolbar/visible", true).toBool());
+    connect(showToolbar, &QAction::toggled, this, [this](bool on) {
+        QSettings().setValue("toolbar/visible", on);
+        if (m_toolbar) m_toolbar->setVisible(on);
+    });
     auto *modes = new QActionGroup(this);
     const std::pair<const char *, QString> viewModes[] = {{"viewAll", tr("All")},
                                                           {"viewVideoSubs", tr("Video and subs")},
@@ -1899,6 +1918,7 @@ void MainWindow::buildToolbar() {
     };
     rebuild();
     addToolBar(areas[std::clamp(QSettings().value("toolbar/alignment", 0).toInt(), 0, 3)], m_toolbar);
+    m_toolbar->setVisible(QSettings().value("toolbar/visible", true).toBool());
 }
 
 // ---- status bar ---------------------------------------------------------------
