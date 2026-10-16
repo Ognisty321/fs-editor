@@ -22,6 +22,71 @@ fn cache(dir: &str) -> PathBuf {
     }
 }
 
+/// The header in Aegisub's spelling ("TV.601", "None"); empty when it is missing or invalid.
+pub fn ycbcr_header(header: &str) -> String {
+    let h = header.trim().to_ascii_lowercase();
+    if h == "none" {
+        return "None".into();
+    }
+    let Some((range, matrix)) = h.split_once('.') else {
+        return String::new();
+    };
+    let range = match range {
+        "tv" => "TV",
+        "pc" => "PC",
+        _ => return String::new(),
+    };
+    let matrix = match matrix {
+        "601" => "601",
+        "709" => "709",
+        "fcc" => "FCC",
+        "240m" => "240M",
+        _ => return String::new(),
+    };
+    format!("{range}.{matrix}")
+}
+
+/// What a video is decoded with for a script's header: its own colour space for None, VSFilter's
+/// TV.601 when the header is missing or invalid (Aegisub's `Header::to_effective`).
+pub fn decode_as(header: &str) -> (fs_media::Matrix, fs_media::Range) {
+    use fs_media::{Matrix, Range};
+    let h = ycbcr_header(header);
+    if h == "None" {
+        return (Matrix::Auto, Range::AsDecoded);
+    }
+    let range = if h.starts_with("PC") {
+        Range::Pc
+    } else {
+        Range::Tv
+    };
+    let matrix = match h.split_once('.').map_or("", |(_, m)| m) {
+        "709" => Matrix::Bt709,
+        "FCC" => Matrix::Fcc,
+        "240M" => Matrix::Smpte240m,
+        _ => Matrix::Bt601,
+    };
+    (matrix, range)
+}
+
+/// The header a script on this video should have (Aegisub's `to_best_practice` of the guessed
+/// colour space): TV/PC.601 or .709, None for anything else. `colorspace` and `range` are
+/// AVColorSpace and AVColorRange; unspecified ones are guessed as Aegisub does.
+pub fn best_matrix(colorspace: i32, range: i32, width: i32, height: i32) -> &'static str {
+    // AVColorSpace: 1 BT.709, 2 unspecified, 5 BT.470BG, 6 SMPTE 170M; AVColorRange 2: full
+    let cs = match colorspace {
+        2 if width > 1024 || height >= 600 => 1,
+        2 => 6,
+        c => c,
+    };
+    match (cs, range == 2) {
+        (1, false) => "TV.709",
+        (1, true) => "PC.709",
+        (5 | 6, false) => "TV.601",
+        (5 | 6, true) => "PC.601",
+        _ => "None",
+    }
+}
+
 pub struct Video {
     inner: fs_media::Video,
     fr: Framerate,
@@ -52,7 +117,17 @@ impl Video {
             sar_den: p.sar_den,
             duration_ms: (p.duration_s * 1000.0).round() as i64,
             matrix: p.matrix.clone(),
+            untagged: p.colorspace == 2,
+            hdr: p.hdr,
+            best_matrix: best_matrix(p.colorspace, p.color_range, p.width, p.height).to_string(),
         }
+    }
+
+    /// Decode with the colour space a script's YCbCr Matrix header names (Aegisub's
+    /// `override_colorspace`), so its colours match the video as VSFilter shows them.
+    pub fn set_ycbcr_header(&mut self, header: &str) {
+        let (m, r) = decode_as(header);
+        self.inner.set_matrix(m, r);
     }
 
     pub fn frame(&mut self, n: i64, out: &mut [u8]) -> Result<(), String> {
@@ -376,6 +451,28 @@ mod tests {
         r.add_script_fonts(&doc);
         assert_eq!(r.script_fonts.len(), 1);
         assert!(r.set_script(&doc.to_ass_string()).is_ok());
+    }
+
+    #[test]
+    fn ycbcr_headers_as_aegisub_reads_them() {
+        use fs_media::{Matrix, Range};
+        assert_eq!(super::ycbcr_header(" tv.709 "), "TV.709");
+        assert_eq!(super::ycbcr_header("pc.240m"), "PC.240M");
+        assert_eq!(super::ycbcr_header("NONE"), "None");
+        assert_eq!(super::ycbcr_header(""), "");
+        assert_eq!(super::ycbcr_header("TV.2020"), "");
+        assert_eq!(super::ycbcr_header("TV.709.1"), "");
+        assert_eq!(super::decode_as("None"), (Matrix::Auto, Range::AsDecoded));
+        assert_eq!(super::decode_as(""), (Matrix::Bt601, Range::Tv)); // VSFilter's
+        assert_eq!(super::decode_as("junk"), (Matrix::Bt601, Range::Tv));
+        assert_eq!(super::decode_as("PC.709"), (Matrix::Bt709, Range::Pc));
+        assert_eq!(super::decode_as("TV.FCC"), (Matrix::Fcc, Range::Tv));
+        // untagged: guessed by size, limited range
+        assert_eq!(super::best_matrix(2, 0, 1920, 1080), "TV.709");
+        assert_eq!(super::best_matrix(2, 0, 720, 480), "TV.601");
+        assert_eq!(super::best_matrix(5, 2, 720, 576), "PC.601");
+        assert_eq!(super::best_matrix(1, 1, 1280, 720), "TV.709");
+        assert_eq!(super::best_matrix(9, 1, 3840, 2160), "None"); // BT.2020
     }
 
     #[test]

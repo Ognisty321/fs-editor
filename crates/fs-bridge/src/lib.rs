@@ -361,6 +361,12 @@ pub mod ffi {
         duration_ms: i64,
         /// The file's own YCbCr Matrix ("TV.709"); empty when untagged.
         matrix: String,
+        /// No colour matrix in the file: it is guessed by size (Aegisub warns).
+        untagged: bool,
+        /// HDR or wide gamut colours, which subtitles cannot match (Aegisub warns).
+        hdr: bool,
+        /// The YCbCr Matrix a script on this video should have (Aegisub's best practice).
+        best_matrix: String,
     }
 
     #[derive(Debug, Clone, Default)]
@@ -884,6 +890,11 @@ pub mod ffi {
         fn keyframes(self: &Video) -> Vec<i64>;
         fn frame_at_ms(self: &Video, ms: i64) -> i64;
         fn ms_at_frame(self: &Video, frame: i64) -> i64;
+        /// Decode with the colour space of a script's YCbCr Matrix header, as Aegisub does:
+        /// the video's own for None, TV.601 (VSFilter's) when missing or invalid.
+        fn set_ycbcr_header(self: &mut Video, header: &str);
+        /// A YCbCr Matrix header in Aegisub's spelling, "" when missing or invalid.
+        fn ycbcr_header(header: &str) -> String;
 
         type Renderer;
         fn new_renderer() -> Result<Box<Renderer>>;
@@ -1213,6 +1224,10 @@ fn new_renderer() -> Result<Box<Renderer>, String> {
 
 fn open_audio(path: &str, cache_dir: &str, progress: &ffi::Progress) -> Result<Box<Audio>, String> {
     Audio::open(path, cache_dir, |d, t| progress.report(d, t)).map(Box::new)
+}
+
+fn ycbcr_header(header: &str) -> String {
+    media::ycbcr_header(header)
 }
 
 fn blank_audio(ms: i64, noise: bool) -> Box<Audio> {

@@ -73,6 +73,9 @@ struct VideoInfo {
     double duration_s = 0;
     std::string pixel_format;
     std::string matrix;  // the first frame's own, e.g. "TV.709"; "" when unset
+    int colorspace = 2;  // its AVColorSpace (2: unspecified) and AVColorRange (0: unspecified)
+    int color_range = 0;
+    bool hdr = false; // PQ or HLG transfer, or BT.2020 / P3 primaries (Aegisub's IsHDRFrame)
 };
 
 class VideoSource {

@@ -176,6 +176,7 @@ public:
     void stepFrames(int n) { seekFrame(m_frame + n); }
 
     void subsChanged();
+    void syncMatrix(); // decode with the script's YCbCr Matrix, when it changed (Aegisub)
     void lineChanged();
     void setPlayerMode(bool on);
     void setFullscreen(bool on, QScreen *on_screen = nullptr); // default: the screen the box is on
@@ -226,6 +227,7 @@ private:
     fsb::VideoInfo m_info{};
     qint64 m_frames = 0, m_frame = 0;
     qint64 m_scriptAt = -2; // frame of a one-frame script; -1 the whole script; -2 out of date
+    std::optional<QString> m_ycbcr; // the YCbCr Matrix header the video is decoded with
     std::vector<std::int64_t> m_timecodes, m_keyframes;
     // the open video's own timecodes and pixel aspect, kept so going back to them needs no lock
     std::vector<std::int64_t> m_videoTimecodes;

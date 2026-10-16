@@ -744,6 +744,8 @@ void VideoBox::open(const QString &path, qint64 frame, double ar) {
             m_path = path;
             m_frame = std::clamp<qint64>(frame, 0, std::max<qint64>(0, m_frames - 1));
             m_scriptAt = -2;
+            m_ycbcr.reset();
+            syncMatrix();
             m_seek->setRange(0, int(std::max<qint64>(0, m_frames - 1)));
             m_chapters.clear();
             for (const auto &[ms, title] : chapters) m_chapters.emplace_back(frameAtStart(ms), title);
@@ -937,7 +939,21 @@ void VideoBox::ensureScript() {
     if (m_scriptAt != -1 && m_scriptAt != m_frame) loadScript(false);
 }
 
+void VideoBox::syncMatrix() {
+    const QString h = fs::q(m_tab->s().info_value("YCbCr Matrix"));
+    if (m_path.isEmpty() || h == m_ycbcr) return;
+    m_ycbcr = h;
+    {
+        std::lock_guard g(m_media->m);
+        if (!m_media->video) return;
+        (*m_media->video)->set_ycbcr_header(fs::Utf8(h));
+        m_media->cachedFrame = -1;
+    }
+    request();
+}
+
 void VideoBox::subsChanged() {
+    syncMatrix();
     if (hasVideo()) loadScript(true);
     else m_scriptAt = -2; // built when a video opens
     m_tools->reload();

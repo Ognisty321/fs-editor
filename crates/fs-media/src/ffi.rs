@@ -51,6 +51,11 @@ pub(crate) mod bridge {
         duration_s: f64,
         pixel_format: String,
         matrix: String,
+        /// AVColorSpace and AVColorRange of the first frame (2 and 0: unspecified).
+        colorspace: i32,
+        color_range: i32,
+        /// HDR transfer or wide gamut primaries.
+        hdr: bool,
     }
 
     #[derive(Debug, Clone, Copy)]

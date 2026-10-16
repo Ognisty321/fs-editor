@@ -59,7 +59,8 @@ std::unique_ptr<VideoSource> open_video(rust::Str path, int32_t track, rust::Str
 VideoProps video_props(const VideoSource &v) {
     const auto &i = v.info();
     return VideoProps{i.width,   i.height,  i.num_frames,      i.fps_num,         i.fps_den,
-                      i.sar_num, i.sar_den, i.duration_s, str(i.pixel_format), str(i.matrix)};
+                      i.sar_num, i.sar_den, i.duration_s, str(i.pixel_format), str(i.matrix),
+                      i.colorspace, i.color_range, i.hdr};
 }
 
 rust::Vec<int64_t> video_timestamps(const VideoSource &v) {

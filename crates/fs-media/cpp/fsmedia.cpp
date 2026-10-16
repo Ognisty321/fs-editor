@@ -90,6 +90,16 @@ const char *matrix_name(AVColorSpace cs, AVColorRange range) {
     }
 }
 
+// The first frame's colour metadata, as Aegisub reads it on open.
+void read_colour(VideoInfo &i, const AVFrame *f) {
+    i.matrix = matrix_name(f->colorspace, f->color_range);
+    i.colorspace = f->colorspace;
+    i.color_range = f->color_range;
+    i.hdr = f->color_trc == AVCOL_TRC_SMPTE2084 || f->color_trc == AVCOL_TRC_ARIB_STD_B67 ||
+            f->color_primaries == AVCOL_PRI_BT2020 || f->color_primaries == AVCOL_PRI_SMPTE431 ||
+            f->color_primaries == AVCOL_PRI_SMPTE432;
+}
+
 /// libass logs everything to stdout by default; keep only errors and
 /// warnings (levels 0-2), on stderr.
 void ass_log(int level, const char *fmt, va_list args, void *) {
@@ -433,7 +443,7 @@ VideoSource::VideoSource(const std::filesystem::path &file, int track, const std
                                    av_q2d(st->time_base);
                 if (const char *n = av_get_pix_fmt_name(static_cast<AVPixelFormat>(f->format)))
                     info_.pixel_format = n;
-                info_.matrix = matrix_name(f->colorspace, f->color_range);
+                read_colour(info_, f);
                 for (size_t n = 0; n < p->pts.size(); ++n)
                     timestamps_.push_back(p->pts[n] * 1000 * st->time_base.num / st->time_base.den);
                 keyframes_ = p->keys;
@@ -467,7 +477,7 @@ VideoSource::VideoSource(const std::filesystem::path &file, int track, const std
         // matrix as the first frame reports it, unguessed (frame_rgba guesses by size when unset)
         std::unique_ptr<BestVideoFrame> f(bs_->GetFrame(0));
         if (f)
-            info_.matrix = matrix_name(f->GetAVFrame()->colorspace, f->GetAVFrame()->color_range);
+            read_colour(info_, f->GetAVFrame());
         return 0;
     });
 }

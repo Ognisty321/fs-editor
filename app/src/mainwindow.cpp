@@ -1293,13 +1293,15 @@ void MainWindow::buildMenus() {
         const int g = std::gcd(i.width, i.height);
         QMessageBox::information(
             this, tr("Video details"),
-            tr("File name: %1\nFPS: %2%3\nResolution: %4x%5 (%6:%7)\nPixel aspect: %8:%9\nLength: %10 frames (%11)\nDecoder: BestSource")
+            tr("File name: %1\nFPS: %2%3\nResolution: %4x%5 (%6:%7)\nPixel aspect: %8:%9\nLength: %10 frames (%11)\nDecoder: BestSource\nColor matrix: %12")
                 .arg(QFileInfo(v->path()).fileName())
                 .arg(i.fps, 0, 'f', 3)
                 .arg(i.vfr ? tr(" (variable)") : QString())
                 .arg(i.width).arg(i.height).arg(i.width / std::max(1, g)).arg(i.height / std::max(1, g))
                 .arg(i.sar_num).arg(i.sar_den)
-                .arg(i.frames).arg(fs::fmtTime(i.duration_ms)));
+                .arg(i.frames).arg(fs::fmtTime(i.duration_ms))
+                .arg((i.untagged ? tr("untagged (guessed %1)").arg(fs::q(i.best_matrix)) : fs::q(i.matrix).isEmpty() ? tr("unknown") : fs::q(i.matrix)) +
+                     (i.hdr ? tr(", HDR/WCG") : QString())));
     });
     add("audioToVideo", tr("Set audio position to video time"), {}, video,
         [=] { if (tab()->audio()->hasAudio()) tab()->audio()->centerOn(tab()->videoTime()); });

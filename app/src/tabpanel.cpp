@@ -17,6 +17,7 @@
 #include <QFormLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QRadioButton>
 #include <QSettings>
 #include <QScrollBar>
@@ -70,7 +71,11 @@ TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fs
         updateVideoContext();
         if (m_keyframesPath.isEmpty()) setKeyframes(m_video->keyframes());
         if (!m_timecodesPath.isEmpty()) openTimecodes(m_timecodesPath);
-        if (m_video->hasVideo()) matchResolution();
+        if (m_video->hasVideo()) {
+            matchMatrix();
+            matchResolution();
+            matchLayoutRes();
+        }
         // a dummy is saved too, and opens again with the script (Aegisub)
         if (!m_video->dummySpec().isEmpty()) s().set_project_value("Video File", fs::Utf8(m_video->dummySpec()));
         if (!m_video->path().isEmpty()) {
@@ -355,6 +360,162 @@ void TabPanel::openVideo(const QString &path, qint64 frame, double ar) {
     m_main->addRecent("video", path);
 }
 
+bool TabPanel::untouched() {
+    auto &ss = s();
+    return ss.file_info().path.empty() && ss.row_count() <= 1 && (ss.row_count() == 0 || ss.row(0).text.empty());
+}
+
+// Aegisub's prompt_choice_dialog: the choices as radio buttons, the last one picked first; -1 when
+// cancelled. The choice is remembered under `last`.
+static int promptChoice(QWidget *parent, const QString &title, const QString &text, const QStringList &choices,
+                        const QString &last, int lastDefault) {
+    QDialog d(parent);
+    d.setWindowTitle(title);
+    auto *v = new QVBoxLayout(&d);
+    v->addWidget(new QLabel(text, &d));
+    auto *group = new QButtonGroup(&d);
+    for (int i = 0; i < choices.size(); ++i) {
+        auto *r = new QRadioButton(choices[i], &d);
+        group->addButton(r, i);
+        v->addWidget(r);
+    }
+    QSettings st;
+    group->button(std::clamp(st.value(last, lastDefault).toInt(), 0, int(choices.size()) - 1))->setChecked(true);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+    QObject::connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+    QObject::connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    v->addWidget(bb);
+    if (d.exec() != QDialog::Accepted) return -1;
+    st.setValue(last, group->checkedId());
+    return group->checkedId();
+}
+
+// Aegisub's update_ycbcr_matrix: warnings for an untagged and an HDR video, then the script's YCbCr
+// Matrix set to the video's when it has none or another one (each Never, Ask or Always)
+void TabPanel::matchMatrix() {
+    auto &ss = s();
+    if (const QString f = fs::q(ss.file_info().format); (f != "ASS" && f != "SSA") || m_video->path().isEmpty()) return;
+    const auto info = m_video->info();
+    const QString best = fs::q(info.best_matrix);
+    QSettings st;
+    if (info.untagged && st.value("video/untaggedWarning", true).toBool())
+        QMessageBox::warning(this, tr("Untagged video"),
+                             tr("The video you have loaded has no specified color matrix. FS Editor will guess the "
+                                "color matrix to be %1, but there is no guarantee that other programs will guess the "
+                                "same matrix. This may make the video appear with different colors in different media "
+                                "players and can prevent subtitle colors from matching video colors.\n\nConsider "
+                                "tagging your video with a color matrix to ensure that your video displays "
+                                "consistently in all players and that subtitle colors can reliably match video colors.")
+                                 .arg(best.endsWith("709") ? "BT.709" : "SMPTE ST 170M"));
+    if (info.hdr && st.value("video/hdrWarning", true).toBool())
+        QMessageBox::warning(this, tr("HDR and/or WCG video"),
+                             tr("The video you have loaded has HDR and/or WCG colors. While ordinary dialogue subtitles "
+                                "will work fine on such videos, matching video colors using subtitles will not be "
+                                "possible on HDR and/or WCG footage."));
+    const QString script = fs::q(fsb::ycbcr_header(ss.info_value("YCbCr Matrix")));
+    int action = 0; // 0 never, 1 ask, 2 always
+    QString text, leave;
+    if (script.isEmpty()) {
+        action = st.value("video/noMatrix", 1).toInt();
+        text = tr("The current subtitle file has no YCbCr Matrix set.\n\nIf you plan to use this subtitle file on "
+                  "this newly loaded video file,\nyou should set the subtitle file's YCbCr Matrix to the video's color "
+                  "space (\"%1\").\n\nIf you plan to use a different video file, you may want to\nleave the YCbCr "
+                  "Matrix unset until you load the correct video file.\n\nThis prompt can be configured in the "
+                  "settings.")
+                   .arg(best);
+        leave = tr("Leave YCbCr Matrix unset");
+    } else if (script != "None" && script != best) { // None opts out of all colour mangling (Aegisub)
+        action = st.value("video/matrixMismatch", 1).toInt();
+        text = tr("This video's recommended YCbCr Matrix (\"%1\") differs from the subtitle file's YCbCr Matrix "
+                  "(\"%2\").\n\nIf this new video's colors look identical to the video the subtitle file was "
+                  "originally authored for,\nthen the subtitle file's YCbCr Matrix should be set to the video's YCbCr "
+                  "Matrix.")
+                   .arg(best, script);
+        leave = tr("Leave script's YCbCr Matrix as it is (\"%1\")").arg(script);
+    }
+    if (action == 1) {
+        const QString key = script.isEmpty() ? "video/lastNoMatrix" : "video/lastMatrixMismatch";
+        const int c = promptChoice(this, script.isEmpty() ? tr("Set script's YCbCr Matrix?") : tr("YCbCr Matrix mismatch"),
+                                   text, {leave, tr("Set script's YCbCr Matrix to the video's (\"%1\")").arg(best)}, key, 1);
+        action = c == 1 ? 2 : 0;
+    }
+    if (action != 2) return;
+    static int edits = 0;
+    ss.set_info_value("YCbCr Matrix", fs::Utf8(best), fs::Utf8(QString("video-matrix-%1").arg(++edits)));
+    changed();
+}
+
+// Aegisub's update_layout_res: a script without a layout resolution takes the video's (or its own
+// script resolution); one of another aspect ratio is asked about (each configurable)
+void TabPanel::matchLayoutRes() {
+    auto &ss = s();
+    const auto fi = ss.file_info();
+    if (const QString f = fs::q(fi.format); (f != "ASS" && f != "SSA") || m_video->path().isEmpty()) return;
+    const auto info = m_video->info();
+    const double par = info.sar_num > 0 && info.sar_den > 0 ? double(info.sar_num) / info.sar_den : 1.0;
+    const int vx = qRound(info.width * std::max(1.0, par)), vy = qRound(info.height * std::max(1.0, 1 / par));
+    const int spx = fi.play_res_x, spy = fi.play_res_y;
+    const int sx = fs::q(ss.info_value("LayoutResX")).toInt(), sy = fs::q(ss.info_value("LayoutResY")).toInt();
+    if (vx <= 0 || vy <= 0 || (sx == vx && sy == vy)) return;
+    QSettings st;
+    int tx = 0, ty = 0; // what to set
+    if (sx <= 0 || sy <= 0) {
+        int action = untouched() ? 2 : st.value("video/noLayoutRes", 1).toInt(); // never, ask, set, set to PlayRes
+        if (action == 1) {
+            const int c = promptChoice(
+                this, tr("Set script's layout resolution?"),
+                tr("The current subtitle file has no layout resolution set.\n\nIf you plan to use this subtitle file "
+                   "on this newly loaded video file,\nyou should set the subtitle file's layout resolution to the "
+                   "video's display resolution.\n\nIf you plan to use a different video file, you may want to leave\n"
+                   "the layout resolution unset until you load the correct video file.\n\nIf you are adapting an "
+                   "existing old subtitle file that does not yet have\na layout resolution set, you should set its "
+                   "layout resolution to the resolution\nof the video the subtitle file was intended to be played back "
+                   "on.\nOften, this is the same as the file's script resolution. (%1 × %2)\n\nThis prompt can be "
+                   "configured in the settings.")
+                    .arg(spx).arg(spy),
+                {tr("Leave layout resolution unset"),
+                 tr("Set script's layout resolution to the video's (%1 × %2)").arg(vx).arg(vy),
+                 tr("Set script's layout resolution to its script resolution (%1 × %2)").arg(spx).arg(spy)},
+                "video/lastNoLayoutRes", 1);
+            action = c <= 0 ? 0 : c + 1;
+        }
+        if (action == 2) tx = vx, ty = vy;
+        else if (action == 3) tx = spx, ty = spy;
+    } else {
+        // the same aspect ratio is usually fine: LayoutRes is there to play on any resolution (Aegisub)
+        const int when = st.value("video/layoutResMismatch", 1).toInt(); // never, aspect ratio changed, always
+        const bool arChanged = std::abs(double(sx) / sy - double(vx) / vy) / (double(vx) / vy) > .01;
+        if (when == 0 || (when == 1 && !arChanged)) return;
+        const QString text =
+            !arChanged
+                ? tr("The resolution of the loaded video and the layout resolution specified for the subtitles don't "
+                     "match.\n\nVideo resolution:    %1 × %2\nSubtitle layout resolution:    %3 × %4\n\nUsually, "
+                     "this is not an issue, and you may leave the subtitle file's layout resolution as it is.\nIf your "
+                     "subtitle file does not contain any significant formatting and you now intend to perform\n"
+                     "formatting on the newly loaded video, you may want to set the script's layout resolution\nto the "
+                     "video's display resolution.")
+                : tr("The resolution of the loaded video and the layout resolution specified for the subtitles differ "
+                     "in aspect ratios.\n\nVideo resolution:    %1 × %2\nSubtitle layout resolution:    %3 × %4\n\n"
+                     "Change layout resolution of subtitles to match video?");
+        const int c = promptChoice(this, tr("Layout resolution mismatch"), text.arg(vx).arg(vy).arg(sx).arg(sy),
+                                   {tr("Leave layout resolution as it is (%1 × %2)").arg(sx).arg(sy),
+                                    tr("Set script's layout resolution to the video's (%1 × %2)").arg(vx).arg(vy)},
+                                   "video/lastLayoutResMismatch", 0);
+        if (c == 1) tx = vx, ty = vy;
+    }
+    if (tx <= 0 || ty <= 0) return;
+    if (untouched()) { // watching a video in a new tab does not ask to save it
+        ss.set_info_quietly("LayoutResX", fs::Utf8(QString::number(tx)));
+        ss.set_info_quietly("LayoutResY", fs::Utf8(QString::number(ty)));
+    } else {
+        static int edits = 0;
+        const QString amend = QString("video-layout-%1").arg(++edits); // one undo step
+        ss.set_info_value("LayoutResX", fs::Utf8(QString::number(tx)), fs::Utf8(amend));
+        ss.set_info_value("LayoutResY", fs::Utf8(QString::number(ty)), fs::Utf8(amend));
+    }
+    changed();
+}
+
 // Aegisub's update_play_res: a script without a resolution takes the video's; another one may be
 // resampled to it (asked by default, as Kainote does)
 void TabPanel::matchResolution() {
@@ -366,9 +527,7 @@ void TabPanel::matchResolution() {
     const int vx = qRound(info.width * std::max(1.0, par)), vy = qRound(info.height * std::max(1.0, 1 / par));
     if (vx <= 0 || vy <= 0 || (fi.play_res_x == vx && fi.play_res_y == vy)) return;
     const bool unset = fs::q(ss.info_value("PlayResX")).toInt() <= 0 && fs::q(ss.info_value("PlayResY")).toInt() <= 0;
-    // the starting document, nothing written yet
-    const bool fresh = fi.path.empty() && ss.row_count() <= 1 && (ss.row_count() == 0 || ss.row(0).text.empty());
-    if (fresh) { // watching a video in a new tab does not ask to save it
+    if (untouched()) { // watching a video in a new tab does not ask to save it
         ss.set_info_quietly("PlayResX", fs::Utf8(QString::number(vx)));
         ss.set_info_quietly("PlayResY", fs::Utf8(QString::number(vy)));
         changed();

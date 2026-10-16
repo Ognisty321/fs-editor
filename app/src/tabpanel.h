@@ -119,6 +119,9 @@ private:
     void applyLayout();
     void syncSelection(); // to the session, for the undo steps
     void matchResolution();
+    void matchMatrix();    // Aegisub's update_ycbcr_matrix
+    void matchLayoutRes(); // Aegisub's update_layout_res
+    bool untouched();      // the starting document, nothing written yet
 
     MainWindow *m_main;
     rust::Box<fsb::Session> m_session;

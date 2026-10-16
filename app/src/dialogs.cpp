@@ -2190,6 +2190,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"video/openWithSubs", QT_TR_NOOP("Open video and audio named in the subtitles"), true, video},
         {"video/askResolution", QT_TR_NOOP("Ask to resample the subtitles to a video of another resolution"), true,
          video},
+        {"video/untaggedWarning", QT_TR_NOOP("Warn on untagged video color matrix"), true, video},
+        {"video/hdrWarning", QT_TR_NOOP("Warn on HDR/WCG video"), true, video},
         {"audio/snapKeyframes", QT_TR_NOOP("Snap audio boundaries to keyframes"), false, audio},
         {"audio/snapLines", QT_TR_NOOP("Snap audio boundaries to other lines"), false, audio},
         {"audio/inactiveComments", QT_TR_NOOP("Show inactive comments in the audio"), false, audio},
@@ -2287,9 +2289,25 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     trace->addItems({tr("0: Fatal"), tr("1: Error"), tr("2: Warning"), tr("3: Hint"), tr("4: Debug"), tr("5: Trace")});
     trace->setCurrentIndex(std::clamp(st.value("automation/traceLevel", 3).toInt(), 0, 5));
     automation->addRow(tr("Trace level"), trace);
+    // Aegisub's video properties on open: each Never, Ask or Always
+    std::vector<std::pair<QString, QComboBox *>> combos;
+    const auto combo = [&](const char *key, int def, const QString &label, const QStringList &items) {
+        auto *c = new QComboBox(this);
+        c->addItems(items);
+        c->setCurrentIndex(std::clamp(st.value(key, def).toInt(), 0, int(items.size()) - 1));
+        video->addRow(label, c);
+        combos.emplace_back(key, c);
+    };
+    combo("video/noMatrix", 1, tr("Use video's YCbCr Matrix when script has no matrix set"),
+          {tr("Never"), tr("Ask"), tr("Always set")});
+    combo("video/matrixMismatch", 1, tr("Match video's YCbCr Matrix on open"), {tr("Never"), tr("Ask"), tr("Always set")});
+    combo("video/noLayoutRes", 1, tr("Set layout resolution from video on open"),
+          {tr("Never"), tr("Ask"), tr("Always set"), tr("Always set from script resolution")});
+    combo("video/layoutResMismatch", 1, tr("Prompt on layout resolution mismatch"),
+          {tr("Never"), tr("When aspect ratio changes"), tr("Always")});
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(bb, &QDialogButtonBox::accepted, this,
-            [this, boxes, spins, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, newCatalog, trace,
+            [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, newCatalog, trace,
              types] {
         QSettings st;
         QSettings classes(assoc::kClasses, QSettings::NativeFormat);
@@ -2312,6 +2330,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         st.setValue("audio/leadOut", leadOut->value());
         st.setValue("main/autosaveSeconds", autosave->value());
         for (auto &[k, s] : spins) st.setValue(k, s->value());
+        for (auto &[k, c] : combos) st.setValue(k, c->currentIndex());
         limits::reload();
         accept();
     });

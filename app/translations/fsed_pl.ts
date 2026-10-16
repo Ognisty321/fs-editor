@@ -683,6 +683,26 @@
         <translation>Zatwierdź zmiany i zostań na linijce</translation>
     </message>
     <message>
+        <source>Split at cursor (estimate times)</source>
+        <translation>Podziel na kursorze (oszacuj czasy)</translation>
+    </message>
+    <message>
+        <source>Split at cursor (preserve times)</source>
+        <translation>Podziel na kursorze (zachowaj czasy)</translation>
+    </message>
+    <message>
+        <source>Split at cursor (at video frame)</source>
+        <translation>Podziel na kursorze (na klatce wideo)</translation>
+    </message>
+    <message>
+        <source>Revert</source>
+        <translation>Przywróć</translation>
+    </message>
+    <message>
+        <source>Insert original</source>
+        <translation>Wstaw oryginał</translation>
+    </message>
+    <message>
         <source>No unconfirmed lines found</source>
         <translation>Nie znaleziono niepewnych linijek</translation>
     </message>
@@ -1880,6 +1900,34 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Kilka klatek naprzód</translation>
     </message>
     <message>
+        <source>File name: %1
+FPS: %2%3
+Resolution: %4x%5 (%6:%7)
+Pixel aspect: %8:%9
+Length: %10 frames (%11)
+Decoder: BestSource
+Color matrix: %12</source>
+        <translation>Nazwa pliku: %1
+FPS: %2%3
+Rozdzielczość: %4x%5 (%6:%7)
+Proporcje piksela: %8:%9
+Długość: %10 klatek (%11)
+Dekoder: BestSource
+Macierz kolorów: %12</translation>
+    </message>
+    <message>
+        <source>untagged (guessed %1)</source>
+        <translation>nieoznaczona (zgadnięta %1)</translation>
+    </message>
+    <message>
+        <source>unknown</source>
+        <translation>nieznana</translation>
+    </message>
+    <message>
+        <source>, HDR/WCG</source>
+        <translation>, HDR/WCG</translation>
+    </message>
+    <message>
         <source>Vector clip modes</source>
         <translation>Tryby wycinka wektorowego</translation>
     </message>
@@ -1902,6 +1950,10 @@ Backspace: rozłącz ostatnią grupę</translation>
     <message>
         <source>Focus the video slider</source>
         <translation>Przejdź do suwaka wideo</translation>
+    </message>
+    <message>
+        <source>Open 2h30m noise audio</source>
+        <translation>Otwórz szum 2h30m</translation>
     </message>
     <message>
         <source>Spectrum display</source>
@@ -2274,20 +2326,6 @@ Można nim też dopasować napisy do wideo o innej prędkości, np. przy przyspi
     <message>
         <source>Video details</source>
         <translation>Szczegóły wideo</translation>
-    </message>
-    <message>
-        <source>File name: %1
-FPS: %2%3
-Resolution: %4x%5 (%6:%7)
-Pixel aspect: %8:%9
-Length: %10 frames (%11)
-Decoder: BestSource</source>
-        <translation>Nazwa pliku: %1
-FPS: %2%3
-Rozdzielczość: %4x%5 (%6:%7)
-Proporcje piksela: %8:%9
-Długość: %10 klatek (%11)
-Dekoder: BestSource</translation>
     </message>
     <message>
         <source> (variable)</source>
@@ -3494,6 +3532,14 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Pytaj o przeskalowanie napisów do wideo o innej rozdzielczości</translation>
     </message>
     <message>
+        <source>Warn on untagged video color matrix</source>
+        <translation>Ostrzegaj o wideo bez oznaczonej macierzy kolorów</translation>
+    </message>
+    <message>
+        <source>Warn on HDR/WCG video</source>
+        <translation>Ostrzegaj o wideo HDR/WCG</translation>
+    </message>
+    <message>
         <source>Focus the audio when the mouse is over it</source>
         <translation>Aktywuj audio po najechaniu myszą</translation>
     </message>
@@ -3612,6 +3658,46 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Trace level</source>
         <translation>Poziom komunikatów</translation>
+    </message>
+    <message>
+        <source>Use video&apos;s YCbCr Matrix when script has no matrix set</source>
+        <translation>Ustaw YCbCr Matrix wideo, gdy skrypt jej nie ma</translation>
+    </message>
+    <message>
+        <source>Never</source>
+        <translation>Nigdy</translation>
+    </message>
+    <message>
+        <source>Ask</source>
+        <translation>Pytaj</translation>
+    </message>
+    <message>
+        <source>Always set</source>
+        <translation>Zawsze ustawiaj</translation>
+    </message>
+    <message>
+        <source>Match video&apos;s YCbCr Matrix on open</source>
+        <translation>Dopasuj YCbCr Matrix do wideo przy otwarciu</translation>
+    </message>
+    <message>
+        <source>Set layout resolution from video on open</source>
+        <translation>Ustaw rozdzielczość układu z wideo przy otwarciu</translation>
+    </message>
+    <message>
+        <source>Always set from script resolution</source>
+        <translation>Zawsze ustawiaj z rozdzielczości skryptu</translation>
+    </message>
+    <message>
+        <source>Prompt on layout resolution mismatch</source>
+        <translation>Pytaj o niezgodną rozdzielczość układu</translation>
+    </message>
+    <message>
+        <source>When aspect ratio changes</source>
+        <translation>Gdy zmienią się proporcje</translation>
+    </message>
+    <message>
+        <source>Always</source>
+        <translation>Zawsze</translation>
     </message>
     <message>
         <source>Dark</source>
@@ -4443,6 +4529,163 @@ do czasu audio</translation>
     <message>
         <source>Comment starter:</source>
         <translation>Początek komentarza:</translation>
+    </message>
+    <message>
+        <source>Untagged video</source>
+        <translation>Wideo bez macierzy kolorów</translation>
+    </message>
+    <message>
+        <source>The video you have loaded has no specified color matrix. FS Editor will guess the color matrix to be %1, but there is no guarantee that other programs will guess the same matrix. This may make the video appear with different colors in different media players and can prevent subtitle colors from matching video colors.
+
+Consider tagging your video with a color matrix to ensure that your video displays consistently in all players and that subtitle colors can reliably match video colors.</source>
+        <translation>Wczytane wideo nie ma określonej macierzy kolorów. FS Editor przyjmie macierz %1, ale nie ma gwarancji, że inne programy zgadną tak samo. Wideo może wtedy mieć inne kolory w różnych odtwarzaczach, a kolory napisów mogą nie pasować do kolorów wideo.
+
+Oznacz wideo macierzą kolorów, żeby wyglądało tak samo we wszystkich odtwarzaczach i żeby kolory napisów dało się dopasować do wideo.</translation>
+    </message>
+    <message>
+        <source>HDR and/or WCG video</source>
+        <translation>Wideo HDR i/lub WCG</translation>
+    </message>
+    <message>
+        <source>The video you have loaded has HDR and/or WCG colors. While ordinary dialogue subtitles will work fine on such videos, matching video colors using subtitles will not be possible on HDR and/or WCG footage.</source>
+        <translation>Wczytane wideo ma kolory HDR i/lub WCG. Zwykłe napisy dialogowe działają na nim bez problemu, ale dopasowanie kolorów napisów do kolorów wideo HDR i/lub WCG nie jest możliwe.</translation>
+    </message>
+    <message>
+        <source>The current subtitle file has no YCbCr Matrix set.
+
+If you plan to use this subtitle file on this newly loaded video file,
+you should set the subtitle file&apos;s YCbCr Matrix to the video&apos;s color space (&quot;%1&quot;).
+
+If you plan to use a different video file, you may want to
+leave the YCbCr Matrix unset until you load the correct video file.
+
+This prompt can be configured in the settings.</source>
+        <translation>Bieżący plik napisów nie ma ustawionej YCbCr Matrix.
+
+Jeśli ten plik napisów ma być używany z nowo wczytanym wideo,
+ustaw YCbCr Matrix pliku na przestrzeń kolorów wideo („%1”).
+
+Jeśli plik ma być używany z innym wideo, możesz
+zostawić YCbCr Matrix nieustawioną do czasu wczytania właściwego wideo.
+
+To pytanie można skonfigurować w ustawieniach.</translation>
+    </message>
+    <message>
+        <source>Leave YCbCr Matrix unset</source>
+        <translation>Zostaw YCbCr Matrix nieustawioną</translation>
+    </message>
+    <message>
+        <source>This video&apos;s recommended YCbCr Matrix (&quot;%1&quot;) differs from the subtitle file&apos;s YCbCr Matrix (&quot;%2&quot;).
+
+If this new video&apos;s colors look identical to the video the subtitle file was originally authored for,
+then the subtitle file&apos;s YCbCr Matrix should be set to the video&apos;s YCbCr Matrix.</source>
+        <translation>Zalecana YCbCr Matrix tego wideo („%1”) różni się od YCbCr Matrix pliku napisów („%2”).
+
+Jeśli kolory nowego wideo wyglądają tak samo jak w wideo, do którego plik napisów był pierwotnie robiony,
+YCbCr Matrix pliku napisów należy ustawić na YCbCr Matrix wideo.</translation>
+    </message>
+    <message>
+        <source>Leave script&apos;s YCbCr Matrix as it is (&quot;%1&quot;)</source>
+        <translation>Zostaw YCbCr Matrix skryptu bez zmian („%1”)</translation>
+    </message>
+    <message>
+        <source>Set script&apos;s YCbCr Matrix?</source>
+        <translation>Ustawić YCbCr Matrix skryptu?</translation>
+    </message>
+    <message>
+        <source>YCbCr Matrix mismatch</source>
+        <translation>Niezgodna YCbCr Matrix</translation>
+    </message>
+    <message>
+        <source>Set script&apos;s YCbCr Matrix to the video&apos;s (&quot;%1&quot;)</source>
+        <translation>Ustaw YCbCr Matrix skryptu na macierz wideo („%1”)</translation>
+    </message>
+    <message>
+        <source>Set script&apos;s layout resolution?</source>
+        <translation>Ustawić rozdzielczość układu skryptu?</translation>
+    </message>
+    <message>
+        <source>The current subtitle file has no layout resolution set.
+
+If you plan to use this subtitle file on this newly loaded video file,
+you should set the subtitle file&apos;s layout resolution to the video&apos;s display resolution.
+
+If you plan to use a different video file, you may want to leave
+the layout resolution unset until you load the correct video file.
+
+If you are adapting an existing old subtitle file that does not yet have
+a layout resolution set, you should set its layout resolution to the resolution
+of the video the subtitle file was intended to be played back on.
+Often, this is the same as the file&apos;s script resolution. (%1 × %2)
+
+This prompt can be configured in the settings.</source>
+        <translation>Bieżący plik napisów nie ma ustawionej rozdzielczości układu.
+
+Jeśli ten plik napisów ma być używany z nowo wczytanym wideo,
+ustaw rozdzielczość układu pliku na rozdzielczość wyświetlania wideo.
+
+Jeśli plik ma być używany z innym wideo, możesz zostawić
+rozdzielczość układu nieustawioną do czasu wczytania właściwego wideo.
+
+Jeśli dostosowujesz stary plik napisów, który nie ma jeszcze
+rozdzielczości układu, ustaw ją na rozdzielczość wideo,
+z którym plik miał być odtwarzany.
+Często jest to rozdzielczość skryptu pliku. (%1 × %2)
+
+To pytanie można skonfigurować w ustawieniach.</translation>
+    </message>
+    <message>
+        <source>Leave layout resolution unset</source>
+        <translation>Zostaw rozdzielczość układu nieustawioną</translation>
+    </message>
+    <message>
+        <source>Set script&apos;s layout resolution to the video&apos;s (%1 × %2)</source>
+        <translation>Ustaw rozdzielczość układu skryptu na rozdzielczość wideo (%1 × %2)</translation>
+    </message>
+    <message>
+        <source>Set script&apos;s layout resolution to its script resolution (%1 × %2)</source>
+        <translation>Ustaw rozdzielczość układu skryptu na jego rozdzielczość (%1 × %2)</translation>
+    </message>
+    <message>
+        <source>The resolution of the loaded video and the layout resolution specified for the subtitles don&apos;t match.
+
+Video resolution:    %1 × %2
+Subtitle layout resolution:    %3 × %4
+
+Usually, this is not an issue, and you may leave the subtitle file&apos;s layout resolution as it is.
+If your subtitle file does not contain any significant formatting and you now intend to perform
+formatting on the newly loaded video, you may want to set the script&apos;s layout resolution
+to the video&apos;s display resolution.</source>
+        <translation>Rozdzielczość wczytanego wideo i rozdzielczość układu napisów nie są zgodne.
+
+Rozdzielczość wideo:    %1 × %2
+Rozdzielczość układu napisów:    %3 × %4
+
+Zwykle nie jest to problem i rozdzielczość układu pliku napisów można zostawić bez zmian.
+Jeśli plik napisów nie ma istotnego formatowania, a formatowanie ma być robione pod nowo wczytane wideo,
+możesz ustawić rozdzielczość układu skryptu na rozdzielczość wyświetlania wideo.</translation>
+    </message>
+    <message>
+        <source>The resolution of the loaded video and the layout resolution specified for the subtitles differ in aspect ratios.
+
+Video resolution:    %1 × %2
+Subtitle layout resolution:    %3 × %4
+
+Change layout resolution of subtitles to match video?</source>
+        <translation>Rozdzielczość wczytanego wideo i rozdzielczość układu napisów mają różne proporcje.
+
+Rozdzielczość wideo:    %1 × %2
+Rozdzielczość układu napisów:    %3 × %4
+
+Zmienić rozdzielczość układu napisów na zgodną z wideo?</translation>
+    </message>
+    <message>
+        <source>Layout resolution mismatch</source>
+        <translation>Niezgodna rozdzielczość układu</translation>
+    </message>
+    <message>
+        <source>Leave layout resolution as it is (%1 × %2)</source>
+        <translation>Zostaw rozdzielczość układu bez zmian (%1 × %2)</translation>
     </message>
     <message>
         <source>Resolution mismatch</source>
