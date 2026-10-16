@@ -1559,6 +1559,7 @@ QStringList styleCatalogs() {
 // the audio output device
 void applyMediaSettings() {
     fsb::set_audio_device(fs::Utf8(QSettings().value("audio/device").toString()));
+    fsb::set_audio_delay(QSettings().value("audio/delay", 0).toLongLong());
     const QString dir = QSettings().value("fonts/externalDir").toString();
     fsb::set_fonts_dir(fs::Utf8(dir));
     static QSet<QString> added; // Qt cannot take an application font back; one left is harmless
@@ -2293,7 +2294,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"audio/boundaryWidth", 2, 1, 10, QT_TR_NOOP("Line boundaries thickness"), " px"},
         {"audio/snapDistance", 8, 0, 50, QT_TR_NOOP("Snapping distance"), " px"},
         {"audio/dragSensitivity", 3, 0, 50, QT_TR_NOOP("Distance before a drag times the line"), " px"},
-        {"audio/markPlayMs", 1000, 100, 10000, QT_TR_NOOP("Time played before and after the mark"), " ms"}};
+        {"audio/markPlayMs", 1000, 100, 10000, QT_TR_NOOP("Time played before and after the mark"), " ms"},
+        {"audio/delay", 0, -60000, 60000, QT_TR_NOOP("Audio delay (for audio opened after)"), " ms"}};
     for (auto [key, def, lo, hi, label, suffix] : audioSpins) {
         auto *s = new QSpinBox(this);
         s->setRange(lo, hi);
@@ -2412,12 +2414,12 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         st.setValue("audio/preferredTracks", tracks->text().trimmed());
         st.setValue("fonts/externalDir", QDir::fromNativeSeparators(fontsDir->text().trimmed()));
         st.setValue("audio/device", device->currentData());
-        applyMediaSettings();
         st.setValue("audio/leadOut", leadOut->value());
         st.setValue("main/autosaveSeconds", autosave->value());
         for (auto &[k, s] : spins) st.setValue(k, s->value());
         for (auto &[k, c] : combos) st.setValue(k, c->currentIndex());
         limits::reload();
+        applyMediaSettings();
         accept();
     });
     connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);

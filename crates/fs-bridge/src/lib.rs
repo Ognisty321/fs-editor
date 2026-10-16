@@ -973,6 +973,8 @@ pub mod ffi {
         fn set_fonts_dir(dir: &str);
         /// The output device for audio opened after this ("" the default; one not found too).
         fn set_audio_device(name: &str);
+        /// Kainote's audio delay in ms, for audio opened after this.
+        fn set_audio_delay(ms: i64);
         fn audio_devices() -> Vec<String>;
         /// The audio streams; empty when the file cannot be read.
         fn audio_tracks(path: &str) -> Vec<SubTrack>;
@@ -1252,6 +1254,10 @@ fn set_fonts_dir(dir: &str) {
 
 fn set_audio_device(name: &str) {
     media::set_audio_device(name);
+}
+
+fn set_audio_delay(ms: i64) {
+    media::set_audio_delay(ms);
 }
 
 fn audio_devices() -> Vec<String> {

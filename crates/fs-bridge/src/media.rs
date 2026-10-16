@@ -32,6 +32,13 @@ pub fn set_audio_device(name: &str) {
     put(&AUDIO_DEVICE, name);
 }
 
+/// Kainote's audio delay in ms (later when positive), for audio opened after it is set.
+static AUDIO_DELAY: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+pub fn set_audio_delay(ms: i64) {
+    AUDIO_DELAY.store(ms, std::sync::atomic::Ordering::Relaxed);
+}
+
 use fs_audio::{
     AudioSource, FreqScale, PcmBuffer, Peak, PeakCache, Player, Spectrogram, SpectrumConfig,
     SpectrumView,
@@ -373,7 +380,9 @@ impl Audio {
             .map(|s| s as &dyn AudioSource)
             .collect();
         let pcm = PcmBuffer::load_parts(&srcs, progress).map_err(|_| "cancelled".to_string())?;
-        Ok(Self::from_pcm(pcm))
+        Ok(Self::from_pcm(pcm.delayed(
+            AUDIO_DELAY.load(std::sync::atomic::Ordering::Relaxed),
+        )))
     }
 
     /// Silent audio for timing without a sound track (Kainote "dummy audio"). At 1 kHz every

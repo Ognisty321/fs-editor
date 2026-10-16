@@ -132,6 +132,24 @@ impl PcmBuffer {
     pub fn rate(&self) -> u32 {
         self.rate
     }
+
+    /// The track `ms` later (Kainote's audio delay): silence before it, or its start cut off when
+    /// negative. Copies the samples, so a delay of zero returns it as it is.
+    pub fn delayed(self, ms: i64) -> Self {
+        if ms == 0 {
+            return self;
+        }
+        let n = (u128::from(ms.unsigned_abs()) * u128::from(self.rate) / 1000) as usize;
+        let s: Vec<i16> = if ms > 0 {
+            std::iter::repeat_n(0, n)
+                .chain(self.samples.iter().copied())
+                .collect()
+        } else {
+            self.samples.get(n..).unwrap_or(&[]).to_vec()
+        };
+        Self::new(self.rate, s)
+    }
+
     pub fn len(&self) -> i64 {
         self.samples.len() as i64
     }
@@ -202,6 +220,19 @@ pub(crate) fn to_i16(x: f32) -> i16 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_delay_adds_silence_or_cuts_the_start() {
+        let pcm = || super::PcmBuffer::new(1000, vec![1, 2, 3, 4]);
+        assert_eq!(pcm().delayed(2).samples(), &[0, 0, 1, 2, 3, 4]);
+        assert_eq!(pcm().delayed(-1).samples(), &[2, 3, 4]);
+        assert!(pcm().delayed(-10).samples().is_empty());
+        assert_eq!(pcm().delayed(0).samples(), &[1, 2, 3, 4]);
+        assert_eq!(
+            super::PcmBuffer::new(48000, vec![0; 10]).delayed(1).len(),
+            58
+        ); // 48 samples a ms
+    }
+
     use super::*;
 
     #[test]

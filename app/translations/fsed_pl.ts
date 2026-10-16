@@ -3728,6 +3728,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Czas odtwarzany przed znacznikiem i po nim</translation>
     </message>
     <message>
+        <source>Audio delay (for audio opened after)</source>
+        <translation>Opóźnienie audio (dla audio otwartego później)</translation>
+    </message>
+    <message>
         <source>Recently opened files listed</source>
         <translation>Liczba ostatnio otwartych plików</translation>
     </message>
