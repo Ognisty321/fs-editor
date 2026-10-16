@@ -555,15 +555,34 @@ fn shown(text: &str) -> (String, Vec<(usize, usize, usize)>) {
     (hay, runs)
 }
 
-/// `rep` read as Aegisub (Perl) reads `$1a`: group 1, then "a"; the regex crate would look for
-/// a group named "1a".
-// shortcut: no `\1` for a group, which would take `\1c` and `\1a` tags; add it behind an option
-// if people ask
+/// `rep` read as Aegisub's replacement (boost's Perl format): `$1a` is group 1, then "a" (the
+/// regex crate would look for a group named "1a"); `\1` to `\9` are groups too, unless they open
+/// a colour or alpha tag (`\1c`, `\3a`, which Aegisub would read as a group and a letter); `\\`
+/// is one backslash and `\$` a dollar. Any other backslash stays, so `\N` is still a line break
+/// (Aegisub drops it and leaves "N").
 fn perl_groups(rep: &str) -> String {
     let (mut out, mut rest) = (String::with_capacity(rep.len()), rep);
-    while let Some(i) = rest.find('$') {
+    while let Some(i) = rest.find(['$', '\\']) {
         out.push_str(&rest[..i]);
         let after = &rest[i + 1..];
+        if rest.as_bytes()[i] == b'\\' {
+            let group = after.starts_with(|c: char| ('1'..='9').contains(&c))
+                && !after[1..].starts_with(['c', 'a']);
+            if group {
+                out.push_str(&format!("${{{}}}", &after[..1]));
+                rest = &after[1..];
+            } else if let Some(r) = after.strip_prefix('\\') {
+                out.push('\\');
+                rest = r;
+            } else if let Some(r) = after.strip_prefix('$') {
+                out.push_str("$$");
+                rest = r;
+            } else {
+                out.push('\\');
+                rest = after;
+            }
+            continue;
+        }
         let digits = after.bytes().take_while(u8::is_ascii_digit).count();
         if let Some(r) = after.strip_prefix('$') {
             out.push_str("$$");
@@ -1975,6 +1994,17 @@ mod tests {
             perl_groups("$1a $2 ${3}b $$1x $name $"),
             "${1}a $2 ${3}b $$1x $name $"
         );
+        assert_eq!(
+            perl_groups(r"{\1c&H0&\3a&HFF&}\1x \2 \\N \N \\ \0 \$5 \"),
+            r"{\1c&H0&\3a&HFF&}${1}x ${2} \N \N \ \0 $$5 \"
+        );
+        let r = Replace {
+            matcher: TextMatcher::new(r"(\w+) (\w+)", true, true, Field::Text).unwrap(),
+            replacement: r"{\1c&HFF&}\2\N\1".into(),
+            first_only: false,
+            keep_case: false,
+        };
+        assert_eq!(r.apply(&r.rep(), "ab cd", 0, false).0, r"{\1c&HFF&}cd\Nab");
     }
 
     #[test]
