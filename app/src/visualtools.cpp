@@ -592,9 +592,9 @@ void VisualTools::reload() {
         // m_vec holds the points as offsets from \pos; libass also shifts them by the alignment
         m_vec = Drawing::parse(fs::q(m_v.drawing));
         const double k = std::pow(2.0, -(std::max(1, m_v.drawing_scale) - 1));
-        m_drawScale = QPointF(m_v.fscx / 100 * k, m_v.fscy / 100 * k);
-        m_drawOrigin = QPointF(m_v.x, m_v.y);
-        m_vec.translate(-alignShift(m_vec));
+        const QPointF scale(m_v.fscx / 100 * k, m_v.fscy / 100 * k), shift = alignShift(m_vec);
+        setDrawFrame({m_v.x, m_v.y}, scale, QPointF(m_v.x - shift.x() * scale.x(), m_v.y - shift.y() * scale.y()));
+        m_vec.translate(-shift);
     }
     std::erase_if(m_vecSel, [this](std::pair<int, int> h) {
         return h.first >= int(m_vec.cmds.size()) || h.second >= int(m_vec.cmds[size_t(h.first)].pts.size());
@@ -920,25 +920,44 @@ QPointF VisualTools::vecW(QPointF pt) const {
     return w(drawToScript(pt));
 }
 
-namespace {
-// p turned by deg around o the way libass applies \frz (counterclockwise on screen)
-QPointF turn(QPointF p, QPointF o, double deg) {
-    if (deg == 0) return p;
-    const double a = qDegreesToRadians(deg), c = std::cos(a), s = std::sin(a);
-    const QPointF d = p - o;
-    return o + QPointF(d.x() * c + d.y() * s, -d.x() * s + d.y() * c);
+VisualTools::Projection VisualTools::projection(const fsb::Visual &v, QPointF at) const {
+    const auto m = fsb::line_projection(v, at.x(), at.y(), std::max(1, m_box->info().height));
+    Projection out{};
+    std::copy_n(m.begin(), std::min(m.size(), out.size()), out.begin());
+    return out;
 }
-} // namespace
 
-// libass aligns the unturned drawing at \pos, then turns it around \org
-// shortcut: \frx, \fry and \fax/\fay are ignored for drawings; add the 3D transform if people edit tilted shapes.
+QPointF VisualTools::project(const Projection &m, QPointF p, double z) {
+    const auto row = [&](int r) { return m[r * 4] * p.x() + m[r * 4 + 1] * p.y() + m[r * 4 + 2] * z + m[r * 4 + 3]; };
+    // a point behind the camera libass does not draw; kept just in front so lines stay drawable
+    const double h = std::max(row(2), 1e-6);
+    return {row(0) / h, row(1) / h};
+}
+
+double VisualTools::widgetScale() const { return QLineF(w({0, 0}), w({1, 0})).length(); }
+
+double VisualTools::guide(double px) const {
+    const double camera = 312.5 * m_v.play_res_y / std::max(1, m_box->info().height); // line_projection's
+    return std::min(px / std::max(widgetScale(), 1e-6), camera / 2);
+}
+
+void VisualTools::setDrawFrame(QPointF origin, QPointF scale, QPointF at) {
+    m_drawOrigin = origin;
+    m_drawScale = scale;
+    m_drawProj = projection(m_v, at);
+    const Projection &m = m_drawProj;
+    // the plane z = 0 maps by a homography: columns x, y and 1 of the projection
+    m_drawUnproject = QTransform(m[0], m[4], m[8], m[1], m[5], m[9], m[3], m[7], m[11]).inverted();
+}
+
+// libass lays the drawing out at \pos, scales it, then shears, turns and projects it (around
+// \org, the shear from the drawing's (0,0)), as line_projection does
 QPointF VisualTools::drawToScript(QPointF pt) const {
-    const QPointF s = m_drawOrigin + QPointF(pt.x() * m_drawScale.x(), pt.y() * m_drawScale.y());
-    return turn(s, {m_v.org_x, m_v.org_y}, m_v.frz);
+    return project(m_drawProj, m_drawOrigin + QPointF(pt.x() * m_drawScale.x(), pt.y() * m_drawScale.y()));
 }
 
 QPointF VisualTools::scriptToDraw(QPointF s) const {
-    const QPointF d = turn(s, {m_v.org_x, m_v.org_y}, -m_v.frz) - m_drawOrigin;
+    const QPointF d = m_drawUnproject.map(s) - m_drawOrigin;
     return {d.x() / m_drawScale.x(), d.y() / m_drawScale.y()};
 }
 
@@ -1074,11 +1093,13 @@ void VisualTools::paint(QPainter &p) {
         break;
     }
     case Scale: {
-        // along the line's own axes, turned by rz (Aegisub)
-        // shortcut: rx and ry are left out, the axes stay flat; Aegisub turns them in 3D
-        const double a = qDegreesToRadians(m_v.frz);
-        const QPointF ax(std::cos(a), -std::sin(a)), ay(std::sin(a), std::cos(a));
-        const QPointF ex = pos + ax * m_v.fscx, ey = pos - ay * m_v.fscy;
+        // along the line's own axes, turned in 3D at \pos (Aegisub), 100% a hundred widget pixels
+        fsb::Visual at = m_v;
+        at.org_x = m_v.x, at.org_y = m_v.y, at.fax = at.fay = 0;
+        const Projection m = projection(at, {m_v.x, m_v.y});
+        const double k = guide(100) / 100;
+        const QPointF ex = w(project(m, {m_v.x + m_v.fscx * k, m_v.y}));
+        const QPointF ey = w(project(m, {m_v.x, m_v.y - m_v.fscy * k}));
         line(p, pos, ex);
         line(p, pos, ey);
         handle(p, ex);
@@ -1087,12 +1108,22 @@ void VisualTools::paint(QPainter &p) {
         break;
     }
     case RotZ: {
-        const QPointF org = w({m_v.org_x, m_v.org_y});
-        const double a = qDegreesToRadians(m_v.frz);
-        const QPointF tip = org + QPointF(std::cos(a), -std::sin(a)) * 70;
+        // Aegisub's ring in the plane \frx and \fry turn, through \pos (70 pixels at least)
+        const QPointF o(m_v.org_x, m_v.org_y), org = w(o);
+        fsb::Visual flat = m_v;
+        flat.frz = 0, flat.fax = flat.fay = 0;
+        const Projection m = projection(flat, o);
+        const double r = std::max(guide(70), QLineF(o, {m_v.x, m_v.y}).length());
+        const auto at = [&](double deg) {
+            const double a = qDegreesToRadians(deg);
+            return w(project(m, o + QPointF(std::cos(a), -std::sin(a)) * r));
+        };
+        QPolygonF ring;
+        for (int k = 0; k <= 72; ++k) ring << at(k * 5);
+        const QPointF tip = at(m_v.frz);
         p.setPen(QPen(lineColor(), 1, Qt::DashLine));
-        p.drawEllipse(org, 70, 70);
-        line(p, org, tip);
+        p.drawPolyline(ring);
+        line(p, at(m_v.frz + 180), tip);
         line(p, org, pos, QColor(255, 255, 255, 100), Qt::DotLine);
         handle(p, tip, true);
         handle(p, org, false, accentColor());
@@ -1105,17 +1136,22 @@ void VisualTools::paint(QPainter &p) {
         break;
     }
     case RotXY: {
-        p.save();
-        p.translate(pos);
-        // the grid is foreshortened like the rotated text plane
-        p.scale(std::cos(qDegreesToRadians(m_v.fry)), std::cos(qDegreesToRadians(m_v.frx)));
+        // Aegisub's grid in the turned plane through \org, and the plane's axes (z toward the
+        // viewer), 20 widget pixels a square
+        const QPointF o(m_v.org_x, m_v.org_y), org = w(o);
+        fsb::Visual plane = m_v;
+        plane.fax = plane.fay = 0;
+        const Projection m = projection(plane, o);
+        const double g = guide(100) / 5;
+        const auto at = [&](double x, double y, double z = 0) { return w(project(m, o + QPointF(x, y) * g, z * g)); };
         p.setPen(QPen(lineColor(), 1));
-        for (int k = -3; k <= 3; ++k) {
-            p.drawLine(QPointF(k * 20, -60), QPointF(k * 20, 60));
-            p.drawLine(QPointF(-60, k * 20), QPointF(60, k * 20));
+        for (int k = -5; k <= 5; ++k) {
+            p.drawLine(at(k, -5), at(k, 5));
+            p.drawLine(at(-5, k), at(5, k));
         }
-        p.restore();
-        const QPointF org = w({m_v.org_x, m_v.org_y});
+        line(p, org, at(3, 0), QColor(255, 90, 90));
+        line(p, org, at(0, -3), QColor(90, 220, 90));
+        line(p, org, at(0, 0, -3), QColor(90, 150, 255));
         line(p, org, pos, QColor(255, 255, 255, 100), Qt::DotLine);
         handle(p, pos, true);
         handle(p, org, false, accentColor());
@@ -1339,8 +1375,7 @@ bool VisualTools::press(QMouseEvent *e) {
         else {
             if (m_vec.cmds.empty()) {
                 // a fresh drawing starts at the line position
-                m_drawScale = QPointF(m_v.fscx / 100, m_v.fscy / 100);
-                m_drawOrigin = QPointF(m_v.x, m_v.y);
+                setDrawFrame({m_v.x, m_v.y}, {m_v.fscx / 100, m_v.fscy / 100}, {m_v.x, m_v.y});
             }
             pt = scriptToDraw(m_pressS);
         }

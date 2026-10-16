@@ -760,16 +760,17 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     connect(m_text, &QPlainTextEdit::textChanged, this, &EditBox::updateTextInfo);
     for (auto *e : {m_text, m_original})
         connect(e, &SubsTextEdit::keyCommand, this, [this, e](const char *id) { runCommand(id, e); });
-    connect(m_text, &SubsTextEdit::splitRequested, this, [this](qint64 at) {
-        // at the video frame, as Aegisub: the frame shown, kept within the line, ends the first part
-        if (VideoBox *v = m_tab->video(); at == 0 && v->hasVideo() && m_row >= 0) {
-            const fsb::Row r = m_tab->s().row(size_t(m_row));
-            at = v->timeAtEnd(std::max(v->frameAtStart(r.start), std::min(v->frame(), v->frameAtEnd(r.end))));
-        } else if (at == 0) {
-            at = m_tab->videoTime();
-        }
-        splitAtCursor(at);
-    });
+    for (auto *e : {m_text, m_original})
+        connect(e, &SubsTextEdit::splitRequested, this, [this, e](qint64 at) {
+            // at the video frame, as Aegisub: the frame shown, kept within the line, ends the first part
+            if (VideoBox *v = m_tab->video(); at == 0 && v->hasVideo() && m_row >= 0) {
+                const fsb::Row r = m_tab->s().row(size_t(m_row));
+                at = v->timeAtEnd(std::max(v->frameAtStart(r.start), std::min(v->frame(), v->frameAtEnd(r.end))));
+            } else if (at == 0) {
+                at = m_tab->videoTime();
+            }
+            splitAtCursor(at, e == m_original);
+        });
     connect(m_text, &SubsTextEdit::revertRequested, this, [this] { m_text->setText(m_initial); });
     // Aegisub's edit/insert_original: the text from before the edits, at the cursor
     connect(m_text, &SubsTextEdit::insertOriginalRequested, this, [this] { m_text->insertPlainText(m_initial); });
@@ -1215,9 +1216,10 @@ void EditBox::nextLine() {
     m_text->setFocus();
 }
 
-void EditBox::splitAtCursor(qint64 atMs) {
-    const QString t = m_text->text();
-    const auto r = m_tab->s().split_row(size_t(m_row), bytePos(t, m_text->textCursor().position()), atMs);
+void EditBox::splitAtCursor(qint64 atMs, bool original) {
+    SubsTextEdit *box = original ? m_original : m_text;
+    const QString t = box->text();
+    const auto r = m_tab->s().split_row(size_t(m_row), bytePos(t, box->textCursor().position()), atMs, original);
     m_tab->changed();
     if (r >= 0) m_tab->setActive(int(r));
 }

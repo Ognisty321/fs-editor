@@ -1077,8 +1077,8 @@ impl Session {
         });
     }
 
-    // shortcut: trees are off in translator mode, where a row pairs two events; add them there if
-    // people ask.
+    /// The tree mark of the row's line; in translator mode both halves of a pair carry it, so it
+    /// stays when the mode is turned off (the translations are kept).
     fn row_tree(&self, row: usize) -> Option<&'static str> {
         let r = self.tl_row(row)?;
         tree_state(&self.ed.doc.event(r.main())?.actor)
@@ -1087,9 +1087,6 @@ impl Session {
     /// Rows that closed trees fold away. A line marked closed with no description above it (the
     /// description was deleted) stays in view.
     pub fn tree_hidden(&self) -> Vec<usize> {
-        if self.tl {
-            return Vec::new();
-        }
         let mut inside = false;
         let mut out = Vec::new();
         for r in 0..self.rows.len() {
@@ -1105,7 +1102,7 @@ impl Session {
 
     /// The rows of the tree `row` describes; empty when it describes none.
     pub fn tree_members(&self, row: usize) -> Vec<usize> {
-        if self.tl || self.row_tree(row) != Some(TREE_DESCRIPTION) {
+        if self.row_tree(row) != Some(TREE_DESCRIPTION) {
             return Vec::new();
         }
         (row + 1..self.rows.len())
@@ -1116,28 +1113,27 @@ impl Session {
     /// Kainote's "Make tree": each run of the rows (those in no tree yet) gets a comment line
     /// before it holding `description`, and folds closed. Returns the description rows.
     pub fn make_tree(&mut self, rows: &[usize], description: &str) -> Vec<usize> {
-        if self.tl {
-            return Vec::new();
-        }
-        let mut evs: Vec<usize> = rows
+        let mut rows: Vec<usize> = rows
             .iter()
             .copied()
             .filter(|&r| r < self.rows.len() && self.row_tree(r).is_none())
             .collect();
-        evs = self.main_events(&evs);
-        evs.sort_unstable();
-        evs.dedup();
+        rows.sort_unstable();
+        rows.dedup();
         let doc = &self.ed.doc;
-        let heads: Vec<(usize, Event)> = evs
+        // before the run's first row: ahead of the original of a translator's pair
+        let heads: Vec<(usize, Event)> = rows
             .chunk_by(|a, b| b - a == 1)
             .map(|run| {
-                let style = &doc.event(run[0]).unwrap().style;
+                let r = self.rows[run[0]];
+                let style = &doc.event(r.main()).unwrap().style;
                 let mut ev = Event::dialogue(Time(0), Time(0), style, description);
                 ev.kind = fs_core::model::EventKind::Comment;
                 ev.actor = TREE_DESCRIPTION.into();
-                (run[0], ev)
+                (r.original, ev)
             })
             .collect();
+        let evs = self.all_events(&rows);
         if heads.is_empty() {
             return Vec::new();
         }
@@ -1155,7 +1151,7 @@ impl Session {
     /// it at its start and those below at its end, in order, folded as it is. Returns the head's
     /// new row, -1 when no row joined.
     pub fn tree_add_lines(&mut self, head: usize, rows: &[usize]) -> i64 {
-        if self.tl || self.row_tree(head) != Some(TREE_DESCRIPTION) {
+        if self.row_tree(head) != Some(TREE_DESCRIPTION) {
             return -1;
         }
         let members = self.tree_members(head);
@@ -1207,9 +1203,12 @@ impl Session {
 
     /// Open a closed tree, or close an open one (a click on its description).
     pub fn toggle_tree(&mut self, row: usize) {
-        let evs = self.main_events(&self.tree_members(row));
-        let Some(&first) = evs.first() else { return };
-        let closed = tree_state(&self.ed.doc.event(first).unwrap().actor) == Some(TREE_CLOSED);
+        let members = self.tree_members(row);
+        let Some(&first) = members.first() else {
+            return;
+        };
+        let closed = self.row_tree(first) == Some(TREE_CLOSED);
+        let evs = self.all_events(&members);
         let (to, desc) = if closed {
             (TREE_OPENED, "Open tree")
         } else {
@@ -1225,17 +1224,17 @@ impl Session {
 
     /// Undo a tree: its lines lose the mark and the description line goes.
     pub fn remove_tree(&mut self, row: usize) {
-        if self.tl || self.row_tree(row) != Some(TREE_DESCRIPTION) {
+        if self.row_tree(row) != Some(TREE_DESCRIPTION) {
             return;
         }
-        let evs = self.main_events(&self.tree_members(row));
-        let head = self.tl_row(row).unwrap().main();
+        let evs = self.all_events(&self.tree_members(row));
+        let head = self.all_events(&[row]);
         self.edit("Remove tree", move |d| {
             for e in evs {
                 let ev = d.event_mut(e).unwrap();
                 ev.actor = with_tree_state(&ev.actor, None);
             }
-            d.remove_events(&[head]);
+            d.remove_events(&head);
         });
     }
 
@@ -1393,7 +1392,8 @@ impl Session {
 
     /// Aegisub "Recombine Lines"; returns the rows left of the selection.
     pub fn recombine_rows(&mut self, rows: &[usize]) -> Vec<usize> {
-        // shortcut: not in TL mode (pairs would need recombining together); add when asked.
+        // not in translator mode: it makes and drops lines by the texts' overlaps, which the
+        // original and the translation do not share (Aegisub has no such mode)
         if self.tl {
             return rows.to_vec();
         }
@@ -1412,11 +1412,14 @@ impl Session {
         self.rows_of_events(&new)
     }
 
-    /// 0 join, 1 keep first, 2 keep last, 3 as karaoke. Not in TL mode.
+    /// 0 join, 1 keep first, 2 keep last, 3 as karaoke. In translator mode the originals join
+    /// as the translations do, into the first row's pair.
     pub fn join_rows(&mut self, rows: &[usize], mode: u8) -> i64 {
-        // shortcut: TL pairs are not joined (both halves would need merging); add when asked.
-        if self.tl || rows.len() < 2 {
+        if rows.len() < 2 {
             return -1;
+        }
+        if self.tl {
+            return self.join_pairs(rows, mode);
         }
         let evs = self.main_events(rows);
         let last_text = evs
@@ -1443,14 +1446,78 @@ impl Session {
             .map_or(-1, |r| r as i64)
     }
 
-    /// Split at a byte position of the text; `at_ms < 0` estimates the time.
-    pub fn split_row(&mut self, row: usize, byte_pos: usize, at_ms: i64) -> i64 {
-        // shortcut: TL pairs are not split; add when asked.
-        if self.tl {
+    /// The rows joined pair by pair: originals with originals, translations with translations
+    /// (an untranslated row's empty), timed by the translations.
+    fn join_pairs(&mut self, rows: &[usize], mode: u8) -> i64 {
+        let mut sel: Vec<TlRow> = rows.iter().filter_map(|&r| self.tl_row(r)).collect();
+        sel.sort_by_key(|r| r.original);
+        sel.dedup();
+        if sel.len() < 2 {
             return -1;
         }
+        let doc = &self.ed.doc;
+        let main = |r: &TlRow| doc.event(r.main()).unwrap();
+        let originals: Vec<Event> = (sel.iter())
+            .map(|r| Event {
+                start: main(r).start,
+                end: main(r).end,
+                ..doc.event(r.original).unwrap().clone()
+            })
+            .collect();
+        let translations: Vec<Event> = (sel.iter())
+            .map(|r| match r.translation {
+                Some(_) => main(r).clone(),
+                None => Event {
+                    text: String::new(),
+                    ..main(r).clone()
+                },
+            })
+            .collect();
+        let translated = sel.iter().any(|r| r.translation.is_some());
+        let mut o = join_apart(originals, mode);
+        let t = translated.then(|| join_apart(translations, mode));
+        let style = tlmode::tl_style(doc).unwrap_or_else(|| tlmode::DEFAULT_TL_STYLE.into());
+        let first = sel[0];
+        let gone: Vec<usize> = (sel[1..].iter())
+            .flat_map(|r| std::iter::once(r.original).chain(r.translation))
+            .collect();
+        self.edit("Join lines", move |d| {
+            d.remove_events(&gone); // all after the first pair
+            let Some(t) = t else {
+                *d.event_mut(first.original).unwrap() = o;
+                return;
+            };
+            o.style = style;
+            o.effect = tlmode::strip_doubtful(&o.effect).to_string();
+            match first.translation {
+                Some(ti) => {
+                    *d.event_mut(first.original).unwrap() = o;
+                    *d.event_mut(ti).unwrap() = t;
+                }
+                None => {
+                    // the first row was untranslated: it becomes a pair
+                    *d.event_mut(first.original).unwrap() = t;
+                    d.insert_event(first.original, o);
+                }
+            }
+        });
+        self.row_of_event(first.original).map_or(-1, |r| r as i64)
+    }
+
+    /// Split at a byte position of the text (of the original when `original`, in translator
+    /// mode); `at_ms` -1 estimates the time, -2 keeps both parts' times. A translator's pair
+    /// splits the half at the cursor; the other half stays whole on the first part, as typed.
+    pub fn split_row(&mut self, row: usize, byte_pos: usize, at_ms: i64, original: bool) -> i64 {
         let Some(r) = self.tl_row(row) else { return -1 };
         let at = (at_ms >= 0).then_some(Time(at_ms));
+        if self.tl {
+            match r.translation {
+                Some(t) => return self.split_pair(r.original, t, byte_pos, at_ms, original),
+                // an untranslated row has no translation to split
+                None if !original => return -1,
+                None => {}
+            }
+        }
         let n = self.edit("Split line", |d| {
             let (start, end) = d.event(r.main()).map(|e| (e.start, e.end))?;
             let n = ops::split_at(d, r.main(), byte_pos, at)?;
@@ -1463,6 +1530,57 @@ impl Session {
         });
         n.and_then(|e| self.row_of_event(e))
             .map_or(-1, |r| r as i64)
+    }
+
+    fn split_pair(
+        &mut self,
+        o: usize,
+        t: usize,
+        byte_pos: usize,
+        at_ms: i64,
+        original: bool,
+    ) -> i64 {
+        let doc = &self.ed.doc;
+        let (oe, te) = (doc.event(o).unwrap(), doc.event(t).unwrap());
+        let mut d = Document::empty();
+        d.push_event(if original { oe } else { te }.clone());
+        if ops::split_at(&mut d, 0, byte_pos, (at_ms >= 0).then_some(Time(at_ms))).is_none() {
+            return -1;
+        }
+        let (a, b) = (d.event(0).unwrap().clone(), d.event(1).unwrap().clone());
+        let whole = |ev: &Event| {
+            let first = Event {
+                start: a.start,
+                end: a.end,
+                ..ev.clone()
+            };
+            let second = Event {
+                start: b.start,
+                end: b.end,
+                text: String::new(),
+                ..ev.clone()
+            };
+            (first, second)
+        };
+        let ((o1, o2), (t1, t2)) = if original {
+            ((a.clone(), b.clone()), whole(te))
+        } else {
+            (whole(oe), (a.clone(), b.clone()))
+        };
+        let times = (te.start, te.end);
+        let mut parts = [o1, t1, o2, t2];
+        if at_ms == -2 {
+            for e in &mut parts {
+                (e.start, e.end) = times;
+            }
+        }
+        let [o1, t1, o2, t2] = parts;
+        self.edit("Split line", move |d| {
+            *d.event_mut(o).unwrap() = o1;
+            *d.event_mut(t).unwrap() = t1;
+            d.insert_events(vec![(t + 1, o2), (t + 1, t2)]);
+        });
+        self.row_of_event(t + 1).map_or(-1, |r| r as i64)
     }
 
     pub fn swap_rows(&mut self, a: usize, b: usize) {
@@ -2946,6 +3064,24 @@ fn shift_tag_times(ev: &mut Event, delta: i64) {
 }
 
 /// The originals of translation pairs take their translations' times.
+/// `evs` (in order) joined as [`Session::join_rows`]'s `mode` says, apart from any file.
+fn join_apart(evs: Vec<Event>, mode: u8) -> Event {
+    let last = evs.last().map(|e| e.text.clone()).unwrap_or_default();
+    let jm = match mode {
+        1 | 2 => JoinMode::KeepFirst,
+        3 => JoinMode::AsKaraoke,
+        _ => JoinMode::Concatenate { newline: false },
+    };
+    let mut d = Document::empty();
+    let all: Vec<usize> = evs.into_iter().map(|e| d.push_event(e)).collect();
+    ops::join(&mut d, &all, jm);
+    let mut e = d.event(0).unwrap().clone();
+    if mode == 2 {
+        e.text = last;
+    }
+    e
+}
+
 fn sync_originals(d: &mut Document, pairs: &[(usize, usize)]) {
     for &(t, o) in pairs {
         let (Some(tr), Some(or)) = (d.event(t), d.event(o)) else {
@@ -3596,6 +3732,65 @@ mod tests {
         );
     }
 
+    /// Translator mode: pairs join and split half by half, trees fold whole pairs.
+    #[test]
+    fn translator_pairs_join_split_and_fold() {
+        let mut s = session(ASS);
+        s.tl_enable(true);
+        s.paste_translation(0, "jeden");
+        s.paste_translation(2, "trzy");
+        let view = |s: &Session| -> Vec<(String, String, i64, i64)> {
+            (0..s.row_count())
+                .map(|i| {
+                    let r = s.row(i);
+                    (r.original, r.text, r.start, r.end)
+                })
+                .collect()
+        };
+        let own = |o: &str, t: &str, a: i64, b: i64| (o.to_string(), t.to_string(), a, b);
+        // an untranslated row in the middle: its translation is empty
+        assert_eq!(s.join_rows(&[2, 0, 1], 0), 0);
+        assert_eq!(view(&s), [own("one two three", "jeden trzy", 1000, 6000)]);
+        assert_eq!(s.row_count(), 1);
+        s.undo();
+        // keep last; an untranslated first row becomes a pair
+        assert_eq!(s.join_rows(&[1, 2], 2), 1);
+        assert_eq!(view(&s)[1], own("three", "trzy", 3000, 6000));
+        assert!(s.row(1).translated && s.row_count() == 2);
+        s.undo();
+        // split the translation at the cursor: the original stays whole on the first part
+        assert_eq!(s.split_row(2, 3, 5500, false), 3);
+        assert_eq!(
+            view(&s)[2..],
+            [own("three", "trz", 5000, 5500), own("", "y", 5500, 6000)]
+        );
+        s.undo();
+        // or the original, keeping the times; an untranslated row splits its original only
+        assert_eq!(s.split_row(2, 2, -2, true), 3);
+        assert_eq!(
+            view(&s)[2..],
+            [own("th", "trzy", 5000, 6000), own("ree", "", 5000, 6000)]
+        );
+        assert_eq!(s.split_row(1, 1, -1, false), -1);
+        s.undo();
+        // a tree before the pair's original; both halves carry the mark
+        assert_eq!(s.make_tree(&[2], "end"), [2]);
+        assert_eq!(s.tree_hidden(), [3]);
+        assert_eq!(
+            (s.row(3).original.as_str(), s.row(3).text.as_str()),
+            ("three", "trzy")
+        );
+        s.toggle_tree(2);
+        assert!(s.tree_hidden().is_empty());
+        s.toggle_tree(2);
+        s.tl_enable(false);
+        assert_eq!(s.tree_hidden(), [3]); // the translation kept the mark
+        s.undo();
+        s.remove_tree(2);
+        assert_eq!(s.row_count(), 3);
+        assert_eq!(s.row(2).markers, "");
+    }
+
     #[test]
     fn continuous_times_as_aegisub() {
         let times = |s: &Session| -> Vec<(i64, i64)> {
@@ -3874,11 +4069,11 @@ mod tests {
     #[test]
     fn split_row_estimates_or_keeps_times() {
         let mut s = session(ASS);
-        assert_eq!(s.split_row(2, 2, -2), 3);
+        assert_eq!(s.split_row(2, 2, -2, false), 3);
         let (a, b) = (s.row(2), s.row(3));
         assert_eq!((a.text.as_str(), a.start, a.end), ("th", 5000, 6000));
         assert_eq!((b.text.as_str(), b.start, b.end), ("ree", 5000, 6000));
-        assert_eq!(s.split_row(0, 1, -1), 1);
+        assert_eq!(s.split_row(0, 1, -1, false), 1);
         assert_eq!((s.row(0).end, s.row(1).start), (1333, 1333));
     }
 

@@ -602,7 +602,7 @@ void MainWindow::buildMenus() {
         // Aegisub's DialogExport: every filter (the built-in ones among the scripts' by priority), checked
         // as the file last exported, the settings panel of each checked one beside the list. The scripts'
         // config functions run as it opens, as there.
-        const auto filters = (*m_automation)->export_filters();
+        const auto filters = (*m_automation)->export_filters(t->s());
         rust::Vec<fsb::DialogData> panels;
         try {
             auto job = (*m_automation)->start_filter_configs(t->s());
@@ -1692,10 +1692,17 @@ void MainWindow::buildMenus() {
             const QVariant id = a->property("macroId");
             if (!id.isValid() || id.toULongLong() >= states.size()) continue;
             const auto &st = states[size_t(id.toULongLong())];
+            a->setVisible(st.visible); // another file's script (Aegisub's other window)
             a->setEnabled(st.enabled);
             a->setCheckable(st.toggle);
             a->setChecked(st.checked);
             a->setStatusTip(st.help.empty() ? a->toolTip() : fs::q(st.help));
+        }
+        // a submenu shows while something in it does; the inner ones first
+        const auto subs = m_automationMenu->findChildren<QMenu *>();
+        for (auto it = subs.rbegin(); it != subs.rend(); ++it) {
+            const auto acts = (*it)->actions();
+            (*it)->menuAction()->setVisible(std::ranges::any_of(acts, &QAction::isVisible));
         }
     });
 
@@ -2028,6 +2035,15 @@ bool MainWindow::closeTab(int index) {
     m_tabs->removeTab(index);
     delete slot;
     if (m_tabs->count() == 0) newTab();
+    // Aegisub's window closing with its local scripts: those no open file lists are unloaded
+    rust::Vec<rust::String> listed;
+    for (int i = 0; i < m_tabs->count(); ++i)
+        if (auto *p = panel(i))
+            for (auto &s : (*m_automation)->listed_scripts(p->s())) listed.push_back(std::move(s));
+    if ((*m_automation)->keep_scripts({listed.data(), listed.size()})) {
+        m_lastMacro = -1; // the macros were renumbered
+        buildAutomationMenu();
+    }
     return true;
 }
 
@@ -2523,13 +2539,14 @@ void MainWindow::automationManager() {
     };
     auto refresh = [&, this](int select) {
         buildAutomationMenu();
-        scripts = (*m_automation)->scripts();
+        scripts = (*m_automation)->scripts(current()->s());
         list->clear();
         for (const auto &s : scripts) {
             const bool ok = s.error.empty();
             auto *it = new QTreeWidgetItem(list, {s.autoload ? "G" : "L", fs::q(s.name),
                                                   QFileInfo(fs::q(s.path)).fileName(),
                                                   fs::q(ok ? s.description : s.error)});
+            it->setHidden(!s.shown); // another file's (Aegisub: another window's manager)
             if (!ok)
                 for (int c = 0; c < 4; ++c) it->setForeground(c, QColor(255, 128, 128));
         }

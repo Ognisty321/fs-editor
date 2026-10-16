@@ -9,6 +9,8 @@
 #include <QObject>
 #include <QPointF>
 #include <QRectF>
+#include <QTransform>
+#include <array>
 #include <optional>
 #include <set>
 #include <span>
@@ -115,6 +117,17 @@ private:
     // drawing point (offset from \pos, unscaled) <-> script coordinates, turned by \frz around \org
     QPointF drawToScript(QPointF pt) const;
     QPointF scriptToDraw(QPointF s) const;
+    // libass's 3D transform of a line (Session's line_projection) for this video, shearing from
+    // `at`; and a point (x, y, z) as laid out to where it shows, script pixels both
+    using Projection = std::array<double, 12>;
+    Projection projection(const fsb::Visual &v, QPointF at) const;
+    static QPointF project(const Projection &m, QPointF p, double z = 0);
+    // the drawing's frame: its points' origin and scale, and its (0,0) where libass puts it
+    void setDrawFrame(QPointF origin, QPointF scale, QPointF at);
+    double widgetScale() const; // widget pixels a script pixel
+    // a guide `px` widget pixels long in script pixels, at most half the camera's distance so
+    // libass's strong perspective does not blow it up
+    double guide(double px) const;
     // the l/b command whose segment passes near the point (t: where on it), or -1
     int hitSegment(QPointF widgetPos, double &t) const;
     // the active line is on the video's frame and not a comment: only then the tools work (Aegisub)
@@ -135,6 +148,8 @@ private:
     std::vector<std::pair<size_t, QPointF>> others() const;
     Drawing m_vec;            // vector clip or drawing being edited
     QPointF m_drawOrigin, m_drawScale{1, 1};
+    Projection m_drawProj{};
+    QTransform m_drawUnproject; // the shown plane back to the laid-out one
     // drag state
     int m_drag = 0;           // 0 none, else tool-specific handle id
     Qt::MouseButton m_button = Qt::NoButton;

@@ -121,7 +121,8 @@ private:
     void updateInfo(const fsb::Row &r);
     void rebuildTagButtons();
     void nextLine();
-    void splitAtCursor(qint64 atMs);
+    /// `original`: at the cursor of the translator's original box.
+    void splitAtCursor(qint64 atMs, bool original = false);
     void setColorTag(int which);
     void toggleTag(const QString &name);
     fsb::StyleData lineStyle() const;

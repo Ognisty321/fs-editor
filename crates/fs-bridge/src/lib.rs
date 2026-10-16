@@ -278,6 +278,11 @@ pub mod ffi {
         frz: f64,
         frx: f64,
         fry: f64,
+        /// `\fax`, `\fay`.
+        fax: f64,
+        fay: f64,
+        /// The script's PlayResY, for the camera's distance.
+        play_res_y: f64,
     }
 
     /// Compared lines whose texts differ, with the differing parts of each text as
@@ -369,6 +374,8 @@ pub mod ffi {
     /// What the Automation menu shows for a macro (Aegisub's validate and is_active).
     #[derive(Debug, Clone, Default)]
     struct MacroState {
+        /// Its script serves this file (autoloaded or listed by it).
+        visible: bool,
         enabled: bool,
         /// It has an is_active function: drawn as a check item.
         toggle: bool,
@@ -415,6 +422,8 @@ pub mod ffi {
         error: String,
         /// Found in an autoload dir (reloading brings it back, so it is not removable).
         autoload: bool,
+        /// It serves the file asked about: autoloaded or listed by it.
+        shown: bool,
         macros: usize,
         filters: usize,
     }
@@ -645,7 +654,14 @@ pub mod ffi {
         fn stretch_times(self: &mut Session, anchor: i64, from: i64, to: i64);
         fn split_by_karaoke(self: &mut Session, rows: &[usize]) -> Vec<usize>;
         /// `at_ms`: -1 estimates the split time from the text lengths, -2 keeps both parts' times.
-        fn split_row(self: &mut Session, row: usize, byte_pos: usize, at_ms: i64) -> i64;
+        /// `original`: `byte_pos` is in a translator pair's original (the other half stays whole).
+        fn split_row(
+            self: &mut Session,
+            row: usize,
+            byte_pos: usize,
+            at_ms: i64,
+            original: bool,
+        ) -> i64;
         fn swap_rows(self: &mut Session, a: usize, b: usize);
         /// Replace each row by one copy per part (split into words, wraps, frames…): `rows[i]`
         /// takes the next `counts[i]` parts. One undo step; returns the new rows.
@@ -871,6 +887,11 @@ pub mod ffi {
         /// an1-9 inside, left/centre/right below, left/centre/right above, before
         /// top/middle/bottom, after top/middle/bottom).
         fn fit_anchor(line: &[f64], rect: &[f64], align: u8) -> Vec<f64>;
+        /// libass's 3D transform of the line `v` (\frx, \fry, \frz around its \org, \fax and
+        /// \fay from (`at_x`, `at_y`), a drawing's (0,0)) for a video `storage_height` high: a
+        /// 3×4 projective matrix, row after row, from (x, y, z, 1) as laid out to the screen,
+        /// script pixels both.
+        fn line_projection(v: &Visual, at_x: f64, at_y: f64, storage_height: f64) -> Vec<f64>;
         fn load_attached_fonts(self: &mut Renderer, media_path: &str);
         type RenderSubs;
         /// Builds the script and registers the embedded fonts (the render thread's work).
@@ -958,7 +979,12 @@ pub mod ffi {
         fn set_cache_dir(self: &mut Automation, dir: &str);
         /// Aegisub's Automation/Trace Level (0 fatal … 5 trace): debug.out above it is dropped.
         fn set_trace_level(self: &Automation, level: i32);
-        fn scripts(self: &Automation) -> Vec<ScriptItem>;
+        fn scripts(self: &Automation, session: &Session) -> Vec<ScriptItem>;
+        /// The scripts the file lists (canonical paths), for `keep_scripts`.
+        fn listed_scripts(self: &Automation, session: &Session) -> Vec<String>;
+        /// A file closed: the scripts neither autoloaded nor in `listed` (what the open files
+        /// list) are unloaded, which renumbers the macros; how many.
+        fn keep_scripts(self: &mut Automation, listed: &[String]) -> usize;
         /// Reload every script and load new files in the autoload dirs; returns the load errors.
         fn reload(self: &mut Automation) -> Vec<String>;
         fn load_autoload(self: &mut Automation) -> Vec<String>;
@@ -972,7 +998,7 @@ pub mod ffi {
         fn add_local_script(self: &Automation, session: &mut Session, path: &str);
         fn remove_local_script(self: &Automation, session: &mut Session, path: &str);
         fn macros(self: &Automation) -> Vec<MacroItem>;
-        fn export_filters(self: &Automation) -> Vec<FilterItem>;
+        fn export_filters(self: &Automation, session: &Session) -> Vec<FilterItem>;
         /// The export dialog's settings panels, as a job: every script filter's config function
         /// with what the file last exported with put back.
         fn start_filter_configs(self: &Automation, session: &Session) -> Box<ScriptJob>;
@@ -1150,6 +1176,10 @@ fn open_video(path: &str, cache_dir: &str, progress: &ffi::Progress) -> Result<B
 
 fn fit_anchor(line: &[f64], rect: &[f64], align: u8) -> Vec<f64> {
     visual::fit_anchor(line, rect, align).to_vec()
+}
+
+fn line_projection(v: &ffi::Visual, at_x: f64, at_y: f64, storage_height: f64) -> Vec<f64> {
+    visual::line_projection(v, [at_x, at_y], storage_height).to_vec()
 }
 
 fn new_renderer() -> Result<Box<Renderer>, String> {

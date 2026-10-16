@@ -60,6 +60,63 @@ pub fn fit_anchor(b: &[f64], r: &[f64], align: u8) -> [f64; 2] {
     }
 }
 
+/// libass's 3D transform of a line (`calc_transform_matrix`) as a 3×4 projective matrix, row
+/// after row: a point (x, y, z) of the line as laid out, unturned and unsheared, in script pixels
+/// goes to `(r0·p / r2·p, r1·p / r2·p)` on the screen, p = (x, y, z, 1). `rot`: \frx, \fry,
+/// \frz around `org`; `shear`: \fax and \fay from `shear_at`; `dist`: the camera's distance
+/// in script pixels: libass's 20000 in 26.6 fixed point, 312.5 storage pixels
+/// (`312.5 · PlayResY / storage height`), Aegisub's too.
+pub fn projection(
+    org: [f64; 2],
+    rot: [f64; 3],
+    shear: [f64; 2],
+    shear_at: [f64; 2],
+    dist: f64,
+) -> [f64; 12] {
+    type V = [f64; 4];
+    let lin =
+        |a: V, ka: f64, b: V, kb: f64| -> V { std::array::from_fn(|i| a[i] * ka + b[i] * kb) };
+    let [frx, fry, frz] = rot.map(f64::to_radians);
+    let [fax, fay] = shear;
+    // from the turning point, sheared
+    let x1: V = [1.0, fax, 0.0, -org[0] - fax * shear_at[1]];
+    let y1: V = [fay, 1.0, 0.0, -org[1] - fay * shear_at[0]];
+    let z1: V = [0.0, 0.0, 1.0, 0.0];
+    // z, then x, then y, with libass's signs
+    let (sz, cz) = frz.sin_cos();
+    let (x2, y2) = (lin(x1, cz, y1, sz), lin(x1, -sz, y1, cz));
+    let (sx, cx) = ((-frx).sin(), frx.cos());
+    let (y3, z3) = (lin(y2, cx, z1, -sx), lin(y2, sx, z1, cx));
+    let (sy, cy) = fry.sin_cos();
+    let (x4, z4) = (lin(x2, cy, z3, -sy), lin(x2, sy, z3, cy));
+    let mut w = z4;
+    w[3] += dist;
+    let (hx, hy) = (lin(w, org[0], x4, dist), lin(w, org[1], y3, dist));
+    let mut m = [0.0; 12];
+    m[..4].copy_from_slice(&hx);
+    m[4..8].copy_from_slice(&hy);
+    m[8..].copy_from_slice(&w);
+    m
+}
+
+/// The line's projection (see `projection`) for a drawing whose (0,0) libass puts at `at`, the
+/// video (libass's storage) `storage_height` high. libass shears in the scaled glyph, so
+/// \fax counts fscx/fscy times and \fay fscy/fscx.
+pub fn line_projection(v: &Visual, at: [f64; 2], storage_height: f64) -> [f64; 12] {
+    let ratio = if v.fscx > 0.0 && v.fscy > 0.0 {
+        v.fscx / v.fscy
+    } else {
+        1.0
+    };
+    projection(
+        [v.org_x, v.org_y],
+        [v.frx, v.fry, v.frz],
+        [v.fax * ratio, v.fay / ratio],
+        at,
+        312.5 * v.play_res_y / storage_height.max(1.0),
+    )
+}
+
 pub fn of_event(doc: &Document, ev: &Event) -> Visual {
     let line = Line::parse(&ev.text);
     let style = doc.style(&ev.style);
@@ -81,6 +138,9 @@ pub fn of_event(doc: &Document, ev: &Event) -> Visual {
             .unwrap_or_else(|| style.map_or(0.0, |s| s.angle)),
         frx: f("frx", 0).unwrap_or(0.0),
         fry: f("fry", 0).unwrap_or(0.0),
+        fax: f("fax", 0).unwrap_or(0.0),
+        fay: f("fay", 0).unwrap_or(0.0),
+        play_res_y: f64::from(doc.play_res().1),
         ..Default::default()
     };
 
@@ -159,6 +219,93 @@ mod tests {
         assert_eq!(at(16), [50.0, 120.0]); // before, top
         assert_eq!(at(17), [50.0, 150.0]);
         assert_eq!(at(21), [350.0, 180.0]); // after, bottom
+    }
+
+    /// The projection against what libass draws: the corners of a turned, sheared box projected
+    /// bound what libass covers, at two frame sizes (the camera is 312.5 storage pixels away).
+    /// \fax and \fay shear from the drawing's (0,0), \fax after the scale.
+    #[test]
+    fn the_projection_is_libass_s() {
+        let mut r = fs_media::SubtitleRenderer::new().unwrap();
+        // (tags, the drawing's (0,0) where libass puts it, the box's corners from it)
+        // (tags, where libass puts the drawing's (0,0), the scale)
+        let cases = [
+            (r"\an7\pos(500,400)\frx40", [500.0, 400.0], [1.0, 1.0]),
+            (r"\an7\pos(500,400)\fry-40", [500.0, 400.0], [1.0, 1.0]),
+            (
+                r"\an7\pos(500,400)\org(600,450)\frx30\fry-25\frz10",
+                [500.0, 400.0],
+                [1.0, 1.0],
+            ),
+            (
+                r"\an7\pos(500,400)\frx-40\fry35",
+                [500.0, 400.0],
+                [1.0, 1.0],
+            ),
+            (
+                r"\an7\pos(500,400)\fax0.3\fay0.2\frz15",
+                [500.0, 400.0],
+                [1.0, 1.0],
+            ),
+            (
+                r"\an7\pos(500,400)\fax-0.4\frx20\fry20",
+                [500.0, 400.0],
+                [1.0, 1.0],
+            ),
+            // the drawing's (0,0) moved by the alignment's share of its box
+            (
+                r"\an5\pos(500,400)\fax0.3\frx25",
+                [400.0, 350.0],
+                [1.0, 1.0],
+            ),
+            (
+                r"\an3\pos(700,600)\fay0.2\fry30",
+                [500.0, 500.0],
+                [1.0, 1.0],
+            ),
+            (
+                r"\an7\pos(500,400)\fscx150\fscy50\fax0.3\fay0.1\frz20",
+                [500.0, 400.0],
+                [1.5, 0.5],
+            ),
+        ];
+        for (tags, at, k2) in cases {
+            for h in [1080usize, 540] {
+                let ass = format!(
+                    "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n\
+                     [V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, \
+                     OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, \
+                     Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, \
+                     MarginV, Encoding\nStyle: D,Arial,20,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,\
+                     0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1\n\n[Events]\nFormat: Layer, Start, End, \
+                     Style, Name, MarginL, MarginR, MarginV, Effect, Text\n\
+                     Dialogue: 0,0:00:00.00,0:00:05.00,D,,0,0,0,,{{{tags}\\p1}}m 20 10 l 220 10 220 110 20 110\n"
+                );
+                r.set_script(&ass).unwrap();
+                let b = r.bounds(1000, h * 16 / 9, h).unwrap().unwrap();
+                let k = h as f64 / 1080.0;
+                let doc = fs_core::Document::parse(&ass);
+                let v = super::of_event(&doc, doc.event(0).unwrap());
+                let m = super::line_projection(&v, at, h as f64);
+                let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+                for (x, y) in [(20.0, 10.0), (220.0, 10.0), (220.0, 110.0), (20.0, 110.0)] {
+                    let p = [at[0] + x * k2[0], at[1] + y * k2[1], 0.0, 1.0];
+                    let dot = |r: &[f64]| r.iter().zip(p).map(|(a, b)| a * b).sum::<f64>();
+                    let w = dot(&m[8..]);
+                    let s = [dot(&m[..4]) / w * k, dot(&m[4..8]) / w * k];
+                    for i in 0..2 {
+                        lo[i] = lo[i].min(s[i]);
+                        hi[i] = hi[i].max(s[i]);
+                    }
+                }
+                let want = [lo[0], lo[1], hi[0], hi[1]];
+                let got = [b[4], b[5], b[6], b[7]].map(f64::from);
+                assert!(
+                    want.iter().zip(got).all(|(a, b)| (a - b).abs() <= 2.0),
+                    "{tags} at {h}: projected {want:?}, libass {got:?}"
+                );
+            }
+        }
     }
 
     #[test]

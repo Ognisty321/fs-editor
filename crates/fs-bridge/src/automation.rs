@@ -2,7 +2,7 @@
 //! macro on a session (each script undo point becomes an undo step) and
 //! export filters. Scripts run on a worker thread (`run_script_job`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -428,10 +428,15 @@ fn relative(path: &Path, base: &Path) -> Option<PathBuf> {
     Some(out)
 }
 
+/// Aegisub's global and local scripts: the autoloaded ones serve every file, any other one the
+/// files that list it in their "Automation Scripts" (one Aegisub window each); a file sees only
+/// those, and a script no open file lists any more is unloaded (`keep_scripts`).
 pub struct Automation {
     env: Env,
     host: Arc<GuiHost>,
     scripts: Vec<Arc<Script>>,
+    /// The autoload dirs' scripts as last loaded from them.
+    autoload: HashSet<PathBuf>,
     /// Flat macro list: (script index, macro index).
     macros: Vec<(usize, usize)>,
 }
@@ -444,6 +449,7 @@ impl Automation {
             env: Env::new(paths, host.clone()),
             host,
             scripts: Vec::new(),
+            autoload: HashSet::new(),
             macros: Vec::new(),
         }
     }
@@ -502,12 +508,14 @@ impl Automation {
     /// Aegisub's AssExportFilterChain: the built-in filters (registered first), then each
     /// script's in load order, sorted by priority, highest first; a tie keeps that order. A name
     /// taken already gets " (1)", " (2)", ….
-    fn chain(&self) -> Vec<(Filter, String)> {
+    /// The file's: only the scripts it sees.
+    fn chain(&self, session: &Session) -> Vec<(Filter, String)> {
         let mut all = vec![
             (Filter::Framerate, 1000, "Transform Framerate".to_owned()),
             (Filter::FixStyles, -5000, "Fix Styles".to_owned()),
         ];
-        for (s, script) in self.scripts.iter().enumerate() {
+        let shown = self.shown(session);
+        for (s, script) in self.scripts.iter().enumerate().filter(|&(s, _)| shown[s]) {
             for (f, info) in script.filters.iter().enumerate() {
                 let mut name = info.name.clone();
                 for n in 1.. {
@@ -535,6 +543,7 @@ impl Automation {
     /// Load every script in the autoload dirs, side by side; returns the load errors.
     pub fn load_autoload(&mut self) -> Vec<String> {
         let files = fs_automation::autoload_files(&self.env.paths);
+        self.autoload = files.iter().cloned().collect();
         self.add_all(&files)
     }
 
@@ -542,11 +551,12 @@ impl Automation {
         self.add(Path::new(path))
     }
 
-    pub fn scripts(&self) -> Vec<ScriptItem> {
+    pub fn scripts(&self, session: &Session) -> Vec<ScriptItem> {
         let autoload = fs_automation::autoload_files(&self.env.paths);
-        self.scripts
-            .iter()
-            .map(|s| ScriptItem {
+        let shown = self.shown(session);
+        (self.scripts.iter().zip(shown))
+            .map(|(s, shown)| ScriptItem {
+                shown,
                 path: s.path.to_string_lossy().into_owned(),
                 name: s.name.clone(),
                 description: s.description.clone(),
@@ -564,11 +574,13 @@ impl Automation {
     /// autoload dirs (Aegisub's "Reload all scripts" with its rescan).
     pub fn reload(&mut self) -> Vec<String> {
         let mut paths: Vec<PathBuf> = self.scripts.drain(..).map(|s| s.path.clone()).collect();
-        for p in fs_automation::autoload_files(&self.env.paths) {
-            if !paths.contains(&p) {
-                paths.push(p);
+        let autoload = fs_automation::autoload_files(&self.env.paths);
+        for p in &autoload {
+            if !paths.contains(p) {
+                paths.push(p.clone());
             }
         }
+        self.autoload = autoload.into_iter().collect();
         self.add_all(&paths)
     }
 
@@ -629,9 +641,43 @@ impl Automation {
             .collect()
     }
 
+    /// The canonical paths of the scripts the file lists.
+    fn listed(&self, session: &Session) -> HashSet<PathBuf> {
+        (Self::local_tokens(session).iter())
+            .filter_map(|t| self.local_path(session, t))
+            .map(|(_, p)| canonical(&p))
+            .collect()
+    }
+
+    /// Which loaded scripts the file sees: the autoloaded ones and those it lists.
+    fn shown(&self, session: &Session) -> Vec<bool> {
+        let listed = self.listed(session);
+        (self.scripts.iter())
+            .map(|s| self.autoload.contains(&s.path) || listed.contains(&s.path))
+            .collect()
+    }
+
+    /// The scripts the file lists, as `keep_scripts` takes them.
+    pub fn listed_scripts(&self, session: &Session) -> Vec<String> {
+        (self.listed(session).into_iter())
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    /// A file closed (Aegisub's window with its LocalScriptManager): the scripts neither
+    /// autoloaded nor in `listed` (what the open files list) are unloaded; how many.
+    pub fn keep_scripts(&mut self, listed: &[String]) -> usize {
+        let keep: HashSet<PathBuf> = listed.iter().map(PathBuf::from).collect();
+        let before = self.scripts.len();
+        (self.scripts).retain(|s| self.autoload.contains(&s.path) || keep.contains(&s.path));
+        if self.scripts.len() != before {
+            self.index();
+        }
+        before - self.scripts.len()
+    }
+
     /// Aegisub's LocalScriptManager::Reload: what the file's "Automation Scripts" lists and is
     /// not loaded yet, for the trust prompt.
-    // shortcut: loaded scripts are shared by the tabs (Aegisub has one file per window): a file's scripts stay loaded after it is closed; give each tab its own set if users mix files with different local scripts.
     pub fn local_scripts(&self, session: &Session) -> Vec<LocalScript> {
         Self::local_tokens(session)
             .into_iter()
@@ -717,8 +763,8 @@ impl Automation {
 
     /// The export dialog's filter list (Aegisub's): the built-in Transform Framerate and Fix
     /// Styles among the scripts' filters by priority.
-    pub fn export_filters(&self) -> Vec<FilterItem> {
-        (self.chain().into_iter())
+    pub fn export_filters(&self, session: &Session) -> Vec<FilterItem> {
+        (self.chain(session).into_iter())
             .map(|(f, name)| match f {
                 Filter::Script(s, i) => FilterItem {
                     name,
@@ -743,7 +789,7 @@ impl Automation {
     /// The export dialog's settings panels as a job (GUI thread): every script filter's config
     /// function, as Aegisub calls each as its dialog opens.
     pub fn start_filter_configs(&self, session: &Session) -> Box<ScriptJob> {
-        let filters = (self.chain().into_iter())
+        let filters = (self.chain(session).into_iter())
             .map(|(f, name)| match f {
                 Filter::Script(s, i) if self.scripts[s].filters[i].has_config => Some((
                     self.scripts[s].clone(),
@@ -792,7 +838,7 @@ impl Automation {
         video: &[i64],
         session: &mut Session,
     ) -> Result<Box<ScriptJob>, String> {
-        let chain = self.chain();
+        let chain = self.chain(session);
         let mut steps = Vec::with_capacity(ids.len());
         for &id in ids {
             let Some((filter, name)) = chain.get(id) else {
@@ -917,13 +963,18 @@ impl Automation {
         let (sel, act) = Self::selection(session, rows, active);
         let ctx = Self::context(session);
         let doc = &session.ed.doc;
+        let shown = self.shown(session);
         self.macros
             .iter()
             .map(|&(s, m)| {
                 let script = &self.scripts[s];
+                if !shown[s] {
+                    return MacroState::default();
+                }
                 let (enabled, help) = script.validate_macro(m, doc, &sel, act, &ctx);
                 let checked = script.macro_is_active(m, doc, &sel, act, &ctx);
                 MacroState {
+                    visible: true,
                     enabled,
                     toggle: checked.is_some(),
                     checked: checked.unwrap_or(false),
@@ -943,6 +994,9 @@ impl Automation {
         editor: &MacroContext,
     ) -> Result<Box<ScriptJob>, String> {
         let &(s, m) = self.macros.get(id).ok_or("no such macro")?;
+        if !self.shown(session)[s] {
+            return Err("the macro's script belongs to another file".into());
+        }
         let (sel, act) = Self::selection(session, rows, active);
         let ctx = Context {
             audio_selection: (editor.has_audio).then_some((editor.audio_start, editor.audio_end)),
@@ -1058,6 +1112,7 @@ end)"#,
         let mut a = Automation::new(data, dir.join("user").to_str().unwrap());
         a.load_script(script.to_str().unwrap()).unwrap();
         let mut s = Session::default();
+        a.add_local_script(&mut s, script.to_str().unwrap());
         let st = a.macro_states(&s, &[0], 0);
         assert!(st[0].enabled && !st[0].toggle && st[0].help.is_empty());
         assert!(st[1].enabled && st[1].toggle && st[1].checked);
@@ -1090,6 +1145,7 @@ end)"#,
         a.load_script(script.to_str().unwrap()).unwrap();
         assert_eq!(a.macros()[0].name, "Upper");
         let mut s = Session::default();
+        a.add_local_script(&mut s, script.to_str().unwrap());
         let mut r = s.row(0);
         r.text = "abc".into();
         s.set_row(0, &r, "");
@@ -1122,7 +1178,7 @@ end)"#,
         assert_eq!(names(&a), ["A2", "B"]);
         std::fs::write(&a_lua, "syntax error(").unwrap();
         assert!(a.reload_script(0).is_err());
-        assert!(!a.scripts()[0].error.is_empty());
+        assert!(!a.scripts(&Session::default())[0].error.is_empty());
         a.remove_script(0);
         assert_eq!(names(&a), ["B"]);
         // reload all picks up a new autoload script (and the bundled ones)
@@ -1131,7 +1187,7 @@ end)"#,
         assert!(errors.iter().all(|e| !e.contains("c.lua")), "{errors:?}");
         let n = names(&a);
         assert!(n[0] == "B" && n.contains(&"C".to_owned()), "{n:?}");
-        let s = a.scripts();
+        let s = a.scripts(&Session::default());
         assert!(
             s.iter()
                 .any(|s| s.name == "C" && s.autoload && s.macros == 1)
@@ -1156,8 +1212,10 @@ aegisub.register_filter("Early", "", 9, function() end)"#,
         let data = concat!(env!("CARGO_MANIFEST_DIR"), "/../fs-automation");
         let mut a = Automation::new(data, dir.join("user").to_str().unwrap());
         a.load_script(script.to_str().unwrap()).unwrap();
+        let mut s = Session::default();
+        a.add_local_script(&mut s, script.to_str().unwrap());
         // Aegisub's chain: the built-ins among the scripts' filters by priority, names unique
-        let list = a.export_filters();
+        let list = a.export_filters(&s);
         let names: Vec<&str> = list.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(
             names,
@@ -1171,7 +1229,6 @@ aegisub.register_filter("Early", "", 9, function() end)"#,
             ]
         );
         assert_eq!((list[0].kind, list[1].kind, list[4].kind), (1, 0, 2));
-        let mut s = Session::default();
         let mut r = s.row(0);
         r.text = "x".into();
         r.style = "Gone".into();
@@ -1229,6 +1286,7 @@ end)"#,
         let mut a = Automation::new(data, dir.join("user").to_str().unwrap());
         a.load_script(script.to_str().unwrap()).unwrap();
         let mut s = Session::default();
+        a.add_local_script(&mut s, script.to_str().unwrap());
         let configs = |a: &Automation, s: &Session| {
             let mut job = a.start_filter_configs(s);
             run_script_job(&mut job);
@@ -1236,7 +1294,7 @@ end)"#,
         };
         let mut panels = configs(&a, &s);
         let id = 1;
-        assert_eq!(a.export_filters()[id].name, "Suffix");
+        assert_eq!(a.export_filters(&s)[id].name, "Suffix");
         assert!(panels[0].controls.is_empty() && panels[2].controls.is_empty());
         let p = &mut panels[id].controls;
         assert_eq!((p.len(), p[1].text.as_str(), p[2].flag), (3, "?", false));
@@ -1260,8 +1318,44 @@ end)"#,
         );
         // nothing of it in the file, and another file starts from the defaults
         assert!(s.project_value("Automation Settings Suffix").is_empty());
-        let other = Session::default();
+        let mut other = Session::default();
+        a.add_local_script(&mut other, script.to_str().unwrap());
         assert_eq!(configs(&a, &other)[id].controls[1].text, "?");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Aegisub's window per file: a script loaded for one file is not another's, whose macros
+    /// and filters leave it out, and it is unloaded once no open file lists it.
+    #[test]
+    fn scripts_serve_the_files_that_list_them() {
+        let dir = std::env::temp_dir().join(format!("fsb-own-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mine = dir.join("mine.lua");
+        std::fs::write(
+            &mine,
+            format!(
+                "{}\naegisub.register_filter(\"Mine\", \"\", 0, function() end)",
+                macro_lua("M")
+            ),
+        )
+        .unwrap();
+        let data = concat!(env!("CARGO_MANIFEST_DIR"), "/../fs-automation");
+        let mut a = Automation::new(data, dir.join("user").to_str().unwrap());
+        a.load_script(mine.to_str().unwrap()).unwrap();
+        let (mut one, two) = (Session::default(), Session::default());
+        a.add_local_script(&mut one, mine.to_str().unwrap());
+        let id = a.macros().iter().position(|m| m.name == "M").unwrap();
+        let visible = |s: &Session| a.macro_states(s, &[0], 0)[id].visible;
+        assert!(visible(&one) && !visible(&two));
+        let filters = |s: &Session| a.export_filters(s).iter().any(|f| f.name == "Mine");
+        assert!(filters(&one) && !filters(&two));
+        assert!(a.scripts(&one)[0].shown && !a.scripts(&two)[0].shown);
+        let ctx = MacroContext::default();
+        assert!(a.start_macro(id, &two, &[0], 0, &ctx).is_err());
+        // the file listing it closes: only the other one's list is kept
+        assert_eq!(a.keep_scripts(&a.listed_scripts(&one)), 0);
+        assert_eq!(a.keep_scripts(&a.listed_scripts(&two)), 1);
+        assert!(a.macros().iter().all(|m| m.name != "M"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1376,6 +1470,7 @@ end)"#,
         a.set_cache_dir(dir.join("cache").to_str().unwrap());
         a.load_script(script.to_str().unwrap()).unwrap();
         let mut s = Session::default();
+        a.add_local_script(&mut s, script.to_str().unwrap());
         let video = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/media/cfr.mkv");
         s.set_project_value("Video File", video);
         let v = Video::open(video, dir.join("cache").to_str().unwrap(), |_, _| true).unwrap();
