@@ -24,6 +24,7 @@ public:
     void refresh();
     const fsb::ColumnInfo &columnInfo(); // distinct styles/actors/effects, current with the document
     void ensureVisible(int row);
+    int rowHeight() const; // the header's too
     void setAnchor(size_t row); // where Shift+click selects from (follows the active line, Aegisub)
     void setVideoTime(qint64 ms);
     // rows that differ from the compared tab (Kainote subtitle comparison)
@@ -86,7 +87,6 @@ private:
     void updateScroll();
     int rowAt(int y) const;      // index into m_vis, -1 outside
     int colAt(int x) const;
-    int rowHeight() const;
     QString cell(const fsb::Row &r, int col, size_t index) const;
     void underlineMisspelled(QPainter &p, const fsb::Row &r, const QString &shown, const QRect &rect);
     void clickRow(int vi, Qt::KeyboardModifiers mods);

@@ -4191,7 +4191,7 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     </message>
     <message>
         <source>Automatic karaoke splitting merges every &quot;n&quot; with the syllable before</source>
-        <translation>Automatyczny podział karaoke łączy każde "n" z poprzednią sylabą</translation>
+        <translation>Automatyczny podział karaoke łączy każde &quot;n&quot; z poprzednią sylabą</translation>
     </message>
     <message>
         <source>A click on a syllable next to the one picked moves their boundary</source>

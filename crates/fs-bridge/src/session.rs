@@ -2241,11 +2241,18 @@ impl Session {
             if text != first.text {
                 continue;
             }
+            // each match as the search found it in the field's text (its groups, its context), the
+            // last first; one overlapping a match replaced after it is left
             let mut new = text.to_string();
+            let mut before = usize::MAX;
             for &(x, r) in field {
-                let at = byte_at(&new, x.start)..byte_at(&new, x.end);
-                if let Some((t, _)) = reps[r].replace_one(&new, at) {
-                    new = t;
+                let at = byte_at(text, x.start)..byte_at(text, x.end);
+                if at.end > before {
+                    continue;
+                }
+                if let Some((t, end)) = reps[r].replace_one(text, at.clone()) {
+                    new.replace_range(at.clone(), &t[at.start..end]);
+                    before = at.start;
                     count += 1;
                 }
             }
@@ -4828,6 +4835,17 @@ mod tests {
         assert_eq!(texts(&s), ["Anx", "qwA", "thrxx"]);
         assert!(s.undo());
         assert_eq!(texts(&s), ["one", "two", "three"]);
+        // "w" is matched before a letter that another rule takes away: replaced as found; the
+        // overlapping "tw" left
+        let rules = [rule(r"w\B", "W", 2), rule("o", "", 2), rule("tw", "YY", 2)];
+        let found: Vec<_> = rules
+            .iter()
+            .map(|r| s.find_matches(r, 9).unwrap())
+            .collect();
+        let in_two = |k: usize| found[k].iter().find(|m| m.row == 1).unwrap().clone();
+        let ticked = [in_two(0), in_two(1), in_two(2)];
+        assert_eq!(s.replace_rule_matches(&rules, &ticked, &[0, 1, 2]), Ok(2));
+        assert_eq!(texts(&s)[1], "tW");
     }
 
     #[test]

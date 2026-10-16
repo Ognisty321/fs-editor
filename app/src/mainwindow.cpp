@@ -2575,7 +2575,10 @@ void MainWindow::assignHotkey(QAction *a) {
     connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
     v->addWidget(bb);
     edits.front()->setFocus(); // a typed key replaces the first, as with one key per command
-    if (d.exec() != QDialog::Accepted) return;
+    const bool accepted = d.exec() == QDialog::Accepted;
+    // the dialog's end takes the edits' focus, which signals into the locals gone by then
+    for (auto *e : edits) disconnect(e, nullptr, &d, nullptr);
+    if (!accepted) return;
     QList<QKeySequence> keys;
     for (auto *e : edits)
         if (!e->keySequence().isEmpty() && !keys.contains(e->keySequence())) keys << e->keySequence();
@@ -3124,13 +3127,17 @@ void MainWindow::correctErrors() {
             if (names->item(i)->checkState() == Qt::Checked) out << names->item(i)->text();
         styles->setText(out.join(','));
     });
-    // the rows of a tab the scope chooses (empty: every line); none when it chooses no line
+    // the rows of a tab the scope chooses (empty: every line); none when it chooses no line. As in
+    // Kainote, the lines the grid's filter hides are left
     const auto rowsOf = [scope, styles](TabPanel *t) -> std::optional<std::vector<size_t>> {
         std::vector<size_t> rows;
         const size_t count = t->s().row_count();
+        const auto vis = t->grid()->visibleRows();
         switch (scope->currentIndex()) {
         case 0:
-            return rows;
+            if (vis.size() == count) return rows;
+            rows = vis;
+            break;
         case 1:
             rows = t->selection();
             break;
@@ -3146,6 +3153,11 @@ void MainWindow::correctErrors() {
             for (size_t r = 0; r < count; ++r)
                 if (names.contains(fs::q(t->s().row(r).style))) rows.push_back(r);
         }
+        }
+        if (scope->currentIndex() != 0 && vis.size() < count) {
+            std::vector<char> shown(count);
+            for (size_t r : vis) shown[r] = 1;
+            std::erase_if(rows, [&shown](size_t r) { return r >= shown.size() || !shown[r]; });
         }
         if (rows.empty()) return std::nullopt;
         return rows;

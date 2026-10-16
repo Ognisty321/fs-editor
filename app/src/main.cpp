@@ -2,6 +2,7 @@
 #include "dialogs.h"
 #include "editbox.h"
 #include "associations.h"
+#include "grid.h"
 #include "mainwindow.h"
 #include "tabpanel.h"
 #include "theme.h"
@@ -27,6 +28,7 @@
 #include <QTabBar>
 #include <QTextEdit>
 #include <QTimer>
+#include <QToolTip>
 #include <QPainter>
 #include <QTranslator>
 #include <QUrl>
@@ -305,6 +307,17 @@ int main(int argc, char **argv) {
                                   Qt::LeftButton, Qt::NoModifier);
                     QApplication::sendEvent(view, &e);
                 }
+                // FSED_SMOKE_GRIDCLICK="3,c": a left click on the third line shown in the grid ("c": with Ctrl)
+                if (const QStringList g = qEnvironmentVariable("FSED_SMOKE_GRIDCLICK").split(','); g[0].toInt() > 0) {
+                    QWidget *vp = w.current()->grid()->viewport();
+                    const int h = w.current()->grid()->rowHeight();
+                    const QPointF p(40, h * g[0].toInt() + h / 2);
+                    const auto mods = g.value(1) == "c" ? Qt::ControlModifier : Qt::NoModifier;
+                    QMouseEvent press(QEvent::MouseButtonPress, p, vp->mapToGlobal(p), Qt::LeftButton, Qt::LeftButton, mods);
+                    QApplication::sendEvent(vp, &press);
+                    QMouseEvent release(QEvent::MouseButtonRelease, p, vp->mapToGlobal(p), Qt::LeftButton, Qt::NoButton, mods);
+                    QApplication::sendEvent(vp, &release);
+                }
                 // FSED_SMOKE_DRAG="x1,y1,x2,y2": a left-button drag on the video, in view fractions 0..1;
                 // "x1,y1,x2,y2,z" zooms in a step first; "...;x1,y1,x2,y2" drags again; more pairs drag
                 // through each point
@@ -339,9 +352,36 @@ int main(int argc, char **argv) {
             for (const QString &id : ids.split(';'))
                 if (auto *a = w.action(id)) a->trigger();
         });
-    // FSED_SMOKE_MENU="Automation" opens that menu of the window (its title without the &)
+    // FSED_SMOKE_MENU="Automation" opens that menu of the window (its title without the &);
+    // "video>Audio streams" opens the video's context menu with that submenu shown;
+    // "video>Audio streams>#2 aac" picks that item, then shows the submenu again
+    static std::function<void(QString)> videoMenu;
+    videoMenu = [&w](const QString &title) {
+        QWidget *view = w.current()->video()->view();
+        QTimer::singleShot(300, &w, [title] {
+            auto *m = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            for (auto *a : m ? m->actions() : QList<QAction *>())
+                if (a->menu() && a->text().remove('&') == title.section('>', 1, 1)) {
+                    if (const QString item = title.section('>', 2); !item.isEmpty()) {
+                        for (auto *x : a->menu()->actions())
+                            if (x->text().remove('&') == item) {
+                                m->close();
+                                x->trigger();
+                            }
+                        return QTimer::singleShot(1500, [t = title.section('>', 0, 1)] { videoMenu(t); });
+                    }
+                    m->setActiveAction(a);
+                    QKeyEvent right(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
+                    QApplication::sendEvent(m, &right);
+                }
+        });
+        const QPoint at = view->rect().center();
+        QContextMenuEvent e(QContextMenuEvent::Mouse, at, view->mapToGlobal(at));
+        QApplication::sendEvent(view, &e); // the menu runs in here till the shot
+    };
     if (const QString title = qEnvironmentVariable("FSED_SMOKE_MENU"); !title.isEmpty())
         QTimer::singleShot(std::max(700, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 2 / 3), &w, [&w, title] {
+            if (title.startsWith("video>")) return videoMenu(title);
             for (auto *m : w.findChildren<QMenu *>())
                 if (QString(m->title()).remove('&') == title) return m->popup(w.mapToGlobal(QPoint(0, 30)));
         });
@@ -382,7 +422,8 @@ int main(int argc, char **argv) {
     // "^" closes the dialog (to shoot the main window after a non-modal one); "Sort#2" presses the
     // second such button; a text no button has selects the list items and the tabs with it; "~500"
     // waits half a second (for a search on a worker); "Edit@" presses Edit with the rest pressed half
-    // a second later, in the modal dialog it opens.
+    // a second later, in the modal dialog it opens. "+Bold" presses it with Shift (by its text or tooltip),
+    // "?Bold" writes the tooltip it shows to <shot>.txt.
     static std::function<void(QStringList)> clicks;
     clicks = [&w](QStringList texts) {
             while (!texts.isEmpty()) {
@@ -398,6 +439,8 @@ int main(int argc, char **argv) {
                     wait.exec();
                     continue;
                 }
+                const QChar how = text.startsWith('+') || text.startsWith('?') ? text[0] : QChar();
+                if (!how.isNull()) text.remove(0, 1);
                 QWidget *top = smokeDialog(w);
                 if (text == "^" && top) top->close();
                 int nth = 1;
@@ -405,9 +448,21 @@ int main(int argc, char **argv) {
                     nth = text.mid(h + 1).toInt(), text.truncate(h);
                 bool clicked = false;
                 for (auto *b : (top ? top : &w)->findChildren<QAbstractButton *>())
-                    if ((b->text() == text || (b->text().isEmpty() && b->toolTip() == text)) && b->isVisible() &&
-                        --nth == 0) {
-                        b->click();
+                    if ((b->text() == text || ((b->text().isEmpty() || !how.isNull()) && b->toolTip() == text)) &&
+                        b->isVisible() && --nth == 0) {
+                        const QPoint c = b->rect().center();
+                        if (how == '+') {
+                            QMouseEvent press(QEvent::MouseButtonPress, c, b->mapToGlobal(c), Qt::LeftButton,
+                                              Qt::LeftButton, Qt::ShiftModifier);
+                            QApplication::sendEvent(b, &press);
+                        } else if (how == '?') {
+                            QHelpEvent help(QEvent::ToolTip, c, b->mapToGlobal(c));
+                            QApplication::sendEvent(b, &help);
+                            QFile f(qEnvironmentVariable("FSED_SMOKE") + ".txt");
+                            if (f.open(QIODevice::WriteOnly | QIODevice::Append)) f.write((QToolTip::text() + QChar(10)).toUtf8());
+                        } else {
+                            b->click();
+                        }
                         clicked = true;
                         break;
                     }
