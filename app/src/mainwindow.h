@@ -89,6 +89,10 @@ private:
     void compareTabs(bool on);
     void followActive();
     bool maybeSave(TabPanel *tab);
+    // the tabs' files (a script, else its video) and the index of the front one among them
+    QStringList sessionFiles(int *front) const;
+    void openSession(const QStringList &files, int front);
+    void openSessionFile(const QString &path); // saved by "Save session to file"
     bool saveAs(TabPanel *tab);
     bool saveTab(TabPanel *tab);
     void checkDisk(TabPanel *t); // offers to read a file another program changed again

@@ -1544,6 +1544,30 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Wczytaj ostatnią sesję</translation>
     </message>
     <message>
+        <source>FS Editor session (*.fses)</source>
+        <translation>Sesja FS Editor (*.fses)</translation>
+    </message>
+    <message>
+        <source>Load session from file...</source>
+        <translation>Wczytaj sesję z pliku...</translation>
+    </message>
+    <message>
+        <source>Load session</source>
+        <translation>Wczytaj sesję</translation>
+    </message>
+    <message>
+        <source>Save session to file...</source>
+        <translation>Zapisz sesję do pliku...</translation>
+    </message>
+    <message>
+        <source>Save session</source>
+        <translation>Zapisz sesję</translation>
+    </message>
+    <message>
+        <source>Session saved: %1</source>
+        <translation>Zapisano sesję: %1</translation>
+    </message>
+    <message>
         <source>Load last session after program start</source>
         <translation>Wczytuj ostatnią sesję przy starcie programu</translation>
     </message>
@@ -2034,6 +2058,10 @@ Macierz kolorów: %12</translation>
     <message>
         <source>Translation assistant keys</source>
         <translation>Klawisze asystenta tłumaczenia</translation>
+    </message>
+    <message>
+        <source>%1 is not a session file</source>
+        <translation>%1 nie jest plikiem sesji</translation>
     </message>
     <message>
         <source>Each of these keys runs the command:</source>

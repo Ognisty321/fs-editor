@@ -31,6 +31,9 @@
 #include <QDoubleSpinBox>
 #include <QEventLoop>
 #include <QFileDialog>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
 #include <QFormLayout>
@@ -512,7 +515,9 @@ int MainWindow::pickTrack(const rust::Vec<fsb::SubTrack> &tracks, const QString 
 
 void MainWindow::openFile(const QString &path, const QString &encoding) {
     const QString ext = QFileInfo(path).suffix().toLower();
-    if (kVideoExt.contains(ext)) {
+    if (ext == "fses") {
+        openSessionFile(path);
+    } else if (kVideoExt.contains(ext)) {
         // like Kainote: an empty tab offers the subtitles stored in the video
         if (const auto tracks = fsb::subtitle_tracks(fs::Utf8(path)); !tracks.empty() && untouched(current()))
             if (const int i = pickTrack(tracks, tr("The video contains subtitles. Load them?")); i >= 0)
@@ -929,17 +934,33 @@ void MainWindow::buildMenus() {
     add("showLog", tr("Show / Hide log window"), {}, file, [logDlg] { logDlg->setVisible(!logDlg->isVisible()); });
     auto *session = sub(file, tr("Last session"));
     add("loadSession", tr("Load last session"), {}, session, [this] {
-        const QStringList files = QSettings().value("session/files").toStringList();
-        const int front = QSettings().value("session/current").toInt();
-        TabPanel *pick = nullptr;
-        for (int k = 0; k < files.size(); ++k) {
-            if (!QFileInfo::exists(files[k])) continue;
-            // each file its own tab: a video alone would otherwise take the next script in
-            if (!untouched(current()) || current()->video()->hasVideo()) newTab();
-            openFile(files[k]);
-            if (k == front || !pick) pick = current();
-        }
-        if (pick) showPanel(pick);
+        openSession(QSettings().value("session/files").toStringList(), QSettings().value("session/current").toInt());
+    });
+    // Kainote's session files, in a format of our own (JSON): the tabs' files and the one in front
+    const QString sessionFilter = tr("FS Editor session (*.fses)");
+    add("loadSessionFile", tr("Load session from file..."), {}, session, [this, sessionFilter] {
+        const QString path = QFileDialog::getOpenFileName(this, tr("Load session"),
+                                                          QSettings().value("main/sessionDir").toString(), sessionFilter);
+        if (path.isEmpty()) return;
+        QSettings().setValue("main/sessionDir", QFileInfo(path).absolutePath());
+        openSessionFile(path);
+    });
+    add("saveSessionFile", tr("Save session to file..."), {}, session, [this, sessionFilter] {
+        // the files as saved come back: unsaved changes are saved first, or the saving is cancelled
+        for (auto *t : tabs())
+            if (!maybeSave(t)) return;
+        const QString path = QFileDialog::getSaveFileName(this, tr("Save session"),
+                                                          QSettings().value("main/sessionDir").toString(), sessionFilter);
+        if (path.isEmpty()) return;
+        int front = 0;
+        const QStringList files = sessionFiles(&front);
+        QFile f(path);
+        if (!f.open(QIODevice::WriteOnly) ||
+            f.write(QJsonDocument(QJsonObject{{"files", QJsonArray::fromStringList(files)}, {"current", front}})
+                        .toJson()) < 0)
+            return error(f.errorString());
+        QSettings().setValue("main/sessionDir", QFileInfo(path).absolutePath());
+        status(tr("Session saved: %1").arg(QFileInfo(path).fileName()));
     });
     auto *ask = add("sessionAtStart", tr("Load last session after program start"), {}, session, {});
     ask->setCheckable(true);
@@ -2264,16 +2285,42 @@ void MainWindow::updateActions() {
     action("editor")->setChecked(!tab->playerMode());
 }
 
-void MainWindow::closeEvent(QCloseEvent *e) {
+QStringList MainWindow::sessionFiles(int *front) const {
     QStringList files;
-    int front = 0;
+    *front = 0;
     for (auto *t : tabs()) {
-        if (!maybeSave(t)) return e->ignore();
         // a tab with no script file comes back with its video, as in Kainote's session
         const QString f = t->path().isEmpty() ? t->video()->path() : t->path();
-        if (t == current()) front = int(files.size()); // counted among the files kept
+        if (t == current()) *front = int(files.size()); // counted among the files kept
         if (!f.isEmpty()) files << f;
     }
+    return files;
+}
+
+void MainWindow::openSession(const QStringList &files, int front) {
+    TabPanel *pick = nullptr;
+    for (int k = 0; k < files.size(); ++k) {
+        if (!QFileInfo::exists(files[k])) continue;
+        // each file its own tab: a video alone would otherwise take the next script in
+        if (!untouched(current()) || current()->video()->hasVideo()) newTab();
+        openFile(files[k]);
+        if (k == front || !pick) pick = current();
+    }
+    if (pick) showPanel(pick);
+}
+
+void MainWindow::openSessionFile(const QString &path) {
+    QFile f(path);
+    const QJsonObject o = f.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(f.readAll()).object() : QJsonObject();
+    if (!o["files"].isArray()) return error(tr("%1 is not a session file").arg(QDir::toNativeSeparators(path)));
+    openSession(o["files"].toVariant().toStringList(), o["current"].toInt());
+}
+
+void MainWindow::closeEvent(QCloseEvent *e) {
+    for (auto *t : tabs())
+        if (!maybeSave(t)) return e->ignore();
+    int front = 0;
+    const QStringList files = sessionFiles(&front);
     QSettings st;
     st.setValue("session/files", files);
     st.setValue("session/current", front);
