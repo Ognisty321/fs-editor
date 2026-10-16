@@ -196,6 +196,8 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
     m_active = 0;
     m_edit->load(-1); // a new file: forget the revert text of the old one
     m_grid->resetFilter();
+    // Kainote's sorted loading: by start time, an undo step when the order changes
+    if (QSettings().value("grid/loadSorted", false).toBool()) s().sort_rows(0, false, {});
     changed();
     setActive(std::clamp(fs::q(s().project_value("Active Line")).toInt(), 0, std::max(0, int(s().row_count()) - 1)));
     if (const int top = fs::q(s().project_value("Scroll Position")).toInt(); top > 0) // after setActive, as Aegisub

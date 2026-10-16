@@ -207,8 +207,20 @@ MainWindow::MainWindow() {
         if (i < 0) newTab();
     });
     connect(m_tabs, &QTabWidget::currentChanged, this, [this] {
+        const QPointer<TabPanel> was = m_prev;
         if (m_second && current() == m_second) setSplit(m_prev); // picking the right-hand tab swaps the sides
         m_prev = current();
+        if (was && current() && was != current()) {
+            const QSettings st;
+            // Kainote's: the shift times values go along to the tab picked
+            if (st.value("shift/followTab", false).toBool()) {
+                was->shift()->save();
+                current()->shift()->load();
+            }
+            // Kainote's: the line at the time of the last tab's first selected line becomes active
+            if (st.value("grid/selectFromLastTab", false).toBool() && !was->selection().empty())
+                current()->grid()->selectNear(was->s().row(was->selection().front()).start);
+        }
         if (m_compareOn) compareTabs(true);
         followActive();
         updateActions();
@@ -475,6 +487,8 @@ TabPanel *MainWindow::newTab() {
     refreshTitle();
     return tab;
 }
+
+bool MainWindow::isVideoFile(const QString &path) { return kVideoExt.contains(QFileInfo(path).suffix().toLower()); }
 
 // An untitled tab holding only the empty starting line can take a file (it keeps its video/audio).
 static bool untouched(TabPanel *tab) {

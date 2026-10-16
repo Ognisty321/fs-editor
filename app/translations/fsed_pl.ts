@@ -3656,6 +3656,30 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Otwieraj wideo na aktywnej linii, gdy napisy nie zapisały pozycji</translation>
     </message>
     <message>
+        <source>Full screen for a video opened alone with the program</source>
+        <translation>Pełny ekran dla samego wideo otwartego z programem</translation>
+    </message>
+    <message>
+        <source>No warnings in the visual tools</source>
+        <translation>Bez ostrzeżeń w narzędziach wizualnych</translation>
+    </message>
+    <message>
+        <source>Leaving full screen makes the line seen active</source>
+        <translation>Po wyjściu z pełnego ekranu oglądana linia staje się aktywna</translation>
+    </message>
+    <message>
+        <source>A tab picked makes active the line at the time of the last tab&apos;s line</source>
+        <translation>Wybrana karta uaktywnia linię z czasem linii poprzedniej karty</translation>
+    </message>
+    <message>
+        <source>Sort the lines by start time when opening</source>
+        <translation>Sortuj linie po czasie początku przy otwieraniu</translation>
+    </message>
+    <message>
+        <source>The shift times values go along to the tab picked</source>
+        <translation>Wartości przesuwania czasów przechodzą do wybranej karty</translation>
+    </message>
+    <message>
         <source>Shift+Enter adds \n</source>
         <translation>Shift+Enter wstawia \n</translation>
     </message>

@@ -22,13 +22,13 @@ public:
     void shift();
     void postProcess();
     void run(); // the page shown: shift, or post-process (Kainote's one command for both)
+    void save() const; // the values, for the next panel made or loaded
+    void load();
 
 protected:
     void enterEvent(QEnterEvent *) override;
 
 private:
-    void save() const;
-    void load();
     void store(QSettings &st) const; // shift-page values, also used for profiles
     void restore(QSettings &st);
     void updateEnabled();            // frames / marker options need video or audio

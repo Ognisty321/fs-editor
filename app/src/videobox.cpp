@@ -1104,6 +1104,9 @@ void VideoBox::setFullscreen(bool on, QScreen *on_screen) {
         showNormal();
         if (!m_detached) dock();
         m_toolRow->setVisible(!m_tab->playerMode());
+        // Kainote's: the grid finds the line seen last in full screen
+        if (!m_tab->path().isEmpty() && QSettings().value("grid/visibleAfterFullscreen", false).toBool())
+            m_tab->grid()->selectNear(m_tab->videoTime());
     }
     m_view->updateOverlay();
 }

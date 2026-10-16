@@ -1780,6 +1780,13 @@ impl Session {
                 groups[r] = g;
             }
         } else {
+            // in order already (Kainote's sort on opening a sorted file): no empty undo step
+            if groups
+                .windows(2)
+                .all(|w| cmp(main(&w[0]), main(&w[1])).is_le())
+            {
+                return;
+            }
             groups.sort_by(|a, b| cmp(main(a), main(b)));
         }
         self.set_groups("Sort lines", groups);
@@ -2239,6 +2246,27 @@ impl Session {
                 !e.is_comment() && e.start.ms() <= ms && ms < e.end.ms()
             })
             .collect()
+    }
+
+    /// Kainote's line for a time: the first dialogue with text showing at `ms` (end included),
+    /// else the one starting nearest it, the earlier on a tie; -1 when there is none.
+    pub fn row_near(&self, ms: i64) -> i64 {
+        let events = self.ed.doc.events();
+        let mut best: Option<(i64, usize)> = None;
+        for (i, r) in self.rows.iter().enumerate() {
+            let e = &events[r.main()].event;
+            if e.is_comment() || e.text.is_empty() {
+                continue;
+            }
+            if e.start.ms() <= ms && ms <= e.end.ms() {
+                return i as i64;
+            }
+            let d = (e.start.ms() - ms).abs();
+            if best.is_none_or(|(bd, _)| d < bd) {
+                best = Some((d, i));
+            }
+        }
+        best.map_or(-1, |(_, i)| i as i64)
     }
 
     pub fn font_uses(&self) -> Box<FontUses> {
@@ -3519,6 +3547,29 @@ mod tests {
     }
 
     const ASS: &str = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,one\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,two\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,three\n";
+
+    #[test]
+    fn sorting_lines_in_order_adds_no_step() {
+        let mut s = session(ASS);
+        s.sort_rows(0, false, &[]);
+        assert!(!s.can_undo());
+        s.sort_rows(6, false, &[]); // one, three, two
+        assert!(s.can_undo());
+        assert_eq!(s.row(1).text, "three");
+    }
+
+    #[test]
+    fn row_near_a_time() {
+        let s = session(ASS);
+        assert_eq!(s.row_near(1500), 0);
+        assert_eq!(s.row_near(4000), 1); // the end counts
+        // between lines, the nearest start: two's at 3 s against three's at 5 s
+        assert_eq!(s.row_near(3900), 1);
+        assert_eq!(s.row_near(4400), 2);
+        assert_eq!(s.row_near(0), 0);
+        assert_eq!(s.row_near(99_000), 2);
+        assert_eq!(session(&ASS.replace(",one", ",")).row_near(0), 1); // empty lines are skipped
+    }
 
     #[test]
     fn undo_levels_hold_across_opening() {

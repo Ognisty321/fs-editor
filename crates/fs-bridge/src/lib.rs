@@ -719,6 +719,8 @@ pub mod ffi {
         fn replace_rules(self: &mut Session, specs: &[FindSpec]) -> Result<usize>;
         fn overlapping(self: &Session, row: usize) -> Vec<usize>;
         fn rows_at(self: &Session, ms: i64) -> Vec<usize>;
+        /// Kainote's line for a time: one showing then, else the nearest start; -1 for none.
+        fn row_near(self: &Session, ms: i64) -> i64;
         fn resample(self: &mut Session, spec: &ResampleSpec);
         /// The fonts and characters the script uses, for [`collect_fonts`] on another thread.
         fn font_uses(self: &Session) -> Box<FontUses>;

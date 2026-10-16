@@ -63,6 +63,7 @@ public:
     void insertRow(bool after, int timeMode);
     void moveSelection(int delta);
     void selectVisibleOnVideo();
+    void selectNear(qint64 ms); // Kainote's: the line showing at ms, else the one starting nearest
     void splitRows(int how);
     void swapRows();
     void joinRows(int mode);

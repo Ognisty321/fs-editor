@@ -222,6 +222,10 @@ int main(int argc, char **argv) {
                                                          "of the autosaved subtitles?")) == QMessageBox::Yes)
             w.action("openAutosave")->trigger();
         if (!files.isEmpty()) w.openFiles(files);
+        // Kainote's full screen for a video opened alone with the program
+        if (files.size() == 1 && MainWindow::isVideoFile(files[0]) &&
+            QSettings().value("video/fullscreenOnStart", false).toBool())
+            w.current()->video()->setFullscreen(true);
         if (files.isEmpty() && QSettings().value("main/askSession", true).toBool()) w.action("loadSession")->trigger();
     });
     // Smoke test: FSED_SMOKE=out.png grabs the window after loading and quits;

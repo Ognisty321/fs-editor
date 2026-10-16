@@ -1018,8 +1018,8 @@ void VisualTools::paint(QPainter &p) {
     const auto oth = others();
     for (const auto &o : oth) handle(p, o.second, true, lineColor());
     if (!shown()) {
-        // why the tool does nothing (Kainote)
-        if (m_valid && oth.empty()) {
+        // why the tool does nothing (Kainote, which can turn it off)
+        if (m_valid && oth.empty() && !QSettings().value("video/visualWarningsOff", false).toBool()) {
             const bool comment = m_box->tab()->s().row(size_t(m_box->tab()->active())).comment;
             const QString t = comment ? tr("The visual tools do not work on comments")
                                       : tr("The line is not visible on this frame\nor lasts no time");

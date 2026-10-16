@@ -38,6 +38,7 @@ public:
 
     TabPanel *current() const;
     QList<TabPanel *> tabs() const;
+    static bool isVideoFile(const QString &path); // by its extension
     void showPanel(TabPanel *t); // brings its tab to the front
     TabPanel *newTab();
     // Opens subtitles, video, audio or keyframes by extension.

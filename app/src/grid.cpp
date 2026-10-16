@@ -794,6 +794,10 @@ void Grid::makeContinuous(bool next) {
     m_tab->changed();
 }
 
+void Grid::selectNear(qint64 ms) {
+    if (const qint64 row = m_tab->s().row_near(ms); row >= 0) m_tab->setActive(int(row), true, false);
+}
+
 void Grid::selectVisibleOnVideo() {
     const auto rows = fs::vec(m_tab->s().rows_at(m_tab->videoTime()));
     if (!rows.empty()) m_tab->setSelection(rows, int(rows.front()));
