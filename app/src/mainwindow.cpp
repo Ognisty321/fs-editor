@@ -289,6 +289,9 @@ MainWindow::MainWindow() {
         for (qsizetype i = 0; i < old.size(); ++i)
             if ((bytes += old[i].size()) > (100 << 20) || i >= 1000) QFile::remove(old[i].absoluteFilePath());
     }
+    // an autosave's record of its file goes with it
+    for (const QFileInfo &f : QDir(autosaveDir()).entryInfoList({"*.AUTOSAVE.ass.from"}, QDir::Files))
+        if (!QFileInfo::exists(f.absoluteFilePath().chopped(5))) QFile::remove(f.absoluteFilePath());
     // a Windows logoff or shutdown may end the app without closeEvent: the work goes to autosaves
     connect(qApp, &QGuiApplication::commitDataRequest, this, [this] { autosaveTabs(); });
     // Kainote's: a file another program changed is offered again when the app or its tab comes back
@@ -824,11 +827,13 @@ void MainWindow::buildMenus() {
     add("openAutosave", tr("Open autosave"), {}, file, [this] {
         AutosaveDialog d(this);
         if (d.exec() != QDialog::Accepted || d.chosen().isEmpty()) return;
-        // as an unsaved script: Save asks where, not into the autosave folder that gets cleaned
-        // shortcut: the name it had is not kept, a record of it beside the autosave if missed
+        // as an unsaved script: Save asks where, not into the autosave folder that gets cleaned, and
+        // starts at the file it was autosaved from
         TabPanel *tab = untouched(current()) ? current() : newTab();
         if (tab->openSubs(d.chosen())) {
             tab->s().detach();
+            QFile from(d.chosen() + ".from");
+            tab->setProperty("savePath", from.open(QIODevice::ReadOnly) ? QString::fromUtf8(from.readAll()) : QString());
             tab->changed();
             updateActions();
         }
@@ -1781,6 +1786,9 @@ bool MainWindow::autosaveTabs(bool wait) {
         for (int k = 2; used.contains(name); ++k) name = QString("%1 (%2)").arg(base).arg(k);
         used.insert(name);
         const QString path = autosaveDir() + "/" + name + "." + stamp + ".AUTOSAVE.ass";
+        // the file it is a copy of, for Save once it is recovered
+        if (QFile from(path + ".from"); !t->path().isEmpty() && from.open(QIODevice::WriteOnly))
+            from.write(t->path().toUtf8());
         if (!wait) {
             // the timer's: serialised and written on a worker so a big file does not stall typing;
             // marked now so the next tick skips it, unmarked if the write fails
@@ -1978,7 +1986,7 @@ void MainWindow::pasteTranslation() {
 // ---- files --------------------------------------------------------------------
 
 bool MainWindow::saveAs(TabPanel *tab) {
-    QString start = tab->path();
+    QString start = tab->path().isEmpty() ? tab->property("savePath").toString() : tab->path();
     if (!start.isEmpty() && !tab->s().lossless(fs::Utf8(start))) {
         // Aegisub's: to an ASS name when the file's format cannot hold it all
         status(tr("Its format cannot hold everything in these subtitles: save them as ASS"));
