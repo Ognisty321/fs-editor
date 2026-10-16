@@ -13,6 +13,7 @@
 #include <QInputDialog>
 #include <QMenu>
 #include <QPainter>
+#include <QScopedValueRollback>
 #include <string_view>
 #include <QScrollBar>
 #include <QSettings>
@@ -34,9 +35,9 @@ struct GridTheme {
 constexpr int Pad = 4;
 
 // Calls draw(x, width) for each (start, length) span of the raw text as the cell shows it: with
-// tags hidden (mode 2) or simplified to one character (mode 1)
+// tags hidden (mode 2) or simplified to the mark (mode 1)
 template <class F>
-void eachSpan(const std::vector<size_t> &spans, const QString &raw, const QString &shown, int mode,
+void eachSpan(const std::vector<size_t> &spans, const QString &raw, const QString &shown, int mode, int markSize,
               const QRect &rect, const QFontMetrics &fm, F draw) {
     const auto shownAt = [&](size_t at) {
         int out = 0;
@@ -45,7 +46,7 @@ void eachSpan(const std::vector<size_t> &spans, const QString &raw, const QStrin
             if (block) block = raw[k] != '}';
             else if (mode && raw[k] == '{') {
                 block = true;
-                out += mode == 1;
+                out += mode == 1 ? markSize : 0;
             } else {
                 ++out;
             }
@@ -61,7 +62,7 @@ void eachSpan(const std::vector<size_t> &spans, const QString &raw, const QStrin
 } // namespace
 
 Grid::Grid(TabPanel *tab) : QAbstractScrollArea(tab), m_tab(tab) {
-    applyFocusPolicy();
+    applySettings();
     viewport()->setMouseTracking(true);
     connect(&m_edgeTimer, &QTimer::timeout, this, [this] {
         if (m_selectTo < 0) return m_edgeTimer.stop();
@@ -106,9 +107,13 @@ void Grid::setColumnHidden(int c, bool hidden) {
     viewport()->update();
 }
 
-void Grid::applyFocusPolicy() {
+void Grid::applySettings() {
+    QSettings st;
     // off, a click selects without taking the keys from the edit box; Tab still reaches the grid
-    setFocusPolicy(QSettings().value("grid/focusOnClick", true).toBool() ? Qt::StrongFocus : Qt::TabFocus);
+    setFocusPolicy(st.value("grid/focusOnClick", true).toBool() ? Qt::StrongFocus : Qt::TabFocus);
+    m_tagMark = st.value("grid/tagMark", QString(QChar(0x2600))).toString();
+    m_centerActive = st.value("grid/centerActive", false).toBool();
+    viewport()->update();
 }
 
 void Grid::setTagMode(int mode) {
@@ -325,7 +330,7 @@ QString Grid::cell(const fsb::Row &r, int col, size_t index) const {
             const size_t end = std::min(m_tagMode ? v.find('{', at) : v.npos, v.size());
             s += QString::fromUtf8(v.data() + at, qsizetype(std::min<size_t>(end - at, 4 * Cap)));
             if (end == v.size()) break;
-            if (m_tagMode == 1) s += QChar(0x2600);
+            if (m_tagMode == 1) s += m_tagMark;
             const size_t close = v.find('}', end);
             at = close == v.npos ? v.size() : close + 1;
         }
@@ -374,7 +379,7 @@ void Grid::underlineMisspelled(QPainter &p, const fsb::Row &r, const QString &sh
     p.setPen(QPen(theme::color(theme::GridMisspelled), 1));
     p.setClipRect(rect);
     const int y = rect.center().y() + (fm.ascent() - fm.descent()) / 2 + 2; // under the baseline
-    eachSpan(*it, raw, shown, m_tagMode, rect, fm, [&](int x, int w) { p.drawLine(x, y, x + w, y); });
+    eachSpan(*it, raw, shown, m_tagMode, int(m_tagMark.size()), rect, fm, [&](int x, int w) { p.drawLine(x, y, x + w, y); });
     p.restore();
 }
 
@@ -457,7 +462,7 @@ void Grid::paintEvent(QPaintEvent *) {
                 const QRect tx = cr.adjusted(Pad, 0, -Pad, 0);
                 p.save();
                 p.setClipRect(tx);
-                eachSpan(cmp->second, fs::q(r.text), shown, m_tagMode, tx, p.fontMetrics(),
+                eachSpan(cmp->second, fs::q(r.text), shown, m_tagMode, int(m_tagMark.size()), tx, p.fontMetrics(),
                          [&](int x, int w) { p.fillRect(x, cr.top() + 2, std::max(w, 2), rh - 4, T.compareText); });
                 p.restore();
             }
@@ -493,6 +498,8 @@ void Grid::ensureVisible(int row) {
     if (it == m_vis.end()) return;
     const int vi = int(it - m_vis.begin());
     auto *sb = verticalScrollBar();
+    // Kainote's centred active line, for the jumps the grid's own clicks and keys did not make
+    if (m_centerActive && !m_byHand) return sb->setValue(vi - sb->pageStep() / 2);
     if (vi < sb->value()) sb->setValue(vi);
     else if (vi >= sb->value() + sb->pageStep()) sb->setValue(vi - sb->pageStep() + 1);
 }
@@ -517,6 +524,7 @@ void Grid::clickRow(int vi, Qt::KeyboardModifiers mods) {
 }
 
 void Grid::mousePressEvent(QMouseEvent *e) {
+    const QScopedValueRollback byHand(m_byHand, true);
     if (focusPolicy() & Qt::ClickFocus) setFocus();
     const int vi = rowAt(int(e->position().y()));
     const int col = colAt(int(e->position().x()));
@@ -552,6 +560,7 @@ void Grid::mousePressEvent(QMouseEvent *e) {
 }
 
 void Grid::mouseMoveEvent(QMouseEvent *e) {
+    const QScopedValueRollback byHand(m_byHand, true);
     if (m_selectTo >= 0 && (e->buttons() & Qt::LeftButton)) {
         // a drag selects the lines it passes, the grid scrolling on past its edges (Aegisub), on a
         // timer while the mouse stays there, faster the farther it is
@@ -657,6 +666,7 @@ void Grid::moveSelection(int delta) {
 }
 
 void Grid::keyPressEvent(QKeyEvent *e) {
+    const QScopedValueRollback byHand(m_byHand, true);
     if (m_vis.empty()) return;
     auto pos = std::find(m_vis.begin(), m_vis.end(), size_t(std::max(0, m_tab->active())));
     int vi = pos == m_vis.end() ? 0 : int(pos - m_vis.begin());
@@ -715,7 +725,16 @@ void Grid::paste() {
 void Grid::duplicate() {
     const auto rows = fs::vec(m_tab->s().duplicate_rows(fs::slice(m_tab->selection())));
     m_tab->changed();
-    if (!rows.empty()) m_tab->setSelection(rows, int(rows.front()));
+    if (rows.empty()) return;
+    if (!QSettings().value("grid/duplicateKeepsSelection", false).toBool())
+        return m_tab->setSelection(rows, int(rows.front()));
+    // Kainote's option: the originals stay selected; each run of copies follows its block of originals
+    std::vector<size_t> originals;
+    for (size_t i = 0, j; i < rows.size(); i = j + 1) {
+        for (j = i; j + 1 < rows.size() && rows[j + 1] == rows[j] + 1;) ++j;
+        for (size_t k = 0; k <= j - i; ++k) originals.push_back(rows[i] - (j - i + 1) + k);
+    }
+    m_tab->setSelection(originals, int(originals.front()));
 }
 
 void Grid::deleteRows() {

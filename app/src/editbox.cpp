@@ -284,24 +284,25 @@ fsb::Thesaurus *get() {
 } // namespace thesaurus
 } // namespace
 
-// Suggestions and "Add to dictionary" for a misspelled word under the mouse, and Aegisub's thesaurus.
-void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
-    std::unique_ptr<QMenu> m(createStandardContextMenu(e->pos()));
-    QAction *const first = m->actions().value(0); // the standard actions follow ours
-    const QTextCursor at = cursorForPosition(e->pos());
-    const QTextBlock block = at.block();
-    const QString t = block.text();
-    // replaces t's [s, s + l) and selects the new text
-    auto replacer = [this, block](int s, int l) {
-        return [this, block, s, l](const QString &with) {
+// replaces the block's [s, s + l) and selects the new text
+static auto replacer(QPlainTextEdit *e, const QTextBlock &block) {
+    return [e, block](int s, int l) {
+        return [e, block, s, l](const QString &with) {
             QTextCursor c(block);
             c.setPosition(block.position() + s);
             c.setPosition(block.position() + s + l, QTextCursor::KeepAnchor);
             c.insertText(with);
             c.setPosition(block.position() + s, QTextCursor::KeepAnchor);
-            setTextCursor(c);
+            e->setTextCursor(c);
         };
     };
+}
+
+// Suggestions and "Add to dictionary" before `first` in m for a misspelled word at `at`; false if none is there.
+bool SubsTextEdit::addSpellActions(QMenu *m, QAction *first, const QTextCursor &at) {
+    const QTextBlock block = at.block();
+    const QString t = block.text();
+    const auto replacer = ::replacer(this, block);
     if (auto *sp = spell::get()) {
         const auto bad = sp->misspelled(fs::Utf8(t));
         for (size_t i = 0; i + 1 < bad.size(); i += 2) {
@@ -312,7 +313,7 @@ void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
             const auto sugg = sp->suggest(fs::Utf8(word));
             for (size_t k = 0; k < std::min<size_t>(sugg.size(), 8); ++k) {
                 const QString w = fs::q(sugg[k]);
-                auto *a = new QAction(w, m.get());
+                auto *a = new QAction(w, m);
                 QFont f = a->font();
                 f.setBold(true);
                 a->setFont(f);
@@ -320,17 +321,37 @@ void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
                 m->insertAction(first, a);
             }
             if (sugg.empty()) {
-                auto *none = new QAction(tr("(no suggestions)"), m.get());
+                auto *none = new QAction(tr("(no suggestions)"), m);
                 none->setEnabled(false);
                 m->insertAction(first, none);
             }
-            auto *add = new QAction(tr("Add \"%1\" to dictionary").arg(word), m.get());
+            auto *add = new QAction(tr("Add \"%1\" to dictionary").arg(word), m);
             connect(add, &QAction::triggered, this, [word] { spell::addWord(word); });
             m->insertAction(first, add);
-            m->insertSeparator(first);
-            break;
+            return true;
         }
     }
+    return false;
+}
+
+// Kainote's suggestions on a double click on a misspelled word (the word is selected as usual)
+void SubsTextEdit::mouseDoubleClickEvent(QMouseEvent *e) {
+    QPlainTextEdit::mouseDoubleClickEvent(e);
+    if (e->button() != Qt::LeftButton || !QSettings().value("edit/spellDoubleClick", false).toBool()) return;
+    QMenu m;
+    if (addSpellActions(&m, nullptr, cursorForPosition(e->position().toPoint())))
+        m.exec(e->globalPosition().toPoint());
+}
+
+// The spelling actions for the word under the mouse, and Aegisub's thesaurus.
+void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
+    std::unique_ptr<QMenu> m(createStandardContextMenu(e->pos()));
+    QAction *const first = m->actions().value(0); // the standard actions follow ours
+    const QTextCursor at = cursorForPosition(e->pos());
+    const QTextBlock block = at.block();
+    const QString t = block.text();
+    if (addSpellActions(m.get(), first, at)) m->insertSeparator(first);
+    const auto replacer = ::replacer(this, block);
     const auto words = fsb::text_words(fs::Utf8(t));
     // Aegisub: a word of the user dictionary can leave it, and the language is chosen here
     for (size_t i = 0; i + 1 < words.size(); i += 2) {
@@ -928,7 +949,9 @@ bool EditBox::eventFilter(QObject *o, QEvent *e) {
     if (e->type() == QEvent::KeyPress) {
         const auto *k = static_cast<QKeyEvent *>(e);
         if ((k->key() == Qt::Key_Return || k->key() == Qt::Key_Enter) && !(k->modifiers() & ~Qt::KeypadModifier)) {
-            nextLine();
+            // Kainote's option to stay on the line after editing its times (they are committed as typed)
+            const bool times = o == m_start || o == m_end || o == m_duration;
+            if (!times || !QSettings().value("edit/timesStayOnLine", false).toBool()) nextLine();
             return true;
         }
     }

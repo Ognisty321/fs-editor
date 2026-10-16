@@ -31,7 +31,7 @@ public:
     void setCompare(std::map<size_t, std::vector<size_t>> rows);
     // rows timed with the other split-view tab's active line, marked at the left edge
     void setLinked(std::set<size_t> rows);
-    void applyFocusPolicy(); // Aegisub's Subtitle/Grid/Focus Allow
+    void applySettings(); // Aegisub's Focus Allow, Kainote's tag mark and centred active line
     void setTagMode(int mode); // Aegisub's: 0 show tags, 1 simplify them to ☀, 2 hide them
     static QString colName(int c);
     void setColumnHidden(int c, bool hidden);
@@ -120,6 +120,9 @@ private:
     quint64 m_gen = ~0ull;
     qint64 m_videoMs = -1;
     int m_tagMode = 0;
+    QString m_tagMark;          // what a tag block shows as in tag mode 1
+    bool m_centerActive = false;
+    bool m_byHand = false;      // in the grid's own mouse or key handler
     int m_marker = -1;
     int m_anchor = 0;
     int m_dragFrom = -1;         // Alt+drag moving rows

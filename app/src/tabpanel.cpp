@@ -85,7 +85,12 @@ TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fs
                 m_audio->open(m_video->path(), true);
         }
         m_video->subsChanged();
-        m_video->seekFrame(m_video->frame()); // 0, or the position the script was saved at
+        // 0, or the position the script was saved at; without one, Kainote's option starts at the active line
+        if (m_video->frame() == 0 && m_active >= 0 && !path().isEmpty() &&
+            QSettings().value("video/openAtActive", false).toBool())
+            m_video->seekStart(s().row(size_t(m_active)).start);
+        else
+            m_video->seekFrame(m_video->frame());
         applyLayout();
         emit statusChanged();
         emit titleChanged();

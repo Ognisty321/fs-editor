@@ -286,12 +286,14 @@ MainWindow::MainWindow() {
     buildToolbar();
 
     // Autosave (Aegisub): modified tabs are copied to autosaveDir() every N seconds; at startup the
-    // newest 1000 copies within 100 MB stay (Aegisub's CleanCache), and so do those of the files as opened.
+    // newest copies within 100 MB stay (Aegisub's CleanCache; their number is Kainote's max autosave
+    // files, 1000 as in Aegisub), and so do those of the files as opened.
+    const qsizetype keep = std::max(2, QSettings().value("main/autosaveMax", 1000).toInt());
     for (const char *kind : {"*.AUTOSAVE.ass", "*.ORIGINAL.*"}) {
         qint64 bytes = 0;
         const auto old = QDir(autosaveDir()).entryInfoList({kind}, QDir::Files, QDir::Time);
         for (qsizetype i = 0; i < old.size(); ++i)
-            if ((bytes += old[i].size()) > (100 << 20) || i >= 1000) QFile::remove(old[i].absoluteFilePath());
+            if ((bytes += old[i].size()) > (100 << 20) || i >= keep) QFile::remove(old[i].absoluteFilePath());
     }
     // an autosave's record of its file goes with it
     for (const QFileInfo &f : QDir(autosaveDir()).entryInfoList({"*.AUTOSAVE.ass.from"}, QDir::Files))
@@ -427,6 +429,13 @@ QList<TabPanel *> MainWindow::tabs() const {
     return out;
 }
 
+// The title on a tab, cut to Kainote's tab title length; the tool tip has the whole path
+static QString tabText(TabPanel *tab) {
+    const QString t = tab->title();
+    const int n = std::max(20, QSettings().value("main/tabTitleChars", 40).toInt());
+    return t.size() > n ? t.left(n - 1) + QChar(0x2026) : t;
+}
+
 TabPanel *MainWindow::newTab() {
     auto *slot = new QWidget;
     slot->setLayout(new QVBoxLayout);
@@ -441,7 +450,7 @@ TabPanel *MainWindow::newTab() {
     }
     slot->layout()->addWidget(tab);
     slot->setProperty("panel", QVariant::fromValue<QObject *>(tab));
-    const int i = m_tabs->addTab(slot, tab->title());
+    const int i = m_tabs->addTab(slot, tabText(tab));
     connect(tab, &TabPanel::docChanged, this, [this] {
         if (m_compareOn) m_compareLater->start();
     });
@@ -451,7 +460,7 @@ TabPanel *MainWindow::newTab() {
     auto refreshTitle = [this, tab] {
         const int idx = indexOfPanel(tab);
         if (idx < 0) return;
-        m_tabs->setTabText(idx, tab->title());
+        m_tabs->setTabText(idx, tabText(tab));
         m_tabs->setTabToolTip(idx, tab->path() + (tab->video()->path().isEmpty() ? "" : "\n" + tab->video()->path()));
         if (tab == current()) setWindowTitle(tab->title() + " - FS Editor");
     };
@@ -511,9 +520,14 @@ void MainWindow::openFile(const QString &path, const QString &encoding) {
                 else t->openSubs(path, encoding);
                 return updateActions();
             }
-        // reuse an empty, untouched tab, otherwise open a new one
+        // reuse an empty, untouched tab, otherwise open a new one; Kainote's option (its default) replaces
+        // the current tab's subtitles instead, keeping its video and audio
         TabPanel *tab = current();
-        if (!untouched(tab)) tab = newTab();
+        if (QSettings().value("main/subsInCurrentTab", false).toBool() && tab) {
+            if (!maybeSave(tab)) return;
+        } else if (!untouched(tab)) {
+            tab = newTab();
+        }
         if (tab->openSubs(path, encoding)) addRecent("subs", path);
         updateActions();
     }
@@ -536,7 +550,10 @@ void MainWindow::openFiles(QStringList files) {
     }
     TabPanel *last = nullptr; // the tab filled last: its video may still be loading
     for (qsizetype i = 0; i < std::max(subs.size(), videos.size()); ++i) {
-        if (i < subs.size()) openFile(subs[i]); // takes an empty tab or a new one
+        if (i < subs.size()) { // takes an empty tab or a new one
+            if (i > 0 && !untouched(current())) newTab();
+            openFile(subs[i]);
+        }
         else if (current() == last || !untouched(current()) || !current()->video()->path().isEmpty()) newTab();
         if (i < videos.size()) openFile(videos[i]);
         last = current();
@@ -925,11 +942,12 @@ void MainWindow::buildMenus() {
             action("sessionAtStart")->setChecked(QSettings().value("main/askSession", true).toBool()); // the menu's tick
             for (auto *t : tabs()) { // the limits colour the grid and the edit box
                 t->grid()->viewport()->update();
-                t->grid()->applyFocusPolicy();
+                t->grid()->applySettings();
                 t->edit()->reload();
                 t->audio()->docChanged(); // inactive lines
                 t->audio()->settingsChanged();
                 t->s().set_undo_limit(size_t(QSettings().value("main/undoLevels", 500).toInt()));
+                emit t->titleChanged(); // the tab title's length
             }
         };
         for (;;) {

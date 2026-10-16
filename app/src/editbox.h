@@ -18,6 +18,7 @@ class TabPanel;
 class QCheckBox;
 class QComboBox;
 class QLabel;
+class QMenu;
 class QSpinBox;
 class QRadioButton;
 class QToolButton;
@@ -86,9 +87,11 @@ signals:
 protected:
     void keyPressEvent(QKeyEvent *) override;
     void contextMenuEvent(QContextMenuEvent *) override;
+    void mouseDoubleClickEvent(QMouseEvent *) override;
     void wheelEvent(QWheelEvent *) override;
     void focusOutEvent(QFocusEvent *) override;
 private:
+    bool addSpellActions(QMenu *m, QAction *first, const QTextCursor &at);
     std::pair<int, int> blockAt(int pos) const;
     void updateCalltip();
     void matchBraces();

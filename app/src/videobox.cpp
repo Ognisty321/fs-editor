@@ -257,6 +257,12 @@ void VideoView::mouseMoveEvent(QMouseEvent *e) {
 void VideoView::leaveEvent(QEvent *) { updateOverlay(); } // the crosshair goes with the mouse
 
 void VideoView::mouseReleaseEvent(QMouseEvent *e) {
+    // Kainote's pause on a left click with the pointer (a click, not a pan of the zoomed video)
+    if (e->button() == Qt::LeftButton && !(e->modifiers() & Qt::ControlModifier) && !m_zoomDragging &&
+        m_box->m_tools->tool() == VisualTools::Pointer && m_box->playing() &&
+        (!m_panning || (e->position() - m_panFrom).manhattanLength() < 3) &&
+        QSettings().value("video/clickPauses", false).toBool())
+        m_box->pause();
     if (m_panning) {
         m_panning = false;
         unsetCursor();

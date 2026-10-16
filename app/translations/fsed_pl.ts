@@ -3628,6 +3628,34 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Kliknięcie w siatce przenosi tam fokus klawiatury</translation>
     </message>
     <message>
+        <source>Open subtitles in the current tab, in place of its subtitles</source>
+        <translation>Otwieraj napisy w bieżącej karcie, w miejsce jej napisów</translation>
+    </message>
+    <message>
+        <source>Enter in the times stays on the line</source>
+        <translation>Enter w polach czasu zostaje na linii</translation>
+    </message>
+    <message>
+        <source>Spelling suggestions on a double click on a misspelled word</source>
+        <translation>Podpowiedzi pisowni po dwukliku na błędnym słowie</translation>
+    </message>
+    <message>
+        <source>Center the active line in the grid when it changes</source>
+        <translation>Wyśrodkowuj aktywną linię w siatce, gdy się zmienia</translation>
+    </message>
+    <message>
+        <source>Duplicated lines leave the originals selected</source>
+        <translation>Po duplikowaniu linii zaznaczone zostają oryginały</translation>
+    </message>
+    <message>
+        <source>A left click pauses the video</source>
+        <translation>Lewy przycisk myszy pauzuje wideo</translation>
+    </message>
+    <message>
+        <source>Open a video at the active line when the subtitles saved no position</source>
+        <translation>Otwieraj wideo na aktywnej linii, gdy napisy nie zapisały pozycji</translation>
+    </message>
+    <message>
         <source>Shift+Enter adds \n</source>
         <translation>Shift+Enter wstawia \n</translation>
     </message>
@@ -3716,6 +3744,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Preferowane ścieżki audio</translation>
     </message>
     <message>
+        <source>Simplified tags shown as</source>
+        <translation>Uproszczone tagi wyświetlane jako</translation>
+    </message>
+    <message>
         <source>Default</source>
         <translation>Domyślne</translation>
     </message>
@@ -3798,6 +3830,14 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Find and replace history entries</source>
         <translation>Wpisy historii wyszukiwania i zamiany</translation>
+    </message>
+    <message>
+        <source>Autosave files kept</source>
+        <translation>Zachowywane pliki autozapisu</translation>
+    </message>
+    <message>
+        <source>Characters of a tab&apos;s title</source>
+        <translation>Znaki tytułu karty</translation>
     </message>
     <message>
         <source>Line boundaries thickness</source>

@@ -2220,6 +2220,17 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"video/autohideTools", QT_TR_NOOP("Only show visual tools when the mouse is over the video"), false, video},
         {"audio/drawKeyframesKaraoke", QT_TR_NOOP("Show keyframes in the audio in karaoke mode"), true, audio},
         {"grid/focusOnClick", QT_TR_NOOP("A click in the grid moves the keyboard focus there"), true, subs},
+        // Kainote's behaviours
+        {"main/subsInCurrentTab", QT_TR_NOOP("Open subtitles in the current tab, in place of its subtitles"), false,
+         editor},
+        {"edit/timesStayOnLine", QT_TR_NOOP("Enter in the times stays on the line"), false, editor},
+        {"edit/spellDoubleClick", QT_TR_NOOP("Spelling suggestions on a double click on a misspelled word"), false,
+         editor},
+        {"grid/centerActive", QT_TR_NOOP("Center the active line in the grid when it changes"), false, subs},
+        {"grid/duplicateKeepsSelection", QT_TR_NOOP("Duplicated lines leave the originals selected"), false, subs},
+        {"video/clickPauses", QT_TR_NOOP("A left click pauses the video"), false, video},
+        {"video/openAtActive", QT_TR_NOOP("Open a video at the active line when the subtitles saved no position"),
+         false, video},
         {"edit/softBreak", QT_TR_NOOP("Shift+Enter adds \\n"), false, editor},
         {"subs/defaultResAuto", QT_TR_NOOP("New files use the resolution of the first video opened"), true, subs},
         {"subs/cpsIgnoreWhitespace", QT_TR_NOOP("Ignore whitespace in characters per second"), true, subs},
@@ -2265,6 +2276,10 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     tracks->setToolTip(tr("Languages or parts of track names, in order of preference, separated by \";\". A file "
                           "with several audio tracks loads the first one that matches, or asks."));
     audio->addRow(tr("Preferred audio tracks"), tracks);
+    // Kainote's ASS tags replacement character, shown in the grid's simplified tags mode
+    auto *tagMark = new QLineEdit(st.value("grid/tagMark", QString(QChar(0x2600))).toString(), this);
+    tagMark->setMaxLength(8);
+    subs->addRow(tr("Simplified tags shown as"), tagMark);
     auto *device = new QComboBox(this);
     device->addItem(tr("Default"), "");
     for (const auto &n : fsb::audio_devices()) device->addItem(fs::q(n), fs::q(n));
@@ -2318,7 +2333,10 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"audio/spectrumCacheMb", 128, 2, 1024, audio, QT_TR_NOOP("Spectrum cache memory (MB)")},
         // Aegisub's Limits/Undo Levels and Find Replace
         {"main/undoLevels", 500, 2, 10000, editor, QT_TR_NOOP("Undo levels")},
-        {"find/recentCount", 20, 0, 99, editor, QT_TR_NOOP("Find and replace history entries")}};
+        {"find/recentCount", 20, 0, 99, editor, QT_TR_NOOP("Find and replace history entries")},
+        // Kainote's max autosave files (also those of the files as opened), counted at startup
+        {"main/autosaveMax", 1000, 2, 1000000, editor, QT_TR_NOOP("Autosave files kept")},
+        {"main/tabTitleChars", 40, 20, 150, editor, QT_TR_NOOP("Characters of a tab's title")}};
     for (auto [key, def, lo, hi, form, label] : moreSpins) {
         auto *s = new QSpinBox(this);
         s->setRange(lo, hi);
@@ -2463,7 +2481,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                                         QDialogButtonBox::RestoreDefaults,
                                     this);
     const auto save = [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs,
-                       trace, tracks, fontsDir, device, autosaveFolder, autoloadPath, includePath, scriptEditor, types] {
+                       trace, tracks, tagMark, fontsDir, device, autosaveFolder, autoloadPath, includePath, scriptEditor, types] {
         QSettings st;
         QSettings classes(assoc::kClasses, QSettings::NativeFormat);
         bool associated = false;
@@ -2486,6 +2504,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         st.setValue("audio/inactiveLines", inactive->currentIndex());
         st.setValue("audio/leadIn", leadIn->value());
         st.setValue("audio/preferredTracks", tracks->text().trimmed());
+        st.setValue("grid/tagMark", tagMark->text());
         st.setValue("fonts/externalDir", QDir::fromNativeSeparators(fontsDir->text().trimmed()));
         st.setValue("audio/device", device->currentData());
         st.setValue("main/autosaveDir", QDir::fromNativeSeparators(autosaveFolder->text().trimmed()));
@@ -2509,7 +2528,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                          "audio/inactiveLines",   "audio/leadIn",     "audio/leadOut",    "audio/preferredTracks",
                          "fonts/externalDir",     "audio/device",     "main/autosaveDir", "main/autosaveSeconds",
                          "video/openWithSubs",    "grid/font",        "edit/font",        "automation/autoloadPath",
-                         "automation/includePath", "automation/editor"};
+                         "automation/includePath", "automation/editor", "grid/tagMark"};
     for (const auto &[k, w] : boxes) owned << k;
     for (const auto &[k, w] : spins) owned << k;
     for (const auto &[k, w] : catalogs) owned << k;
