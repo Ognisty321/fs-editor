@@ -1244,6 +1244,12 @@ static const PanelKey kEditKeys[] = {
     {"editSetDoubtful", QT_TRANSLATE_NOOP("EditBox", "Mark as not confirmed and go to the next line"), "Alt+Down"},
     // Aegisub's audio/commit in the edit box
     {"editCommit", QT_TRANSLATE_NOOP("EditBox", "Apply changes and stay on the line"), "Ctrl+Return"},
+    // Aegisub's edit/line/split/estimate|preserve|video, edit/revert and edit/insert_original
+    {"editSplitEstimate", QT_TRANSLATE_NOOP("EditBox", "Split at cursor (estimate times)"), ""},
+    {"editSplitPreserve", QT_TRANSLATE_NOOP("EditBox", "Split at cursor (preserve times)"), ""},
+    {"editSplitVideo", QT_TRANSLATE_NOOP("EditBox", "Split at cursor (at video frame)"), ""},
+    {"editRevert", QT_TRANSLATE_NOOP("EditBox", "Revert"), ""},
+    {"editInsertOriginal", QT_TRANSLATE_NOOP("EditBox", "Insert original"), ""},
 };
 
 std::span<const PanelKey> EditBox::keys() { return kEditKeys; }
@@ -1288,6 +1294,12 @@ void EditBox::runCommand(const QString &id, SubsTextEdit *e) {
         s.set_doubtful({&row, 1}, true);
         m_tab->changed();
         nextLine();
+    } else if (id == "editSplitEstimate" || id == "editSplitPreserve" || id == "editSplitVideo") {
+        emit e->splitRequested(id == "editSplitEstimate" ? -1 : id == "editSplitPreserve" ? -2 : 0);
+    } else if (id == "editRevert") {
+        emit m_text->revertRequested();
+    } else if (id == "editInsertOriginal") {
+        emit m_text->insertOriginalRequested();
     } else if (id == "editCommit") {
         // the text is applied as it is typed: what follows is an undo step of its own, and the
         // audio's selection goes to the line
