@@ -193,7 +193,7 @@ void Grid::hideSelected() {
 
 void Grid::makeTree() {
     const auto sel = m_tab->selection();
-    if (sel.empty() || m_tab->s().file_info().tl_mode) return;
+    if (sel.empty()) return;
     bool ok = false;
     const QString d = QInputDialog::getText(this, tr("Make tree"), tr("Description:"), QLineEdit::Normal, {}, &ok);
     if (!ok) return;
@@ -740,7 +740,6 @@ void Grid::swapRows() {
 // mode: 0 the texts joined, 1 the first kept, 2 the last kept, 3 as karaoke
 void Grid::joinRows(int mode) {
     const auto sel = m_tab->selection();
-    if (m_tab->s().file_info().tl_mode) return m_tab->main()->status(tr("Lines are not joined in translation mode"));
     if (sel.size() < 2 || sel.size() > 20) return m_tab->main()->status(tr("Select from 2 to 20 lines to join them"));
     const auto r = m_tab->s().join_rows(fs::slice(sel), uint8_t(mode));
     m_tab->changed();
@@ -760,7 +759,7 @@ void Grid::selectVisibleOnVideo() {
 // how: 0 before the video frame, 1 into frames, 2 characters, 3 words, 4 wraps, 5 after the frame
 void Grid::splitRows(int how) {
     auto &s = m_tab->s();
-    if (s.file_info().tl_mode) return m_tab->main()->status(tr("Lines are not split in translation mode"));
+    const bool tl = s.file_info().tl_mode;
     // every line's parts, split in one go
     std::vector<size_t> rows, counts;
     QStringList all;
@@ -769,7 +768,9 @@ void Grid::splitRows(int how) {
         const fsb::Row r = s.row(row);
         QStringList parts;
         std::vector<std::int64_t> st, en;
-        const QString text = fs::q(r.text);
+        // what the row shows: an untranslated row's original in translator mode
+        const rust::String &shown = tl && !r.translated ? r.original : r.text;
+        const QString text = fs::q(shown);
         if (how == 0 || how == 5) {
             // Aegisub's: the first part ends before (on) the frame shown, the second starts on (after)
             // it; a line not on the frame gets a copy on just that frame
@@ -795,9 +796,9 @@ void Grid::splitRows(int how) {
             }
         } else {
             if (how == 2) {
-                for (QChar c : fs::q(fsb::strip_tags(r.text))) if (!c.isSpace()) parts << QString(c);
+                for (QChar c : fs::q(fsb::strip_tags(shown))) if (!c.isSpace()) parts << QString(c);
             } else if (how == 3) {
-                parts = fs::q(fsb::strip_tags(r.text)).replace("\\N", " ").split(' ', Qt::SkipEmptyParts);
+                parts = fs::q(fsb::strip_tags(shown)).replace("\\N", " ").split(' ', Qt::SkipEmptyParts);
             } else {
                 parts = text.split("\\N", Qt::SkipEmptyParts);
             }
@@ -843,14 +844,16 @@ void Grid::contextMenu(const QPoint &global) {
     const auto sel = m_tab->selection();
     const bool tl = s.file_info().tl_mode;
     QMenu m(this);
+    // Aegisub's recombine and karaoke split need the lines' one shared text, which a pair lacks
+    for (const char *id : {"recombine", "splitKaraoke"}) mw->action(id)->setEnabled(!tl);
     // the window's actions, so they take hotkeys (Aegisub, Kainote); the menu greys what the
     // selection cannot do, and they check it themselves when a hotkey runs them
-    const bool canJoin = sel.size() >= 2 && sel.size() <= 20 && !tl, video = m_tab->video()->hasVideo();
+    const bool canJoin = sel.size() >= 2 && sel.size() <= 20, video = m_tab->video()->hasVideo();
     const std::pair<const char *, bool> state[] = {
-        {"swapLines", sel.size() == 2}, {"joinLines", canJoin},          {"joinKeepFirst", canJoin},
-        {"joinKeepLast", canJoin},      {"joinKaraoke", canJoin},        {"splitBefore", !tl && video},
-        {"splitAfter", !tl && video},   {"splitFrames", !tl && video},   {"splitChars", !tl},
-        {"splitWords", !tl},            {"splitWraps", !tl},             {"fpsFromVideo", sel.size() == 2 && video}};
+        {"swapLines", sel.size() == 2}, {"joinLines", canJoin},   {"joinKeepFirst", canJoin},
+        {"joinKeepLast", canJoin},      {"joinKaraoke", canJoin}, {"splitBefore", video},
+        {"splitAfter", video},          {"splitFrames", video},   {"splitChars", true},
+        {"splitWords", true},           {"splitWraps", true},     {"fpsFromVideo", sel.size() == 2 && video}};
     for (auto [id, on] : state) mw->action(id)->setEnabled(on);
     auto *ins = m.addMenu(tr("Insert lines"));
     for (const char *id : {"insertBefore", "insertAfter", "insertBeforeVideo", "insertAfterVideo", "insertBeforeFrame",
@@ -871,7 +874,7 @@ void Grid::contextMenu(const QPoint &global) {
     m.addAction(mw->action("pasteOver"));
     m.addSeparator();
     m.addMenu(mw->action("gridColumns")->menu());
-    mw->action("makeTree")->setEnabled(!tl);
+    mw->action("makeTree")->setEnabled(true);
     m.addAction(mw->action("makeTree"));
     m.addAction(mw->action("hideSelected"));
     m.addMenu(mw->action("gridFiltering")->menu());

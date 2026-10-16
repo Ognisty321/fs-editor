@@ -2077,7 +2077,7 @@ void MainWindow::updateActions() {
     action("saveTranslation")->setEnabled(fi.tl_mode);
     for (const char *id : {"translationMatching", "pasteTranslation", "filterDoubtful", "filterUntranslated"})
         action(id)->setEnabled(fi.tl_mode);
-    action("makeTree")->setEnabled(!fi.tl_mode);
+    for (const char *id : {"recombine", "splitKaraoke"}) action(id)->setEnabled(!fi.tl_mode);
     action("subsFromVideo")->setEnabled(!tab->video()->path().isEmpty());
     action("closeVideo")->setEnabled(tab->video()->hasVideo());
     const char *views[] = {"viewAll", "viewVideoSubs", "viewAudioSubs", "viewOnlyVideo", "viewOnlySubs"};

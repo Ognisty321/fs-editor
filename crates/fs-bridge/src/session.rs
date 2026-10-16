@@ -1598,33 +1598,59 @@ impl Session {
         starts: &[i64],
         ends: &[i64],
     ) -> Vec<usize> {
-        if self.tl {
-            return Vec::new();
-        }
         let n = texts.len().min(starts.len()).min(ends.len());
-        // (event, its parts), by event
+        // (row, its parts), by row
         let mut jobs = Vec::new();
         let mut at = 0;
         for (&row, &count) in rows.iter().zip(counts) {
             let parts = at.min(n)..(at + count).min(n);
             at += count;
             if let Some(r) = self.tl_row(row).filter(|_| !parts.is_empty()) {
-                jobs.push((r.main(), parts));
+                jobs.push((r, parts));
             }
         }
-        jobs.sort_by_key(|j| j.0);
-        jobs.dedup_by_key(|j| j.0);
-        let gone: Vec<usize> = jobs.iter().map(|j| j.0).collect();
+        jobs.sort_by_key(|j| j.0.original);
+        jobs.dedup_by_key(|j| j.0.original);
+        let gone: Vec<usize> = (jobs.iter())
+            .flat_map(|(r, _)| std::iter::once(r.original).chain(r.translation))
+            .collect();
         // the parts go where their line was, once the lines before it are gone too
-        let mut parts = Vec::new();
-        for (k, (e, range)) in jobs.into_iter().enumerate() {
-            let base = self.ed.doc.event(e).unwrap();
-            for p in range {
-                let mut ev = base.clone();
-                ev.text = texts[p].clone();
-                ev.start = Time(starts[p]);
-                ev.end = Time(ends[p]);
-                parts.push((e - k, ev));
+        let doc = &self.ed.doc;
+        let (mut parts, mut removed) = (Vec::new(), 0);
+        for (r, range) in jobs {
+            let at = r.original - removed;
+            removed += 1 + usize::from(r.translation.is_some());
+            let base = doc.event(r.main()).unwrap();
+            let original = r.translation.map(|_| doc.event(r.original).unwrap());
+            for (i, p) in range.enumerate() {
+                let (start, end) = (Time(starts[p]), Time(ends[p]));
+                if let Some(o) = original {
+                    // a translator's pair: the original goes with each copy of the whole line, and
+                    // with the first piece of a split text
+                    let text = if i == 0 || texts[p] == base.text {
+                        o.text.clone()
+                    } else {
+                        String::new()
+                    };
+                    parts.push((
+                        at,
+                        Event {
+                            start,
+                            end,
+                            text,
+                            ..o.clone()
+                        },
+                    ));
+                }
+                parts.push((
+                    at,
+                    Event {
+                        start,
+                        end,
+                        text: texts[p].clone(),
+                        ..base.clone()
+                    },
+                ));
             }
         }
         if parts.is_empty() {
@@ -3748,6 +3774,7 @@ mod tests {
                 .collect()
         };
         let own = |o: &str, t: &str, a: i64, b: i64| (o.to_string(), t.to_string(), a, b);
+        let words = |w: &[&str]| -> Vec<String> { w.iter().map(|s| s.to_string()).collect() };
         // an untranslated row in the middle: its translation is empty
         assert_eq!(s.join_rows(&[2, 0, 1], 0), 0);
         assert_eq!(view(&s), [own("one two three", "jeden trzy", 1000, 6000)]);
@@ -3772,6 +3799,40 @@ mod tests {
             [own("th", "trzy", 5000, 6000), own("ree", "", 5000, 6000)]
         );
         assert_eq!(s.split_row(1, 1, -1, false), -1);
+        s.undo();
+        // words: the original stays with the first piece; frames: with every copy
+        let made = s.explode_rows(
+            &[2, 1],
+            &[2, 2],
+            &words(&["tr", "zy", "t", "wo"]),
+            &[5000, 5500, 3000, 3500],
+            &[5500, 6000, 3500, 4000],
+        );
+        assert_eq!(made, [1, 2, 3, 4]);
+        assert_eq!(
+            view(&s)[1..],
+            [
+                own("t", "", 3000, 3500),
+                own("wo", "", 3500, 4000),
+                own("three", "tr", 5000, 5500),
+                own("", "zy", 5500, 6000)
+            ]
+        );
+        s.undo();
+        s.explode_rows(
+            &[2],
+            &[2],
+            &words(&["trzy", "trzy"]),
+            &[5000, 5500],
+            &[5500, 6000],
+        );
+        assert_eq!(
+            view(&s)[2..],
+            [
+                own("three", "trzy", 5000, 5500),
+                own("three", "trzy", 5500, 6000)
+            ]
+        );
         s.undo();
         // a tree before the pair's original; both halves carry the mark
         assert_eq!(s.make_tree(&[2], "end"), [2]);
