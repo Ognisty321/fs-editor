@@ -1,5 +1,6 @@
 //! Video, subtitle renderer and audio wrappers for the GUI.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -79,19 +80,37 @@ impl Video {
     }
 }
 
-pub struct Renderer(fs_media::SubtitleRenderer, Option<Arc<Section>>);
+pub struct Renderer {
+    ass: fs_media::SubtitleRenderer,
+    /// The `[Fonts]` section last registered.
+    section: Option<Arc<Section>>,
+    /// The names of the script's fonts registered, to notice one taken out.
+    script_fonts: HashSet<String>,
+    /// The media whose attached fonts are registered, to register them again after a reset.
+    media: Option<String>,
+}
 
 impl Renderer {
     pub fn new() -> Result<Self, String> {
+        Ok(Renderer {
+            ass: Self::fresh()?,
+            section: None,
+            script_fonts: HashSet::new(),
+            media: None,
+        })
+    }
+
+    fn fresh() -> Result<fs_media::SubtitleRenderer, String> {
         let mut r = fs_media::SubtitleRenderer::new().map_err(|e| e.to_string())?;
         r.set_fonts("Arial", None).map_err(|e| e.to_string())?;
-        Ok(Renderer(r, None))
+        Ok(r)
     }
 
     /// Register fonts attached to an MKV (silently nothing for other files).
     pub fn load_attached_fonts(&mut self, media_path: &str) {
         let fonts = fs_media::attached_fonts(Path::new(media_path)).unwrap_or_default();
-        (self.0).add_fonts(fonts.iter().map(|(n, d)| (n.as_str(), d.as_slice())));
+        (self.ass).add_fonts(fonts.iter().map(|(n, d)| (n.as_str(), d.as_slice())));
+        self.media = Some(media_path.to_string());
     }
 
     /// The subtitles' script and embedded fonts (which the script leaves out; decoded again
@@ -101,20 +120,31 @@ impl Renderer {
         self.set_script(&subs.script())
     }
 
-    // shortcut: a font taken out of [Fonts] stays registered until the renderer is recreated
-    // (libass can only clear all of them); upgrade if that ever shows on screen
+    /// The script's `[Fonts]`, registered again only when the section changed. A font taken out
+    /// goes from the screen too: libass can only drop all of them, so the renderer starts afresh
+    /// with the media's fonts and the ones left.
     pub(crate) fn add_script_fonts(&mut self, doc: &Document) {
         let section = doc.fonts_section();
-        if section.map(Arc::as_ptr) == self.1.as_ref().map(Arc::as_ptr) {
+        if section.map(Arc::as_ptr) == self.section.as_ref().map(Arc::as_ptr) {
             return;
         }
-        self.1 = section.cloned();
+        self.section = section.cloned();
         let fonts = doc.embedded_fonts();
-        (self.0).add_fonts(fonts.iter().map(|(n, d)| (n.as_str(), d.as_slice())));
+        let names: HashSet<String> = fonts.iter().map(|(n, _)| n.clone()).collect();
+        if !self.script_fonts.is_subset(&names)
+            && let Ok(ass) = Self::fresh()
+        {
+            self.ass = ass;
+            if let Some(media) = self.media.take() {
+                self.load_attached_fonts(&media);
+            }
+        }
+        self.script_fonts = names;
+        (self.ass).add_fonts(fonts.iter().map(|(n, d)| (n.as_str(), d.as_slice())));
     }
 
     pub fn set_script(&mut self, ass: &str) -> Result<(), String> {
-        self.0.set_script(ass).map_err(|e| e.to_string())
+        self.ass.set_script(ass).map_err(|e| e.to_string())
     }
 
     /// The row's line as libass draws it at `at_ms`, in script pixels around its anchor:
@@ -128,7 +158,7 @@ impl Renderer {
         if self.set_script(&script).is_err() {
             return Vec::new();
         }
-        match self.0.bounds(ms, w as usize, h as usize) {
+        match self.ass.bounds(ms, w as usize, h as usize) {
             Ok(Some(b)) => {
                 let mut out: Vec<f64> = (b.iter().enumerate())
                     .map(|(i, &v)| v as f64 - if i % 2 == 0 { ax } else { ay })
@@ -149,7 +179,7 @@ impl Renderer {
         video_h: usize,
         rgba: &mut [u8],
     ) -> Result<bool, String> {
-        self.0
+        self.ass
             .blend(ms, width, height, (video_w, video_h), rgba)
             .map_err(|e| e.to_string())
     }
@@ -163,7 +193,7 @@ impl Renderer {
         video_h: usize,
         rgba: &mut [u8],
     ) -> Result<bool, String> {
-        self.0
+        self.ass
             .overlay(ms, width, height, (video_w, video_h), rgba)
             .map_err(|e| e.to_string())
     }
@@ -321,7 +351,24 @@ impl Audio {
 
 #[cfg(test)]
 mod tests {
-    use super::Audio;
+    use super::{Audio, Renderer};
+
+    /// A font taken out of [Fonts] makes the renderer start afresh; one added does not.
+    #[test]
+    fn a_removed_script_font_resets_the_renderer() {
+        let mut doc = fs_core::Document::new();
+        doc.attach(true, "a.ttf", b"not really a font");
+        let mut r = Renderer::new().unwrap();
+        r.add_script_fonts(&doc);
+        assert_eq!(r.script_fonts.len(), 1);
+        doc.attach(true, "b.ttf", b"nor this");
+        r.add_script_fonts(&doc);
+        assert_eq!(r.script_fonts.len(), 2);
+        assert!(doc.remove_attachment(true, "a_0.ttf"));
+        r.add_script_fonts(&doc);
+        assert_eq!(r.script_fonts.len(), 1);
+        assert!(r.set_script(&doc.to_ass_string()).is_ok());
+    }
 
     #[test]
     fn save_clip_writes_the_range() {
