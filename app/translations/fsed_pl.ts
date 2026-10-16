@@ -349,6 +349,10 @@
         <source>No audio</source>
         <translation>Brak audio</translation>
     </message>
+    <message>
+        <source>Change karaoke tag to \%1</source>
+        <translation>Zmień tag karaoke na \%1</translation>
+    </message>
 </context>
 <context>
     <name>AutosaveDialog</name>
@@ -2094,6 +2098,22 @@ Macierz kolorów: %12</translation>
     <message>
         <source>Translation assistant keys</source>
         <translation>Klawisze asystenta tłumaczenia</translation>
+    </message>
+    <message>
+        <source>Nothing to undo</source>
+        <translation>Nic do cofnięcia</translation>
+    </message>
+    <message>
+        <source>Undo %1</source>
+        <translation>Cofnij: %1</translation>
+    </message>
+    <message>
+        <source>Nothing to redo</source>
+        <translation>Nic do ponowienia</translation>
+    </message>
+    <message>
+        <source>Redo %1</source>
+        <translation>Ponów: %1</translation>
     </message>
     <message>
         <source>%1 is not a session file</source>
@@ -5642,6 +5662,229 @@ Dopasować rozdzielczość napisów do wideo?</translation>
     <message>
         <source>Current line: %1/%2</source>
         <translation>Bieżąca linijka: %1/%2</translation>
+    </message>
+</context>
+<context>
+    <name>UndoStep</name>
+    <message>
+        <source>Add lines to tree</source>
+        <translation>Dodanie linii do drzewka</translation>
+    </message>
+    <message>
+        <source>Add styles</source>
+        <translation>Dodanie stylów</translation>
+    </message>
+    <message>
+        <source>Attach file</source>
+        <translation>Załączenie pliku</translation>
+    </message>
+    <message>
+        <source>Attach fonts</source>
+        <translation>Załączenie czcionek</translation>
+    </message>
+    <message>
+        <source>Change frame rate</source>
+        <translation>Zmiana klatkażu</translation>
+    </message>
+    <message>
+        <source>Change tags</source>
+        <translation>Zmiana tagów</translation>
+    </message>
+    <message>
+        <source>Close tree</source>
+        <translation>Zwinięcie drzewka</translation>
+    </message>
+    <message>
+        <source>Continuous times</source>
+        <translation>Ciągłe czasy</translation>
+    </message>
+    <message>
+        <source>Convert</source>
+        <translation>Konwersja</translation>
+    </message>
+    <message>
+        <source>Correct minor errors</source>
+        <translation>Poprawa drobnych błędów</translation>
+    </message>
+    <message>
+        <source>Delete attachment</source>
+        <translation>Usunięcie załącznika</translation>
+    </message>
+    <message>
+        <source>Delete lines</source>
+        <translation>Usunięcie linii</translation>
+    </message>
+    <message>
+        <source>Delete styles</source>
+        <translation>Usunięcie stylów</translation>
+    </message>
+    <message>
+        <source>Delete text</source>
+        <translation>Usunięcie tekstu</translation>
+    </message>
+    <message>
+        <source>Delete unused styles</source>
+        <translation>Usunięcie nieużywanych stylów</translation>
+    </message>
+    <message>
+        <source>Duplicate lines</source>
+        <translation>Powielenie linii</translation>
+    </message>
+    <message>
+        <source>Edit line</source>
+        <translation>Edycja linii</translation>
+    </message>
+    <message>
+        <source>Edit style</source>
+        <translation>Edycja stylu</translation>
+    </message>
+    <message>
+        <source>Edit styles</source>
+        <translation>Edycja stylów</translation>
+    </message>
+    <message>
+        <source>Insert line</source>
+        <translation>Wstawienie linii</translation>
+    </message>
+    <message>
+        <source>Join lines</source>
+        <translation>Złączenie linii</translation>
+    </message>
+    <message>
+        <source>Kanji timing</source>
+        <translation>Timing kanji</translation>
+    </message>
+    <message>
+        <source>Karaoke join</source>
+        <translation>Złączenie sylab</translation>
+    </message>
+    <message>
+        <source>Karaoke split</source>
+        <translation>Podział sylaby</translation>
+    </message>
+    <message>
+        <source>Karaoke tag</source>
+        <translation>Tag karaoke</translation>
+    </message>
+    <message>
+        <source>Karaoke timing</source>
+        <translation>Timing karaoke</translation>
+    </message>
+    <message>
+        <source>Make tree</source>
+        <translation>Utworzenie drzewka</translation>
+    </message>
+    <message>
+        <source>Move lines</source>
+        <translation>Przeniesienie linii</translation>
+    </message>
+    <message>
+        <source>Move styles</source>
+        <translation>Przeniesienie stylów</translation>
+    </message>
+    <message>
+        <source>Move translation</source>
+        <translation>Przesunięcie tłumaczenia</translation>
+    </message>
+    <message>
+        <source>Not confirmed</source>
+        <translation>Niepewne tłumaczenie</translation>
+    </message>
+    <message>
+        <source>Open tree</source>
+        <translation>Rozwinięcie drzewka</translation>
+    </message>
+    <message>
+        <source>Paste lines</source>
+        <translation>Wklejenie linii</translation>
+    </message>
+    <message>
+        <source>Paste lines over</source>
+        <translation>Wklejenie na linie</translation>
+    </message>
+    <message>
+        <source>Paste translation</source>
+        <translation>Wklejenie tłumaczenia</translation>
+    </message>
+    <message>
+        <source>Post-process timing</source>
+        <translation>Postprocessor czasów</translation>
+    </message>
+    <message>
+        <source>Recombine lines</source>
+        <translation>Ponowne połączenie linii</translation>
+    </message>
+    <message>
+        <source>Remove tree</source>
+        <translation>Usunięcie drzewka</translation>
+    </message>
+    <message>
+        <source>Replace</source>
+        <translation>Zamiana</translation>
+    </message>
+    <message>
+        <source>Resample resolution</source>
+        <translation>Zmiana rozdzielczości</translation>
+    </message>
+    <message>
+        <source>Set FPS from video</source>
+        <translation>Klatkaż z wideo</translation>
+    </message>
+    <message>
+        <source>Shift positions</source>
+        <translation>Przesunięcie pozycji</translation>
+    </message>
+    <message>
+        <source>Shift times</source>
+        <translation>Przesunięcie czasów</translation>
+    </message>
+    <message>
+        <source>Snap to video</source>
+        <translation>Przyciągnięcie do wideo</translation>
+    </message>
+    <message>
+        <source>Sort lines</source>
+        <translation>Sortowanie linii</translation>
+    </message>
+    <message>
+        <source>Spell check</source>
+        <translation>Sprawdzanie pisowni</translation>
+    </message>
+    <message>
+        <source>Split by karaoke</source>
+        <translation>Podział według karaoke</translation>
+    </message>
+    <message>
+        <source>Split line</source>
+        <translation>Podział linii</translation>
+    </message>
+    <message>
+        <source>Split lines</source>
+        <translation>Podział linii</translation>
+    </message>
+    <message>
+        <source>Swap lines</source>
+        <translation>Zamiana linii miejscami</translation>
+    </message>
+    <message>
+        <source>Translation assistant</source>
+        <translation>Asystent tłumaczenia</translation>
+    </message>
+    <message>
+        <source>Translation mode off</source>
+        <translation>Wyłączenie trybu tłumacza</translation>
+    </message>
+    <message>
+        <source>Translation mode on</source>
+        <translation>Włączenie trybu tłumacza</translation>
+    </message>
+    <message>
+        <source>Vector drawing</source>
+        <translation>Rysunek wektorowy</translation>
+    </message>
+    <message>
+        <source>Visual typesetting</source>
+        <translation>Typesetting wizualny</translation>
     </message>
 </context>
 <context>

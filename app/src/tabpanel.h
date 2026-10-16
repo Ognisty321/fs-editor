@@ -84,6 +84,7 @@ public:
     void setKeyframes(std::vector<std::int64_t> kf);
     void closeKeyframes(); // back to the video's own
     void openTimecodes(const QString &path); // empty: the video's own; applied when a video opens
+    QString timecodesPath() const { return m_timecodesPath; }
     qint64 videoTime() const;
     // where a line starting (ending) on the video frame goes: Aegisub's TimeAtFrame START (END), safe
     // from rounding to centiseconds; videoTime() without video

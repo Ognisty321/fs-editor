@@ -759,6 +759,9 @@ pub mod ffi {
         fn set_undo_limit(self: &mut Session, steps: usize);
         fn can_redo(self: &Session) -> bool;
         fn history(self: &Session) -> Vec<String>;
+        /// The step Undo (Redo) would take back (do again); empty when there is none.
+        fn undo_description(self: &Session) -> String;
+        fn redo_description(self: &Session) -> String;
         fn undo_to(self: &mut Session, steps: usize);
 
         fn styles(self: &Session) -> Vec<StyleData>;
@@ -882,6 +885,9 @@ pub mod ffi {
         fn syllables_of(text: &str, start: i64, end: i64) -> Vec<Syllable>;
         fn kara_split(self: &mut Session, row: usize, syl: usize, char_pos: usize);
         fn kara_join(self: &mut Session, row: usize, syl: usize);
+        /// The karaoke tag of the line's syllables ("k", "kf", "ko"; "" without any) and setting it.
+        fn kara_kind(self: &Session, row: usize) -> String;
+        fn kara_set_kind(self: &mut Session, row: usize, kind: &str);
         fn kara_set_boundary(
             self: &mut Session,
             row: usize,

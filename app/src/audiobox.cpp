@@ -13,6 +13,7 @@
 #include <QHBoxLayout>
 #include <QPointer>
 #include <QKeyEvent>
+#include <QMenu>
 #include <QPainter>
 #include <QRegularExpression>
 #include <QScrollBar>
@@ -349,6 +350,26 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
                 }
                 return;
             }
+        }
+        // a right click on the syllables changes their karaoke tag (Aegisub's karaoke bar menu)
+        if (y < RulerH + karaH() && e->button() == Qt::RightButton) {
+            const size_t row = size_t(b.m_tab->active());
+            const QString now = fs::q(b.m_tab->s().kara_kind(row));
+            QMenu menu(this);
+            for (const char *kind : {"k", "kf", "ko"}) {
+                QAction *a = menu.addAction(tr("Change karaoke tag to \\%1").arg(kind));
+                a->setCheckable(true);
+                a->setChecked(now == kind);
+                a->setData(QString(kind));
+            }
+            m_button = Qt::NoButton;
+            if (const QAction *a = menu.exec(e->globalPosition().toPoint())) {
+                b.writeProposedSplit();
+                b.m_tab->s().kara_set_kind(row, fs::Utf8(a->data().toString()));
+                b.m_tab->changed(TabPanel::FromAudio);
+                b.karaokeChanged();
+            }
+            return;
         }
         for (size_t k = 0; k < b.m_syl.size(); ++k)
             if (t >= b.m_syl[k].start && t < b.m_syl[k].end) b.m_activeSyl = int(k);

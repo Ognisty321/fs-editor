@@ -2564,6 +2564,14 @@ impl Session {
         self.ed.undo_list().map(str::to_string).collect()
     }
 
+    pub fn undo_description(&self) -> String {
+        self.ed.undo_description().unwrap_or_default().to_string()
+    }
+
+    pub fn redo_description(&self) -> String {
+        self.ed.redo_description().unwrap_or_default().to_string()
+    }
+
     pub fn undo_to(&mut self, steps: usize) {
         for _ in 0..steps {
             if !self.undo_step() {
@@ -3258,6 +3266,22 @@ impl Session {
 
     pub fn kara_join(&mut self, row: usize, syl: usize) {
         self.kara_edit(row, "Karaoke join", "", |k| k.join(syl));
+    }
+
+    pub fn kara_kind(&self, row: usize) -> String {
+        self.kara(row)
+            .and_then(|(_, k)| k.syls.first().map(|s| s.kind.clone()))
+            .unwrap_or_default()
+    }
+
+    /// Every syllable's tag becomes `kind` (Aegisub's karaoke bar menu).
+    pub fn kara_set_kind(&mut self, row: usize, kind: &str) {
+        let same = self
+            .kara(row)
+            .is_none_or(|(_, k)| k.syls.iter().all(|s| s.kind == kind));
+        if !same {
+            self.kara_edit(row, "Karaoke tag", "", |k| k.set_kind(kind));
+        }
     }
 
     /// Move syllable boundary `index` (1..n-1) to `ms`; `shift_rest` moves
@@ -5049,6 +5073,13 @@ mod tests {
         s.kara_set_times(2, 4800, 6200, "");
         assert_eq!(s.row(2).text, "{\\k50}a{\\k20}b{\\k70}c");
         assert_eq!((s.row(2).start, s.row(2).end), (4800, 6200));
+        // the tag of every syllable, one undo step; the same tag again changes nothing
+        assert_eq!(s.kara_kind(2), "k");
+        s.kara_set_kind(2, "kf");
+        assert_eq!(s.row(2).text, "{\\kf50}a{\\kf20}b{\\kf70}c");
+        s.kara_set_kind(2, "kf");
+        assert!(s.undo());
+        assert_eq!(s.kara_kind(2), "k");
         // a line without karaoke keeps its text
         s.kara_set_times(1, 2900, 4000, "");
         assert_eq!((s.row(1).text.as_str(), s.row(1).start), ("two", 2900));

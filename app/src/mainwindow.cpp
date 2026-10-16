@@ -494,6 +494,12 @@ TabPanel *MainWindow::newTab() {
     connect(tab->video(), &VideoBox::opened, this, [this, tab] { // video opens in the background
         if (tab == current()) updateActions();
     });
+    connect(tab->audio(), &AudioBox::opened, this, [this, tab] {
+        if (tab == current()) updateActions();
+    });
+    connect(tab, &TabPanel::titleChanged, this, [this, tab] { // every change: Undo's step
+        if (tab == current()) updateActions();
+    });
     m_tabs->setCurrentIndex(i);
     refreshTitle();
     return tab;
@@ -596,6 +602,12 @@ void showHotkey(QAction *a) {
     a->setToolTip(key.isEmpty() ? a->text() : QString("%1 (%2)").arg(a->text(), key));
 }
 
+// the command's own name: a menu text may say more (Undo's step)
+QString commandName(const QAction *a) {
+    const QVariant name = a->property("name");
+    return (name.isValid() ? name.toString() : a->text()).remove('&');
+}
+
 QList<QKeySequence> defaultKeys(const QAction *a) {
     const auto k = a->property("defaultKey").value<QKeySequence>();
     return k.isEmpty() ? QList<QKeySequence>{} : QList{k};
@@ -636,6 +648,8 @@ void MainWindow::buildMenus() {
     auto menu = [this, mb](const QString &title) {
         auto *m = mb->addMenu(title);
         m->installEventFilter(this);
+        // what can run now, and Undo's step, as Aegisub validates its menus when they open
+        connect(m, &QMenu::aboutToShow, this, &MainWindow::updateActions);
         return m;
     };
     auto sub = [this](QMenu *parent, const QString &title) {
@@ -1212,6 +1226,7 @@ void MainWindow::buildMenus() {
     });
     add("closeKeyframes", tr("Close keyframes"), {}, video, [=, this] {
         tab()->closeKeyframes(); // back to the video's own, like Aegisub
+        updateActions();
     });
     // Aegisub's timecodes: override the video's frame times (VFR typesetting on a CFR encode)
     add("openTimecodes", tr("Open timecodes..."), {}, video, [=, this] {
@@ -1233,7 +1248,10 @@ void MainWindow::buildMenus() {
             QMessageBox::warning(this, tr("Save timecodes"), QString::fromUtf8(e.what()));
         }
     });
-    add("closeTimecodes", tr("Close timecodes"), {}, video, [=] { tab()->openTimecodes({}); });
+    add("closeTimecodes", tr("Close timecodes"), {}, video, [=, this] {
+        tab()->openTimecodes({});
+        updateActions();
+    });
     add("openDummy", tr("Open dummy video"), {}, video, [=, this] {
         QDialog d(this);
         d.setWindowTitle(tr("Dummy video"));
@@ -1501,7 +1519,10 @@ void MainWindow::buildMenus() {
     add("blankAudio", tr("Open blank 2h30m audio"), {}, audio, [=] { tab()->openBlankAudio(150LL * 60 * 1000); });
     // Aegisub's audio/open/noise
     add("noiseAudio", tr("Open 2h30m noise audio"), {}, audio, [=] { tab()->openBlankAudio(150LL * 60 * 1000, true); });
-    add("closeAudio", tr("Close audio"), {}, audio, [=] { tab()->closeAudio(); });
+    add("closeAudio", tr("Close audio"), {}, audio, [=, this] {
+        tab()->closeAudio();
+        updateActions();
+    });
     // Aegisub's audio/view/spectrum|waveform
     add("audioSpectrum", tr("Spectrum display"), {}, audio, [=] { tab()->audio()->setSpectrum(true); });
     add("audioWaveform", tr("Waveform display"), {}, audio, [=] { tab()->audio()->setSpectrum(false); });
@@ -2078,7 +2099,7 @@ void MainWindow::buildToolbar() {
             menu->addSeparator();
             for (auto it = m_actions.cbegin(); it != m_actions.cend(); ++it) {
                 if (it.key().startsWith("macro:")) continue;
-                auto *a = menu->addAction(it.value()->icon(), QString(it.value()->text()).remove('&'));
+                auto *a = menu->addAction(it.value()->icon(), commandName(it.value()));
                 a->setCheckable(true);
                 a->setChecked(ids.contains(it.key()));
                 connect(a, &QAction::toggled, this, [this, id = it.key()](bool on) {
@@ -2300,6 +2321,20 @@ void MainWindow::updateActions() {
     for (const char *id : {"recombine", "splitKaraoke"}) action(id)->setEnabled(!fi.tl_mode);
     action("subsFromVideo")->setEnabled(!tab->video()->path().isEmpty());
     action("closeVideo")->setEnabled(tab->video()->hasVideo());
+    action("videoDetails")->setEnabled(tab->video()->hasVideo());
+    for (const char *id : {"closeAudio", "saveAudioClip"}) action(id)->setEnabled(tab->audio()->hasAudio());
+    for (const char *id : {"saveKeyframes", "closeKeyframes"}) action(id)->setEnabled(!tab->keyframes().empty());
+    action("saveTimecodes")->setEnabled(tab->video()->timecodes().size() >= 2);
+    action("closeTimecodes")->setEnabled(!tab->timecodesPath().isEmpty());
+    // Aegisub's "Undo <step>" / "Nothing to undo"
+    const QString undo = undoStepName(fs::q(tab->s().undo_description()));
+    const QString redo = undoStepName(fs::q(tab->s().redo_description()));
+    action("undo")->setText(undo.isEmpty() ? tr("Nothing to undo") : tr("Undo %1").arg(undo));
+    action("undo")->setEnabled(!undo.isEmpty());
+    action("redo")->setText(redo.isEmpty() ? tr("Nothing to redo") : tr("Redo %1").arg(redo));
+    action("redo")->setEnabled(!redo.isEmpty());
+    action("undoToSave")->setEnabled(tab->modified() && !undo.isEmpty());
+    for (const char *id : {"undo", "redo"}) showHotkey(action(id));
     const char *views[] = {"viewAll", "viewVideoSubs", "viewAudioSubs", "viewOnlyVideo", "viewOnlySubs"};
     action(views[std::clamp(tab->viewMode() - 1, 0, 4)])->setChecked(true);
     action("editor")->setChecked(!tab->playerMode());
@@ -2367,7 +2402,7 @@ void MainWindow::dropEvent(QDropEvent *e) {
 
 void MainWindow::assignHotkey(QAction *a) {
     QDialog d(this);
-    d.setWindowTitle(tr("Hotkey for \"%1\"").arg(QString(a->text()).remove('&')));
+    d.setWindowTitle(tr("Hotkey for \"%1\"").arg(commandName(a)));
     auto *v = new QVBoxLayout(&d);
     v->addWidget(new QLabel(tr("Each of these keys runs the command:"), &d));
     auto *rows = new QVBoxLayout;
@@ -2419,7 +2454,7 @@ bool MainWindow::setHotkey(QAction *a, const QList<QKeySequence> &keys) {
             // the audio's keys and the window's are apart
             if (other == a || !other->shortcuts().contains(key) || other->property("context") != a->property("context"))
                 continue;
-            if (!confirm(tr("%1 is used by \"%2\". Take it over?").arg(key.toString(), QString(other->text()).remove('&'))))
+            if (!confirm(tr("%1 is used by \"%2\". Take it over?").arg(key.toString(), commandName(other))))
                 return false;
             auto left = other->shortcuts();
             left.removeAll(key);
@@ -2458,7 +2493,7 @@ void MainWindow::editHotkeys() {
                 menu = QString(m->title()).remove('&');
                 break;
             }
-        auto *it = new QTreeWidgetItem(list, {QString(a->text()).remove('&'), menu});
+        auto *it = new QTreeWidgetItem(list, {commandName(a), menu});
         it->setIcon(0, a->icon().isNull() ? QIcon(blank) : a->icon());
         it->setData(0, Qt::UserRole, QVariant::fromValue(a));
     }

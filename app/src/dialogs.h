@@ -176,6 +176,9 @@ private:
     QCheckBox *m_scaled;
 };
 
+// An undo step's description as the user reads it: the core's steps translated, a macro's name as it is
+QString undoStepName(const QString &description);
+
 class HistoryDialog : public QDialog {
     Q_OBJECT
 public:
