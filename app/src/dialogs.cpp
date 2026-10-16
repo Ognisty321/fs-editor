@@ -2215,6 +2215,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
          editor},
         {"main/saveOnChange", QT_TR_NOOP("Save the file after every change"), false, editor},
         {"edit/syntax", QT_TR_NOOP("Syntax highlighting in the edit box"), true, editor},
+        {"edit/callTips", QT_TR_NOOP("Call tips: the parameters of the tag at the cursor"), false, editor},
         {"edit/softBreak", QT_TR_NOOP("Shift+Enter adds \\n"), false, editor},
         {"subs/defaultResAuto", QT_TR_NOOP("New files use the resolution of the first video opened"), true, subs},
         {"subs/cpsIgnoreWhitespace", QT_TR_NOOP("Ignore whitespace in characters per second"), true, subs},

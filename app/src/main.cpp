@@ -25,6 +25,7 @@
 #include <QTabBar>
 #include <QTextEdit>
 #include <QTimer>
+#include <QPainter>
 #include <QTranslator>
 #include <QUrl>
 #include <QWheelEvent>
@@ -384,8 +385,17 @@ int main(int argc, char **argv) {
         });
     if (const QString out = qEnvironmentVariable("FSED_SMOKE"); !out.isEmpty())
         QTimer::singleShot(std::max(1000, qEnvironmentVariableIntValue("FSED_SMOKE_MS")), &w, [&w, out] {
-            QWidget *top = smokeDialog(w);
-            (top ? top : &w)->grab().save(out);
+            QWidget *shot = smokeDialog(w);
+            if (!shot) shot = &w;
+            QPixmap px = shot->grab();
+            {
+                // tool tips and popups are windows of their own: drawn where they are over it
+                QPainter p(&px);
+                for (QWidget *pop : QApplication::topLevelWidgets())
+                    if (pop->isVisible() && (pop->windowType() == Qt::ToolTip || pop->windowType() == Qt::Popup))
+                        p.drawPixmap(pop->mapToGlobal(QPoint()) - shot->mapToGlobal(QPoint()), pop->grab());
+            }
+            px.save(out);
             QApplication::exit(0);
         });
     const int rc = app.exec();

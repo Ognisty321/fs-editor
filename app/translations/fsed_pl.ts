@@ -3596,6 +3596,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Podświetlanie składni w polu edycji</translation>
     </message>
     <message>
+        <source>Call tips: the parameters of the tag at the cursor</source>
+        <translation>Podpowiedzi parametrów tagu pod kursorem</translation>
+    </message>
+    <message>
         <source>Shift+Enter adds \n</source>
         <translation>Shift+Enter wstawia \n</translation>
     </message>
@@ -6022,6 +6026,10 @@ albo nie trwa wcale</translation>
     <message>
         <source>Error background</source>
         <translation>Tło błędów</translation>
+    </message>
+    <message>
+        <source>Matching brackets background</source>
+        <translation>Tło pasujących nawiasów</translation>
     </message>
     <message>
         <source>Modified selection</source>

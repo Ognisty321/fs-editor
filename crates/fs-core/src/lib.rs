@@ -3,6 +3,7 @@
 
 pub mod ass;
 pub mod attachments;
+pub mod calltip;
 pub mod color;
 pub mod fonts;
 pub mod history;

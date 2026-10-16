@@ -952,6 +952,9 @@ pub mod ffi {
         /// Aegisub's syntax highlighting as flat [style, len, ...], len in UTF-16 units; style is
         /// fs_core::syntax::Style's number; template_line: a karaoke template line.
         fn syntax_styles(text: &str, template_line: bool) -> Vec<u32>;
+        /// Aegisub's call tip at `pos` (UTF-16 units): `[start, end, tag position]`, the
+        /// parameter's range in the tip and where the tag's name starts; empty when there is none.
+        fn calltip(text: &str, pos: usize, tip: &mut String) -> Vec<usize>;
         /// What characters per second leaves out (both by default).
         fn set_cps_ignore(whitespace: bool, punctuation: bool);
 
@@ -1155,6 +1158,26 @@ fn syntax_styles(text: &str, template_line: bool) -> Vec<u32> {
         at += len;
     }
     out
+}
+
+fn calltip(text: &str, pos: usize, tip: &mut String) -> Vec<usize> {
+    let mut u16s = 0;
+    let byte = text
+        .char_indices()
+        .find(|&(_, c)| {
+            u16s += c.len_utf16();
+            u16s > pos
+        })
+        .map_or(text.len(), |(i, _)| i);
+    let Some(c) = fs_core::calltip::calltip(text, byte) else {
+        return Vec::new();
+    };
+    *tip = c.text.to_owned(); // ASCII: its bytes are its UTF-16 units
+    vec![
+        c.highlight.start,
+        c.highlight.end,
+        text[..c.tag_pos].encode_utf16().count(),
+    ]
 }
 
 fn translatable_blocks(text: &str) -> Vec<u32> {

@@ -28,7 +28,7 @@ pub enum Style {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Tok {
+pub(crate) enum Tok {
     Text,
     LineBreak,
     OvrBegin,
@@ -53,9 +53,9 @@ enum Tok {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Token {
-    ty: Tok,
-    len: usize,
+pub(crate) struct Token {
+    pub ty: Tok,
+    pub len: usize,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -91,7 +91,7 @@ fn templater(s: &[u8]) -> Option<(Tok, usize)> {
 
 /// The lexer: each step takes the longest of the rules of the state it is in, the first rule on a
 /// tie; neighbouring tokens of one type are one token.
-fn tokenize(text: &str, template: bool) -> Vec<Token> {
+pub(crate) fn tokenize(text: &str, template: bool) -> Vec<Token> {
     use Tok::*;
     let b = text.as_bytes();
     let mut out: Vec<Token> = Vec::new();

@@ -461,6 +461,72 @@ SubsTextEdit::SubsTextEdit(QWidget *parent) : QPlainTextEdit(parent) {
         cur.insertText(c);
         setTextCursor(cur);
     });
+    connect(this, &QPlainTextEdit::cursorPositionChanged, this, &SubsTextEdit::updateCalltip);
+    connect(this, &QPlainTextEdit::cursorPositionChanged, this, &SubsTextEdit::matchBraces);
+}
+
+// Kainote's brace matching: the bracket at the cursor, else the one just before it, and its pair
+void SubsTextEdit::matchBraces() {
+    QList<QTextEdit::ExtraSelection> marks;
+    const QString t = toPlainText();
+    const int at = textCursor().position();
+    static const QString opening = "{(", closing = "})";
+    for (const int p : {at, at - 1}) {
+        if (p < 0 || p >= t.size()) continue;
+        const int o = int(opening.indexOf(t[p])), c = int(closing.indexOf(t[p]));
+        if (o < 0 && c < 0) continue;
+        const QChar other = o >= 0 ? closing[o] : opening[c];
+        const int step = o >= 0 ? 1 : -1;
+        int q = p;
+        for (int depth = 0; q >= 0 && q < t.size(); q += step)
+            if (t[q] == t[p]) ++depth;
+            else if (t[q] == other && --depth == 0) break;
+        if (q >= 0 && q < t.size())
+            for (const int m : {p, q}) {
+                QTextEdit::ExtraSelection s;
+                s.cursor = QTextCursor(document());
+                s.cursor.setPosition(m);
+                s.cursor.setPosition(m + 1, QTextCursor::KeepAnchor);
+                s.format.setBackground(theme::color(theme::SyntaxBraces));
+                marks << s;
+            }
+        break;
+    }
+    setExtraSelections(marks);
+}
+
+// Aegisub's call tips: the tag's parameters under it, the one at the cursor in bold
+void SubsTextEdit::updateCalltip() {
+    rust::String tip;
+    const auto r = hasFocus() && QSettings().value("edit/callTips", false).toBool()
+                       ? fsb::calltip(fs::Utf8(toPlainText()), size_t(textCursor().position()), tip)
+                       : rust::Vec<size_t>{};
+    if (r.empty()) {
+        if (m_calltip) m_calltip->hide();
+        return;
+    }
+    if (!m_calltip) {
+        m_calltip = new QLabel(this, Qt::ToolTip);
+        m_calltip->setTextFormat(Qt::RichText);
+        m_calltip->setForegroundRole(QPalette::ToolTipText);
+        m_calltip->setBackgroundRole(QPalette::ToolTipBase);
+        m_calltip->setAutoFillBackground(true);
+        m_calltip->setMargin(3);
+    }
+    const QString p = fs::q(tip);
+    const int a = int(r[0]), b = int(r[1]);
+    m_calltip->setText("<nobr>" + p.left(a).toHtmlEscaped() + "<b>" + p.mid(a, b - a).toHtmlEscaped() + "</b>" +
+                       p.mid(b).toHtmlEscaped() + "</nobr>");
+    m_calltip->adjustSize();
+    QTextCursor slash(document());
+    slash.setPosition(int(r[2]) - 1);
+    m_calltip->move(viewport()->mapToGlobal(cursorRect(slash).bottomLeft() + QPoint(0, 2)));
+    m_calltip->show();
+}
+
+void SubsTextEdit::focusOutEvent(QFocusEvent *e) {
+    if (m_calltip) m_calltip->hide();
+    QPlainTextEdit::focusOutEvent(e);
 }
 
 void SubsTextEdit::setText(const QString &t) {

@@ -87,8 +87,12 @@ protected:
     void keyPressEvent(QKeyEvent *) override;
     void contextMenuEvent(QContextMenuEvent *) override;
     void wheelEvent(QWheelEvent *) override;
+    void focusOutEvent(QFocusEvent *) override;
 private:
     std::pair<int, int> blockAt(int pos) const;
+    void updateCalltip();
+    void matchBraces();
+    QLabel *m_calltip = nullptr;
     QCompleter *m_completer;
     QSyntaxHighlighter *m_highlighter;
     bool m_templateLine = false;

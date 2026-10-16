@@ -50,6 +50,7 @@ enum Role : int {
     SyntaxBackground,
     SyntaxErrorBackground,
     SyntaxMisspelled,
+    SyntaxBraces, // Kainote's matching brackets' background
     AudioBackground,
     AudioSelection,
     AudioSelectionModified,
