@@ -1359,6 +1359,11 @@ void MainWindow::buildMenus() {
     add("audioWaveform", tr("Waveform display"), {}, audio, [=] { tab()->audio()->setSpectrum(false); });
     panelKeys(sub(audio, tr("Timing keys")), AudioBox::keys(), "AudioBox",
               [=](const char *id) { tab()->audio()->runCommand(id); });
+    // Aegisub's app/toggle/global_hotkeys
+    auto *medusa = add("medusaMode", tr("Timing keys anywhere (Medusa mode)"), {}, audio, {});
+    medusa->setCheckable(true);
+    medusa->setChecked(m_medusa = QSettings().value("audio/medusa").toBool());
+    connect(medusa, &QAction::toggled, this, [this](bool on) { QSettings().setValue("audio/medusa", m_medusa = on); });
     // Aegisub's audio/save/clip: from the earliest start to the latest end of the selected lines
     add("saveAudioClip", tr("Save audio clip..."), {}, audio, [=, this] {
         auto *a = tab()->audio()->source();
@@ -2334,7 +2339,23 @@ bool MainWindow::eventFilter(QObject *o, QEvent *e) {
             if (i >= 0) QTimer::singleShot(0, this, [this, i] { closeTab(i); });
             return true;
         }
-    } else if (e->type() == QEvent::ShortcutOverride) {
+    }
+    // Medusa mode: the audio's keys that type nothing (the keypad's, with Ctrl or Alt, F keys) time
+    // the line from anywhere outside the video and audio, which keep their own keys
+    if ((e->type() == QEvent::ShortcutOverride || e->type() == QEvent::KeyPress) && m_medusa && current() &&
+        !dynamic_cast<VideoView *>(o) && !dynamic_cast<AudioView *>(o)) {
+        auto *ke = static_cast<QKeyEvent *>(e);
+        auto *w = qobject_cast<QWidget *>(o);
+        const bool typesNothing = (ke->modifiers() & (Qt::KeypadModifier | Qt::ControlModifier | Qt::AltModifier)) ||
+                                  (ke->key() >= Qt::Key_F1 && ke->key() <= Qt::Key_F35);
+        if (w && w->window() == this && typesNothing && current()->audio()->hasAudio())
+            if (const char *id = panelCommand(ke, AudioBox::keys())) {
+                if (e->type() == QEvent::KeyPress) current()->audio()->runCommand(id);
+                e->accept();
+                return true;
+            }
+    }
+    if (e->type() == QEvent::ShortcutOverride) {
         auto *ke = static_cast<QKeyEvent *>(e);
         const auto mods = ke->modifiers() & ~Qt::KeypadModifier;
         const int k = ke->key();

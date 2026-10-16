@@ -102,6 +102,7 @@ private:
     QWidget *m_right = nullptr;
     QPointer<TabPanel> m_second, m_prev;
     bool m_compareOn = false;
+    bool m_medusa = false; // the audio's timing keys work anywhere in the window (Aegisub's Medusa mode)
     class QTimer *m_compareLater = nullptr; // edits rerun the comparison once typing pauses
     QToolBar *m_toolbar = nullptr;
     QMenu *m_automationMenu = nullptr;
