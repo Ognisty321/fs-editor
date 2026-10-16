@@ -1609,6 +1609,16 @@ void MainWindow::buildMenus() {
     add("stylingAssistant", tr("Styling assistant..."), {}, subs, [=, this] {
         if (tab()->s().row_count()) (new StylingAssistant(this, tab()))->show();
     });
+    // Aegisub's tool/translation_assistant, one at a time; its keys run in it while it is open
+    add("translationAssistant", tr("Translation assistant..."), {}, subs, [=, this] {
+        if (auto *d = findChild<TranslationAssistant *>()) return d->raise(), d->activateWindow();
+        auto *d = new TranslationAssistant(this, tab());
+        if (d->start()) d->show();
+    });
+    panelKeys(sub(subs, tr("Translation assistant keys")), TranslationAssistant::keys(), "TranslationAssistant",
+              [=, this](const char *id) {
+                  if (auto *d = findChild<TranslationAssistant *>()) d->runCommand(id);
+              });
     // Kainote's window for lining a pasted translation up with the timed original; non-modal,
     // it acts on the grid selection
     add("translationMatching", tr("Translation matching..."), {}, subs, [this] {

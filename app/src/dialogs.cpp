@@ -54,6 +54,7 @@
 #include <QTabWidget>
 #include <QtConcurrentRun>
 #include <QTemporaryDir>
+#include <QTextCursor>
 #include <QTimer>
 #include <QMenu>
 #include <QToolButton>
@@ -3039,6 +3040,219 @@ void KanjiTimerDialog::done(int r) {
         m_changes.clear();
     }
     QDialog::done(r);
+}
+
+static const PanelKey kTranslationKeys[] = {
+    {"tlCommit", QT_TRANSLATE_NOOP("TranslationAssistant", "Accept changes"), "Return"},
+    {"tlPreview", QT_TRANSLATE_NOOP("TranslationAssistant", "Preview changes"), "F8"},
+    {"tlPrev", QT_TRANSLATE_NOOP("TranslationAssistant", "Previous line"), "PgUp"},
+    {"tlNext", QT_TRANSLATE_NOOP("TranslationAssistant", "Next line"), "PgDown"},
+    {"tlInsertOriginal", QT_TRANSLATE_NOOP("TranslationAssistant", "Insert original"), "Ins"},
+    {"tlPlayVideo", QT_TRANSLATE_NOOP("TranslationAssistant", "Play video"), "Home"},
+    {"tlPlayAudio", QT_TRANSLATE_NOOP("TranslationAssistant", "Play audio"), "End"},
+};
+
+std::span<const PanelKey> TranslationAssistant::keys() { return kTranslationKeys; }
+
+TranslationAssistant::TranslationAssistant(MainWindow *main, TabPanel *tab) : QDialog(main), m_main(main), m_tab(tab) {
+    setWindowTitle(tr("Translation assistant"));
+    setAttribute(Qt::WA_DeleteOnClose);
+    auto *v = new QVBoxLayout(this);
+    auto *original = new QGroupBox(tr("Original"), this);
+    auto *ov = new QVBoxLayout(original);
+    m_lineNo = new QLabel(original);
+    m_original = new QPlainTextEdit(original);
+    m_original->setReadOnly(true);
+    ov->addWidget(m_lineNo);
+    ov->addWidget(m_original);
+    auto *translated = new QGroupBox(tr("Translation"), this);
+    auto *tv = new QVBoxLayout(translated);
+    m_translation = new SubsTextEdit(translated);
+    m_translation->installEventFilter(this);
+    tv->addWidget(m_translation);
+    v->addWidget(original, 1);
+    v->addWidget(translated, 1);
+
+    auto *h = new QHBoxLayout;
+    auto *keysBox = new QGroupBox(tr("Keys"), this);
+    auto *kv = new QFormLayout(keysBox);
+    m_preview = new QCheckBox(tr("Enable preview"), keysBox);
+    m_preview->setChecked(QSettings().value("translation/preview", true).toBool());
+    connect(m_preview, &QCheckBox::toggled, this, [](bool on) { QSettings().setValue("translation/preview", on); });
+    // the keys as bound now, with the window's Delete lines (Aegisub lists its edit/line/delete)
+    const auto keyOf = [main](const char *id) {
+        const QAction *a = main->action(id);
+        return a ? a->shortcut().toString(QKeySequence::NativeText) : QString();
+    };
+    for (const auto &k : kTranslationKeys)
+        kv->addRow(QCoreApplication::translate("TranslationAssistant", k.name), new QLabel(keyOf(k.id), keysBox));
+    kv->addRow(tr("Delete line"), new QLabel(keyOf("deleteLines"), keysBox));
+    kv->addRow(m_preview);
+    h->addWidget(keysBox, 1);
+    auto *actions = new QGroupBox(tr("Actions"), this);
+    auto *av = new QVBoxLayout(actions);
+    auto *playAudio = new QPushButton(tr("Play audio"), actions), *playVideo = new QPushButton(tr("Play video"), actions);
+    playAudio->setEnabled(tab->audio()->hasAudio());
+    playVideo->setEnabled(tab->video()->hasVideo());
+    for (auto *b : {playAudio, playVideo}) {
+        b->setAutoDefault(false);
+        av->addWidget(b);
+    }
+    av->addStretch();
+    h->addWidget(actions);
+    v->addLayout(h);
+    auto *close = new QPushButton(tr("Close"), this);
+    close->setAutoDefault(false);
+    v->addWidget(close, 0, Qt::AlignRight);
+    connect(close, &QPushButton::clicked, this, &QDialog::close);
+    connect(playAudio, &QPushButton::clicked, this, [this] { runCommand("tlPlayAudio"); });
+    connect(playVideo, &QPushButton::clicked, this, [this] { runCommand("tlPlayVideo"); });
+    resize(480, 420);
+
+    connect(tab, &TabPanel::activeChanged, this, [this] {
+        if (!m_busy) lineChanged();
+    });
+    connect(tab, &TabPanel::docChanged, this, [this] {
+        if (!m_busy) lineChanged(); // Aegisub starts the line over when its text changes elsewhere
+    });
+}
+
+std::vector<uint32_t> TranslationAssistant::blocks() const {
+    const auto b = fsb::translatable_blocks(m_tab->s().row(size_t(m_row)).text);
+    return {b.begin(), b.end()};
+}
+
+bool TranslationAssistant::start() {
+    m_row = std::max(0, m_tab->active());
+    m_block = 0;
+    if ((m_tab->s().row_count() && !blocks().empty()) || step(1)) {
+        display();
+        return true;
+    }
+    QMessageBox::information(m_main, windowTitle(), tr("There is nothing to translate in the file."));
+    close();
+    return false;
+}
+
+bool TranslationAssistant::step(int dir) {
+    const int n = int(m_tab->s().row_count());
+    if (const int count = int(blocks().size() / 2); m_block + dir >= 0 && m_block + dir < count) {
+        m_block += dir;
+        return true;
+    }
+    for (int r = m_row + dir; r >= 0 && r < n; r += dir) {
+        const auto b = fsb::translatable_blocks(m_tab->s().row(size_t(r)).text);
+        if (b.empty()) continue;
+        m_row = r;
+        m_block = dir > 0 ? 0 : int(b.size() / 2) - 1;
+        m_busy = true;
+        m_tab->setActive(r);
+        m_busy = false;
+        return true;
+    }
+    return false;
+}
+
+void TranslationAssistant::lineChanged() {
+    if (!m_tab || m_tab->active() < 0) return;
+    m_row = m_tab->active();
+    m_block = 0;
+    if (!blocks().empty() || step(1)) return display();
+    QMessageBox::information(this, windowTitle(), tr("No more lines to translate."));
+    close();
+}
+
+void TranslationAssistant::display() {
+    const auto b = blocks();
+    const QString text = fs::q(m_tab->s().row(size_t(m_row)).text);
+    m_lineNo->setText(tr("Current line: %1/%2").arg(m_row + 1).arg(m_tab->s().row_count()));
+    m_original->setCurrentCharFormat({}); // the last highlight would carry over to the whole text
+    m_original->setPlainText(text);
+    if (size_t(m_block) * 2 + 1 < b.size()) {
+        QTextCursor c(m_original->document());
+        c.setPosition(int(b[m_block * 2]));
+        c.setPosition(int(b[m_block * 2] + b[m_block * 2 + 1]), QTextCursor::KeepAnchor);
+        QTextCharFormat f;
+        f.setFontWeight(QFont::Bold);
+        f.setForeground(palette().color(QPalette::Link));
+        c.mergeCharFormat(f);
+        c.clearSelection();
+        m_original->setTextCursor(c);
+        m_original->ensureCursorVisible();
+    }
+    if (m_preview->isChecked()) m_tab->seekVideo(m_tab->s().row(size_t(m_row)).start);
+    m_translation->setText({});
+    m_translation->setFocus();
+}
+
+void TranslationAssistant::commit(bool next) {
+    const auto b = blocks();
+    if (size_t(m_block) * 2 + 1 >= b.size()) return lineChanged();
+    QString value = m_translation->text();
+    value.replace("\r\n", "\\N").replace('\r', "\\N").replace('\n', "\\N");
+    QString text = fs::q(m_tab->s().row(size_t(m_row)).text);
+    text.replace(int(b[m_block * 2]), int(b[m_block * 2 + 1]), value);
+    const std::vector<size_t> rows{size_t(m_row)};
+    const auto t = fs::rvec({text});
+    m_busy = true;
+    m_tab->s().set_texts(fs::slice(rows), {t.data(), t.size()}, "Translation assistant");
+    m_tab->changed();
+    m_busy = false;
+    if (!next) {
+        if (blocks().empty()) return lineChanged(); // the block went with the text typed in its place
+        m_block = std::min(m_block, int(blocks().size() / 2) - 1);
+        return display();
+    }
+    // the block replaced may now be none or several: go on after what was typed
+    const auto now = blocks();
+    const uint32_t end = b[m_block * 2] + uint32_t(value.size());
+    m_block = -1;
+    for (size_t k = 0; k + 1 < now.size(); k += 2)
+        if (now[k] + now[k + 1] <= end) m_block = int(k / 2);
+    if (step(1)) return display();
+    QMessageBox::information(this, windowTitle(), tr("No more lines to translate."));
+    close();
+}
+
+void TranslationAssistant::runCommand(const QString &id) {
+    if (!m_tab) {
+        close();
+        return;
+    }
+    if (id == "tlCommit") commit(true);
+    else if (id == "tlPreview") commit(false);
+    else if (id == "tlNext" || id == "tlPrev") {
+        if (step(id == "tlNext" ? 1 : -1)) display();
+    } else if (id == "tlInsertOriginal") {
+        const auto b = blocks();
+        if (size_t(m_block) * 2 + 1 < b.size())
+            m_translation->insertPlainText(fs::q(m_tab->s().row(size_t(m_row)).text).mid(int(b[m_block * 2]), int(b[m_block * 2 + 1])));
+    } else if (id == "tlPlayVideo") {
+        m_tab->playLine(m_row);
+    } else if (id == "tlPlayAudio") {
+        const fsb::Row r = m_tab->s().row(size_t(m_row));
+        m_tab->audio()->play(r.start, r.end);
+    }
+    if (isVisible()) m_translation->setFocus();
+}
+
+bool TranslationAssistant::eventFilter(QObject *o, QEvent *e) {
+    if (o == m_translation && (e->type() == QEvent::KeyPress || e->type() == QEvent::ShortcutOverride)) {
+        auto *ke = static_cast<QKeyEvent *>(e);
+        const char *id = m_main->panelCommand(ke, keys());
+        // Shift+Enter breaks the line, as \N when committed (Aegisub)
+        const bool lineBreak = !id && (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter) &&
+                               (ke->modifiers() & Qt::ShiftModifier);
+        if (id || lineBreak) {
+            e->accept();
+            if (e->type() == QEvent::KeyPress) {
+                if (id) runCommand(id);
+                else m_translation->insertPlainText("\\N");
+            }
+            return true;
+        }
+    }
+    return QDialog::eventFilter(o, e);
 }
 
 StylingAssistant::StylingAssistant(QWidget *parent, TabPanel *tab) : QDialog(parent), m_tab(tab) {

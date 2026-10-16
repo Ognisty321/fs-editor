@@ -858,6 +858,9 @@ pub mod ffi {
         fn fmt_time(ms: i64) -> String;
         fn parse_time(s: &str) -> i64;
         fn strip_tags(s: &str) -> String;
+        /// The line's text to translate as UTF-16 start and length pairs: its plain text
+        /// blocks, without tags, comments, drawings or blocks of only whitespace.
+        fn translatable_blocks(text: &str) -> Vec<u32>;
         /// Keyframe frame numbers from an XviD/Aegisub/… keyframes file.
         fn load_keyframes(path: &str) -> Result<Vec<i64>>;
         /// Write keyframes in Aegisub's v1 format.
@@ -1120,6 +1123,13 @@ fn syntax_styles(text: &str, template_line: bool) -> Vec<u32> {
         at += len;
     }
     out
+}
+
+fn translatable_blocks(text: &str) -> Vec<u32> {
+    let u16s = |s: &str| s.encode_utf16().count() as u32;
+    (fs_core::tags::translatable_ranges(text).into_iter())
+        .flat_map(|r| [u16s(&text[..r.start]), u16s(&text[r])])
+        .collect()
 }
 
 fn strip_tags(s: &str) -> String {

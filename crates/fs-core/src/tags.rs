@@ -339,6 +339,28 @@ fn push_text(blocks: &mut Vec<Block>, t: &str, drawing: u32) {
     }
 }
 
+/// Byte ranges of the line's text to translate (Aegisub's translation assistant): its plain
+/// text blocks, not override blocks, comments, drawings or only whitespace.
+pub fn translatable_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
+    let mut at = 0;
+    let mut out = Vec::new();
+    for b in Line::parse(text).blocks {
+        let len = match &b {
+            Block::Text(t) => t.len(),
+            Block::Drawing { commands, .. } => commands.len(),
+            Block::Comment(c) => c.len() + 2,
+            Block::Override { raw, .. } => raw.as_ref().map_or(0, String::len),
+        };
+        if let Block::Text(t) = &b
+            && !t.chars().all(char::is_whitespace)
+        {
+            out.push(at..at + len);
+        }
+        at += len;
+    }
+    out
+}
+
 /// Parse the inside of an override block into tags. Text before the first
 /// backslash and between tags that does not belong to any tag is attached to
 /// the preceding tag's raw text (or kept as an unnamed tag) so nothing is lost.
@@ -832,6 +854,15 @@ pub fn drawing_bounds(cmds: &[DrawCmd]) -> Option<(f64, f64, f64, f64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn translatable_ranges_are_the_plain_text() {
+        let t = r"{\i1}Hello {note}wörld{\i0} {\p1}m 0 0 l 1 1{\p0}end";
+        let got: Vec<&str> = translatable_ranges(t).into_iter().map(|r| &t[r]).collect();
+        assert_eq!(got, ["Hello ", "wörld", "end"]);
+        assert!(translatable_ranges("{\\pos(1,2)}  ").is_empty());
+        assert_eq!(translatable_ranges("{open"), [0..5]);
+    }
 
     #[test]
     fn lossless() {
