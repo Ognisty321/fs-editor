@@ -340,8 +340,14 @@ MainWindow::MainWindow() {
     (*m_automation)->set_trace_level(QSettings().value("automation/traceLevel", 3).toInt());
     (*m_automation)->set_search_paths(fs::Utf8(QSettings().value("automation/autoloadPath").toString()),
                                       fs::Utf8(QSettings().value("automation/includePath").toString()));
-    for (const auto &e : (*m_automation)->load_autoload()) status(fs::q(e));
-    buildAutomationMenu();
+    // Kainote's loading of the autoload scripts: 0 at start in the background, 1 at start (as
+    // Aegisub does), 2 and 3 as the menu first opens, in the background or not
+    if (const int method = QSettings().value("automation/loadMethod", 1).toInt(); method == 1) {
+        ensureAutoload();
+    } else {
+        if (method == 0) startAutoload();
+        buildAutomationMenu();
+    }
 
     newTab();
     watchScripts();
@@ -351,6 +357,8 @@ MainWindow::MainWindow() {
 
 MainWindow::~MainWindow() {
     qApp->removeEventFilter(this);
+    // the scripts still loading may call the host, which goes with this window
+    if (m_autoloadJob) (*m_automation)->finish_autoload(std::move(*m_autoloadJob));
     // tabs hold rust boxes; delete them before the automation host goes away
     setSplit(nullptr);
     while (m_tabs->count()) delete m_tabs->widget(0);
@@ -686,6 +694,7 @@ void MainWindow::buildMenus() {
         // Aegisub's DialogExport: every filter (the built-in ones among the scripts' by priority), checked
         // as the file last exported, the settings panel of each checked one beside the list. The scripts'
         // config functions run as it opens, as there.
+        ensureAutoload();
         const auto filters = (*m_automation)->export_filters(t->s());
         rust::Vec<fsb::DialogData> panels;
         try {
@@ -1856,6 +1865,8 @@ void MainWindow::buildMenus() {
         buildAutomationMenu();
     });
     add("reloadScripts", tr("Reload all scripts"), {}, nullptr, [this] {
+        if (m_autoloadJob) ensureAutoload(); // its scripts in first, not added over the reloaded ones
+        m_autoloaded = true; // the reload loads the autoload dirs
         for (const auto &e : (*m_automation)->reload()) log(fs::q(e));
         buildAutomationMenu();
     });
@@ -1865,6 +1876,14 @@ void MainWindow::buildMenus() {
     // Aegisub's validate (enabled, and a help text for the status bar in place of the
     // description) and is_active (a toggle macro's check mark), as the menu opens
     connect(m_automationMenu, &QMenu::aboutToShow, this, [this] {
+        if (!m_autoloaded) {
+            if (QSettings().value("automation/loadMethod", 1).toInt() % 2) {
+                ensureAutoload();
+            } else if (!m_autoloadJob) {
+                startAutoload();
+                buildAutomationMenu(); // with the loading line
+            }
+        }
         auto *tab = current();
         const auto rows = tab->selection();
         const auto states = (*m_automation)->macro_states(tab->s(), fs::slice(rows), tab->active());
@@ -2185,7 +2204,7 @@ bool MainWindow::saveAs(TabPanel *tab) {
                                  .arg(QFileInfo(p).suffix().toUpper()),
                              QMessageBox::Save | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Save)
         return false;
-    if (!tab->save(p)) return false;
+    if (!SettingsDialog::applyScriptDefaults(this, tab->s(), p) || !tab->save(p)) return false;
     addRecent("subs", p);
     return true;
 }
@@ -2193,9 +2212,10 @@ bool MainWindow::saveAs(TabPanel *tab) {
 // a file in a format that cannot hold the subtitles goes to Save as (Aegisub), and so does a
 // converted one, not to overwrite a file of the new extension (Kainote)
 bool MainWindow::saveTab(TabPanel *tab) {
-    if (tab->path().isEmpty() || tab->s().converted() || !tab->s().lossless(fs::Utf8(tab->path())) ||
-        !tab->save())
+    if (tab->path().isEmpty() || tab->s().converted() || !tab->s().lossless(fs::Utf8(tab->path())))
         return saveAs(tab);
+    if (!SettingsDialog::applyScriptDefaults(this, tab->s(), tab->path())) return false;
+    if (!tab->save()) return saveAs(tab);
     addRecent("subs", tab->path());
     return true;
 }
@@ -2654,7 +2674,45 @@ void MainWindow::buildAutomationMenu() {
         a->setToolTip(fs::q(mi.description));
         a->setProperty("macroId", qulonglong(id));
     }
+    if (m_autoloadJob) m_automationMenu->addAction(tr("Loading the autoload scripts..."))->setEnabled(false);
+    if (!m_autoloaded) { // the hotkeys of the scripts not loaded yet load them first
+        QSettings st;
+        st.beginGroup("hotkeys");
+        for (const QString &k : st.allKeys())
+            if (k.startsWith("macro:") && !m_actions.contains(k))
+                add(k, k, {}, nullptr, [this, k] {
+                    // later: the loading deletes this action
+                    QTimer::singleShot(0, this, [this, k] {
+                        ensureAutoload();
+                        if (auto *a = m_actions.value(k); a && a->property("macroId").isValid()) a->trigger();
+                    });
+                });
+    }
     watchScripts();
+}
+
+void MainWindow::startAutoload() {
+    m_autoloadJob.emplace((*m_automation)->start_autoload());
+    auto *poll = new QTimer(this);
+    connect(poll, &QTimer::timeout, this, [this, poll] {
+        if (m_autoloadJob && !fsb::autoload_done(**m_autoloadJob)) return;
+        poll->deleteLater();
+        ensureAutoload();
+    });
+    poll->start(30);
+}
+
+void MainWindow::ensureAutoload() {
+    if (m_autoloaded) return;
+    m_autoloaded = true;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const auto errors = m_autoloadJob ? (*m_automation)->finish_autoload(std::move(*m_autoloadJob))
+                                      : (*m_automation)->load_autoload();
+    m_autoloadJob.reset();
+    QApplication::restoreOverrideCursor();
+    for (const auto &e : errors) status(fs::q(e));
+    buildAutomationMenu();
+    if (m_automationMenu->isVisible()) emit m_automationMenu->aboutToShow(); // the macros' states, loaded while open
 }
 
 // Aegisub's Automation/Autoreload Mode: a script file changed loads again (1 the local scripts,
@@ -2821,6 +2879,7 @@ void MainWindow::correctErrors() {
 }
 
 void MainWindow::automationManager() {
+    ensureAutoload();
     QDialog d(this);
     d.setWindowTitle(tr("Automation manager"));
     d.resize(720, 380);

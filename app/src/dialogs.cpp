@@ -1631,6 +1631,103 @@ std::function<void()> SettingsDialog::conversionPage(QFormLayout *form, QWidget 
     };
 }
 
+// Kainote's default script properties: these [Script Info] keys take the values set when ASS is saved
+static const std::pair<const char *, const char *> kScriptDefaults[] = {
+    {QT_TRANSLATE_NOOP("SettingsDialog", "Title"), "Title"},
+    {QT_TRANSLATE_NOOP("SettingsDialog", "Author"), "Original Script"},
+    {QT_TRANSLATE_NOOP("SettingsDialog", "Translator"), "Original Translation"},
+    {QT_TRANSLATE_NOOP("SettingsDialog", "Proofreading"), "Original Editing"},
+    {QT_TRANSLATE_NOOP("SettingsDialog", "Timer"), "Original Timing"},
+    {QT_TRANSLATE_NOOP("SettingsDialog", "Editing"), "Script Updated By"}};
+
+static QString scriptDefaultKey(const char *key, const char *what = "") {
+    return QStringLiteral("scriptDefaults/%1%2").arg(QLatin1String(key), QLatin1String(what));
+}
+
+std::function<void()> SettingsDialog::scriptDefaultsPage(QFormLayout *form, QWidget *owner) {
+    const QSettings st;
+    auto *note = new QLabel(tr("The properties ticked are set to these values when subtitles are saved as ASS."), owner);
+    note->setWordWrap(true);
+    form->addRow(note);
+    std::vector<std::tuple<const char *, QCheckBox *, QLineEdit *>> fields;
+    for (auto [label, key] : kScriptDefaults) {
+        auto *on = new QCheckBox(tr(label), owner);
+        on->setChecked(st.value(scriptDefaultKey(key, "On"), false).toBool());
+        auto *value = new QLineEdit(st.value(scriptDefaultKey(key)).toString(), owner);
+        form->addRow(on, value);
+        fields.emplace_back(key, on, value);
+    }
+    auto *ask = new QCheckBox(tr("Ask before changing the properties"), owner);
+    ask->setChecked(st.value("scriptDefaults/ask", true).toBool());
+    form->addRow(ask);
+    return [=] {
+        QSettings st;
+        for (auto [key, on, value] : fields) {
+            st.setValue(scriptDefaultKey(key, "On"), on->isChecked());
+            st.setValue(scriptDefaultKey(key), value->text());
+        }
+        st.setValue("scriptDefaults/ask", ask->isChecked());
+    };
+}
+
+QStringList SettingsDialog::scriptDefaultKeys() {
+    QStringList keys{"scriptDefaults/ask"};
+    for (auto [label, key] : kScriptDefaults) keys << scriptDefaultKey(key) << scriptDefaultKey(key, "On");
+    return keys;
+}
+
+bool SettingsDialog::applyScriptDefaults(QWidget *parent, fsb::Session &s, const QString &path) {
+    const QString ext = QFileInfo(path).suffix().toLower();
+    if (ext != "ass" && ext != "ssa") return true;
+    QSettings st;
+    std::vector<std::pair<const char *, QString>> changes; // key, new value; label by index below
+    std::vector<const char *> labels;
+    for (auto [label, key] : kScriptDefaults) {
+        const QString v = st.value(scriptDefaultKey(key)).toString();
+        if (st.value(scriptDefaultKey(key, "On"), false).toBool() && fs::q(s.info_value(key)) != v) {
+            changes.emplace_back(key, v);
+            labels.push_back(label);
+        }
+    }
+    if (changes.empty()) return true;
+    std::vector<bool> take(changes.size(), true);
+    if (st.value("scriptDefaults/ask", true).toBool()) {
+        QDialog d(parent);
+        d.setWindowTitle(tr("Script properties"));
+        auto *lay = new QVBoxLayout(&d);
+        lay->addWidget(new QLabel(tr("Change these properties of the file to the default ones?"), &d));
+        std::vector<QCheckBox *> boxes;
+        for (size_t i = 0; i < changes.size(); ++i) {
+            const QString old = fs::q(s.info_value(changes[i].first));
+            auto *b = new QCheckBox(tr("%1: %2 → %3")
+                                        .arg(tr(labels[i]), old.isEmpty() ? tr("(none)") : old,
+                                             changes[i].second.isEmpty() ? tr("(none)") : changes[i].second),
+                                    &d);
+            b->setChecked(true);
+            lay->addWidget(b);
+            boxes.push_back(b);
+        }
+        auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+        bb->button(QDialogButtonBox::Ok)->setText(tr("Change"));
+        auto *keep = bb->addButton(tr("Keep the file's"), QDialogButtonBox::ActionRole);
+        auto *stop = bb->addButton(tr("Change and turn off confirmation"), QDialogButtonBox::ActionRole);
+        lay->addWidget(bb);
+        // Cancel cancels the saving, as in Kainote; keeping the file's saves it unchanged
+        QObject::connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+        QObject::connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+        QObject::connect(keep, &QPushButton::clicked, &d, [&d] { d.done(2); });
+        QObject::connect(stop, &QPushButton::clicked, &d, [&d] { d.done(3); });
+        const int r = d.exec();
+        if (r == QDialog::Rejected) return false;
+        if (r == 2) return true;
+        if (r == 3) st.setValue("scriptDefaults/ask", false);
+        for (size_t i = 0; i < boxes.size(); ++i) take[i] = boxes[i]->isChecked();
+    }
+    for (size_t i = 0; i < changes.size(); ++i)
+        if (take[i]) s.set_info_value(changes[i].first, fs::Utf8(changes[i].second), "scriptDefaults");
+    return true;
+}
+
 fsb::ConvertSpec SettingsDialog::conversionSpec(int w, int h) {
     const QSettings st;
     fsb::ConvertSpec spec;
@@ -2255,8 +2352,9 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     };
     QFormLayout *editor = page(tr("Editor")), *subs = page(tr("Subtitles")), *video = page(tr("Video")),
                 *audio = page(tr("Audio")), *automation = page(tr("Automation")), *colors = page(tr("Colors")),
-                *conversion = page(tr("Conversion"));
+                *conversion = page(tr("Conversion")), *scriptDefaults = page(tr("Script properties"));
     const auto saveConversion = conversionPage(conversion, this);
+    const auto saveScriptDefaults = scriptDefaultsPage(scriptDefaults, this);
     buildColorsPage(colors);
     // Kainote's file associations: the types ticked open here from Explorer
     std::vector<std::pair<QString, QCheckBox *>> types;
@@ -2554,12 +2652,17 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
           {tr("Next to the video"), tr("Next to the subtitles"), tr("In a folder asked for")});
     combo("automation/autoreload", 1, tr("Automatically reload changed scripts"),
           {tr("No scripts"), tr("Subtitle-local scripts"), tr("Global autoload scripts"), tr("All scripts")}, automation);
+    // Kainote's loading method of the autoload scripts; the change counts from the next start
+    combo("automation/loadMethod", 1, tr("Load the autoload scripts"),
+          {tr("At program start, in the background"), tr("At program start"),
+           tr("When the menu first opens, in the background"), tr("When the menu first opens")},
+          automation);
     // Aegisub's OK, Cancel, Apply and Restore Defaults
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply |
                                         QDialogButtonBox::RestoreDefaults,
                                     this);
     const auto save = [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs,
-                       trace, tracks, tagMark, saveConversion, fontsDir, device, autosaveFolder, autoloadPath, includePath, scriptEditor, types] {
+                       trace, tracks, tagMark, saveConversion, saveScriptDefaults, fontsDir, device, autosaveFolder, autoloadPath, includePath, scriptEditor, types] {
         QSettings st;
         QSettings classes(assoc::kClasses, QSettings::NativeFormat);
         bool associated = false;
@@ -2584,6 +2687,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         st.setValue("audio/preferredTracks", tracks->text().trimmed());
         st.setValue("grid/tagMark", tagMark->text());
         saveConversion();
+        saveScriptDefaults();
         st.setValue("fonts/externalDir", QDir::fromNativeSeparators(fontsDir->text().trimmed()));
         st.setValue("audio/device", device->currentData());
         st.setValue("main/autosaveDir", QDir::fromNativeSeparators(autosaveFolder->text().trimmed()));
@@ -2609,6 +2713,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                          "video/openWithSubs",    "grid/font",        "edit/font",        "automation/autoloadPath",
                          "automation/includePath", "automation/editor", "grid/tagMark", "convert/style",
                          "convert/tags", "convert/newEnds", "convert/msPerChar", "convert/fps", "convert/showSettings"};
+    owned << scriptDefaultKeys();
     for (const auto &[k, w] : boxes) owned << k;
     for (const auto &[k, w] : spins) owned << k;
     for (const auto &[k, w] : catalogs) owned << k;

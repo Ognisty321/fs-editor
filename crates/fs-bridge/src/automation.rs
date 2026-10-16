@@ -409,6 +409,17 @@ fn load_scripts(paths: &[PathBuf], env: &Env) -> Vec<Option<Script>> {
         .collect()
 }
 
+/// Kainote's autoload in the background: the autoload dirs' scripts load on a thread of their
+/// own while the program goes on; `finish_autoload` waits for them and adds them.
+pub struct AutoloadJob {
+    files: Vec<PathBuf>,
+    thread: std::thread::JoinHandle<Vec<Option<Script>>>,
+}
+
+pub fn autoload_done(job: &AutoloadJob) -> bool {
+    job.thread.is_finished()
+}
+
 /// `path` relative to `base`, both absolute on the same drive (agi::Path::MakeRelative).
 fn relative(path: &Path, base: &Path) -> Option<PathBuf> {
     let (p, b): (Vec<_>, Vec<_>) = (path.components().collect(), base.components().collect());
@@ -493,8 +504,13 @@ impl Automation {
     /// Scripts loaded side by side, then put in the list in the order given (a path loaded
     /// already is replaced); returns the load errors.
     fn add_all(&mut self, paths: &[PathBuf]) -> Vec<String> {
+        let loaded = load_scripts(paths, &self.env);
+        self.add_loaded(paths, loaded)
+    }
+
+    fn add_loaded(&mut self, paths: &[PathBuf], loaded: Vec<Option<Script>>) -> Vec<String> {
         let mut errors = Vec::new();
-        for (p, s) in paths.iter().zip(load_scripts(paths, &self.env)) {
+        for (p, s) in paths.iter().zip(loaded) {
             let Some(s) = s else {
                 errors.push(format!("{}: the script crashed while loading", p.display()));
                 continue;
@@ -549,6 +565,22 @@ impl Automation {
         let files = fs_automation::autoload_files(&self.env.paths);
         self.autoload = files.iter().cloned().collect();
         self.add_all(&files)
+    }
+
+    pub fn start_autoload(&mut self) -> Box<AutoloadJob> {
+        let files = fs_automation::autoload_files(&self.env.paths);
+        self.autoload = files.iter().cloned().collect();
+        let (paths, env) = (files.clone(), self.env.clone());
+        let thread = std::thread::spawn(move || load_scripts(&paths, &env));
+        Box::new(AutoloadJob { files, thread })
+    }
+
+    /// The scripts of `start_autoload`, waited for; returns the load errors.
+    #[allow(clippy::boxed_local)] // cxx hands the job over boxed
+    pub fn finish_autoload(&mut self, job: Box<AutoloadJob>) -> Vec<String> {
+        let loaded = job.thread.join();
+        let loaded = loaded.unwrap_or_else(|_| job.files.iter().map(|_| None).collect());
+        self.add_loaded(&job.files, loaded)
     }
 
     pub fn load_script(&mut self, path: &str) -> Result<(), String> {
@@ -1197,6 +1229,27 @@ end)"#,
                 .any(|s| s.name == "C" && s.autoload && s.macros == 1)
         );
         assert!(s.iter().any(|s| s.name == "B" && !s.autoload));
+    }
+
+    #[test]
+    fn autoload_in_the_background() {
+        let dir = std::env::temp_dir().join(format!("fsb-bgload-{}", std::process::id()));
+        let autoload = dir.join("user/automation/autoload");
+        std::fs::create_dir_all(&autoload).unwrap();
+        std::fs::write(autoload.join("c.lua"), macro_lua("C")).unwrap();
+        let local = dir.join("l.lua");
+        std::fs::write(&local, macro_lua("L")).unwrap();
+        let data = concat!(env!("CARGO_MANIFEST_DIR"), "/../fs-automation");
+        let mut a = Automation::new(data, dir.join("user").to_str().unwrap());
+        let job = a.start_autoload();
+        // a file's own script loaded meanwhile stays
+        a.load_script(local.to_str().unwrap()).unwrap();
+        let errors = a.finish_autoload(job);
+        assert!(errors.iter().all(|e| !e.contains("c.lua")), "{errors:?}");
+        let s = a.scripts(&Session::default());
+        assert!(s.iter().any(|s| s.name == "C" && s.autoload));
+        assert!(s.iter().any(|s| s.name == "L" && !s.autoload));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

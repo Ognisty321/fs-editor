@@ -78,6 +78,9 @@ private:
     void buildToolbar();
     void buildStatusBar();
     void buildAutomationMenu();
+    // the autoload scripts loaded in the background (Kainote), and loaded (or waited for) now
+    void startAutoload();
+    void ensureAutoload();
     void watchScripts();
     void assignHotkey(QAction *a);
     bool setHotkey(QAction *a, const QList<QKeySequence> &keys);
@@ -123,6 +126,8 @@ private:
     QPointer<StyleManager> m_styles; // open beside the editor (Kainote), gone when closed
     std::optional<rust::Box<fsb::Automation>> m_automation;
     GuiAutomationHost *m_host = nullptr; // owned by m_automation
+    std::optional<rust::Box<fsb::AutoloadJob>> m_autoloadJob;
+    bool m_autoloaded = false;
     qint64 m_lastMacro = -1; // first macro of the last script loaded by hand
     bool m_checkingDisk = false;
 };

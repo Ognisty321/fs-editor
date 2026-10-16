@@ -16,6 +16,7 @@
 #include <QLibraryInfo>
 #include <QListWidget>
 #include <QLockFile>
+#include <QMenu>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QMouseEvent>
@@ -326,6 +327,12 @@ int main(int argc, char **argv) {
         QTimer::singleShot(std::max(700, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 2 / 3), &w, [&w, ids] {
             for (const QString &id : ids.split(';'))
                 if (auto *a = w.action(id)) a->trigger();
+        });
+    // FSED_SMOKE_MENU="Automation" opens that menu of the window (its title without the &)
+    if (const QString title = qEnvironmentVariable("FSED_SMOKE_MENU"); !title.isEmpty())
+        QTimer::singleShot(std::max(700, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 2 / 3), &w, [&w, title] {
+            for (auto *m : w.findChildren<QMenu *>())
+                if (QString(m->title()).remove('&') == title) return m->popup(w.mapToGlobal(QPoint(0, 30)));
         });
     // FSED_SMOKE_SEEK="0.5" clicks the video's seek bar halfway ("0.5,s": with Shift); "w,-1" turns
     // the wheel over it a notch down ("w,-1,s": with Shift)

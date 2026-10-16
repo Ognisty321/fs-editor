@@ -2068,6 +2068,10 @@ Macierz kolorów: %12</translation>
         <translation>Każdy z tych klawiszy uruchamia komendę:</translation>
     </message>
     <message>
+        <source>Loading the autoload scripts...</source>
+        <translation>Wczytywanie skryptów autoload...</translation>
+    </message>
+    <message>
         <source>Reloaded %1</source>
         <translation>Przeładowano %1</translation>
     </message>
@@ -3616,6 +3620,66 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Pokazuj te ustawienia przed konwersją</translation>
     </message>
     <message>
+        <source>Title</source>
+        <translation>Tytuł</translation>
+    </message>
+    <message>
+        <source>Author</source>
+        <translation>Autor</translation>
+    </message>
+    <message>
+        <source>Translator</source>
+        <translation>Tłumaczenie</translation>
+    </message>
+    <message>
+        <source>Proofreading</source>
+        <translation>Korekta</translation>
+    </message>
+    <message>
+        <source>Timer</source>
+        <translation>Timing</translation>
+    </message>
+    <message>
+        <source>Editing</source>
+        <translation>Edycja</translation>
+    </message>
+    <message>
+        <source>The properties ticked are set to these values when subtitles are saved as ASS.</source>
+        <translation>Zaznaczone właściwości dostają te wartości przy zapisie napisów jako ASS.</translation>
+    </message>
+    <message>
+        <source>Ask before changing the properties</source>
+        <translation>Pytaj przed zmianą właściwości</translation>
+    </message>
+    <message>
+        <source>Script properties</source>
+        <translation>Właściwości skryptu</translation>
+    </message>
+    <message>
+        <source>Change these properties of the file to the default ones?</source>
+        <translation>Zmienić te właściwości pliku na domyślne?</translation>
+    </message>
+    <message>
+        <source>%1: %2 → %3</source>
+        <translation>%1: %2 → %3</translation>
+    </message>
+    <message>
+        <source>(none)</source>
+        <translation>(brak)</translation>
+    </message>
+    <message>
+        <source>Change</source>
+        <translation>Zmień</translation>
+    </message>
+    <message>
+        <source>Keep the file&apos;s</source>
+        <translation>Zostaw obecne</translation>
+    </message>
+    <message>
+        <source>Change and turn off confirmation</source>
+        <translation>Zmień i wyłącz potwierdzenie</translation>
+    </message>
+    <message>
         <source>Editor</source>
         <translation>Edytor</translation>
     </message>
@@ -4250,6 +4314,26 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>All scripts</source>
         <translation>Wszystkie</translation>
+    </message>
+    <message>
+        <source>Load the autoload scripts</source>
+        <translation>Wczytywanie skryptów autoload</translation>
+    </message>
+    <message>
+        <source>At program start, in the background</source>
+        <translation>Przy starcie programu, w tle</translation>
+    </message>
+    <message>
+        <source>At program start</source>
+        <translation>Przy starcie programu</translation>
+    </message>
+    <message>
+        <source>When the menu first opens, in the background</source>
+        <translation>Przy pierwszym otwarciu menu, w tle</translation>
+    </message>
+    <message>
+        <source>When the menu first opens</source>
+        <translation>Przy pierwszym otwarciu menu</translation>
     </message>
     <message>
         <source>Restore defaults?</source>

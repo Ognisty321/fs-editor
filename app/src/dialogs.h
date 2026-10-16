@@ -194,6 +194,12 @@ public:
     // those settings for a conversion; converted to ASS, the subtitles take the video's resolution
     // (w, h above 0), else that of new files
     static fsb::ConvertSpec conversionSpec(int w, int h);
+    // Kainote's default script properties: the page of this dialog (the function returned stores
+    // them) and their applying to `s` before it is saved to `path` (ASS only), asking first when
+    // set to; false: the saving was cancelled
+    static std::function<void()> scriptDefaultsPage(QFormLayout *form, QWidget *owner);
+    static QStringList scriptDefaultKeys();
+    static bool applyScriptDefaults(QWidget *parent, fsb::Session &s, const QString &path);
 
 signals:
     void applied(); // OK, Apply or Restore Defaults saved the options

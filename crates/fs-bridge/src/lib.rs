@@ -9,7 +9,7 @@ mod session;
 mod spell;
 mod visual;
 
-use automation::run_script_job;
+use automation::{AutoloadJob, autoload_done, run_script_job};
 pub use automation::{Automation, ScriptJob};
 use fs_core::tags::set_cps_ignore;
 pub use kanji::KanjiTimer;
@@ -1064,6 +1064,12 @@ pub mod ffi {
         /// Reload every script and load new files in the autoload dirs; returns the load errors.
         fn reload(self: &mut Automation) -> Vec<String>;
         fn load_autoload(self: &mut Automation) -> Vec<String>;
+        /// Kainote's autoload in the background: started, the scripts load on a thread of their
+        /// own; finished, they are waited for and added (the load errors returned).
+        type AutoloadJob;
+        fn start_autoload(self: &mut Automation) -> Box<AutoloadJob>;
+        fn autoload_done(job: &AutoloadJob) -> bool;
+        fn finish_autoload(self: &mut Automation, job: Box<AutoloadJob>) -> Vec<String>;
         fn load_script(self: &mut Automation, path: &str) -> Result<()>;
         /// Reload script `index` (of `scripts()`) in place.
         fn reload_script(self: &mut Automation, index: usize) -> Result<()>;
