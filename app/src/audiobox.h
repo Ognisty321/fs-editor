@@ -112,6 +112,7 @@ private:
     int xOf(qint64 ms) const { return int((ms - m_left) / m_msPerPx); }
     qint64 msAt(int x) const { return m_left + qint64(x * m_msPerPx); }
     qint64 snap(qint64 ms, bool toggle) const;
+    qint64 markPlayMs() const;
     const std::vector<std::pair<qint64, qint64>> &inactiveLines() const;
     void setLeft(qint64 ms);
     void zoom(double factor, int aroundX);

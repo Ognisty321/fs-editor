@@ -3604,6 +3604,26 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Odtwarzaj audio przy przechodzeniu wideo o klatkę</translation>
     </message>
     <message>
+        <source>Show keyframes in the audio</source>
+        <translation>Pokazuj klatki kluczowe w audio</translation>
+    </message>
+    <message>
+        <source>Show the time under the mouse in the audio</source>
+        <translation>Pokazuj czas pod kursorem myszy w audio</translation>
+    </message>
+    <message>
+        <source>Show the video position in the audio</source>
+        <translation>Pokazuj pozycję wideo w audio</translation>
+    </message>
+    <message>
+        <source>Show the selection background in the audio</source>
+        <translation>Pokazuj tło zaznaczenia w audio</translation>
+    </message>
+    <message>
+        <source>Show seconds boundaries in the audio</source>
+        <translation>Pokazuj granice sekund w audio</translation>
+    </message>
+    <message>
         <source>None</source>
         <translation>Brak</translation>
     </message>
@@ -3690,6 +3710,22 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Frames skipped by a fast jump</source>
         <translation>Klatki przeskakiwane szybkim skokiem</translation>
+    </message>
+    <message>
+        <source>Line boundaries thickness</source>
+        <translation>Grubość granic linijki</translation>
+    </message>
+    <message>
+        <source>Snapping distance</source>
+        <translation>Odległość przyciągania</translation>
+    </message>
+    <message>
+        <source>Distance before a drag times the line</source>
+        <translation>Odległość, po której przeciąganie ustawia czasy linijki</translation>
+    </message>
+    <message>
+        <source>Time played before and after the mark</source>
+        <translation>Czas odtwarzany przed znacznikiem i po nim</translation>
     </message>
     <message>
         <source>Recently opened files listed</source>

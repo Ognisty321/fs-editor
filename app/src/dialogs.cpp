@@ -2216,6 +2216,11 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"audio/wheelZooms", QT_TR_NOOP("Mouse wheel zooms the audio (Shift scrolls)"), false, audio},
         {"audio/autoFocus", QT_TR_NOOP("Focus the audio when the mouse is over it"), true, audio},
         {"audio/playOnStep", QT_TR_NOOP("Play audio when stepping in video"), false, audio},
+        {"audio/drawKeyframes", QT_TR_NOOP("Show keyframes in the audio"), true, audio},
+        {"audio/drawCursorTime", QT_TR_NOOP("Show the time under the mouse in the audio"), true, audio},
+        {"audio/drawVideoPosition", QT_TR_NOOP("Show the video position in the audio"), true, audio},
+        {"audio/drawSelection", QT_TR_NOOP("Show the selection background in the audio"), true, audio},
+        {"audio/drawSeconds", QT_TR_NOOP("Show seconds boundaries in the audio"), true, audio},
     };
     std::vector<std::pair<QString, QCheckBox *>> boxes;
     for (const auto &c : checks) {
@@ -2283,6 +2288,20 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     fastJump->setValue(st.value("video/fastJump", 10).toInt());
     video->addRow(tr("Frames skipped by a fast jump"), fastJump);
     spins.emplace_back("video/fastJump", fastJump);
+    // Aegisub's line boundaries thickness, snap distance and start drag sensitivity; Kainote's mark play time
+    const std::tuple<const char *, int, int, int, const char *, const char *> audioSpins[] = {
+        {"audio/boundaryWidth", 2, 1, 10, QT_TR_NOOP("Line boundaries thickness"), " px"},
+        {"audio/snapDistance", 8, 0, 50, QT_TR_NOOP("Snapping distance"), " px"},
+        {"audio/dragSensitivity", 3, 0, 50, QT_TR_NOOP("Distance before a drag times the line"), " px"},
+        {"audio/markPlayMs", 1000, 100, 10000, QT_TR_NOOP("Time played before and after the mark"), " ms"}};
+    for (auto [key, def, lo, hi, label, suffix] : audioSpins) {
+        auto *s = new QSpinBox(this);
+        s->setRange(lo, hi);
+        s->setSuffix(suffix);
+        s->setValue(st.value(key, def).toInt());
+        audio->addRow(tr(label), s);
+        spins.emplace_back(key, s);
+    }
     auto *recent = new QSpinBox(this); // Aegisub's Limits/MRU
     recent->setRange(1, 99);
     recent->setValue(st.value("main/recentCount", 20).toInt());

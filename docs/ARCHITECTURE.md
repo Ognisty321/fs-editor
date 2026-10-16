@@ -199,6 +199,7 @@ Szczegóły są w `docs/research/kainote-ui.md`. W skrócie:
 
 * menu, pasek narzędzi i pasek kart (wiele plików naraz, każda karta ma własny dokument, wideo, audio i undo). Kilka plików otwartych naraz (upuszczonych, z wiersza poleceń albo z okna otwierania) łączy się jak w Kainote: napisy i wideo w kolejności nazw („ep2” przed „ep10”) tworzą pary, każda w osobnej karcie, a audio i klatki kluczowe trafiają do ostatniej;
 * karta zawiera wideo (lewa góra) i obok edytor linii; audio jest nad edytorem, a grid na dole;
+* opcje audio z Aegisuba i Kainote: co jest rysowane (klatki kluczowe, czas pod kursorem, pozycja wideo, tło zaznaczenia, granice sekund), grubość granic linijki, odległość przyciągania, czułość przeciągania i czas odtwarzany wokół znacznika;
 * tryb tłumaczenia z dwoma polami tekstu w edytorze (oryginał i tłumaczenie) oraz kolumną oryginału w gridzie;
 * przesuwanie czasów w gridzie, panel przesuwania czasów i filtrowanie linii;
 * zoom wideo (kółko, prostokąt, komendy Aegisub: powiększ/pomniejsz Ctrl+Num+/−, 50/100/200% pikseli wideo, „Ctrl+Spacja” na suwak) i tryb odtwarzacza (samo wideo bez edycji, pełny ekran). Oddalenie poniżej dopasowania rysuje całą klatkę mniejszą (do 10%) na środku widoku, a „Wyśrodkuj powiększone wideo” (Aegisub video/reset_pan) przesuwa powiększony fragment na środek klatki bez zmiany zoomu. Krok szybkiego skoku (Alt+←/→) jest w ustawieniach wideo, domyślnie 10 klatek;

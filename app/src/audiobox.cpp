@@ -124,6 +124,7 @@ void AudioView::render(QRhiCommandBuffer *cb) {
     wu.p0[3] = float(b.xOf(b.m_selEnd) / w);
     RhiQuad::setColor(wu.c0, col(theme::AudioBackground));
     RhiQuad::setColor(wu.c1, b.m_selModified ? col(theme::AudioSelectionModified) : col(theme::AudioSelection));
+    if (!b.m_settings.value("audio/drawSelection", true).toBool()) wu.p0[3] = wu.p0[2]; // no selection background
     RhiQuad::setColor(wu.c2, col(theme::AudioWaveform));
     RhiQuad::setColor(wu.c3, col(theme::AudioWaveformAverage));
     m_wave.setUniforms(u, wu, QRectF(QPointF(0, 0), QSizeF(out)), out);
@@ -157,12 +158,17 @@ void AudioView::paintOverlay(QPainter &p) {
         p.drawText(QRect(0, 0, w, h), Qt::AlignCenter, tr("No audio"));
         return;
     }
-    // keyframes
+    // what is drawn: Aegisub's Audio/Display/Draw options, Kainote's too
+    const QSettings &st = b.m_settings;
+    if (st.value("audio/drawSeconds", true).toBool() && 1000 / b.m_msPerPx >= 10) {
+        p.setPen(QColor(255, 255, 255, 40));
+        for (qint64 t = std::max<qint64>(0, l) / 1000 * 1000; t <= r; t += 1000) p.drawLine(b.xOf(t), RulerH, b.xOf(t), h);
+    }
     auto *video = b.m_tab->video();
     p.setPen(QPen(col(theme::AudioKeyframe), 1, Qt::DashLine));
     for (qint64 kf : b.m_tab->keyframes()) {
         const qint64 t = video->hasVideo() ? video->timeAtStart(kf) : -1; // where snapping puts a line
-        if (t < l || t > r) continue;
+        if (t < l || t > r || !st.value("audio/drawKeyframes", true).toBool()) continue;
         p.drawLine(b.xOf(t), RulerH, b.xOf(t), h);
     }
     // inactive lines: shaded, with dotted boundaries; those a Ctrl+drag takes along go with the marker
@@ -202,9 +208,10 @@ void AudioView::paintOverlay(QPainter &p) {
         }
     }
     // active line
-    p.setPen(QPen(col(theme::AudioStart), 2));
+    const int bw = st.value("audio/boundaryWidth", 2).toInt();
+    p.setPen(QPen(col(theme::AudioStart), bw));
     p.drawLine(b.xOf(b.m_selStart), RulerH, b.xOf(b.m_selStart), h);
-    p.setPen(QPen(col(theme::AudioEnd), 2));
+    p.setPen(QPen(col(theme::AudioEnd), bw));
     p.drawLine(b.xOf(b.m_selEnd), RulerH, b.xOf(b.m_selEnd), h);
     p.setPen(QColor(230, 230, 230));
     p.drawText(QRect(b.xOf(b.m_selStart) + 3, h - 16, 400, 14), Qt::AlignLeft,
@@ -215,7 +222,7 @@ void AudioView::paintOverlay(QPainter &p) {
         p.drawLine(b.xOf(b.m_mark), 0, b.xOf(b.m_mark), h);
     }
     // the time under the mouse while nothing plays (Aegisub's and Kainote's track cursor)
-    if (m_hoverX >= 0 && !b.playing()) {
+    if (m_hoverX >= 0 && !b.playing() && st.value("audio/drawCursorTime", true).toBool()) {
         p.setPen(QPen(QColor(255, 255, 255, 150), 1));
         p.drawLine(m_hoverX, RulerH, m_hoverX, h);
         const QString at = fs::fmtTime(b.msAt(m_hoverX));
@@ -226,7 +233,9 @@ void AudioView::paintOverlay(QPainter &p) {
         p.drawText(QRect(tx, ty, tw, 15), Qt::AlignCenter, at);
     }
     // play cursor or video position
-    const qint64 cur = b.playing() ? b.positionMs() : video->hasVideo() ? video->time() : -1;
+    const qint64 cur = b.playing()                                                               ? b.positionMs()
+                       : video->hasVideo() && st.value("audio/drawVideoPosition", true).toBool() ? video->time()
+                                                                                                 : -1;
     if (cur >= l && cur <= r) {
         p.setPen(QPen(col(theme::AudioCursor), 1));
         p.drawLine(b.xOf(cur), 0, b.xOf(cur), h);
@@ -381,7 +390,7 @@ void AudioView::mouseMoveEvent(QMouseEvent *e) {
     } else if (m_drag == 2) {
         b.setSelection(b.m_selStart, std::max(b.snap(t, snapToggle), b.m_selStart), true);
     } else if (m_drag == 4) {
-        if (std::abs(x - m_pressX) > 3) {
+        if (std::abs(x - m_pressX) > b.m_settings.value("audio/dragSensitivity", 3).toInt()) {
             b.m_multi |= 2;
             const qint64 u = b.snap(t, snapToggle);
             b.setSelection(std::min(m_pressT, u), std::max(m_pressT, u), true);
@@ -557,8 +566,8 @@ QWidget *AudioBox::buttonRow() {
     })->setIcon(icon("player-play", green));
     btn("▶", tr("Play the current line"), [this] { playSelection(); })->setIcon(icon("player-play-filled", green));
     btn("■", tr("Stop playback"), [this] { m_tab->video()->pause(), stop(); })->setIcon(icon("player-stop-filled", teal));
-    btn("|◀", tr("Play before the mark"), [this] { if (m_mark >= 0) play(std::max<qint64>(0, m_mark - 1000), m_mark); }, true)->setIcon(icon("arrow-bar-left", teal));
-    btn("▶|", tr("Play after the mark"), [this] { if (m_mark >= 0) play(m_mark, m_mark + 1000); })->setIcon(icon("arrow-bar-right", teal));
+    btn("|◀", tr("Play before the mark"), [this] { if (m_mark >= 0) play(std::max<qint64>(0, m_mark - markPlayMs()), m_mark); }, true)->setIcon(icon("arrow-bar-left", teal));
+    btn("▶|", tr("Play after the mark"), [this] { if (m_mark >= 0) play(m_mark, m_mark + markPlayMs()); })->setIcon(icon("arrow-bar-right", teal));
     btn("◁s", tr("Play 500 ms before the start time"), [this] { play(std::max<qint64>(0, m_selStart - 500), m_selStart); }, true);
     btn("s▷", tr("Play 500 ms after the start time"), [this] { play(m_selStart, std::min(m_selEnd, m_selStart + 500)); });
     btn("◁e", tr("Play 500 ms before the end time"), [this] { play(std::max(m_selStart, m_selEnd - 500), m_selEnd); });
@@ -698,11 +707,14 @@ void AudioBox::tick() {
 
 void AudioBox::playSelection() { play(m_selStart, m_selEnd); }
 
+// Kainote's mark play time
+qint64 AudioBox::markPlayMs() const { return m_settings.value("audio/markPlayMs", 1000).toLongLong(); }
+
 qint64 AudioBox::snap(qint64 ms, bool toggle) const {
     const QSettings &st = m_settings;
     const bool kf = st.value("audio/snapKeyframes", false).toBool() != toggle;
     const bool lines = st.value("audio/snapLines", false).toBool() != toggle;
-    const qint64 range = qint64(8 * m_msPerPx);
+    const qint64 range = qint64(st.value("audio/snapDistance", 8).toInt() * m_msPerPx);
     qint64 best = ms, bestD = range + 1;
     auto consider = [&](qint64 t) {
         if (std::abs(t - ms) < bestD) {
@@ -1090,9 +1102,9 @@ void AudioBox::runCommand(const QString &id) {
     else if (id == "audioScrollLeft") setLeft(m_left - span / 4);
     else if (id == "audioScrollRight") setLeft(m_left + span / 4);
     else if (id == "audioBeforeMark") {
-        if (m_mark >= 0) play(std::max<qint64>(0, m_mark - 1000), m_mark);
+        if (m_mark >= 0) play(std::max<qint64>(0, m_mark - markPlayMs()), m_mark);
     } else if (id == "audioAfterMark") {
-        if (m_mark >= 0) play(m_mark, m_mark + 1000);
+        if (m_mark >= 0) play(m_mark, m_mark + markPlayMs());
     } else if (id == "audioFirst500") play(m_selStart, std::min(m_selEnd, m_selStart + 500));
     else if (id == "audioLast500") play(std::max(m_selStart, m_selEnd - 500), m_selEnd);
     else if (id == "audioBefore500") play(std::max<qint64>(0, m_selStart - 500), m_selStart);
