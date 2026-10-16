@@ -20,7 +20,8 @@ jobs:
       fail-fast: false
       matrix:
         # shortcut: macOS dropped from CI for now, re-add macos-latest when a Mac build is wanted.
-        os: [ubuntu-latest, windows-latest]
+        # Ubuntu pinned: ubuntu-latest moves to 26 on its own (2026-10-19), a move made here on purpose
+        os: [ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -42,7 +43,7 @@ jobs:
           - os: windows-latest
             preset: windows
             triplet: x64-windows
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             preset: unix
             triplet: x64-linux-dynamic
     runs-on: ${{ matrix.os }}
