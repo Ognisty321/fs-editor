@@ -477,7 +477,7 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
             a->setChecked(f <= m_box->frame() && (i + 1 == ch.size() || ch[i + 1].first > m_box->frame()));
         }
     }
-    // Kainote's streams: the video's audio tracks, the one heard checked, and the subtitles in it
+    // Kainote's streams: the video's audio tracks and the subtitles in it, the ones heard and edited checked
     if (const QString path = m_box->path(); !path.isEmpty()) {
         const auto audio = fsb::audio_tracks(fs::Utf8(path));
         auto *au = m_box->tab()->audio();
@@ -491,10 +491,14 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
         }
         if (const auto subs = fsb::subtitle_tracks(fs::Utf8(path)); !subs.empty()) {
             auto *sMenu = m.addMenu(tr("Subtitle streams"));
-            for (const auto &t : subs)
-                sMenu->addAction(fs::menuText(MainWindow::trackName(t)), m_box, [mw, tab = m_box->tab(), path, i = t.index] {
+            const auto [from, loaded] = m_box->tab()->embedded();
+            for (const auto &t : subs) {
+                auto *a = sMenu->addAction(fs::menuText(MainWindow::trackName(t)), m_box, [mw, tab = m_box->tab(), path, i = t.index] {
                     if (mw->maybeSave(tab)) tab->openEmbedded(path, i);
                 });
+                a->setCheckable(true); // the one in the editor
+                a->setChecked(loaded == int(t.index) && QFileInfo(from) == QFileInfo(path));
+            }
         }
     }
     // Aegisub's aspect ratio modes, kept in the script's Video AR Mode/Value

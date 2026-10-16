@@ -41,6 +41,8 @@ public:
     static bool askTextImport(QWidget *parent);
     // Subtitle stream `index` of a video, as an unsaved script.
     bool openEmbedded(const QString &video, int index);
+    // the video and stream openEmbedded loaded, till other subtitles replace them (index -1: none)
+    QPair<QString, int> embedded() const { return m_embedded; }
     void importStyles(bool plainText);
     bool save(const QString &path = {});
     bool saveTranslation(const QString &path);
@@ -140,6 +142,7 @@ private:
     bool m_hideOriginal = false;
     std::vector<std::int64_t> m_keyframes;
     QString m_keyframesPath, m_timecodesPath; // loaded from files, kept over the video's own
+    QPair<QString, int> m_embedded{{}, -1};
     QTimer *m_saveLater = nullptr;
     QDateTime m_diskTime;
 };

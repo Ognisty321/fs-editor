@@ -181,6 +181,7 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
         m_main->error(QString::fromUtf8(e.what()));
         return false;
     }
+    m_embedded = {{}, -1};
     // plain text comes in as a new script, with no file behind it
     importStyles(path.endsWith(".txt", Qt::CaseInsensitive) && fs::q(s().file_info().path).isEmpty());
     noteDisk();
@@ -268,6 +269,7 @@ bool TabPanel::openEmbedded(const QString &video, int index) {
         m_main->error(QString::fromUtf8(e.what()));
         return false;
     }
+    m_embedded = {video, index};
     importStyles(false);
     m_sel.clear();
     m_active = 0;
@@ -312,6 +314,7 @@ bool TabPanel::saveTranslation(const QString &p) {
 
 void TabPanel::clearSubs() {
     m_session = fsb::new_session();
+    m_embedded = {{}, -1};
     updateVideoContext();
     m_sel.clear();
     changed();
