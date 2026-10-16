@@ -45,6 +45,8 @@ protected:
 
 private:
     void paintOverlay(QPainter &p);
+    QFont labelFont() const;
+    int karaH() const;
     AudioBox *m_box;
     RhiQuad m_wave, m_overlay;
     std::unique_ptr<QRhiTexture> m_data, m_overlayTex;

@@ -282,16 +282,41 @@ void VideoView::mouseDoubleClickEvent(QMouseEvent *e) {
 }
 
 void VideoView::wheelEvent(QWheelEvent *e) {
-    if (e->modifiers() & Qt::ControlModifier) {
-        emit m_box->heightDelta(e->angleDelta().y() / 4);
-        return;
-    }
-    if (m_box->m_tools->wheel(e)) {
+    const auto mods = e->modifiers();
+    if (!(mods & Qt::ControlModifier) && m_box->m_tools->wheel(e)) {
         updateOverlay();
         return;
     }
-    if (m_box->m_tools->tool() != VisualTools::Pointer) return;
-    zoomBy(e->angleDelta().y() > 0 ? 1 / 1.2 : 1.2, e->position()); // 100%..1000% around the cursor
+    // Aegisub's Video/Scroll Action, Ctrl and Shift Scroll Action: 0 resizes the box, 1 reversed,
+    // 2 zooms, 3 reversed, 4 pans, 5 with X and Y swapped, 6 nothing
+    QSettings st;
+    const int action = mods & Qt::ControlModifier ? st.value("video/ctrlScrollAction", 0).toInt()
+                       : mods & Qt::ShiftModifier ? st.value("video/shiftScrollAction", 4).toInt()
+                                                  : st.value("video/scrollAction", 2).toInt();
+    const QPoint d = e->angleDelta();
+    const int dy = d.y() ? d.y() : d.x(); // Shift turns the wheel sideways on some systems
+    switch (action) {
+    case 0:
+    case 1:
+        emit m_box->heightDelta((action ? -dy : dy) / 4);
+        break;
+    case 2:
+    case 3:
+        if (dy) zoomBy((dy > 0) != (action == 3) ? 1 / 1.2 : 1.2, e->position()); // 100%..1000% around the cursor
+        break;
+    case 4:
+    case 5: {
+        // a notch moves a tenth of what is shown
+        const QPointF step = action == 4 ? QPointF(d.x(), d.y()) : QPointF(d.y(), d.x());
+        QRectF z = m_zoom.translated(-step.x() / 1200.0 * m_zoom.width(), -step.y() / 1200.0 * m_zoom.height());
+        z.moveLeft(std::clamp(z.left(), 0.0, 1 - z.width()));
+        z.moveTop(std::clamp(z.top(), 0.0, 1 - z.height()));
+        if (z != m_zoom) setZoom(z);
+        break;
+    }
+    default:
+        break;
+    }
 }
 
 void VideoView::zoomBy(double f, QPointF at) {
@@ -470,7 +495,8 @@ protected:
         const auto &kf = m_box->tab()->keyframes();
         // shortcut: a video's own keyframes (a thousand an episode) would fill the bar, so they show only when
         // a few pixels apart, as a loaded scene-change list is; a zoomed bar if people want them all
-        if (!kf.empty() && kf.size() * 4 <= size_t(std::max(0, t.second))) {
+        if (!kf.empty() && kf.size() * 4 <= size_t(std::max(0, t.second)) &&
+            QSettings().value("video/sliderKeyframes", true).toBool()) { // Aegisub's Show keyframes in slider
             QColor c = palette().color(QPalette::Text);
             c.setAlpha(110);
             p.setPen(c);
@@ -1150,11 +1176,21 @@ QImage VideoBox::grabFrame(Grab mode) {
 void VideoBox::saveFrame(Grab mode) {
     const QImage img = grabFrame(mode);
     if (img.isNull()) return;
-    // a dummy has no folder: the script's, else home (Aegisub)
+    // Aegisub's Path/Screenshot: next to the video (a dummy has no folder: the script's, else home),
+    // next to the script (else the video's), or a folder asked for
     const QString script = m_tab->path();
-    const QString base = !m_path.isEmpty() ? QFileInfo(m_path).absolutePath() + "/" + QFileInfo(m_path).completeBaseName()
-                         : !script.isEmpty() ? QFileInfo(script).absolutePath() + "/dummy"
-                                             : QDir::homePath() + "/dummy";
+    const QString name = m_path.isEmpty() ? QString("dummy") : QFileInfo(m_path).completeBaseName();
+    QString dir = !m_path.isEmpty() ? QFileInfo(m_path).absolutePath()
+                  : !script.isEmpty() ? QFileInfo(script).absolutePath()
+                                      : QDir::homePath();
+    const int where = QSettings().value("video/screenshotPath", 0).toInt();
+    if (where == 1 && !script.isEmpty()) dir = QFileInfo(script).absolutePath();
+    if (where == 2) {
+        dir = QFileDialog::getExistingDirectory(this, tr("Save the frame in"), QSettings().value("video/screenshotDir", dir).toString());
+        if (dir.isEmpty()) return;
+        QSettings().setValue("video/screenshotDir", dir);
+    }
+    const QString base = dir + "/" + name;
     QString f;
     for (int n = 1; QFileInfo::exists(f = QString("%1_%2_%3.png").arg(base).arg(n, 3, 10, QChar('0')).arg(m_frame)); ++n) {
     }

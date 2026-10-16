@@ -2,7 +2,7 @@
 // Waveform (p0.x = 0): tex is width x 1 RGBA32F with (min, max, avg) per column.
 // Spectrogram (p0.x = 1): tex is width x height R32F intensities, row 0 = top.
 // p0.y vertical zoom, p0.zw selection in u; p1.x the spectrum's colours (0 ours, 1 Aegisub's Icy
-// Blue, 2 its Green); c0 background, c1 selection, c2 waveform, c3 waveform average band.
+// Blue, 2 its Green), p1.y the waveform's style (0 Aegisub's Maximum, 1 Maximum + Average); c0 background, c1 selection, c2 waveform, c3 waveform average band.
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 fragColor;
 layout(std140, binding = 0) uniform buf {
@@ -53,7 +53,7 @@ void main()
         vec3 m = texture(tex, vec2(uv.x, 0.5)).rgb;
         float y = (0.5 - uv.y) * 2.0 / p0.y;
         if (y >= m.r && y <= m.g)
-            fragColor = abs(y) <= m.b ? c3 : c2;
+            fragColor = p1.y > 0.5 && abs(y) <= m.b ? c3 : c2;
         else
             fragColor = bg;
     } else {

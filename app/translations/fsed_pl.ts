@@ -3612,6 +3612,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Podpowiedzi parametrów tagu pod kursorem</translation>
     </message>
     <message>
+        <source>Show keyframes in the seek bar</source>
+        <translation>Klatki kluczowe na pasku przewijania</translation>
+    </message>
+    <message>
         <source>Shift+Enter adds \n</source>
         <translation>Shift+Enter wstawia \n</translation>
     </message>
@@ -3808,6 +3812,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Czcionka pola edycji (w nowych kartach)</translation>
     </message>
     <message>
+        <source>Karaoke syllables font</source>
+        <translation>Czcionka sylab karaoke</translation>
+    </message>
+    <message>
         <source>Dictionary folder (Hunspell .aff/.dic)</source>
         <translation>Folder słowników (Hunspell .aff/.dic)</translation>
     </message>
@@ -4002,6 +4010,74 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Green</source>
         <translation>Zielony</translation>
+    </message>
+    <message>
+        <source>Waveform style</source>
+        <translation>Styl fali</translation>
+    </message>
+    <message>
+        <source>Maximum</source>
+        <translation>Maksimum</translation>
+    </message>
+    <message>
+        <source>Maximum + Average</source>
+        <translation>Maksimum + średnia</translation>
+    </message>
+    <message>
+        <source>Resizes the video box</source>
+        <translation>Zmienia rozmiar okna wideo</translation>
+    </message>
+    <message>
+        <source>Resizes the video box (reversed)</source>
+        <translation>Zmienia rozmiar okna wideo (odwrotnie)</translation>
+    </message>
+    <message>
+        <source>Zooms the video</source>
+        <translation>Powiększa wideo</translation>
+    </message>
+    <message>
+        <source>Zooms the video (reversed)</source>
+        <translation>Powiększa wideo (odwrotnie)</translation>
+    </message>
+    <message>
+        <source>Pans the video</source>
+        <translation>Przesuwa wideo</translation>
+    </message>
+    <message>
+        <source>Pans the video (X/Y swapped)</source>
+        <translation>Przesuwa wideo (X i Y zamienione)</translation>
+    </message>
+    <message>
+        <source>Does nothing</source>
+        <translation>Nic nie robi</translation>
+    </message>
+    <message>
+        <source>Scrolling on the video display</source>
+        <translation>Kółko myszy na wideo</translation>
+    </message>
+    <message>
+        <source>Ctrl+Scrolling on the video display</source>
+        <translation>Ctrl + kółko myszy na wideo</translation>
+    </message>
+    <message>
+        <source>Shift+Scrolling on the video display</source>
+        <translation>Shift + kółko myszy na wideo</translation>
+    </message>
+    <message>
+        <source>Save frames</source>
+        <translation>Zapisuj klatki</translation>
+    </message>
+    <message>
+        <source>Next to the video</source>
+        <translation>Obok wideo</translation>
+    </message>
+    <message>
+        <source>Next to the subtitles</source>
+        <translation>Obok napisów</translation>
+    </message>
+    <message>
+        <source>In a folder asked for</source>
+        <translation>W folderze wskazanym za każdym razem</translation>
     </message>
     <message>
         <source>Automatically reload changed scripts</source>
@@ -5337,6 +5413,10 @@ Dopasować rozdzielczość napisów do wideo?</translation>
     <message>
         <source>Chapter %1</source>
         <translation>Rozdział %1</translation>
+    </message>
+    <message>
+        <source>Save the frame in</source>
+        <translation>Zapisz klatkę w</translation>
     </message>
     <message>
         <source>Saved %1</source>

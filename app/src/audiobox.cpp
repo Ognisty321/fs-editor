@@ -25,7 +25,7 @@
 #include <thread>
 
 namespace {
-constexpr int RulerH = 20, KaraH = 18;
+constexpr int RulerH = 20;
 QColor col(theme::Role r) { return theme::color(r); }
 } // namespace
 
@@ -121,6 +121,7 @@ void AudioView::render(QRhiCommandBuffer *cb) {
     wu.p0[0] = b.m_spectrum ? 1 : 0;
     wu.p0[1] = b.m_spectrum ? 1.0f + (b.m_vzoom - 1) * 0.5f : b.m_vzoom;
     wu.p1[0] = float(b.m_settings.value("audio/spectrumScheme", 0).toInt()); // Aegisub's colour schemes
+    wu.p1[1] = float(b.m_settings.value("audio/waveformStyle", 1).toInt()); // Aegisub's: 0 the peaks only
     const double w = std::max(1, width());
     wu.p0[2] = float(b.xOf(b.m_selStart) / w);
     wu.p0[3] = float(b.xOf(b.m_selEnd) / w);
@@ -137,9 +138,16 @@ void AudioView::render(QRhiCommandBuffer *cb) {
     cb->endPass();
 }
 
+// Aegisub's Audio/Karaoke font, for the syllables' strip
+QFont AudioView::labelFont() const {
+    return m_box->m_settings.value("audio/karaokeFont", QFont(font().family(), 8)).value<QFont>();
+}
+
+int AudioView::karaH() const { return std::max(18, QFontMetrics(labelFont()).height() + 4); }
+
 void AudioView::paintOverlay(QPainter &p) {
     auto &b = *m_box;
-    const int w = width(), h = height();
+    const int w = width(), h = height(), KaraH = karaH();
     p.setFont(QFont(font().family(), 8));
     // ruler
     p.fillRect(0, 0, w, RulerH, QColor(0, 0, 0, 170));
@@ -201,8 +209,11 @@ void AudioView::paintOverlay(QPainter &p) {
                 p.drawLine(x0, RulerH, x0, h);
             }
             p.setPen(col(theme::AudioSyllable));
+            p.save();
+            p.setFont(labelFont());
             p.drawText(QRect(x0 + 2, RulerH, std::max(1, x1 - x0 - 2), KaraH), Qt::AlignVCenter | Qt::AlignLeft,
                        fs::q(sy.text));
+            p.restore();
             if (int(k) == b.m_activeSyl) {
                 p.setPen(QPen(col(theme::AudioStart), 1));
                 p.drawRect(x0, RulerH, x1 - x0, h - RulerH - 1);
@@ -318,12 +329,12 @@ void AudioView::mousePressEvent(QMouseEvent *e) {
                 return;
             }
         // click on the syllable text splits it at the character under the mouse
-        if (y < RulerH + KaraH && e->button() == Qt::LeftButton) {
+        if (y < RulerH + karaH() && e->button() == Qt::LeftButton) {
             for (size_t k = 0; k < b.m_syl.size(); ++k) {
                 const auto &sy = b.m_syl[k];
                 const int x0 = b.xOf(sy.start) + 2;
                 const QString text = fs::q(sy.text);
-                const QFontMetrics fm(QFont(font().family(), 8));
+                const QFontMetrics fm(labelFont());
                 if (x < x0 || x > x0 + fm.horizontalAdvance(text)) continue;
                 int pos = 0;
                 while (pos < text.size() && x0 + fm.horizontalAdvance(text.left(pos + 1)) < x) ++pos;

@@ -2216,6 +2216,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"main/saveOnChange", QT_TR_NOOP("Save the file after every change"), false, editor},
         {"edit/syntax", QT_TR_NOOP("Syntax highlighting in the edit box"), true, editor},
         {"edit/callTips", QT_TR_NOOP("Call tips: the parameters of the tag at the cursor"), false, editor},
+        {"video/sliderKeyframes", QT_TR_NOOP("Show keyframes in the seek bar"), true, video},
         {"edit/softBreak", QT_TR_NOOP("Shift+Enter adds \\n"), false, editor},
         {"subs/defaultResAuto", QT_TR_NOOP("New files use the resolution of the first video opened"), true, subs},
         {"subs/cpsIgnoreWhitespace", QT_TR_NOOP("Ignore whitespace in characters per second"), true, subs},
@@ -2339,7 +2340,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     recent->setValue(st.value("main/recentCount", 20).toInt());
     editor->addRow(tr("Recently opened files listed"), recent);
     spins.emplace_back("main/recentCount", recent);
-    const auto fontButton = [this, editor](const QString &key, const QFont &def, const QString &label) {
+    const auto fontButton = [this, editor](const QString &key, const QFont &def, const QString &label,
+                                           QFormLayout *form = nullptr) {
         const auto name = [](const QFont &f) { return QString("%1, %2 pt").arg(f.family()).arg(f.pointSize()); };
         auto *b = new QPushButton(name(QSettings().value(key, def).value<QFont>()), this);
         connect(b, &QPushButton::clicked, this, [=] {
@@ -2350,11 +2352,13 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                 b->setText(name(f));
             }
         });
-        editor->addRow(label, b);
+        (form ? form : editor)->addRow(label, b);
     };
     fontButton("grid/font", QFont("Tahoma", 10), tr("Grid font (applies to new tabs)"));
     // Aegisub's Subtitle/Edit Box/Font Face and Font Size
     fontButton("edit/font", QApplication::font(), tr("Edit box font (applies to new tabs)"));
+    // Aegisub's Audio/Karaoke font
+    fontButton("audio/karaokeFont", QFont(QApplication::font().family(), 8), tr("Karaoke syllables font"), audio);
     auto *dictDir = new QLineEdit(QDir::toNativeSeparators(spell::dir()), this);
     dictDir->setMinimumWidth(dictDir->fontMetrics().averageCharWidth() * 48);
     editor->addRow(tr("Dictionary folder (Hunspell .aff/.dic)"), dictDir);
@@ -2437,6 +2441,15 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     combo("audio/freqCurve", 0, tr("Spectrum frequency mapping"),
           {tr("Linear"), tr("Extended"), tr("Medium"), tr("Compressed"), tr("Logarithmic")}, audio);
     combo("audio/spectrumScheme", 0, tr("Spectrum colours"), {tr("Default"), tr("Icy Blue"), tr("Green")}, audio);
+    combo("audio/waveformStyle", 1, tr("Waveform style"), {tr("Maximum"), tr("Maximum + Average")}, audio);
+    const QStringList scroll = {tr("Resizes the video box"), tr("Resizes the video box (reversed)"), tr("Zooms the video"),
+                                tr("Zooms the video (reversed)"), tr("Pans the video"), tr("Pans the video (X/Y swapped)"),
+                                tr("Does nothing")};
+    combo("video/scrollAction", 2, tr("Scrolling on the video display"), scroll);
+    combo("video/ctrlScrollAction", 0, tr("Ctrl+Scrolling on the video display"), scroll);
+    combo("video/shiftScrollAction", 4, tr("Shift+Scrolling on the video display"), scroll);
+    combo("video/screenshotPath", 0, tr("Save frames"),
+          {tr("Next to the video"), tr("Next to the subtitles"), tr("In a folder asked for")});
     combo("automation/autoreload", 1, tr("Automatically reload changed scripts"),
           {tr("No scripts"), tr("Subtitle-local scripts"), tr("Global autoload scripts"), tr("All scripts")}, automation);
     // Aegisub's OK, Cancel, Apply and Restore Defaults
