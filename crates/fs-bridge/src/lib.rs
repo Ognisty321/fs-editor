@@ -969,6 +969,8 @@ pub mod ffi {
             cache_dir: &str,
             progress: &Progress,
         ) -> Result<Box<Audio>>;
+        /// Kainote's external fonts folder ("" none), for renderers made after this.
+        fn set_fonts_dir(dir: &str);
         /// The audio streams; empty when the file cannot be read.
         fn audio_tracks(path: &str) -> Vec<SubTrack>;
         /// The track Kainote's preferred names (";"-separated languages or title parts) pick, -1 none.
@@ -1239,6 +1241,10 @@ fn open_audio(
     progress: &ffi::Progress,
 ) -> Result<Box<Audio>, String> {
     Audio::open(path, track, cache_dir, |d, t| progress.report(d, t)).map(Box::new)
+}
+
+fn set_fonts_dir(dir: &str) {
+    media::set_fonts_dir(dir);
 }
 
 fn audio_tracks(path: &str) -> Vec<ffi::SubTrack> {

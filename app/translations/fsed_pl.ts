@@ -3700,6 +3700,14 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Język sprawdzania pisowni</translation>
     </message>
     <message>
+        <source>Fonts in this folder show in the video and the font lists and are collected, without being installed; for videos opened after it is set</source>
+        <translation>Czcionki z tego folderu są widoczne na wideo i na listach czcionek oraz trafiają do kolektora, bez instalowania; dla wideo otwartego po ustawieniu</translation>
+    </message>
+    <message>
+        <source>External fonts folder</source>
+        <translation>Folder czcionek zewnętrznych</translation>
+    </message>
+    <message>
         <source>System</source>
         <translation>Systemowy</translation>
     </message>

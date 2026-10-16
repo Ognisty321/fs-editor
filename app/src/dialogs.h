@@ -197,6 +197,7 @@ QString autosaveDir();
 // Style catalogs (Aegisub's .sty files): their names, and the styles of one (none when it is missing)
 QStringList styleCatalogs();
 std::vector<fsb::StyleData> catalogStyles(const QString &name);
+void applyFontsDir();
 
 // Aegisub's "Open autosave file": files on the left, their versions (newest first) on the right.
 class AutosaveDialog : public QDialog {

@@ -1555,6 +1555,20 @@ QStringList styleCatalogs() {
     return cats;
 }
 
+// Kainote's external fonts folder: libass renders from it and the font lists show its fonts
+void applyFontsDir() {
+    const QString dir = QSettings().value("fonts/externalDir").toString();
+    fsb::set_fonts_dir(fs::Utf8(dir));
+    static QSet<QString> added; // Qt cannot take an application font back; one left is harmless
+    if (dir.isEmpty()) return;
+    QDirIterator it(dir, {"*.ttf", "*.otf", "*.ttc", "*.otc"}, QDir::Files); // libass reads only the folder itself
+    while (it.hasNext())
+        if (const QString f = it.next(); !added.contains(f)) {
+            QFontDatabase::addApplicationFont(f);
+            added << f;
+        }
+}
+
 std::vector<fsb::StyleData> catalogStyles(const QString &name) {
     QFile f(catalogFile(name));
     if (!f.open(QIODevice::ReadOnly)) return {}; // a catalog with nothing saved yet
@@ -2125,6 +2139,9 @@ FontCollectorDialog::FontCollectorDialog(TabPanel *tab) : QDialog(tab) {
         watch->setFuture(QtConcurrent::run([uses, dir, from, to]() -> Result {
             rust::Vec<rust::String> dirs;
             if (!dir.isEmpty()) dirs.push_back(fs::rs(dir));
+            // Kainote's external fonts folder is searched like the system's
+            if (const QString ext = QSettings().value("fonts/externalDir").toString(); !ext.isEmpty())
+                dirs.push_back(fs::rs(ext));
             try {
                 return {true, fs::q(fsb::collect_fonts(**uses, std::move(dirs), fs::Utf8(from), fs::Utf8(to)))};
             } catch (const std::exception &e) {
@@ -2290,6 +2307,10 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         spell::fillLanguages(dictLang, keep);
     });
     editor->addRow(tr("Spell check language"), dictLang);
+    auto *fontsDir = new QLineEdit(QDir::toNativeSeparators(st.value("fonts/externalDir").toString()), this);
+    fontsDir->setToolTip(tr("Fonts in this folder show in the video and the font lists and are collected, without being "
+                            "installed; for videos opened after it is set"));
+    editor->addRow(tr("External fonts folder"), fontsDir);
     auto *language = new QComboBox(this);
     language->addItem(tr("System"), "");
     language->addItem("English", "en");
@@ -2341,7 +2362,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
           {tr("Never"), tr("When aspect ratio changes"), tr("Always")});
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(bb, &QDialogButtonBox::accepted, this,
-            [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs, trace, tracks,
+            [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs, trace, tracks, fontsDir,
              types] {
         QSettings st;
         QSettings classes(assoc::kClasses, QSettings::NativeFormat);
@@ -2362,6 +2383,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         st.setValue("audio/inactiveLines", inactive->currentIndex());
         st.setValue("audio/leadIn", leadIn->value());
         st.setValue("audio/preferredTracks", tracks->text().trimmed());
+        st.setValue("fonts/externalDir", QDir::fromNativeSeparators(fontsDir->text().trimmed()));
+        applyFontsDir();
         st.setValue("audio/leadOut", leadOut->value());
         st.setValue("main/autosaveSeconds", autosave->value());
         for (auto &[k, s] : spins) st.setValue(k, s->value());

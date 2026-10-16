@@ -2,7 +2,20 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+
+/// Kainote's external fonts folder: its fonts render without being installed. Read by each new
+/// renderer, so it applies to videos opened after it is set.
+static FONTS_DIR: RwLock<String> = RwLock::new(String::new());
+
+pub fn set_fonts_dir(dir: &str) {
+    *FONTS_DIR.write().unwrap_or_else(|e| e.into_inner()) = dir.to_string();
+}
+
+fn fonts_dir() -> Option<PathBuf> {
+    let d = FONTS_DIR.read().unwrap_or_else(|e| e.into_inner());
+    (!d.is_empty()).then(|| PathBuf::from(&*d))
+}
 
 use fs_audio::{
     AudioSource, FreqScale, PcmBuffer, Peak, PeakCache, Player, Spectrogram, SpectrumConfig,
@@ -192,7 +205,8 @@ impl Renderer {
 
     fn fresh() -> Result<fs_media::SubtitleRenderer, String> {
         let mut r = fs_media::SubtitleRenderer::new().map_err(|e| e.to_string())?;
-        r.set_fonts("Arial", None).map_err(|e| e.to_string())?;
+        r.set_fonts("Arial", fonts_dir().as_deref())
+            .map_err(|e| e.to_string())?;
         Ok(r)
     }
 

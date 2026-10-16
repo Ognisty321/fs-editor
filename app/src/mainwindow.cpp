@@ -180,6 +180,7 @@ public:
 
 MainWindow::MainWindow() {
     limits::reload(); // the counter options, before any row's characters per second
+    applyFontsDir();
     m_compareLater = new QTimer(this);
     m_compareLater->setSingleShot(true);
     m_compareLater->setInterval(150); // a comparison of 100k lines takes 34 ms: not every keystroke

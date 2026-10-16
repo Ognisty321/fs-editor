@@ -139,6 +139,7 @@ Wszystkie operacje są wywoływalne z CLI, GUI i Lua:
 ### 3.7 Czcionki i pisownia
 
 * `fs-core::fonts` zbiera kroje użyte w liniach (`\fn`, `\b`, `\i`, `\r`) razem ze znakami. Z funkcją `fontdb` szuka plików czcionek, także po nazwach GDI (ID 1/4/6), i wykrywa brakujące glify. Korzystają z tego `fsed fonts` i kolekcjoner czcionek w GUI, który przeszukuje też załączniki MKV.
+* folder czcionek zewnętrznych (Kainote): czcionki z niego renderuje libass (`ass_set_fonts_dir`, dla wideo otwartego po ustawieniu), widać je na listach czcionek (Qt), a kolektor szuka w nim jak w systemowych;
 * `fs-bridge::spell` opakowuje `spellbook` (słowniki Hunspell, także w kodowaniach typu ISO8859-2). Skaner słów pomija bloki `{…}`, `\N`/`\h` i rysunki `\p` i zwraca pozycje UTF-16 dla Qt.
 
 ## 4. Formaty (`fs-formats`)
