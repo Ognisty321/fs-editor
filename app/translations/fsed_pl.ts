@@ -735,6 +735,94 @@
         <translation>Wyczyść tekst</translation>
     </message>
     <message>
+        <source>Paste all to translation</source>
+        <translation>Wklej całość do tłumaczenia</translation>
+    </message>
+    <message>
+        <source>Paste the selection to translation</source>
+        <translation>Wklej zaznaczenie do tłumaczenia</translation>
+    </message>
+    <message>
+        <source>Tag button 1</source>
+        <translation>Przycisk tagu 1</translation>
+    </message>
+    <message>
+        <source>Tag button 2</source>
+        <translation>Przycisk tagu 2</translation>
+    </message>
+    <message>
+        <source>Tag button 3</source>
+        <translation>Przycisk tagu 3</translation>
+    </message>
+    <message>
+        <source>Tag button 4</source>
+        <translation>Przycisk tagu 4</translation>
+    </message>
+    <message>
+        <source>Tag button 5</source>
+        <translation>Przycisk tagu 5</translation>
+    </message>
+    <message>
+        <source>Tag button 6</source>
+        <translation>Przycisk tagu 6</translation>
+    </message>
+    <message>
+        <source>Tag button 7</source>
+        <translation>Przycisk tagu 7</translation>
+    </message>
+    <message>
+        <source>Tag button 8</source>
+        <translation>Przycisk tagu 8</translation>
+    </message>
+    <message>
+        <source>Tag button 9</source>
+        <translation>Przycisk tagu 9</translation>
+    </message>
+    <message>
+        <source>Tag button 10</source>
+        <translation>Przycisk tagu 10</translation>
+    </message>
+    <message>
+        <source>Tag button 11</source>
+        <translation>Przycisk tagu 11</translation>
+    </message>
+    <message>
+        <source>Tag button 12</source>
+        <translation>Przycisk tagu 12</translation>
+    </message>
+    <message>
+        <source>Tag button 13</source>
+        <translation>Przycisk tagu 13</translation>
+    </message>
+    <message>
+        <source>Tag button 14</source>
+        <translation>Przycisk tagu 14</translation>
+    </message>
+    <message>
+        <source>Tag button 15</source>
+        <translation>Przycisk tagu 15</translation>
+    </message>
+    <message>
+        <source>Tag button 16</source>
+        <translation>Przycisk tagu 16</translation>
+    </message>
+    <message>
+        <source>Tag button 17</source>
+        <translation>Przycisk tagu 17</translation>
+    </message>
+    <message>
+        <source>Tag button 18</source>
+        <translation>Przycisk tagu 18</translation>
+    </message>
+    <message>
+        <source>Tag button 19</source>
+        <translation>Przycisk tagu 19</translation>
+    </message>
+    <message>
+        <source>Tag button 20</source>
+        <translation>Przycisk tagu 20</translation>
+    </message>
+    <message>
         <source>No unconfirmed lines found</source>
         <translation>Nie znaleziono niepewnych linijek</translation>
     </message>
@@ -2114,6 +2202,20 @@ Macierz kolorów: %12</translation>
     <message>
         <source>Show toolbar</source>
         <translation>Pokaż pasek narzędzi</translation>
+    </message>
+    <message>
+        <source>Delete unused styles</source>
+        <translation>Usuń nieużywane style</translation>
+    </message>
+    <message>
+        <source>Every style is in use.</source>
+        <translation>Wszystkie style są używane.</translation>
+    </message>
+    <message>
+        <source>Deleted styles:
+%1</source>
+        <translation>Usunięte style:
+%1</translation>
     </message>
     <message>
         <source>Styling assistant keys</source>
@@ -3984,6 +4086,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Uproszczone tagi wyświetlane jako</translation>
     </message>
     <message>
+        <source>Characters the font filter requires</source>
+        <translation>Znaki wymagane przez filtr czcionek</translation>
+    </message>
+    <message>
         <source>Default</source>
         <translation>Domyślne</translation>
     </message>
@@ -4911,6 +5017,14 @@ do czasu audio</translation>
     <message>
         <source>Strikeout</source>
         <translation>Przekreślenie</translation>
+    </message>
+    <message>
+        <source>Filter</source>
+        <translation>Filtruj</translation>
+    </message>
+    <message>
+        <source>Filters fonts to those containing the characters set in the settings</source>
+        <translation>Zostawia tylko czcionki zawierające znaki ustawione w ustawieniach</translation>
     </message>
     <message>
         <source>All fonts</source>
@@ -6022,6 +6136,30 @@ Dopasować rozdzielczość napisów do wideo?</translation>
         <translation>Kopiuj współrzędne pod kursorem</translation>
     </message>
     <message>
+        <source>Show / hide progress bar</source>
+        <translation>Pokaż / ukryj pasek postępu</translation>
+    </message>
+    <message>
+        <source>Change aspect ratio</source>
+        <translation>Zmień proporcje wideo</translation>
+    </message>
+    <message>
+        <source>Remove video</source>
+        <translation>Usuń plik wideo</translation>
+    </message>
+    <message>
+        <source>Move %1 to the recycle bin?</source>
+        <translation>Przenieść %1 do kosza?</translation>
+    </message>
+    <message>
+        <source>Aspect ratio</source>
+        <translation>Proporcje obrazu</translation>
+    </message>
+    <message>
+        <source>Display aspect ratio (width / height)</source>
+        <translation>Proporcje wyświetlania (szerokość / wysokość)</translation>
+    </message>
+    <message>
         <source>Show toolbar</source>
         <translation>Pokaż pasek narzędzi</translation>
     </message>
@@ -6181,20 +6319,8 @@ Dopasować rozdzielczość napisów do wideo?</translation>
         <translation>Własne...</translation>
     </message>
     <message>
-        <source>Aspect ratio</source>
-        <translation>Proporcje obrazu</translation>
-    </message>
-    <message>
-        <source>Display aspect ratio (width / height)</source>
-        <translation>Proporcje wyświetlania (szerokość / wysokość)</translation>
-    </message>
-    <message>
         <source>Remove video</source>
         <translation>Usuń plik wideo</translation>
-    </message>
-    <message>
-        <source>Move %1 to the recycle bin?</source>
-        <translation>Przenieść %1 do kosza?</translation>
     </message>
 </context>
 <context>

@@ -382,6 +382,11 @@ static const PanelKey kVideoKeys[] = {
     {"videoMinimize", QT_TRANSLATE_NOOP("VideoBox", "Leave full screen and minimize"), "B"},
     // Aegisub's "copy coordinates": the script point under the mouse
     {"videoCopyCoords", QT_TRANSLATE_NOOP("VideoBox", "Copy the coordinates under the mouse"), "Ctrl+C"},
+    // Kainote's, of its context menu
+    {"videoStop", QT_TRANSLATE_NOOP("VideoBox", "Stop"), ""},
+    {"videoProgressBar", QT_TRANSLATE_NOOP("VideoBox", "Show / hide progress bar"), ""},
+    {"videoAspect", QT_TRANSLATE_NOOP("VideoBox", "Change aspect ratio"), ""},
+    {"videoRemove", QT_TRANSLATE_NOOP("VideoBox", "Remove video"), ""},
 };
 
 std::span<const PanelKey> VideoBox::keys() { return kVideoKeys; }
@@ -405,7 +410,34 @@ void VideoBox::runCommand(const QString &id) {
     } else if (id == "videoCopyCoords") {
         const QPointF p = m_view->toScript(m_view->mapFromGlobal(QCursor::pos()).toPointF());
         QApplication::clipboard()->setText(QString("%1,%2").arg(qRound(p.x())).arg(qRound(p.y())));
+    } else if (id == "videoStop") {
+        pause();
+        seekFrame(0);
+    } else if (id == "videoProgressBar") {
+        m_seek->setVisible(!m_seek->isVisible());
+    } else if (id == "videoAspect") {
+        if (hasVideo()) setAspectMode(4);
+    } else if (id == "videoRemove") {
+        const QString p = path();
+        if (p.isEmpty() || !m_tab->main()->confirm(tr("Move %1 to the recycle bin?").arg(QFileInfo(p).fileName())))
+            return;
+        close();
+        QFile::moveToTrash(p);
     }
+}
+
+void VideoBox::setAspectMode(int mode) {
+    double custom = 0;
+    if (mode == 4) {
+        bool ok;
+        const QRectF r = m_view->displayRect();
+        custom = QInputDialog::getDouble(this, tr("Aspect ratio"), tr("Display aspect ratio (width / height)"),
+                                         r.width() / std::max(1.0, r.height()), 0.5, 5, 4, &ok);
+        if (!ok) return;
+    }
+    setAspect(aspectOfMode(mode, custom));
+    m_tab->s().set_project_value("Video AR Mode", fs::Utf8(mode ? QString::number(mode) : QString()));
+    m_tab->s().set_project_value("Video AR Value", fs::Utf8(mode == 4 ? QString::number(custom) : QString()));
 }
 
 void VideoView::contextMenuEvent(QContextMenuEvent *e) {
@@ -417,10 +449,7 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
         QApplication::clipboard()->setText(QString("%1,%2").arg(qRound(sp.x())).arg(qRound(sp.y())));
     });
     m.addAction(m_box->playing() ? tr("Pause") : tr("Play"), m_box, &VideoBox::togglePlay);
-    m.addAction(tr("Stop"), m_box, [this] {
-        m_box->pause();
-        m_box->seekFrame(0);
-    });
+    m.addAction(tr("Stop"), m_box, [this] { m_box->runCommand("videoStop"); });
     m.addAction(m_box->isFullScreen() ? tr("Exit full screen") : tr("Full screen"), m_box,
                 [this] { m_box->setFullscreen(!m_box->isFullScreen()); });
     if (const auto screens = QGuiApplication::screens(); screens.size() > 1)
@@ -437,7 +466,7 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
     m.addAction(mw->action("openVideo"));
     m.addAction(mw->action("openSubs"));
     m.addAction(m_box->m_seek->isVisible() ? tr("Hide progress bar") : tr("Show progress bar"), m_box,
-                [this] { m_box->m_seek->setVisible(!m_box->m_seek->isVisible()); });
+                [this] { m_box->runCommand("videoProgressBar"); });
     if (const auto &ch = m_box->chapters(); !ch.empty()) {
         auto *chMenu = m.addMenu(tr("Chapters"));
         for (size_t i = 0; i < ch.size(); ++i) {
@@ -450,25 +479,11 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
     }
     // Aegisub's aspect ratio modes, kept in the script's Video AR Mode/Value
     auto *arMenu = m.addMenu(tr("Change aspect ratio"));
-    const auto setMode = [this](int mode, double custom) {
-        m_box->setAspect(VideoBox::aspectOfMode(mode, custom));
-        m_box->tab()->s().set_project_value("Video AR Mode", fs::Utf8(mode ? QString::number(mode) : QString()));
-        m_box->tab()->s().set_project_value("Video AR Value",
-                                            fs::Utf8(mode == 4 ? QString::number(custom) : QString()));
-    };
     const int cur = fs::q(m_box->tab()->s().project_value("Video AR Mode")).toInt();
     const char *modes[] = {QT_TR_NOOP("Default"), QT_TR_NOOP("Full screen (4:3)"), QT_TR_NOOP("Widescreen (16:9)"),
                            QT_TR_NOOP("Cinematic (2.35)"), QT_TR_NOOP("Custom...")};
     for (int i = 0; i < 5; ++i) {
-        auto *a = arMenu->addAction(tr(modes[i]), m_box, [this, setMode, i] {
-            if (i < 4) return setMode(i, 0);
-            bool ok;
-            const QRectF r = displayRect();
-            const double ar =
-                QInputDialog::getDouble(this, tr("Aspect ratio"), tr("Display aspect ratio (width / height)"),
-                                        r.width() / std::max(1.0, r.height()), 0.5, 5, 4, &ok);
-            if (ok) setMode(4, ar);
-        });
+        auto *a = arMenu->addAction(tr(modes[i]), m_box, [this, i] { m_box->setAspectMode(i); });
         a->setCheckable(true);
         a->setChecked(i == cur);
     }
@@ -478,12 +493,8 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
         m.addAction(mw->action(id));
     m.addSeparator();
     m.addAction(mw->action("closeVideo"));
-    m.addAction(tr("Remove video"), this, [this, mw] {
-        const QString p = m_box->path();
-        if (p.isEmpty() || !mw->confirm(tr("Move %1 to the recycle bin?").arg(QFileInfo(p).fileName()))) return;
-        m_box->close();
-        QFile::moveToTrash(p);
-    })->setEnabled(!m_box->path().isEmpty());
+    m.addAction(tr("Remove video"), m_box, [this] { m_box->runCommand("videoRemove"); })
+        ->setEnabled(!m_box->path().isEmpty());
     m.exec(e->globalPos());
 }
 

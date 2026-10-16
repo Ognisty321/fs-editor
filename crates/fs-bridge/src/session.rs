@@ -2930,6 +2930,21 @@ impl Session {
 
     // ---- visual tools -----------------------------------------------------
 
+    pub fn split_positioned(&self, row: usize, text: &str, how: u8) -> Vec<String> {
+        let Some(r) = self.tl_row(row) else {
+            return Vec::new();
+        };
+        let ev = self.ed.doc.event(r.main()).unwrap();
+        crate::split::split_positioned(&self.ed.doc, ev, text, how)
+    }
+
+    pub fn frame_texts(&self, row: usize, text: &str, times: &[i64]) -> Vec<String> {
+        let Some(r) = self.tl_row(row) else {
+            return Vec::new();
+        };
+        crate::split::frame_texts(self.ed.doc.event(r.main()).unwrap(), text, times)
+    }
+
     pub fn visual(&self, row: usize) -> Visual {
         let Some(r) = self.tl_row(row) else {
             return Visual::default();

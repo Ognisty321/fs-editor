@@ -1705,6 +1705,14 @@ void MainWindow::buildMenus() {
         m_styles->raise();
         m_styles->activateWindow();
     });
+    // Kainote's clean styles of the file, as the style manager's button does it
+    add("cleanStyles", tr("Delete unused styles"), {}, subs, [=, this] {
+        QStringList gone;
+        for (const auto &n : tab()->s().clean_styles()) gone << fs::q(n);
+        tab()->changed();
+        QMessageBox::information(this, tr("Delete unused styles"),
+                                 gone.isEmpty() ? tr("Every style is in use.") : tr("Deleted styles:\n%1").arg(gone.join("\n")));
+    });
     auto *conv = sub(subs, tr("Conversion"));
     const std::tuple<const char *, const char *, const char *> formats[] = {
         {"toASS", "ASS", "F9"}, {"toSRT", "SRT", "F8"}, {"toMDVD", "MicroDVD", "F10"},

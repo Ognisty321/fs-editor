@@ -7,6 +7,7 @@ mod kanji;
 mod media;
 mod session;
 mod spell;
+mod split;
 mod visual;
 
 use automation::{AutoloadJob, autoload_done, run_script_job};
@@ -701,6 +702,11 @@ pub mod ffi {
             ends: &[i64],
         ) -> Vec<usize>;
         fn move_rows(self: &mut Session, rows: &[usize], delta: i64) -> Vec<usize>;
+        /// Kainote's split of the row's `text` into characters (2), words (3) or wraps (4) keeping each
+        /// piece where it was (its own `\an`, `\pos` or `\move`); empty when there is nothing to split.
+        fn split_positioned(self: &Session, row: usize, text: &str, how: u8) -> Vec<String>;
+        /// The row's `text` for each of `times` (ms), its `\move` as the `\pos` it is at then.
+        fn frame_texts(self: &Session, row: usize, text: &str, times: &[i64]) -> Vec<String>;
         fn make_continuous(self: &mut Session, rows: &[usize], next: bool);
         fn sort_rows(self: &mut Session, key: u8, selected_only: bool, rows: &[usize]);
         fn shift(self: &mut Session, spec: &ShiftSpec, fps_timecodes: &[i64]) -> usize;

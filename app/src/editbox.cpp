@@ -699,7 +699,8 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
         m_tagBar->addWidget(b);
         return b;
     };
-    connect(tool("F", tr("Font selection")), &QToolButton::clicked, this, [this] {
+    m_fontButton = tool("F", tr("Font selection"));
+    connect(m_fontButton, &QToolButton::clicked, this, [this] {
         // Aegisub: start from the font in effect at the cursor and set only what changed
         const auto st = lineStyle();
         const int pos = m_text->textCursor().position();
@@ -836,6 +837,8 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     auto *tlb = new QHBoxLayout;
     auto *pasteSel = new QPushButton(tr("Paste the selected"), m_tlBox);
     auto *pasteAll = new QPushButton(tr("Paste all"), m_tlBox);
+    m_pasteSelected = pasteSel;
+    m_pasteAll = pasteAll;
     m_hideOriginal = new QCheckBox(tr("Hide original"), m_tlBox);
     m_doubtful = new QCheckBox(tr("Not confirmed"), m_tlBox);
     m_movingTags = new QCheckBox(tr("Moving tags"), m_tlBox);
@@ -1404,6 +1407,31 @@ static const PanelKey kEditKeys[] = {
     // Aegisub's edit/clear and edit/clear/text
     {"editClear", QT_TRANSLATE_NOOP("EditBox", "Clear"), ""},
     {"editClearText", QT_TRANSLATE_NOOP("EditBox", "Clear text"), ""},
+    // Kainote's: the font button, the translation's buttons and the tag buttons
+    {"editFont", QT_TRANSLATE_NOOP("EditBox", "Font selection"), ""},
+    {"editPasteAll", QT_TRANSLATE_NOOP("EditBox", "Paste all to translation"), ""},
+    {"editPasteSelected", QT_TRANSLATE_NOOP("EditBox", "Paste the selection to translation"), ""},
+    {"editHideOriginal", QT_TRANSLATE_NOOP("EditBox", "Hide original"), ""},
+    {"editTag1", QT_TRANSLATE_NOOP("EditBox", "Tag button 1"), ""},
+    {"editTag2", QT_TRANSLATE_NOOP("EditBox", "Tag button 2"), ""},
+    {"editTag3", QT_TRANSLATE_NOOP("EditBox", "Tag button 3"), ""},
+    {"editTag4", QT_TRANSLATE_NOOP("EditBox", "Tag button 4"), ""},
+    {"editTag5", QT_TRANSLATE_NOOP("EditBox", "Tag button 5"), ""},
+    {"editTag6", QT_TRANSLATE_NOOP("EditBox", "Tag button 6"), ""},
+    {"editTag7", QT_TRANSLATE_NOOP("EditBox", "Tag button 7"), ""},
+    {"editTag8", QT_TRANSLATE_NOOP("EditBox", "Tag button 8"), ""},
+    {"editTag9", QT_TRANSLATE_NOOP("EditBox", "Tag button 9"), ""},
+    {"editTag10", QT_TRANSLATE_NOOP("EditBox", "Tag button 10"), ""},
+    {"editTag11", QT_TRANSLATE_NOOP("EditBox", "Tag button 11"), ""},
+    {"editTag12", QT_TRANSLATE_NOOP("EditBox", "Tag button 12"), ""},
+    {"editTag13", QT_TRANSLATE_NOOP("EditBox", "Tag button 13"), ""},
+    {"editTag14", QT_TRANSLATE_NOOP("EditBox", "Tag button 14"), ""},
+    {"editTag15", QT_TRANSLATE_NOOP("EditBox", "Tag button 15"), ""},
+    {"editTag16", QT_TRANSLATE_NOOP("EditBox", "Tag button 16"), ""},
+    {"editTag17", QT_TRANSLATE_NOOP("EditBox", "Tag button 17"), ""},
+    {"editTag18", QT_TRANSLATE_NOOP("EditBox", "Tag button 18"), ""},
+    {"editTag19", QT_TRANSLATE_NOOP("EditBox", "Tag button 19"), ""},
+    {"editTag20", QT_TRANSLATE_NOOP("EditBox", "Tag button 20"), ""},
 };
 
 std::span<const PanelKey> EditBox::keys() { return kEditKeys; }
@@ -1454,6 +1482,17 @@ void EditBox::runCommand(const QString &id, SubsTextEdit *e) {
         emit m_text->revertRequested();
     } else if (id == "editInsertOriginal") {
         emit m_text->insertOriginalRequested();
+    } else if (id == "editFont") {
+        m_fontButton->click();
+    } else if (id == "editPasteAll" || id == "editPasteSelected") {
+        if (tl) (id == "editPasteAll" ? m_pasteAll : m_pasteSelected)->click();
+    } else if (id == "editHideOriginal") {
+        if (tl) m_hideOriginal->toggle();
+    } else if (id.startsWith("editTag")) {
+        // the tag buttons in order; the last button of the row is "+", which adds one
+        const int k = id.mid(7).toInt() - 1;
+        if (k < m_userTags->count() - 1)
+            if (auto *b = qobject_cast<QAbstractButton *>(m_userTags->itemAt(k)->widget())) b->click();
     } else if (id == "editClear") {
         m_text->setText({});
     } else if (id == "editClearText") {

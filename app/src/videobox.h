@@ -146,6 +146,8 @@ public:
     void stepChapter(int dir); // to the nearest chapter start before (dir < 0) or after the current frame
     void setTimecodes(std::vector<std::int64_t> tc); // empty: the video's own
     void setAspect(double ar); // display width / height, expressed as the sample aspect ratio; 0: the file's own
+    // Aegisub's mode (aspectOfMode), kept in the script's Video AR Mode/Value; 4 asks for the custom value
+    void setAspectMode(int mode);
     // Aegisub's Video AR Mode: 1 4:3, 2 16:9, 3 2.35, 4 the custom value, else 0 (the file's own)
     static double aspectOfMode(int mode, double custom);
 

@@ -15,6 +15,7 @@
 #include <unordered_map>
 
 class TabPanel;
+class QAbstractButton;
 class QCheckBox;
 class QComboBox;
 class QLabel;
@@ -163,6 +164,7 @@ private:
     QPlainTextEdit *m_initialView;
     QWidget *m_initialButtons;
     QCheckBox *m_hideOriginal, *m_doubtful, *m_movingTags;
+    QAbstractButton *m_fontButton, *m_pasteAll, *m_pasteSelected; // their commands click them (Kainote)
     QCheckBox *m_comment;
     QSpinBox *m_layer, *m_ml, *m_mr, *m_mv;
     TimeEdit *m_start, *m_end, *m_duration;

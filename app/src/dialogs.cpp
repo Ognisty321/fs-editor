@@ -27,6 +27,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QFontDatabase>
+#include <QRawFont>
 #include <QFontDialog>
 #include <QFormLayout>
 #include <QFutureWatcher>
@@ -941,6 +942,20 @@ QString uniqueName(const QString &first, const QStringList &taken) {
 // the Apply / rename / name-clash logic follows Aegisub's DialogStyleEditor.
 // ---- font catalogs ------------------------------------------------------------
 
+const QString kFontFilterChars = QString::fromUtf8("ĄĆĘŁŃÓŚŹŻąćęłńóśźż");
+
+// Kainote's font filter: whether the family has a glyph for every one of the characters
+static bool fontHasAll(const QString &family, const QString &chars) {
+    static QHash<QString, bool> known; // a family looked at once per filter text
+    const QString key = family + '\n' + chars;
+    if (const auto it = known.constFind(key); it != known.cend()) return *it;
+    const QRawFont raw = QRawFont::fromFont(QFont(family));
+    bool all = raw.isValid();
+    for (const char32_t c : chars.toUcs4())
+        if (all && !QChar::isSpace(c)) all = raw.supportsCharacter(c);
+    return known[key] = all;
+}
+
 // Kainote's font catalogs: named lists of font families in the settings; a font may be in several
 static QStringList fontCatalogs() {
     QSettings st;
@@ -1134,7 +1149,12 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
     // Kainote's font catalogs: the font list narrowed to one, fonts added to them, and their window
     auto *catalog = new QComboBox(this);
     catalog->setToolTip(tr("Font catalog"));
-    const auto filterFonts = [this, catalog] {
+    auto *charFilter = new QToolButton(this);
+    charFilter->setText(tr("Filter"));
+    charFilter->setCheckable(true);
+    charFilter->setChecked(QSettings().value("style/fontFilterOn", false).toBool());
+    charFilter->setToolTip(tr("Filters fonts to those containing the characters set in the settings"));
+    const auto filterFonts = [this, catalog, charFilter] {
         const QString cat = catalog->currentData().toString(), text = m_font->currentText();
         QStringList families = QFontDatabase::families();
         if (cat == "/") { // the fonts in no catalog
@@ -1145,6 +1165,13 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
         } else if (!cat.isEmpty()) {
             families = catalogFonts(cat);
         }
+        if (const QString chars = QSettings().value("style/fontFilterText", kFontFilterChars).toString();
+            charFilter->isChecked() && !chars.trimmed().isEmpty()) {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            families.removeIf([&chars](const QString &f) { return !fontHasAll(f, chars); });
+            QApplication::restoreOverrideCursor();
+        }
+        QSettings().setValue("style/fontFilterOn", charFilter->isChecked());
         const QSignalBlocker block(m_font);
         m_font->clear();
         m_font->addItems(families);
@@ -1162,6 +1189,7 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
     };
     fillCatalogs();
     connect(catalog, &QComboBox::currentIndexChanged, this, filterFonts);
+    connect(charFilter, &QToolButton::toggled, this, filterFonts);
     auto *addTo = new QToolButton(this);
     addTo->setText("+");
     addTo->setToolTip(tr("Add the font to a catalog"));
@@ -1191,9 +1219,10 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
         manageFontCatalogs(this, m_font->currentText());
         fillCatalogs();
     });
-    fontL->addWidget(catalog, 2, 0, 1, 2);
-    fontL->addWidget(addTo, 2, 2);
-    fontL->addWidget(manage, 2, 3);
+    fontL->addWidget(catalog, 2, 0);
+    fontL->addWidget(addTo, 2, 1);
+    fontL->addWidget(manage, 2, 2);
+    fontL->addWidget(charFilter, 2, 3);
     group(left, tr("Font and size"), fontL);
 
     auto *colorL = new QGridLayout;
@@ -2837,6 +2866,9 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     auto *tagMark = new QLineEdit(st.value("grid/tagMark", QString(QChar(0x2600))).toString(), this);
     tagMark->setMaxLength(8);
     subs->addRow(tr("Simplified tags shown as"), tagMark);
+    // Kainote's font filter text of the style editor
+    auto *fontFilter = new QLineEdit(st.value("style/fontFilterText", kFontFilterChars).toString(), this);
+    subs->addRow(tr("Characters the font filter requires"), fontFilter);
     auto *device = new QComboBox(this);
     device->addItem(tr("Default"), "");
     for (const auto &n : fsb::audio_devices()) device->addItem(fs::q(n), fs::q(n));
@@ -3049,7 +3081,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                                         QDialogButtonBox::RestoreDefaults,
                                     this);
     const auto save = [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs,
-                       trace, tracks, tagMark, saveConversion, saveScriptDefaults, fontsDir, device, autosaveFolder, autoloadPath, includePath, scriptEditor, types] {
+                       trace, tracks, tagMark, fontFilter, saveConversion, saveScriptDefaults, fontsDir, device, autosaveFolder, autoloadPath, includePath, scriptEditor, types] {
         QSettings st;
         QSettings classes(assoc::kClasses, QSettings::NativeFormat);
         bool associated = false;
@@ -3073,6 +3105,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         st.setValue("audio/leadIn", leadIn->value());
         st.setValue("audio/preferredTracks", tracks->text().trimmed());
         st.setValue("grid/tagMark", tagMark->text());
+        st.setValue("style/fontFilterText", fontFilter->text());
         saveConversion();
         saveScriptDefaults();
         st.setValue("fonts/externalDir", QDir::fromNativeSeparators(fontsDir->text().trimmed()));
@@ -3098,7 +3131,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                          "audio/inactiveLines",   "audio/leadIn",     "audio/leadOut",    "audio/preferredTracks",
                          "fonts/externalDir",     "audio/device",     "main/autosaveDir", "main/autosaveSeconds",
                          "video/openWithSubs",    "grid/font",        "edit/font",        "automation/autoloadPath",
-                         "automation/includePath", "automation/editor", "grid/tagMark", "convert/style",
+                         "automation/includePath", "automation/editor", "grid/tagMark", "style/fontFilterText", "convert/style",
                          "convert/tags", "convert/newEnds", "convert/msPerChar", "convert/fps", "convert/showSettings"};
     owned << scriptDefaultKeys();
     for (const auto &[k, w] : boxes) owned << k;

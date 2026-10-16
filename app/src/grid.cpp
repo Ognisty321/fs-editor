@@ -835,29 +835,21 @@ void Grid::splitRows(int how) {
         } else if (how == 1) {
             auto *v = m_tab->video();
             if (!v->hasVideo()) return;
-            // one line per frame the line is on, cut halfway between frames (Aegisub's START/END)
+            // one line per frame the line is on, cut halfway between frames (Aegisub's START/END); a
+            // \move becomes the \pos it is at on each frame (Kainote)
+            std::vector<std::int64_t> at;
             for (qint64 f = v->frameAtStart(r.start), last = v->frameAtEnd(r.end); f <= last; ++f) {
-                parts << text;
+                at.push_back(v->timeAt(f));
                 st.push_back(std::max<std::int64_t>(r.start, v->timeAtStart(f)));
                 en.push_back(std::min<std::int64_t>(r.end, v->timeAtEnd(f)));
             }
+            for (const auto &t : s.frame_texts(row, shown, {at.data(), at.size()})) parts << fs::q(t);
         } else {
-            if (how == 2) {
-                for (QChar c : fs::q(fsb::strip_tags(shown))) if (!c.isSpace()) parts << QString(c);
-            } else if (how == 3) {
-                parts = fs::q(fsb::strip_tags(shown)).replace("\\N", " ").split(' ', Qt::SkipEmptyParts);
-            } else {
-                parts = text.split("\\N", Qt::SkipEmptyParts);
-            }
-            // times proportional to the characters of each part
-            qint64 total = 0;
-            for (const auto &p : parts) total += std::max<qsizetype>(1, p.size());
-            qint64 t = r.start, acc = 0;
-            for (const auto &p : parts) {
-                acc += std::max<qsizetype>(1, p.size());
-                st.push_back(t);
-                t = r.start + (r.end - r.start) * acc / std::max<qint64>(1, total);
-                en.push_back(t);
+            // Kainote's: each character, word or wrap a line of the same times, placed where it was
+            for (const auto &t : s.split_positioned(row, shown, uint8_t(how))) {
+                parts << fs::q(t);
+                st.push_back(r.start);
+                en.push_back(r.end);
             }
         }
         if (parts.size() < 2) continue;
