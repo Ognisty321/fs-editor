@@ -120,6 +120,7 @@ private:
     QMenu *m_automationMenu = nullptr;
     QFileSystemWatcher *m_scriptWatch = nullptr;
     QMap<QString, QAction *> m_actions;
+    bool m_openingPairs = false; // openFiles pairs the files itself: no same-named file offered
     QMap<QString, QMenu *> m_recent;
     QLabel *m_statusFields[9];
     FindDialog *m_find = nullptr;

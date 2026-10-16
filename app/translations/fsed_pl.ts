@@ -1418,12 +1418,20 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Napisy w wideo</translation>
     </message>
     <message>
+        <source>Load subtitles named &quot;%1&quot;?</source>
+        <translation>Wczytać napisy „%1”?</translation>
+    </message>
+    <message>
         <source>The video contains subtitles. Load them?</source>
         <translation>Wideo zawiera napisy. Wczytać je?</translation>
     </message>
     <message>
         <source>%1 is open already</source>
         <translation>%1 jest już otwarty</translation>
+    </message>
+    <message>
+        <source>Load the video from the folder: &quot;%1&quot;?</source>
+        <translation>Wczytać wideo z folderu: „%1”?</translation>
     </message>
     <message>
         <source>&amp;File</source>
@@ -4058,6 +4066,14 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Index cache size (MB)</source>
         <translation>Rozmiar pamięci indeksów (MB)</translation>
+    </message>
+    <message>
+        <source>Offset of a start time from video (ms)</source>
+        <translation>Przesunięcie czasu początku z wideo (ms)</translation>
+    </message>
+    <message>
+        <source>Offset of an end time from video (ms)</source>
+        <translation>Przesunięcie czasu końca z wideo (ms)</translation>
     </message>
     <message>
         <source>Undo levels</source>

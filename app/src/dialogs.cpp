@@ -2891,6 +2891,9 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         // Aegisub's FFmpegSource Cache/Files and Size for the index files, Kainote's cache files limit
         {"video/indexCacheFiles", 20, 0, 100000, video, QT_TR_NOOP("Index cache files kept (0: any number)")},
         {"video/indexCacheMb", 42, 1, 100000, video, QT_TR_NOOP("Index cache size (MB)")},
+        // Kainote's offsets of the times Insert start (end) time from video puts in
+        {"video/insertStartOffset", 0, -100000, 100000, video, QT_TR_NOOP("Offset of a start time from video (ms)")},
+        {"video/insertEndOffset", 0, -100000, 100000, video, QT_TR_NOOP("Offset of an end time from video (ms)")},
         // Aegisub's Limits/Undo Levels and Find Replace
         {"main/undoLevels", 500, 2, 10000, editor, QT_TR_NOOP("Undo levels")},
         {"find/recentCount", 20, 0, 99, editor, QT_TR_NOOP("Find and replace history entries")},

@@ -58,6 +58,7 @@
 #include <QPushButton>
 #include <QCheckBox>
 #include <QCollator>
+#include <QScopedValueRollback>
 #include <QSettings>
 #include <QSpinBox>
 #include <QStandardPaths>
@@ -527,11 +528,27 @@ int MainWindow::pickTrack(const rust::Vec<fsb::SubTrack> &tracks, const QString 
     return ok ? tracks[size_t(std::max(0, int(items.indexOf(pick))))].index : -1;
 }
 
+// Kainote's: a file next to it with the same name (up to the last dot) and one of these extensions
+static QString sameNamed(const QString &path, const QStringList &exts) {
+    const QFileInfo fi(path);
+    for (const QFileInfo &f : fi.dir().entryInfoList(QDir::Files, QDir::Name))
+        if (f.completeBaseName().compare(fi.completeBaseName(), Qt::CaseInsensitive) == 0 &&
+            exts.contains(f.suffix().toLower()) && f != fi && !(f.suffix().toLower() == "txt" && isKeyframesFile(f.filePath())))
+            return f.filePath();
+    return {};
+}
+
 void MainWindow::openFile(const QString &path, const QString &encoding) {
     const QString ext = QFileInfo(path).suffix().toLower();
     if (ext == "fses") {
         openSessionFile(path);
     } else if (kVideoExt.contains(ext)) {
+        // Kainote: the subtitles named like the video, offered unless they are the tab's already
+        if (const QString subs = m_openingPairs ? QString() : sameNamed(path, kSubsExt);
+            !subs.isEmpty() && QFileInfo(subs) != QFileInfo(current()->path()) &&
+            confirm(tr("Load subtitles named \"%1\"?").arg(QFileInfo(subs).fileName())) &&
+            (untouched(current()) || maybeSave(current())) && current()->openSubs(subs))
+            addRecent("subs", subs);
         // like Kainote: an empty tab offers the subtitles stored in the video
         if (const auto tracks = fsb::subtitle_tracks(fs::Utf8(path)); !tracks.empty() && untouched(current()))
             if (const int i = pickTrack(tracks, tr("The video contains subtitles. Load them?")); i >= 0)
@@ -561,7 +578,14 @@ void MainWindow::openFile(const QString &path, const QString &encoding) {
         } else if (!untouched(tab)) {
             tab = newTab();
         }
-        if (tab->openSubs(path, encoding)) addRecent("subs", path);
+        if (!tab->openSubs(path, encoding)) return updateActions();
+        addRecent("subs", path);
+        // Kainote: a tab with no video offers the video named like the subtitles, when they name none
+        // (a named one may be loading in the background)
+        if (const QString video = m_openingPairs ? QString() : sameNamed(path, kVideoExt);
+            !video.isEmpty() && tab->video()->path().isEmpty() && tab->s().project_value("Video File").empty() &&
+            confirm(tr("Load the video from the folder: \"%1\"?").arg(QFileInfo(video).fileName())))
+            tab->openVideo(video);
         updateActions();
     }
 }
@@ -570,6 +594,7 @@ void MainWindow::openFile(const QString &path, const QString &encoding) {
 // tab; audio and keyframes go to the last one.
 void MainWindow::openFiles(QStringList files) {
     if (files.size() == 1) return openFile(files.front());
+    const QScopedValueRollback pairing(m_openingPairs, true);
     QCollator order; // "ep2" before "ep10"
     order.setNumericMode(true);
     order.setCaseSensitivity(Qt::CaseInsensitive);
@@ -1200,7 +1225,7 @@ void MainWindow::buildMenus() {
         const QString f = QFileDialog::getOpenFileName(
             this, tr("Open video"), QFileInfo(tab()->path()).absolutePath(),
             tr("Video (%1);;All files (*)").arg("*." + kVideoExt.join(" *.")));
-        if (!f.isEmpty()) tab()->openVideo(f);
+        if (!f.isEmpty()) openFile(f); // as a dropped video: the subtitles in it or named like it offered
     });
     video->addMenu(recentMenu("video"));
     // Aegisub's video/close: the file stays where it is (Remove video recycles it)
@@ -1323,7 +1348,10 @@ void MainWindow::buildMenus() {
         auto *t = current();
         if (t->active() < 0) return;
         const auto sel = t->selection();
-        t->s().snap_to_video(fs::slice(sel), t->videoStartTime(), t->videoEndTime(), start);
+        const QSettings st; // Kainote's offsets, never before 0
+        const qint64 from = std::max<qint64>(0, t->videoStartTime() + st.value("video/insertStartOffset", 0).toInt());
+        const qint64 to = std::max<qint64>(0, t->videoEndTime() + st.value("video/insertEndOffset", 0).toInt());
+        t->s().snap_to_video(fs::slice(sel), from, to, start);
         t->changed();
     };
     add("startFromVideo", tr("Insert start time from video"), QKeySequence("Ctrl+Left"), video,
