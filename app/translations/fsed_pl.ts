@@ -2040,6 +2040,18 @@ Macierz kolorów: %12</translation>
         <translation>Każdy z tych klawiszy uruchamia komendę:</translation>
     </message>
     <message>
+        <source>Reloaded %1</source>
+        <translation>Przeładowano %1</translation>
+    </message>
+    <message>
+        <source>Edit</source>
+        <translation>Edytuj</translation>
+    </message>
+    <message>
+        <source>Could not open %1 in an editor</source>
+        <translation>Nie udało się otworzyć %1 w edytorze</translation>
+    </message>
+    <message>
         <source>Automation Script referenced with unknown location specifier character.
 Location specifier found: %1
 Filename specified: %2</source>
@@ -3852,6 +3864,22 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Poziom komunikatów</translation>
     </message>
     <message>
+        <source>Autoload path</source>
+        <translation>Folder autoładowania</translation>
+    </message>
+    <message>
+        <source>Include path</source>
+        <translation>Folder modułów (include)</translation>
+    </message>
+    <message>
+        <source>The system&apos;s program for .lua files</source>
+        <translation>Program systemu dla plików .lua</translation>
+    </message>
+    <message>
+        <source>Script editor</source>
+        <translation>Edytor skryptów</translation>
+    </message>
+    <message>
         <source>Use video&apos;s YCbCr Matrix when script has no matrix set</source>
         <translation>Ustaw YCbCr Matrix wideo, gdy skrypt jej nie ma</translation>
     </message>
@@ -3974,6 +4002,26 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Green</source>
         <translation>Zielony</translation>
+    </message>
+    <message>
+        <source>Automatically reload changed scripts</source>
+        <translation>Przeładowuj zmienione skrypty</translation>
+    </message>
+    <message>
+        <source>No scripts</source>
+        <translation>Żadnych</translation>
+    </message>
+    <message>
+        <source>Subtitle-local scripts</source>
+        <translation>Skrypty lokalne napisów</translation>
+    </message>
+    <message>
+        <source>Global autoload scripts</source>
+        <translation>Globalne skrypty autoładowania</translation>
+    </message>
+    <message>
+        <source>All scripts</source>
+        <translation>Wszystkie</translation>
     </message>
     <message>
         <source>Restore defaults?</source>

@@ -1025,6 +1025,9 @@ pub mod ffi {
         /// Without a host, dialogs are answered with their defaults.
         fn set_host(self: &mut Automation, host: UniquePtr<AutomationHost>);
         fn set_cache_dir(self: &mut Automation, dir: &str);
+        /// Aegisub's autoload and include folders (`|`-separated, `?user`…; empty: the standard
+        /// ones), for scripts loaded after this.
+        fn set_search_paths(self: &mut Automation, autoload: &str, include: &str);
         /// Aegisub's Automation/Trace Level (0 fatal … 5 trace): debug.out above it is dropped.
         fn set_trace_level(self: &Automation, level: i32);
         fn scripts(self: &Automation, session: &Session) -> Vec<ScriptItem>;

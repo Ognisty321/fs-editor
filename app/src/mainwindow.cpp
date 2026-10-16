@@ -20,6 +20,7 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QDesktopServices>
+#include <QProcess>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDateTime>
@@ -31,6 +32,7 @@
 #include <QEventLoop>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFileSystemWatcher>
 #include <QFormLayout>
 #include <QFutureWatcher>
 #include <QGridLayout>
@@ -319,10 +321,13 @@ MainWindow::MainWindow() {
     (*m_automation)->set_host(std::unique_ptr<fsb::AutomationHost>(m_host));
     (*m_automation)->set_cache_dir(fs::Utf8(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex"));
     (*m_automation)->set_trace_level(QSettings().value("automation/traceLevel", 3).toInt());
+    (*m_automation)->set_search_paths(fs::Utf8(QSettings().value("automation/autoloadPath").toString()),
+                                      fs::Utf8(QSettings().value("automation/includePath").toString()));
     for (const auto &e : (*m_automation)->load_autoload()) status(fs::q(e));
     buildAutomationMenu();
 
     newTab();
+    watchScripts();
     restoreGeometry(QSettings().value("main/geometry").toByteArray());
     if (!QSettings().contains("main/geometry")) resize(1280, 860);
 }
@@ -913,6 +918,9 @@ void MainWindow::buildMenus() {
     add("settings", tr("Settings"), {}, file, [this] {
         const auto apply = [this] {
             (*m_automation)->set_trace_level(QSettings().value("automation/traceLevel", 3).toInt());
+            (*m_automation)->set_search_paths(fs::Utf8(QSettings().value("automation/autoloadPath").toString()),
+                                              fs::Utf8(QSettings().value("automation/includePath").toString()));
+            watchScripts();
             if (m_toolbar) m_toolbar->setIconSize(QSize(22, 22) * QSettings().value("main/toolbarIconSize", 22).toInt() / 22);
             action("sessionAtStart")->setChecked(QSettings().value("main/askSession", true).toBool()); // the menu's tick
             for (auto *t : tabs()) { // the limits colour the grid and the edit box
@@ -2550,6 +2558,40 @@ void MainWindow::buildAutomationMenu() {
         a->setToolTip(fs::q(mi.description));
         a->setProperty("macroId", qulonglong(id));
     }
+    watchScripts();
+}
+
+// Aegisub's Automation/Autoreload Mode: a script file changed loads again (1 the local scripts,
+// 2 the autoloaded ones, 3 both)
+void MainWindow::watchScripts() {
+    if (!current()) return; // starting up: once the first tab is there
+    if (!m_scriptWatch) {
+        m_scriptWatch = new QFileSystemWatcher(this);
+        connect(m_scriptWatch, &QFileSystemWatcher::fileChanged, this, [this](const QString &path) {
+            // an editor saving may replace the file: read it a moment later
+            QTimer::singleShot(300, this, [this, path] {
+                if (!current()) return;
+                const auto list = (*m_automation)->scripts(current()->s());
+                for (size_t i = 0; i < list.size(); ++i)
+                    if (QFileInfo(fs::q(list[i].path)) == QFileInfo(path)) {
+                        try {
+                            (*m_automation)->reload_script(i);
+                            status(tr("Reloaded %1").arg(QFileInfo(path).fileName()));
+                        } catch (const rust::Error &e) {
+                            log(QString::fromUtf8(e.what()));
+                        }
+                        buildAutomationMenu();
+                        break;
+                    }
+            });
+        });
+    }
+    const int mode = QSettings().value("automation/autoreload", 1).toInt();
+    if (const QStringList old = m_scriptWatch->files(); !old.isEmpty()) m_scriptWatch->removePaths(old);
+    QStringList files;
+    for (const auto &s : (*m_automation)->scripts(current()->s()))
+        if (mode & (s.autoload ? 2 : 1) && QFileInfo::exists(fs::q(s.path))) files << fs::q(s.path);
+    if (!files.isEmpty()) m_scriptWatch->addPaths(files);
 }
 
 // Aegisub's Automation Manager: G(lobal, autoload) / L(oaded by hand) scripts, failed ones in red.
@@ -2695,7 +2737,7 @@ void MainWindow::automationManager() {
     auto *h = new QHBoxLayout;
     v->addLayout(h);
     rust::Vec<fsb::ScriptItem> scripts;
-    QPushButton *remove = nullptr, *reload = nullptr, *info = nullptr;
+    QPushButton *remove = nullptr, *reload = nullptr, *info = nullptr, *edit = nullptr;
     const auto row = [list] { return list->currentIndex().row(); };
     const auto enable = [&] {
         const int r = row();
@@ -2703,6 +2745,7 @@ void MainWindow::automationManager() {
         remove->setEnabled(any && !scripts[size_t(r)].autoload);
         reload->setEnabled(any);
         info->setEnabled(any);
+        edit->setEnabled(any);
     };
     auto refresh = [&, this](int select) {
         buildAutomationMenu();
@@ -2762,6 +2805,15 @@ void MainWindow::automationManager() {
                 .arg(fs::q(s.name), fs::q(s.description), fs::q(s.author), fs::q(s.version), fs::q(s.path),
                      s.error.empty() ? tr("Correctly loaded") : tr("Failed to load: %1").arg(fs::q(s.error)),
                      QString::number(s.macros), QString::number(s.filters)));
+    });
+    // Kainote's script editing: the editor from the settings, else the system's for .lua; a script
+    // saved there loads again when Automatically reload covers it
+    edit = button(tr("Edit"), [&, this] {
+        const QString file = fs::q(scripts[size_t(row())].path);
+        const QString editor = QSettings().value("automation/editor").toString();
+        if (!(editor.isEmpty() ? QDesktopServices::openUrl(QUrl::fromLocalFile(file))
+                               : QProcess::startDetached(editor, {QDir::toNativeSeparators(file)})))
+            error(tr("Could not open %1 in an editor").arg(QDir::toNativeSeparators(file)));
     });
     button(tr("Reload all"), [&, this] {
         for (const auto &e : (*m_automation)->reload()) log(fs::q(e));

@@ -463,6 +463,10 @@ impl Automation {
             .cache_dir = dir.to_owned();
     }
 
+    pub fn set_search_paths(&mut self, autoload: &str, include: &str) {
+        self.env.paths.set_search(autoload, include);
+    }
+
     /// The GUI's host; it also serves `aegisub.clipboard`.
     pub fn set_host(&mut self, host: UniquePtr<AutomationHost>) {
         *self.host.cpp.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(CppHost(host)));

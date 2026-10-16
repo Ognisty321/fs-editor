@@ -65,6 +65,27 @@ impl Paths {
         }
     }
 
+    /// Aegisub's Path/Automation/Autoload and Include: `|`-separated folders, `?user` and the
+    /// other tokens allowed; an empty one keeps the standard layout.
+    pub fn set_search(&mut self, autoload: &str, include: &str) {
+        let standard = Paths::new(self.data.clone(), self.user.clone());
+        let list = |s: &str, default: Vec<PathBuf>| {
+            let dirs: Vec<PathBuf> = s
+                .split('|')
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .map(|p| PathBuf::from(self.decode(p, None)))
+                .collect();
+            if dirs.is_empty() { default } else { dirs }
+        };
+        let (autoload, include) = (
+            list(autoload, standard.autoload),
+            list(include, standard.include),
+        );
+        self.autoload = autoload;
+        self.include = include;
+    }
+
     fn support_dir(&self) -> PathBuf {
         self.data.join("automation").join("include")
     }

@@ -1082,3 +1082,24 @@ fn stop_ends_a_script_that_never_checks_cancel() {
     drop(s);
     stop.trigger(); // the state is closed: nothing to stop
 }
+
+#[test]
+fn search_paths_take_aegisubs_tokens() {
+    let mut p = Paths::new(PathBuf::from("/data"), PathBuf::from("/user"));
+    let standard = p.autoload.clone();
+    p.set_search(" ?user/my scripts/ | /other ", "");
+    assert_eq!(
+        p.autoload,
+        [
+            PathBuf::from(p.decode("?user/my scripts/", None)),
+            PathBuf::from(p.decode("/other", None))
+        ]
+    );
+    assert!(p.autoload[0].starts_with("/user"));
+    assert_eq!(
+        p.include,
+        Paths::new(PathBuf::from("/data"), PathBuf::from("/user")).include
+    );
+    p.set_search("|", "");
+    assert_eq!(p.autoload, standard);
+}

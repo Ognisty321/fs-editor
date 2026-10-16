@@ -12,6 +12,7 @@
 #include <span>
 
 class TabPanel;
+class QFileSystemWatcher;
 class QSplitter;
 class QTabWidget;
 class QToolBar;
@@ -76,6 +77,7 @@ private:
     void buildToolbar();
     void buildStatusBar();
     void buildAutomationMenu();
+    void watchScripts();
     void assignHotkey(QAction *a);
     bool setHotkey(QAction *a, const QList<QKeySequence> &keys);
     void editHotkeys();
@@ -108,6 +110,7 @@ private:
     class QTimer *m_compareLater = nullptr; // edits rerun the comparison once typing pauses
     QToolBar *m_toolbar = nullptr;
     QMenu *m_automationMenu = nullptr;
+    QFileSystemWatcher *m_scriptWatch = nullptr;
     QMap<QString, QAction *> m_actions;
     QMap<QString, QMenu *> m_recent;
     QLabel *m_statusFields[9];

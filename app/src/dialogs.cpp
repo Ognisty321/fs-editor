@@ -2400,6 +2400,17 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     trace->addItems({tr("0: Fatal"), tr("1: Error"), tr("2: Warning"), tr("3: Hint"), tr("4: Debug"), tr("5: Trace")});
     trace->setCurrentIndex(std::clamp(st.value("automation/traceLevel", 3).toInt(), 0, 5));
     automation->addRow(tr("Trace level"), trace);
+    // Aegisub's Path/Automation/Autoload and Include
+    auto *autoloadPath = new QLineEdit(st.value("automation/autoloadPath").toString(), this);
+    autoloadPath->setPlaceholderText("?user/automation/autoload/|?data/automation/autoload/");
+    automation->addRow(tr("Autoload path"), autoloadPath);
+    auto *includePath = new QLineEdit(st.value("automation/includePath").toString(), this);
+    includePath->setPlaceholderText("?user/automation/include/|?data/automation/include/");
+    automation->addRow(tr("Include path"), includePath);
+    // Kainote's script editor
+    auto *scriptEditor = new QLineEdit(QDir::toNativeSeparators(st.value("automation/editor").toString()), this);
+    scriptEditor->setPlaceholderText(tr("The system's program for .lua files"));
+    automation->addRow(tr("Script editor"), scriptEditor);
     // Aegisub's video properties on open: each Never, Ask or Always
     std::vector<std::pair<QString, QComboBox *>> combos;
     const auto combo = [&](const char *key, int def, const QString &label, const QStringList &items,
@@ -2426,12 +2437,14 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     combo("audio/freqCurve", 0, tr("Spectrum frequency mapping"),
           {tr("Linear"), tr("Extended"), tr("Medium"), tr("Compressed"), tr("Logarithmic")}, audio);
     combo("audio/spectrumScheme", 0, tr("Spectrum colours"), {tr("Default"), tr("Icy Blue"), tr("Green")}, audio);
+    combo("automation/autoreload", 1, tr("Automatically reload changed scripts"),
+          {tr("No scripts"), tr("Subtitle-local scripts"), tr("Global autoload scripts"), tr("All scripts")}, automation);
     // Aegisub's OK, Cancel, Apply and Restore Defaults
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply |
                                         QDialogButtonBox::RestoreDefaults,
                                     this);
     const auto save = [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs,
-                       trace, tracks, fontsDir, device, autosaveFolder, types] {
+                       trace, tracks, fontsDir, device, autosaveFolder, autoloadPath, includePath, scriptEditor, types] {
         QSettings st;
         QSettings classes(assoc::kClasses, QSettings::NativeFormat);
         bool associated = false;
@@ -2442,6 +2455,9 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
             }
         if (associated) assoc::notifyShell();
         st.setValue("automation/traceLevel", trace->currentIndex());
+        st.setValue("automation/autoloadPath", autoloadPath->text().trimmed());
+        st.setValue("automation/includePath", includePath->text().trimmed());
+        st.setValue("automation/editor", QDir::fromNativeSeparators(scriptEditor->text().trimmed()));
         for (auto &[k, c] : catalogs) st.setValue(k, c->currentData());
         st.setValue("main/language", language->currentData());
         st.setValue("spell/dir", QDir::fromNativeSeparators(dictDir->text()));
@@ -2473,7 +2489,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     QStringList owned = {"automation/traceLevel", "main/language",    "spell/dir",        "spell/lang",
                          "audio/inactiveLines",   "audio/leadIn",     "audio/leadOut",    "audio/preferredTracks",
                          "fonts/externalDir",     "audio/device",     "main/autosaveDir", "main/autosaveSeconds",
-                         "video/openWithSubs",    "grid/font",        "edit/font"};
+                         "video/openWithSubs",    "grid/font",        "edit/font",        "automation/autoloadPath",
+                         "automation/includePath", "automation/editor"};
     for (const auto &[k, w] : boxes) owned << k;
     for (const auto &[k, w] : spins) owned << k;
     for (const auto &[k, w] : catalogs) owned << k;
