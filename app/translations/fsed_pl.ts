@@ -941,6 +941,10 @@ Każdy zmieniany plik jest najpierw kopiowany do %2</translation>
         <translation>Kopiuj</translation>
     </message>
     <message>
+        <source>Copy to the subtitles&apos; folder</source>
+        <translation>Kopiuj do folderu napisów</translation>
+    </message>
+    <message>
         <source>Attach to subtitles</source>
         <translation>Dołącz do napisów</translation>
     </message>
@@ -3752,6 +3756,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Rozmiar ikon paska narzędzi</translation>
     </message>
     <message>
+        <source>Spectrum cache memory (MB)</source>
+        <translation>Pamięć podręczna spektrum (MB)</translation>
+    </message>
+    <message>
         <source>Line boundaries thickness</source>
         <translation>Grubość granic linijki</translation>
     </message>
@@ -3906,6 +3914,70 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>The subtitles start with the styles of this catalog of the style manager</source>
         <translation>Napisy zaczynają ze stylami tego katalogu menedżera stylów</translation>
+    </message>
+    <message>
+        <source>Spectrum quality</source>
+        <translation>Jakość spektrum</translation>
+    </message>
+    <message>
+        <source>Regular quality</source>
+        <translation>Zwykła</translation>
+    </message>
+    <message>
+        <source>Better quality</source>
+        <translation>Lepsza</translation>
+    </message>
+    <message>
+        <source>High quality</source>
+        <translation>Wysoka</translation>
+    </message>
+    <message>
+        <source>Insane quality</source>
+        <translation>Szalona</translation>
+    </message>
+    <message>
+        <source>Spectrum frequency mapping</source>
+        <translation>Skala częstotliwości spektrum</translation>
+    </message>
+    <message>
+        <source>Linear</source>
+        <translation>Liniowa</translation>
+    </message>
+    <message>
+        <source>Extended</source>
+        <translation>Rozciągnięta</translation>
+    </message>
+    <message>
+        <source>Medium</source>
+        <translation>Średnia</translation>
+    </message>
+    <message>
+        <source>Compressed</source>
+        <translation>Ściśnięta</translation>
+    </message>
+    <message>
+        <source>Logarithmic</source>
+        <translation>Logarytmiczna</translation>
+    </message>
+    <message>
+        <source>Spectrum colours</source>
+        <translation>Kolory spektrum</translation>
+    </message>
+    <message>
+        <source>Icy Blue</source>
+        <translation>Lodowy błękit</translation>
+    </message>
+    <message>
+        <source>Green</source>
+        <translation>Zielony</translation>
+    </message>
+    <message>
+        <source>Restore defaults?</source>
+        <translation>Przywrócić domyślne?</translation>
+    </message>
+    <message>
+        <source>Are you sure that you want to restore the defaults? All your settings will be overridden.</source>
+        <translation>Na pewno przywrócić ustawienia domyślne? Wszystkie twoje ustawienia zostaną nadpisane.</translation>
     </message>
     <message>
         <source>Dark</source>

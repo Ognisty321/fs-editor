@@ -994,8 +994,11 @@ pub mod ffi {
             width: usize,
             height: usize,
             log: bool,
+            curve: i32,
             out: &mut [f32],
         );
+        /// Aegisub's spectrum quality (0..=3) and cache memory in MiB.
+        fn set_spectrum(self: &mut Audio, quality: i32, cache_mb: i32);
         fn play(self: &mut Audio, start_ms: i64, end_ms: i64) -> Result<()>;
         fn stop(self: &Audio);
         fn playing(self: &Audio) -> bool;

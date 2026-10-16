@@ -911,13 +911,21 @@ void MainWindow::buildMenus() {
     connect(ask, &QAction::toggled, this, [](bool on) { QSettings().setValue("main/askSession", on); });
     file->addSeparator();
     add("settings", tr("Settings"), {}, file, [this] {
-        if (SettingsDialog(this).exec() != QDialog::Accepted) return;
-        (*m_automation)->set_trace_level(QSettings().value("automation/traceLevel", 3).toInt());
-        if (m_toolbar) m_toolbar->setIconSize(QSize(22, 22) * QSettings().value("main/toolbarIconSize", 22).toInt() / 22);
-        for (auto *t : tabs()) { // the limits colour the grid and the edit box
-            t->grid()->viewport()->update();
-            t->edit()->reload();
-            t->audio()->docChanged(); // inactive lines
+        const auto apply = [this] {
+            (*m_automation)->set_trace_level(QSettings().value("automation/traceLevel", 3).toInt());
+            if (m_toolbar) m_toolbar->setIconSize(QSize(22, 22) * QSettings().value("main/toolbarIconSize", 22).toInt() / 22);
+            action("sessionAtStart")->setChecked(QSettings().value("main/askSession", true).toBool()); // the menu's tick
+            for (auto *t : tabs()) { // the limits colour the grid and the edit box
+                t->grid()->viewport()->update();
+                t->edit()->reload();
+                t->audio()->docChanged(); // inactive lines
+                t->audio()->settingsChanged();
+            }
+        };
+        for (;;) {
+            SettingsDialog d(this);
+            connect(&d, &SettingsDialog::applied, this, apply);
+            if (d.exec() != SettingsDialog::Restored) break;
         }
     });
     add("hotkeys", tr("Hotkeys..."), {}, file, [this] { editHotkeys(); });

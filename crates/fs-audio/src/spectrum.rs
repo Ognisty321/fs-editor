@@ -19,6 +19,8 @@ pub struct SpectrumConfig {
     pub range_db: f32,
     /// Extra gain in dB before mapping.
     pub gain_db: f32,
+    /// Budget of the column cache in MiB (Aegisub's spectrum Memory Max).
+    pub cache_mb: usize,
 }
 
 impl Default for SpectrumConfig {
@@ -28,6 +30,23 @@ impl Default for SpectrumConfig {
             overlap: 4,
             range_db: 96.0,
             gain_db: 0.0,
+            cache_mb: 64,
+        }
+    }
+}
+
+impl SpectrumConfig {
+    /// Aegisub's spectrum quality 0..=3 (Regular, Better, High, Insane) as its FFTW build runs
+    /// them, two levels up: its FFT sizes and hops.
+    pub fn with_quality(self, quality: i32) -> Self {
+        // Aegisub's spectrum_width (bins, log2) and spectrum_distance (hop, log2), indexes 2..=5
+        const WIDTH: [u32; 4] = [9, 9, 10, 11];
+        const DISTANCE: [u32; 4] = [7, 6, 6, 5];
+        let q = quality.clamp(0, 3) as usize;
+        Self {
+            fft_log2: WIDTH[q] + 1,
+            overlap: 1 << (WIDTH[q] + 1 - DISTANCE[q]),
+            ..self
         }
     }
 }
@@ -39,6 +58,11 @@ pub enum FreqScale {
     /// Logarithmic from `min_hz` up.
     Log {
         min_hz: f32,
+    },
+    /// Aegisub's frequency curves: from the first bin up, between linear and logarithmic, bent
+    /// so 1 kHz sits `fref_pos` (0..1) of the way up (0.001 Linear .. 0.999 Logarithmic).
+    Curve {
+        fref_pos: f32,
     },
 }
 
@@ -67,8 +91,6 @@ pub struct Spectrogram {
     cache: Mutex<Cache>,
 }
 
-const CACHE_LIMIT_BYTES: usize = 64 << 20;
-
 /// Computed columns with the read each was last used by.
 #[derive(Default)]
 struct Cache {
@@ -80,9 +102,9 @@ struct Cache {
 impl Cache {
     /// Over the budget, the least recently read columns go until half of it is left, so a
     /// zoomed-out view scrolled back and forth keeps what it returns to (it was all cleared).
-    fn evict(&mut self, column_bytes: usize) {
-        let keep = CACHE_LIMIT_BYTES / 2 / column_bytes.max(1);
-        if self.columns.len() * column_bytes <= CACHE_LIMIT_BYTES || keep == 0 {
+    fn evict(&mut self, column_bytes: usize, limit_bytes: usize) {
+        let keep = limit_bytes / 2 / column_bytes.max(1);
+        if self.columns.len() * column_bytes <= limit_bytes || keep == 0 {
             return;
         }
         let mut stamps: Vec<u64> = self.columns.values().map(|c| c.1).collect();
@@ -94,7 +116,7 @@ impl Cache {
 impl Spectrogram {
     pub fn new(pcm: PcmBuffer, cfg: SpectrumConfig) -> Self {
         let size = 1usize << cfg.fft_log2.clamp(6, 15);
-        let hop = (size / cfg.overlap.clamp(1, 64) as usize).max(1);
+        let hop = (size / cfg.overlap.clamp(1, 256) as usize).max(1);
         // Hann window; normalise so a full-scale sine reads 0 dB
         let window: Vec<f32> = (0..size)
             .map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / size as f32).cos())
@@ -186,7 +208,10 @@ impl Spectrogram {
                 cache.columns.insert(indices[k], (c.clone(), tick));
                 out[k] = Some(c);
             }
-            cache.evict(self.bins() * size_of::<f32>());
+            cache.evict(
+                self.bins() * size_of::<f32>(),
+                self.cfg.cache_mb.max(1) << 20,
+            );
         }
         out.into_iter()
             .map(|c| c.expect("every column found or computed"))
@@ -231,6 +256,23 @@ impl Spectrogram {
         let nyq = self.pcm.rate() as f32 / 2.0;
         let max_hz = max_hz.clamp(1.0, nyq);
         let bins = self.bins();
+        // Aegisub's curve: the first bin, and how far toward the log curve 1 kHz puts it
+        let curve = |fref_pos: f32| {
+            let lo = self.bin_hz(1).min(max_hz * 0.5);
+            let pos = fref_pos.clamp(0.001, 0.999);
+            let lin = lo + pos * (max_hz - lo);
+            let log = lo * (max_hz / lo).powf(pos);
+            let ratio = if lin - log > 1e-6 {
+                ((lin - 1000f32.clamp(lo, max_hz)) / (lin - log)).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            (lo, ratio)
+        };
+        let (curve_lo, curve_ratio) = match scale {
+            FreqScale::Curve { fref_pos } => curve(fref_pos),
+            _ => (0.0, 0.0),
+        };
         // bin range per row (top row is max_hz)
         let row_bins: Vec<(usize, usize)> = (0..height)
             .map(|r| {
@@ -241,6 +283,10 @@ impl Spectrogram {
                         FreqScale::Log { min_hz } => {
                             let lo = min_hz.clamp(1.0, max_hz * 0.5);
                             lo * (max_hz / lo).powf(t)
+                        }
+                        FreqScale::Curve { .. } => {
+                            let lin = curve_lo + t * (max_hz - curve_lo);
+                            lin + curve_ratio * (curve_lo * (max_hz / curve_lo).powf(t) - lin)
                         }
                     }
                 };
@@ -338,16 +384,53 @@ mod tests {
         };
         sp.render(&view, &mut img);
         // 1 kHz of 2 kHz → middle row is the brightest in every column
-        let col_of = |x: usize| {
+        let col_of = |img: &[f32], x: usize| {
             (0..h)
                 .max_by(|&a, &b| img[a * w + x].total_cmp(&img[b * w + x]))
                 .unwrap()
         };
-        assert!((col_of(25) as i32 - 32).abs() <= 1, "{}", col_of(25));
+        assert!(
+            (col_of(&img, 25) as i32 - 32).abs() <= 1,
+            "{}",
+            col_of(&img, 25)
+        );
         view.max_hz = 24000.0;
         view.scale = FreqScale::Log { min_hz: 50.0 };
         sp.render(&view, &mut img);
         assert!(img.iter().all(|v| (0.0..=1.0).contains(v)));
+        // Aegisub's curves put 1 kHz where they say, the linear one where linear does
+        for (fref_pos, row) in [
+            (0.125, h as f32 * 0.875),
+            (0.425, h as f32 * 0.575),
+            (0.001, h as f32 * (1.0 - 1.0 / 24.0)),
+        ] {
+            view.scale = FreqScale::Curve { fref_pos };
+            sp.render(&view, &mut img);
+            let at = col_of(&img, 25);
+            assert!((at as f32 - row).abs() <= 1.5, "{fref_pos}: {at} not {row}");
+        }
+    }
+
+    #[test]
+    fn quality_levels_are_aegisubs() {
+        let q = |n| {
+            let c = SpectrumConfig::default().with_quality(n);
+            (
+                1usize << c.fft_log2,
+                (1usize << c.fft_log2) / c.overlap as usize,
+            )
+        };
+        assert_eq!(
+            [q(-1), q(0), q(1), q(2), q(3), q(9)],
+            [
+                (1024, 128),
+                (1024, 128),
+                (1024, 64),
+                (2048, 64),
+                (4096, 32),
+                (4096, 32)
+            ]
+        );
     }
 
     /// Zoomed out, a view scrolled by a fraction of a column computes only the hops it uncovers.
@@ -383,7 +466,7 @@ mod tests {
         for i in 1..=30 {
             cache.columns.insert(i, (col.clone(), i as u64));
         }
-        cache.evict(CACHE_LIMIT_BYTES / 10);
+        cache.evict((64 << 20) / 10, 64 << 20);
         let mut kept: Vec<i64> = cache.columns.keys().copied().collect();
         kept.sort_unstable();
         assert_eq!(kept, [26, 27, 28, 29, 30]);

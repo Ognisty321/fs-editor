@@ -429,6 +429,7 @@ impl Audio {
         }
     }
 
+    #[allow(clippy::too_many_arguments)] // the FFI's flat arguments
     pub fn spectrum(
         &self,
         start: f64,
@@ -436,8 +437,11 @@ impl Audio {
         width: usize,
         height: usize,
         log: bool,
+        curve: i32,
         out: &mut [f32],
     ) {
+        // Aegisub's frequency mappings: Linear, Extended, Medium, Compressed, Logarithmic
+        const FREF_POS: [f32; 5] = [0.001, 0.125, 0.333, 0.425, 0.999];
         let view = SpectrumView {
             start,
             spp,
@@ -447,10 +451,23 @@ impl Audio {
             scale: if log {
                 FreqScale::Log { min_hz: 40.0 }
             } else {
-                FreqScale::Linear
+                FreqScale::Curve {
+                    fref_pos: FREF_POS[curve.clamp(0, 4) as usize],
+                }
             },
         };
         self.spectrum.render(&view, out);
+    }
+
+    /// Aegisub's spectrum quality (0..=3) and cache size; the columns are computed again.
+    pub fn set_spectrum(&mut self, quality: i32, cache_mb: i32) {
+        let cfg = SpectrumConfig {
+            cache_mb: cache_mb.max(1) as usize,
+            ..SpectrumConfig::default().with_quality(quality)
+        };
+        if cfg != self.spectrum.config() {
+            self.spectrum = Spectrogram::new(self.spectrum.pcm().clone(), cfg);
+        }
     }
 
     pub fn play(&mut self, start_ms: i64, end_ms: i64) -> Result<(), String> {
@@ -581,7 +598,7 @@ mod tests {
 
         let (w, h) = (8usize, 200usize);
         let mut out = vec![0f32; w * h];
-        a.spectrum(48000.0 * 2.0, 1024.0, w, h, true, &mut out);
+        a.spectrum(48000.0 * 2.0, 1024.0, w, h, true, 0, &mut out);
         let col: Vec<f32> = (0..h).map(|r| out[r * w + w / 2]).collect();
         let mut sorted = col.clone();
         sorted.sort_by(f32::total_cmp);
@@ -714,6 +731,7 @@ mod tests {
                 w,
                 h,
                 false,
+                0,
                 &mut spec,
             );
             eprintln!("spectrum 10 s view #{k}: {:?}", t0.elapsed());

@@ -81,7 +81,8 @@ void AudioView::render(QRhiCommandBuffer *cb) {
         if (b.m_spectrum) {
             const int h = std::max(1, out.height());
             texels.resize(size_t(w) * size_t(h));
-            (*b.m_audio)->spectrum(start, spp, size_t(w), size_t(h), b.m_enhance, {texels.data(), texels.size()});
+            (*b.m_audio)->spectrum(start, spp, size_t(w), size_t(h), b.m_enhance,
+                                   b.m_settings.value("audio/freqCurve", 0).toInt(), {texels.data(), texels.size()});
             sz = {w, h};
             fmt = QRhiTexture::R32F;
         } else {
@@ -119,6 +120,7 @@ void AudioView::render(QRhiCommandBuffer *cb) {
     RhiQuad::Uniforms wu;
     wu.p0[0] = b.m_spectrum ? 1 : 0;
     wu.p0[1] = b.m_spectrum ? 1.0f + (b.m_vzoom - 1) * 0.5f : b.m_vzoom;
+    wu.p1[0] = float(b.m_settings.value("audio/spectrumScheme", 0).toInt()); // Aegisub's colour schemes
     const double w = std::max(1, width());
     wu.p0[2] = float(b.xOf(b.m_selStart) / w);
     wu.p0[3] = float(b.xOf(b.m_selEnd) / w);
@@ -656,11 +658,20 @@ void AudioBox::openBlank(qint64 ms, bool noise) {
 
 void AudioBox::loaded() {
     m_duration = (*m_audio)->duration_ms();
+    settingsChanged();
     setVolume(m_volume->value() / 100.0f);
     updateScroll();
     lineChanged();
     m_tab->main()->status(QString());
     emit opened();
+}
+
+void AudioBox::settingsChanged() {
+    // Aegisub's Audio/Renderer/Spectrum/Quality and Memory Max
+    if (m_audio)
+        (*m_audio)->set_spectrum(m_settings.value("audio/spectrumQuality", 1).toInt(),
+                                 m_settings.value("audio/spectrumCacheMb", 128).toInt());
+    m_view->dataChanged();
 }
 
 void AudioBox::close() {

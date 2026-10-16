@@ -2086,11 +2086,15 @@ FontCollectorDialog::FontCollectorDialog(TabPanel *tab) : QDialog(tab) {
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, this);
     auto *check = bb->addButton(tr("Check"), QDialogButtonBox::ActionRole);
     auto *copy = bb->addButton(tr("Copy"), QDialogButtonBox::ActionRole);
+    // Aegisub's "Copy fonts to subtitle file's folder"
+    const QString subsDir = tab->path().isEmpty() ? QString() : QFileInfo(tab->path()).absolutePath();
+    auto *toSubs = bb->addButton(tr("Copy to the subtitles' folder"), QDialogButtonBox::ActionRole);
+    toSubs->setEnabled(!subsDir.isEmpty());
     auto *attach = bb->addButton(tr("Attach to subtitles"), QDialogButtonBox::ActionRole);
     attach->setToolTip(tr("Embed the found fonts in the script's [Fonts] section (Aegisub)"));
     auto *pack = bb->addButton(tr("Pack into ZIP..."), QDialogButtonBox::ActionRole);
     // the script's fonts are read here, the font files on a worker (the first scan of the system's takes seconds)
-    enum Mode { Check, Copy, Attach, Zip };
+    enum Mode { Check, Copy, ToSubs, Attach, Zip };
     auto run = [=, this](Mode mode, const QString &zip = {}) {
         if (mode == Copy && dest->text().isEmpty()) return report->setPlainText(tr("Choose a destination folder first."));
         QSettings s;
@@ -2105,15 +2109,15 @@ FontCollectorDialog::FontCollectorDialog(TabPanel *tab) : QDialog(tab) {
         auto tmp = mode >= Attach ? std::make_shared<QTemporaryDir>() : nullptr;
         if (tmp && !tmp->isValid()) return report->setPlainText(tmp->errorString());
         const QString dir = extra->text(), from = attached->isChecked() ? media : QString(),
-                      to = mode == Copy ? dest->text() : tmp ? tmp->path() : QString();
-        for (auto *b : {check, copy, attach, pack}) b->setEnabled(false);
+                      to = mode == Copy ? dest->text() : mode == ToSubs ? subsDir : tmp ? tmp->path() : QString();
+        for (auto *b : {check, copy, toSubs, attach, pack}) b->setEnabled(false);
         report->setPlainText(tr("Searching for fonts..."));
         using Result = std::pair<bool, QString>; // ok, report or error
         auto *watch = new QFutureWatcher<Result>(this);
         connect(watch, &QFutureWatcher<Result>::finished, this, [=, this] {
             auto [ok, r] = watch->result();
             const int missing = r.count("MISSING") + r.count("missing glyphs");
-            QString done = mode == Copy ? tr("Copied to %1").arg(to) : QString();
+            QString done = mode == Copy || mode == ToSubs ? tr("Copied to %1").arg(QDir::toNativeSeparators(to)) : QString();
             QStringList files;
             if (ok && tmp)
                 for (const QFileInfo &fi : QDir(tmp->path()).entryInfoList(QDir::Files)) files << fi.filePath();
@@ -2137,6 +2141,7 @@ FontCollectorDialog::FontCollectorDialog(TabPanel *tab) : QDialog(tab) {
                                      : r + "\n" + (missing ? tr("%n problem(s) found.", nullptr, missing) : tr("All fonts found.")) +
                                            (done.isEmpty() ? QString() : "\n" + done));
             for (auto *b : {check, copy, attach, pack}) b->setEnabled(true);
+            toSubs->setEnabled(!subsDir.isEmpty());
             watch->deleteLater();
         });
         watch->setFuture(QtConcurrent::run([uses, dir, from, to]() -> Result {
@@ -2154,6 +2159,7 @@ FontCollectorDialog::FontCollectorDialog(TabPanel *tab) : QDialog(tab) {
     };
     connect(check, &QPushButton::clicked, this, [run] { run(Check); });
     connect(copy, &QPushButton::clicked, this, [run] { run(Copy); });
+    connect(toSubs, &QPushButton::clicked, this, [run] { run(ToSubs); });
     connect(attach, &QPushButton::clicked, this, [run] { run(Attach); });
     connect(pack, &QPushButton::clicked, this, [=, this] {
         const QString start = dest->text().isEmpty() ? QFileInfo(tab->path()).absolutePath() : dest->text();
@@ -2303,7 +2309,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     const std::tuple<const char *, int, int, int, QFormLayout *, const char *> moreSpins[] = {
         {"subs/defaultResWidth", 1920, 1, 16384, subs, QT_TR_NOOP("Default width of new files")},
         {"subs/defaultResHeight", 1080, 1, 16384, subs, QT_TR_NOOP("Default height of new files")},
-        {"main/toolbarIconSize", 22, 12, 64, editor, QT_TR_NOOP("Toolbar icon size")}};
+        {"main/toolbarIconSize", 22, 12, 64, editor, QT_TR_NOOP("Toolbar icon size")},
+        {"audio/spectrumCacheMb", 128, 2, 1024, audio, QT_TR_NOOP("Spectrum cache memory (MB)")}};
     for (auto [key, def, lo, hi, form, label] : moreSpins) {
         auto *s = new QSpinBox(this);
         s->setRange(lo, hi);
@@ -2394,11 +2401,12 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     automation->addRow(tr("Trace level"), trace);
     // Aegisub's video properties on open: each Never, Ask or Always
     std::vector<std::pair<QString, QComboBox *>> combos;
-    const auto combo = [&](const char *key, int def, const QString &label, const QStringList &items) {
+    const auto combo = [&](const char *key, int def, const QString &label, const QStringList &items,
+                           QFormLayout *form = nullptr) {
         auto *c = new QComboBox(this);
         c->addItems(items);
         c->setCurrentIndex(std::clamp(st.value(key, def).toInt(), 0, int(items.size()) - 1));
-        video->addRow(label, c);
+        (form ? form : video)->addRow(label, c);
         combos.emplace_back(key, c);
     };
     // Aegisub's App/Auto/Load Linked Files; it was a tick box before
@@ -2411,10 +2419,18 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
           {tr("Never"), tr("Ask"), tr("Always set"), tr("Always set from script resolution")});
     combo("video/layoutResMismatch", 1, tr("Prompt on layout resolution mismatch"),
           {tr("Never"), tr("When aspect ratio changes"), tr("Always")});
-    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    connect(bb, &QDialogButtonBox::accepted, this,
-            [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs, trace, tracks, fontsDir, device, autosaveFolder,
-             types] {
+    // Aegisub's Audio/Renderer/Spectrum and Colour/Audio Display/Spectrum
+    combo("audio/spectrumQuality", 1, tr("Spectrum quality"),
+          {tr("Regular quality"), tr("Better quality"), tr("High quality"), tr("Insane quality")}, audio);
+    combo("audio/freqCurve", 0, tr("Spectrum frequency mapping"),
+          {tr("Linear"), tr("Extended"), tr("Medium"), tr("Compressed"), tr("Logarithmic")}, audio);
+    combo("audio/spectrumScheme", 0, tr("Spectrum colours"), {tr("Default"), tr("Icy Blue"), tr("Green")}, audio);
+    // Aegisub's OK, Cancel, Apply and Restore Defaults
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply |
+                                        QDialogButtonBox::RestoreDefaults,
+                                    this);
+    const auto save = [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs,
+                       trace, tracks, fontsDir, device, autosaveFolder, types] {
         QSettings st;
         QSettings classes(assoc::kClasses, QSettings::NativeFormat);
         bool associated = false;
@@ -2443,9 +2459,38 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         for (auto &[k, c] : combos) st.setValue(k, c->currentIndex());
         limits::reload();
         applyMediaSettings();
+        emit applied();
+    };
+    connect(bb, &QDialogButtonBox::accepted, this, [this, save] {
+        save();
         accept();
     });
+    connect(bb->button(QDialogButtonBox::Apply), &QPushButton::clicked, this, save);
     connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    // the options of these pages go back to their defaults; the colour themes, hotkeys and file
+    // associations have their own
+    QStringList owned = {"automation/traceLevel", "main/language",    "spell/dir",        "spell/lang",
+                         "audio/inactiveLines",   "audio/leadIn",     "audio/leadOut",    "audio/preferredTracks",
+                         "fonts/externalDir",     "audio/device",     "main/autosaveDir", "main/autosaveSeconds",
+                         "video/openWithSubs",    "grid/font",        "edit/font"};
+    for (const auto &[k, w] : boxes) owned << k;
+    for (const auto &[k, w] : spins) owned << k;
+    for (const auto &[k, w] : catalogs) owned << k;
+    for (const auto &[k, w] : combos) owned << k;
+    connect(bb->button(QDialogButtonBox::RestoreDefaults), &QPushButton::clicked, this, [this, owned] {
+        if (!qEnvironmentVariableIsSet("FSED_SMOKE") && // asks nothing in a smoke test
+            QMessageBox::question(this, tr("Restore defaults?"),
+                                  tr("Are you sure that you want to restore the defaults? All your settings will be "
+                                     "overridden.")) != QMessageBox::Yes)
+            return;
+        QSettings st;
+        for (const QString &k : owned) st.remove(k);
+        spell::reload();
+        limits::reload();
+        applyMediaSettings();
+        emit applied();
+        done(Restored); // reopened, to show the defaults
+    });
     connect(list, &QListWidget::currentRowChanged, pages, [pages](int row) {
         pages->setCurrentIndex(row);
         QSettings().setValue("settings/page", row); // opens where it was left

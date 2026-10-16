@@ -187,6 +187,10 @@ class SettingsDialog : public QDialog {
     Q_OBJECT
 public:
     explicit SettingsDialog(QWidget *parent);
+    static constexpr int Restored = 2; // exec()'s result after Restore Defaults
+
+signals:
+    void applied(); // OK, Apply or Restore Defaults saved the options
 
 private:
     void buildColorsPage(QFormLayout *form);
