@@ -2392,9 +2392,9 @@ bool MainWindow::maybeSave(TabPanel *tab) {
     const auto r = QMessageBox::question(this, tr("Save changes"),
                                          tr("Save changes to %1?").arg(tab->title()),
                                          QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
-    if (r == QMessageBox::Cancel) return false;
     if (r == QMessageBox::Discard) return true;
-    return saveTab(tab);
+    // no answer (the program quit with the question open) keeps the file as it is, like Cancel
+    return r == QMessageBox::Save && saveTab(tab);
 }
 
 bool MainWindow::closeTab(int index) {

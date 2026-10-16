@@ -2117,8 +2117,8 @@ std::vector<fsb::StyleData> StyleManager::askOverwrite(const std::vector<fsb::St
                                                  tr("A style named \"%1\" already exists. Replace it?").arg(fs::q(s.name)),
                                                  QMessageBox::Yes | QMessageBox::YesToAll | QMessageBox::No |
                                                      QMessageBox::Cancel);
-            if (b == QMessageBox::Cancel) return {};
             if (b == QMessageBox::No) continue;
+            if (b != QMessageBox::Yes && b != QMessageBox::YesToAll) return {}; // Cancel, or no answer
             all = b == QMessageBox::YesToAll;
         }
         out.push_back(s);
