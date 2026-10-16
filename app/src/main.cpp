@@ -521,13 +521,15 @@ int main(int argc, char **argv) {
                 if (f.open(QIODevice::WriteOnly | QIODevice::Append))
                     f.write(QString("audio %1 track %2" + QString(QChar(10))).arg(au->path()).arg(au->track()).toUtf8());
             }
-            // tool tips and popups are windows of their own: drawn where they are, the shot grown to
-            // take in those reaching past it
+            // tool tips and popups over it are windows of their own: drawn where they are, the shot
+            // grown to take in those reaching past it
             QList<QWidget *> pops;
-            QRect all(shot->mapToGlobal(QPoint()), shot->size());
+            const QRect own(shot->mapToGlobal(QPoint()), shot->size());
+            QRect all = own;
             for (QWidget *pop : QApplication::topLevelWidgets())
-                if (pop->isVisible() && (pop->windowType() == Qt::ToolTip || pop->windowType() == Qt::Popup))
-                    pops << pop, all |= QRect(pop->mapToGlobal(QPoint()), pop->size());
+                if (const QRect r(pop->mapToGlobal(QPoint()), pop->size());
+                    pop->isVisible() && (pop->windowType() == Qt::ToolTip || pop->windowType() == Qt::Popup) && r.intersects(own))
+                    pops << pop, all |= r;
             QPixmap px(all.size());
             px.fill(Qt::black);
             {
