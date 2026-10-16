@@ -2205,6 +2205,9 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     const Check checks[] = {
         {"main/askSession", QT_TR_NOOP("Load the last session at startup"), true, editor},
         {"main/saveUiState", QT_TR_NOOP("Save UI state in subtitles files"), true, editor},
+        {"main/backupOriginal", QT_TR_NOOP("Keep a copy of each opened file (.ORIGINAL) in the autosave folder"), true,
+         editor},
+        {"main/saveOnChange", QT_TR_NOOP("Save the file after every change"), false, editor},
         {"edit/syntax", QT_TR_NOOP("Syntax highlighting in the edit box"), true, editor},
         {"edit/softBreak", QT_TR_NOOP("Shift+Enter adds \\n"), false, editor},
         {"subs/defaultResAuto", QT_TR_NOOP("New files use the resolution of the first video opened"), true, subs},
@@ -2265,6 +2268,9 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     autosave->setSpecialValueText(tr("off"));
     autosave->setValue(st.value("main/autosaveSeconds", 60).toInt());
     editor->addRow(tr("Autosave every"), autosave);
+    auto *autosaveFolder = new QLineEdit(QDir::toNativeSeparators(st.value("main/autosaveDir").toString()), this);
+    autosaveFolder->setPlaceholderText(QDir::toNativeSeparators(autosaveDir()));
+    editor->addRow(tr("Autosave folder"), autosaveFolder);
     // the character counter's limits, red in the grid and the edit box (Aegisub's, Kainote's); the
     // characters per second redden from the first to fully at the second (Aegisub's warning and error)
     const std::pair<const char *, int> limitKeys[] = {
@@ -2407,7 +2413,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
           {tr("Never"), tr("When aspect ratio changes"), tr("Always")});
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(bb, &QDialogButtonBox::accepted, this,
-            [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs, trace, tracks, fontsDir, device,
+            [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs, trace, tracks, fontsDir, device, autosaveFolder,
              types] {
         QSettings st;
         QSettings classes(assoc::kClasses, QSettings::NativeFormat);
@@ -2430,6 +2436,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         st.setValue("audio/preferredTracks", tracks->text().trimmed());
         st.setValue("fonts/externalDir", QDir::fromNativeSeparators(fontsDir->text().trimmed()));
         st.setValue("audio/device", device->currentData());
+        st.setValue("main/autosaveDir", QDir::fromNativeSeparators(autosaveFolder->text().trimmed()));
         st.setValue("audio/leadOut", leadOut->value());
         st.setValue("main/autosaveSeconds", autosave->value());
         for (auto &[k, s] : spins) st.setValue(k, s->value());
@@ -2594,7 +2601,11 @@ void SettingsDialog::buildColorsPage(QFormLayout *form) {
 
 // ---- autosave -----------------------------------------------------------------
 
-QString autosaveDir() { return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/autosave"; }
+// Aegisub's Path/Auto/Save
+QString autosaveDir() {
+    const QString dir = QSettings().value("main/autosaveDir").toString();
+    return dir.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/autosave" : dir;
+}
 
 AutosaveDialog::AutosaveDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle(tr("Open autosave file"));

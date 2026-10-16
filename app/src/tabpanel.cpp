@@ -179,7 +179,8 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
     importStyles(path.endsWith(".txt", Qt::CaseInsensitive) && fs::q(s().file_info().path).isEmpty());
     noteDisk();
     // Aegisub's backup of the file as opened, kept in the autosave folder (File > Open autosave)
-    if (const QFileInfo fi(path); fi.absolutePath() != QFileInfo(autosaveDir()).absoluteFilePath()) {
+    if (const QFileInfo fi(path); QSettings().value("main/backupOriginal", true).toBool() &&
+                                  fi.absolutePath() != QFileInfo(autosaveDir()).absoluteFilePath()) {
         const QString copy = autosaveDir() + "/" + fi.completeBaseName() + ".ORIGINAL." + fi.suffix();
         QDir().mkpath(autosaveDir());
         QFile::remove(copy);
@@ -373,6 +374,20 @@ void TabPanel::changed(int source) {
     emit docChanged(source);
     emit titleChanged();
     emit statusChanged();
+    // Aegisub's Save on Every Change: the file itself, when it saves without asking; changes a moment
+    // apart (typing) save once
+    if (modified() && !path().isEmpty() && QSettings().value("main/saveOnChange", false).toBool() &&
+        !s().converted() && s().lossless(fs::Utf8(path()))) {
+        if (!m_saveLater) {
+            m_saveLater = new QTimer(this);
+            m_saveLater->setSingleShot(true);
+            m_saveLater->setInterval(300);
+            connect(m_saveLater, &QTimer::timeout, this, [this] {
+                if (modified() && save()) emit titleChanged();
+            });
+        }
+        m_saveLater->start();
+    }
 }
 
 // the lines the step was made on come back selected (Aegisub)

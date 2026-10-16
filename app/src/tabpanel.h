@@ -139,5 +139,6 @@ private:
     bool m_hideOriginal = false;
     std::vector<std::int64_t> m_keyframes;
     QString m_keyframesPath, m_timecodesPath; // loaded from files, kept over the video's own
+    QTimer *m_saveLater = nullptr;
     QDateTime m_diskTime;
 };

@@ -3580,6 +3580,14 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Zapisuj stan interfejsu w plikach napisów</translation>
     </message>
     <message>
+        <source>Keep a copy of each opened file (.ORIGINAL) in the autosave folder</source>
+        <translation>Trzymaj kopię każdego otwartego pliku (.ORIGINAL) w folderze autozapisu</translation>
+    </message>
+    <message>
+        <source>Save the file after every change</source>
+        <translation>Zapisuj plik po każdej zmianie</translation>
+    </message>
+    <message>
         <source>Syntax highlighting in the edit box</source>
         <translation>Podświetlanie składni w polu edycji</translation>
     </message>
@@ -3698,6 +3706,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Autosave every</source>
         <translation>Autozapis co</translation>
+    </message>
+    <message>
+        <source>Autosave folder</source>
+        <translation>Folder autozapisu</translation>
     </message>
     <message>
         <source>Maximum characters per second</source>
