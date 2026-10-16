@@ -103,7 +103,7 @@ QRectF VideoView::displayRect() const {
     const auto info = m_box->info();
     double vw = info.width > 0 ? info.width : 16, vh = info.height > 0 ? info.height : 9;
     if (info.sar_num > 0 && info.sar_den > 0) vw = vw * info.sar_num / info.sar_den;
-    const double s = std::min(width() / vw, height() / vh);
+    const double s = std::min(width() / vw, height() / vh) * m_shrink;
     return QRectF((width() - vw * s) / 2, (height() - vh * s) / 2, vw * s, vh * s);
 }
 
@@ -127,9 +127,10 @@ double VideoView::scriptScale() const {
     return displayRect().width() / m_zoom.width() / std::max(1, m_box->tab()->s().file_info().play_res_x);
 }
 
-void VideoView::setZoom(QRectF uv) {
+void VideoView::setZoom(QRectF uv, double shrink) {
     m_zoom = uv.normalized().intersected(QRectF(0, 0, 1, 1));
     if (m_zoom.width() < 0.1 || m_zoom.height() < 0.1) m_zoom = {0, 0, 1, 1};
+    m_shrink = m_zoom == QRectF(0, 0, 1, 1) ? std::clamp(shrink, 0.1, 1.0) : 1.0;
     m_box->tab()->main()->updateStatus();
     updateOverlay();
 }
@@ -294,6 +295,13 @@ void VideoView::wheelEvent(QWheelEvent *e) {
 }
 
 void VideoView::zoomBy(double f, QPointF at) {
+    // below the fitted size the whole frame shrinks about the view's centre (to 10%, as zooming in goes to 1000%)
+    if (m_shrink < 1 || (f > 1 && m_zoom == QRectF(0, 0, 1, 1))) {
+        const double s = m_shrink / f;
+        if (s <= 1) return setZoom({0, 0, 1, 1}, s);
+        f = 1 / s; // the rest of the step zooms in
+        m_shrink = 1;
+    }
     const QRectF d = displayRect();
     const QPointF c(m_zoom.left() + (at.x() - d.left()) / d.width() * m_zoom.width(),
                     m_zoom.top() + (at.y() - d.top()) / d.height() * m_zoom.height());
@@ -1070,18 +1078,25 @@ void VideoBox::closeEvent(QCloseEvent *e) {
 
 void VideoBox::resetZoom() { m_view->setZoom({0, 0, 1, 1}); }
 
+void VideoView::resetPan() {
+    QRectF z = m_zoom;
+    z.moveCenter({0.5, 0.5});
+    setZoom(z, m_shrink);
+}
+
 void VideoBox::focusSeek() { m_seek->setFocus(); }
 
 void VideoView::zoomScale(double scale) {
     const double vh = m_box->info().height;
     if (vh <= 0) return;
-    // shortcut: the frame never shows smaller than fitted, so a scale below the fit shows it whole;
-    // a view that resizes with the zoom (Aegisub's) would be needed for that
-    const double s = std::clamp(displayRect().height() * devicePixelRatioF() / (scale * vh), 0.1, 1.0);
-    QRectF z(0, 0, s, s);
+    // the part of the frame that fits at that scale; more than all of it draws the frame smaller
+    const double s = displayRect().height() / m_shrink * devicePixelRatioF() / (scale * vh);
+    if (s >= 1) return setZoom({0, 0, 1, 1}, 1 / s);
+    QRectF z(0, 0, std::max(s, 0.1), std::max(s, 0.1));
+    const double w = z.width();
     z.moveCenter(m_zoom.center());
-    z.moveLeft(std::clamp(z.left(), 0.0, 1 - s));
-    z.moveTop(std::clamp(z.top(), 0.0, 1 - s));
+    z.moveLeft(std::clamp(z.left(), 0.0, 1 - w));
+    z.moveTop(std::clamp(z.top(), 0.0, 1 - w));
     setZoom(z);
 }
 

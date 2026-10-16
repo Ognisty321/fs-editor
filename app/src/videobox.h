@@ -76,7 +76,10 @@ public:
     QPointF toScript(QPointF widget) const;
     double scriptScale() const; // widget px per script px (x)
     QRectF zoom() const { return m_zoom; }
-    void setZoom(QRectF uv);
+    // the part of the frame shown, and how much smaller than fitted the frame is drawn (zoomed out)
+    void setZoom(QRectF uv, double shrink = 1);
+    // the zoomed part moved back to the frame's centre, the zoom kept (Aegisub's video/reset_pan)
+    void resetPan();
     // f < 1 zooms in, keeping the frame's point under the widget point at in place
     void zoomBy(double f, QPointF at);
     // the video's own pixels at that scale (Aegisub's 50/100/200%), around the view's centre
@@ -101,6 +104,7 @@ private:
     QImage m_frame;
     bool m_frameDirty = false, m_overlayDirty = true;
     QRectF m_zoom{0, 0, 1, 1};
+    double m_shrink = 1; // 0.1..1 of the fitted size, below 1 only with the whole frame shown
     QPointF m_zoomDragStart;
     bool m_zoomDragging = false;
     QPointF m_panFrom; // a zoomed frame dragged (Kainote moves its zoom rectangle)

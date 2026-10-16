@@ -2241,6 +2241,12 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     duration->setValue(st.value("subs/defaultDuration", 3000).toInt());
     subs->addRow(tr("Default line duration"), duration);
     spins.emplace_back("subs/defaultDuration", duration);
+    auto *fastJump = new QSpinBox(this); // Aegisub's Video/Slider/Fast Jump Step
+    fastJump->setRange(1, 1000);
+    fastJump->setSuffix(tr(" frames"));
+    fastJump->setValue(st.value("video/fastJump", 10).toInt());
+    video->addRow(tr("Frames skipped by a fast jump"), fastJump);
+    spins.emplace_back("video/fastJump", fastJump);
     const auto fontName = [](const QFont &f) { return QString("%1, %2 pt").arg(f.family()).arg(f.pointSize()); };
     auto *font = new QPushButton(fontName(st.value("grid/font", QFont("Tahoma", 10)).value<QFont>()), this);
     connect(font, &QPushButton::clicked, this, [font, fontName] {

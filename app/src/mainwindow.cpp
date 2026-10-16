@@ -1193,9 +1193,10 @@ void MainWindow::buildMenus() {
     add("snapEnd", tr("Snap end to keyframe"), QKeySequence("Shift+Right"), video, [=] { snap(false); });
     add("prevFrame", tr("Previous frame"), QKeySequence("Left"), video, [=] { tab()->video()->stepFrames(-1); });
     add("nextFrame", tr("Next frame"), QKeySequence("Right"), video, [=] { tab()->video()->stepFrames(1); });
-    // Aegisub's video/frame/*/large with its default Fast Jump Step of 10
-    add("prevFrames", tr("Back 10 frames"), QKeySequence("Alt+Left"), video, [=] { tab()->video()->stepFrames(-10); });
-    add("nextFrames", tr("Forward 10 frames"), QKeySequence("Alt+Right"), video, [=] { tab()->video()->stepFrames(10); });
+    // Aegisub's video/frame/*/large, by its Fast Jump Step setting
+    const auto jump = [] { return std::max(1, QSettings().value("video/fastJump", 10).toInt()); };
+    add("prevFrames", tr("Back several frames"), QKeySequence("Alt+Left"), video, [=] { tab()->video()->stepFrames(-jump()); });
+    add("nextFrames", tr("Forward several frames"), QKeySequence("Alt+Right"), video, [=] { tab()->video()->stepFrames(jump()); });
     // Aegisub's keys
     add("goStart", tr("Go to start time of line"), QKeySequence("Ctrl+1"), video, [=] {
         if (tab()->active() >= 0) tab()->video()->seekStart(tab()->s().row(size_t(tab()->active())).start);
@@ -1317,6 +1318,7 @@ void MainWindow::buildMenus() {
         add(QString("vecMode%1").arg(k), QCoreApplication::translate("VisualTools", VisualTools::kVecModes[k]), {},
             vecModes, [=] { tab()->video()->tools()->setVecMode(k); });
     add("resetZoom", tr("Turn off video zoom"), QKeySequence("Ctrl+Shift+Z"), video, [=] { tab()->video()->resetZoom(); });
+    add("resetPan", tr("Center the zoomed video"), {}, video, [=] { tab()->video()->view()->resetPan(); });
     // Aegisub's video/zoom/* (its keys for in and out) and video/focus_seek
     add("zoomIn", tr("Zoom in"), QKeySequence("Ctrl+Num++"), video, [=] {
         auto *v = tab()->video()->view();
