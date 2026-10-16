@@ -41,6 +41,7 @@ public:
     TabPanel *newTab();
     // Opens subtitles, video, audio or keyframes by extension.
     void openFile(const QString &path, const QString &encoding = {});
+    void openFiles(QStringList files);
     // Copies modified tabs to autosaveDir(); true if any file was written. With !wait the files
     // are written on a worker and true means one was started.
     bool autosaveTabs(bool wait = true);

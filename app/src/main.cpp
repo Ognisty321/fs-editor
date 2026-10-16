@@ -220,7 +220,7 @@ int main(int argc, char **argv) {
                                              QObject::tr("FS Editor was not closed properly last time. Open one "
                                                          "of the autosaved subtitles?")) == QMessageBox::Yes)
             w.action("openAutosave")->trigger();
-        for (const QString &f : files) w.openFile(f);
+        if (!files.isEmpty()) w.openFiles(files);
         if (files.isEmpty() && QSettings().value("main/askSession", true).toBool()) w.action("loadSession")->trigger();
     });
     // Smoke test: FSED_SMOKE=out.png grabs the window after loading and quits;

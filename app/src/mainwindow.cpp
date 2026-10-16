@@ -52,6 +52,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QCheckBox>
+#include <QCollator>
 #include <QSettings>
 #include <QSpinBox>
 #include <QStandardPaths>
@@ -507,6 +508,31 @@ void MainWindow::openFile(const QString &path, const QString &encoding) {
     }
 }
 
+// Kainote's: files opened together pair subtitles with videos in name order, each pair in its own
+// tab; audio and keyframes go to the last one.
+void MainWindow::openFiles(QStringList files) {
+    if (files.size() == 1) return openFile(files.front());
+    QCollator order; // "ep2" before "ep10"
+    order.setNumericMode(true);
+    order.setCaseSensitivity(Qt::CaseInsensitive);
+    std::ranges::sort(files, order);
+    QStringList subs, videos, other;
+    for (const QString &f : std::as_const(files)) {
+        const QString ext = QFileInfo(f).suffix().toLower();
+        if (kVideoExt.contains(ext)) videos << f;
+        else if (kAudioExt.contains(ext) || (ext == "txt" && isKeyframesFile(f))) other << f;
+        else subs << f;
+    }
+    TabPanel *last = nullptr; // the tab filled last: its video may still be loading
+    for (qsizetype i = 0; i < std::max(subs.size(), videos.size()); ++i) {
+        if (i < subs.size()) openFile(subs[i]); // takes an empty tab or a new one
+        else if (current() == last || !untouched(current()) || !current()->video()->path().isEmpty()) newTab();
+        if (i < videos.size()) openFile(videos[i]);
+        last = current();
+    }
+    for (const QString &f : std::as_const(other)) openFile(f);
+}
+
 // ---- actions ------------------------------------------------------------------
 
 namespace {
@@ -569,7 +595,7 @@ void MainWindow::buildMenus() {
     add("openSubs", tr("Open subtitles"), QKeySequence("Ctrl+O"), file, [this] {
         const QStringList files = QFileDialog::getOpenFileNames(this, tr("Open subtitles"),
                                                                 QSettings().value("main/lastDir").toString(), kSubsFilter);
-        for (const auto &f : files) openFile(f);
+        if (!files.isEmpty()) openFiles(files);
         if (!files.isEmpty()) QSettings().setValue("main/lastDir", QFileInfo(files.first()).absolutePath());
     });
     // Aegisub's "Open Subtitles with Charset": for files whose encoding detection guesses wrong
@@ -2194,7 +2220,7 @@ void MainWindow::dropEvent(QDropEvent *e) {
     e->acceptProposedAction();
     // after the drop returns: openFile may ask a question, which must not block the drag source
     QTimer::singleShot(0, this, [this, files] {
-        for (const QString &f : files) openFile(f);
+        if (!files.isEmpty()) openFiles(files);
     });
 }
 

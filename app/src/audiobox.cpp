@@ -587,10 +587,12 @@ QWidget *AudioBox::buttonRow() {
 
 void AudioBox::setSpectrum(bool on) { m_spectrumToggle->setChecked(on); }
 
-void AudioBox::open(const QString &path) {
+void AudioBox::open(const QString &path, bool withVideo) {
     // several audio tracks: Kainote's preferred one, else the one picked, as Aegisub asks
     int track = -1;
-    if (const auto tracks = fsb::audio_tracks(fs::Utf8(path)); tracks.size() > 1) {
+    const auto tracks = fsb::audio_tracks(fs::Utf8(path));
+    if (withVideo && tracks.empty()) return;
+    if (tracks.size() > 1) {
         track = fsb::preferred_track({tracks.data(), tracks.size()},
                                      fs::Utf8(QSettings().value("audio/preferredTracks").toString()));
         if (track < 0)

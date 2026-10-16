@@ -81,7 +81,7 @@ TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fs
         if (!m_video->path().isEmpty()) {
             s().set_project_value("Video File", fs::Utf8(m_video->path()));
             if (QSettings().value("video/openAudio", true).toBool() && !m_audio->hasAudio())
-                m_audio->open(m_video->path());
+                m_audio->open(m_video->path(), true);
         }
         m_video->subsChanged();
         m_video->seekFrame(m_video->frame()); // 0, or the position the script was saved at
