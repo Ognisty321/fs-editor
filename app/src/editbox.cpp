@@ -761,7 +761,12 @@ EditBox::EditBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
         p.drawRect(QRectF(6, 33, 28, 6));
         p.end();
         b->setIcon(QIcon(px));
-        connect(b, &QToolButton::clicked, this, [this, k] { setColorTag(k + 1); });
+        // Kainote's: a right click opens the colour sampler (the clicks swapped by a setting)
+        const auto sampler = [] { return QSettings().value("edit/samplerOnLeftClick", false).toBool(); };
+        connect(b, &QToolButton::clicked, this, [this, k, sampler] { setColorTag(k + 1, sampler()); });
+        b->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(b, &QToolButton::customContextMenuRequested, this,
+                [this, k, sampler] { setColorTag(k + 1, !sampler()); });
     }
     m_an = new QComboBox(this);
     m_an->setToolTip(tr("Text position"));
@@ -1055,7 +1060,7 @@ void EditBox::toggleTag(const QString &name) {
                       name == "b" ? st.bold : name == "i" ? st.italic : name == "u" ? st.underline : st.strikeout);
 }
 
-void EditBox::setColorTag(int which) {
+void EditBox::setColorTag(int which, bool sampler) {
     // Aegisub: the dialog starts from the colour in effect at the cursor, the style's unless a tag sets it
     const auto st = lineStyle();
     const rust::String *colors[] = {&st.primary, &st.secondary, &st.outline_color, &st.back};
@@ -1084,7 +1089,7 @@ void EditBox::setColorTag(int which) {
     };
     ++m_undoStep;
     bool previewed = false;
-    const QColor c = ColorPicker::get(this, start, true, [&](const QColor &col) {
+    const auto live = [&](const QColor &col) {
         {
             const QSignalBlocker quiet(m_text); // the colour and its alpha as one change
             restore();
@@ -1094,7 +1099,8 @@ void EditBox::setColorTag(int which) {
         }
         previewed = true;
         emit m_text->textChanged();
-    });
+    };
+    const QColor c = sampler ? ColorPicker::sample(this, start, live) : ColorPicker::get(this, start, true, live);
     if (!c.isValid() && previewed) {
         m_tab->undo();
         // a preview longer than the 30 s of a typing step spans two of them: the text goes back anyway

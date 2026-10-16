@@ -131,7 +131,7 @@ private:
     void nextLine();
     /// `original`: at the cursor of the translator's original box.
     void splitAtCursor(qint64 atMs, bool original = false);
-    void setColorTag(int which);
+    void setColorTag(int which, bool sampler = false); // sampler: Kainote's colour sampler
     void toggleTag(const QString &name);
     fsb::StyleData lineStyle() const;
     void configureTagButton(int index);

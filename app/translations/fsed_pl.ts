@@ -467,6 +467,10 @@
         <source>Drag over the screen, or click and then click where, to take a color</source>
         <translation>Przeciągnij po ekranie albo kliknij, a potem kliknij w wybranym miejscu, by pobrać kolor</translation>
     </message>
+    <message>
+        <source>Color sampler</source>
+        <translation>Próbnik koloru</translation>
+    </message>
 </context>
 <context>
     <name>EditBox</name>
@@ -3794,6 +3798,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Spelling suggestions on a double click on a misspelled word</source>
         <translation>Podpowiedzi pisowni po dwukliku na błędnym słowie</translation>
+    </message>
+    <message>
+        <source>A left click on a colour button opens the colour sampler, a right click the colour picker</source>
+        <translation>Lewy klik na przycisku koloru otwiera próbnik koloru, prawy okno wyboru koloru</translation>
     </message>
     <message>
         <source>Center the active line in the grid when it changes</source>

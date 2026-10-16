@@ -23,6 +23,9 @@ public:
     // as it went in.
     static QColor get(QWidget *parent, const QColor &initial, bool alpha,
                       const std::function<void(const QColor &)> &live = {});
+    // Kainote's colour sampler: a small window that only takes colours from the screen, told to
+    // live as they are taken; the alpha stays as it was
+    static QColor sample(QWidget *parent, const QColor &initial, const std::function<void(const QColor &)> &live);
 
 private:
     ColorPicker(const QColor &initial, bool alpha, QWidget *parent);

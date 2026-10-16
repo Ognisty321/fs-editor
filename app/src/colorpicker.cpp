@@ -379,6 +379,47 @@ QColor ColorPicker::get(QWidget *parent, const QColor &initial, bool alpha,
     return d.color();
 }
 
+QColor ColorPicker::sample(QWidget *parent, const QColor &initial, const std::function<void(const QColor &)> &live) {
+    QDialog d(parent);
+    d.setWindowTitle(tr("Color sampler"));
+    auto *v = new QVBoxLayout(&d);
+    auto *hex = new QLineEdit(&d);
+    hex->setReadOnly(true);
+    auto *dropper = new ScreenDropper(&d);
+    dropper->setToolTip(tr("Click a pixel to take its color"));
+    auto *eyedropper = new DropperButton(&d);
+    eyedropper->setToolTip(tr("Drag over the screen, or click and then click where, to take a color"));
+    QColor color = initial.isValid() ? initial : QColor(Qt::white);
+    const auto take = [&](const QColor &c, bool tell) {
+        color.setRgb(c.red(), c.green(), c.blue(), color.alpha()); // the alpha stays as it was
+        hex->setText(QString::asprintf("&H%02X%02X%02X&", color.blue(), color.green(), color.red()));
+        QPalette pal = hex->palette();
+        pal.setColor(QPalette::Base, QColor(color.rgb()));
+        pal.setColor(QPalette::Text, color.lightness() > 127 ? Qt::black : Qt::white);
+        hex->setPalette(pal);
+        if (tell && live) live(color);
+    };
+    take(color, false);
+    dropper->picked = [&](const QColor &c) { take(c, true); };
+    eyedropper->at = [&](QPoint p, bool done) {
+        if (const QColor c = dropper->grab(p); done && c.isValid()) take(c, true);
+    };
+    auto *row = new QHBoxLayout;
+    row->addWidget(eyedropper);
+    row->addWidget(dropper, 1, Qt::AlignCenter);
+    v->addWidget(hex);
+    v->addLayout(row);
+    auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+    connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+    connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    v->addWidget(bb);
+    // Kainote's: it opens where the mouse is, near the colour to take
+    d.adjustSize();
+    d.move(QCursor::pos() - QPoint(d.width() / 2, d.height() / 2));
+    if (d.exec() != QDialog::Accepted) return {};
+    return color;
+}
+
 QColor ColorPicker::color() const {
     QColor c(m_r, m_g, m_b);
     c.setAlpha(m_alpha ? 255 - m_a : m_initial.alpha());

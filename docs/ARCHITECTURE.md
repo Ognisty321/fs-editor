@@ -199,6 +199,7 @@ Szczegóły są w `docs/research/kainote-ui.md`. W skrócie:
 
 * menu, pasek narzędzi i pasek kart (wiele plików naraz, każda karta ma własny dokument, wideo, audio i undo). Kilka plików otwartych naraz (upuszczonych, z wiersza poleceń albo z okna otwierania) łączy się jak w Kainote: napisy i wideo w kolejności nazw („ep2” przed „ep10”) tworzą pary, każda w osobnej karcie, a audio i klatki kluczowe trafiają do ostatniej;
 * karta zawiera wideo (lewa góra) i obok edytor linii; audio jest nad edytorem, a grid na dole;
+* próbnik koloru z Kainote: prawy klik na przycisku koloru w polu edycji otwiera małe okno w miejscu myszy (pipeta, lupa ekranu, kod koloru), kolor od razu widać w linijce, Anuluj cofa; ustawienie zamienia kliknięcia z oknem wyboru koloru;
 * katalogi czcionek z Kainote: nazwane listy rodzin czcionek w ustawieniach (czcionka może być w kilku); w edytorze stylu lista czcionek zawężona do katalogu (lub do czcionek bez katalogu), „+” dodaje lub zabiera bieżącą czcionkę z katalogu, okno katalogów (dodaj / zmień nazwę / usuń, czcionki z podglądem do zaznaczania, filtr);
 * edycja wielu stylów naraz (Kainote): Edytuj przy kilku zaznaczonych stylach — po pytaniu pozostałe dostają to, co zmieniło się w edytowanym (bez nazwy), w pliku jednym krokiem cofania (`style_with_changes` / `change_styles`), w magazynie z zapisem katalogu;
 * wyszukiwanie zaznaczonej frazy w sieci z menu pola edycji (Kainote): ling.pl, bab.la, Google, synonim.net;
