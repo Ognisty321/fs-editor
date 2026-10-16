@@ -124,8 +124,9 @@ Wszystkie operacje są wywoływalne z CLI, GUI i Lua:
 
 * przesuwanie czasów (o czas lub o klatki, wszystkie/zaznaczone/od linii, start/koniec/oba, z ograniczeniem do stylów); w gridzie przesuwa się przeciągnięciem lub skrótami, jak w Kainote;
 * sortowanie (start, koniec, styl, aktor, efekt, warstwa);
-* filtrowanie (styl, aktor, efekt, tekst/regex, komentarze, zaznaczone, kolizje); filtr to widok, nie modyfikacja;
-* szukaj/zamień (zwykły tekst/regex, pola, z/bez tagów);
+* filtrowanie (styl, aktor, efekt, tekst/regex, komentarze, zaznaczone, kolizje); filtr to widok, nie modyfikacja. Linijki ukryte ręcznie i te, które filtr zostawia ukryte („nie resetuj”), są zapamiętane po identyfikatorach, więc wstawienie lub usunięcie linijek przed nimi ich nie przesuwa;
+* szukaj/zamień (zwykły tekst/regex, pola, z/bez tagów). Zamiana z regex czyta odwołania jak Aegisub (format Perla z boost): `$1`, `${1}`, `\1`–`\9` i `\\` jako jeden backslash. Wyjątkiem są tagi koloru i alfy (`\1c`, `\3a`), które zostają tagami, oraz `\N`, który zostaje łamaniem linii (Aegisub zostawia z niego samo „N”);
+* konwersja formatu jest krokiem undo razem z formatem i nazwą pliku: cofnięcie przywraca linijki, format i ścieżkę;
 * post-processor timingu (lead-in/out, łączenie sąsiednich, snap do keyframes);
 * resample rozdzielczości (`PlayResX/Y`, `\pos`, `\clip`, rysunki, marginesy, rozmiary, obrys);
 * zmiana FPS (CFR→CFR, VFR→CFR);
@@ -207,7 +208,9 @@ Szczegóły są w `docs/research/kainote-ui.md`. W skrócie:
 * Hydra (narzędzie „wszystkie tagi”): lista tagów użytkownika z zakresem, krokiem, liczbą cyfr, wartościami domyślnymi, miejscem wstawiania i trybem. Suwaki nad wideo pokazują wartości aktywnej linijki, kółko zmienia wartość o krok, Shift+kółko wybiera tag, a prawy przycisk przesuwa suwaki. Dla `\fad` i `\t` klawisze odległości od początku i końca linijki (Ctrl+, i Ctrl+.) biorą czas wideo;
 * strona „Skojarzenia plików” w ustawieniach (Windows): ProgID `FSEditor.<rozszerzenie>` w `HKCU\Software\Classes`, więc nie trzeba administratora. Typ dostaje go jako domyślny i na liście „Otwórz za pomocą”, a wyłączenie przywraca poprzedni program. Wybór dokonany w Eksploratorze (UserChoice) ma pierwszeństwo, bo tylko Eksplorator może go zapisać;
 * menu kontekstowe pola tekstu: podpowiedzi pisowni, dodanie słowa do słownika i usunięcie go stamtąd, język sprawdzania pisowni (albo jego wyłączenie) i tezaurus;
-* autozapis co N sekund (Aegisub): kopia dokumentu w O(1) w GUI, a zapis ASS na dysk w wątku roboczym. Przy awarii i wylogowaniu zapis odbywa się synchronicznie.
+* autozapis co N sekund (Aegisub): kopia dokumentu w O(1) w GUI, a zapis ASS na dysk w wątku roboczym. Przy awarii i wylogowaniu zapis odbywa się synchronicznie. Obok kopii leży plik `.from` ze ścieżką oryginału, więc „Zapisz” po odzyskaniu zaczyna w tym miejscu;
+* przeciąganie w gridzie i w audio poza krawędź przewija dalej na timerze, także gdy mysz stoi, tym szybciej, im dalej jest. Linijki zabierane przez Ctrl+przeciąganie znacznika rysują się razem z nim;
+* czcionki dołączone do wideo dla prostokątów pozycji i skali wczytują się w tle, gdy tylko wybierzesz narzędzie. Menedżer stylów nie oznacza jako brakujących czcionek dołączonych do pliku. Czcionka usunięta z `[Fonts]` znika też z ekranu: renderer zaczyna od nowa, bo libass umie usunąć tylko wszystkie naraz.
 
 ## 8. Etapy
 
