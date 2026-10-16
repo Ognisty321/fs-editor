@@ -1611,15 +1611,31 @@ std::vector<fsb::StyleData> StyleManager::askOverwrite(const std::vector<fsb::St
     return out;
 }
 
+// The families of a font attached to the file, registered with Qt once a file name and size.
+static QStringList attachedFamilies(const fsb::Session &s, const fsb::AttachmentRow &a) {
+    static QHash<QString, QStringList> known;
+    const QString key = fs::q(a.name) + '/' + QString::number(a.size);
+    if (const auto it = known.constFind(key); it != known.cend()) return *it;
+    const auto data = s.attachment_data(true, a.name);
+    const int id = QFontDatabase::addApplicationFontFromData(
+        QByteArray(reinterpret_cast<const char *>(data.data()), qsizetype(data.size())));
+    return known[key] = id < 0 ? QStringList() : QFontDatabase::applicationFontFamilies(id);
+}
+
 void StyleManager::reload() {
-    // shortcut: the fonts installed when the manager first opened, and a font attached to the
-    // file shows as missing; read them again if people install fonts while it is open
-    static const QSet<QString> fonts = [] {
+    // the system's fonts as Qt read them at the start (it does not watch for new ones), and the
+    // file's attached ones, which libass draws with as well
+    static const QSet<QString> system = [] {
         QSet<QString> f;
         for (const QString &n : QFontDatabase::families()) f.insert(n.toLower());
         return f;
     }();
-    const auto refill = [this](QListWidget *list, const auto &styles) {
+    QSet<QString> fonts = system;
+    if (auto *tab = m_main->current())
+        for (const auto &a : tab->s().attachments())
+            if (a.font)
+                for (const QString &f : attachedFamilies(tab->s(), a)) fonts.insert(f.toLower());
+    const auto refill = [this, &fonts](QListWidget *list, const auto &styles) {
         QSet<QString> selected;
         for (auto *it : list->selectedItems()) selected.insert(it->text());
         const QString current = list->currentItem() ? list->currentItem()->text() : QString();

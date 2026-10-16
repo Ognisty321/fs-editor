@@ -731,6 +731,8 @@ pub mod ffi {
         fn attach_fonts(self: &mut Session, paths: &[String]) -> Result<usize>;
         fn extract_attachment(self: &Session, font: bool, name: &str, path: &str) -> Result<()>;
         fn remove_attachment(self: &mut Session, font: bool, name: &str);
+        /// An attachment's decoded bytes; empty when there is none.
+        fn attachment_data(self: &Session, font: bool, name: &str) -> Vec<u8>;
         /// The file name an attachment extracts to (without SSA's `_0`).
         fn attachment_file_name(name: &str) -> String;
         /// The styles of a catalog file (Aegisub's and Kainote's .sty): its `Style:` lines.

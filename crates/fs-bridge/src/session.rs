@@ -2439,6 +2439,11 @@ impl Session {
         std::fs::write(path, data).map_err(|e| format!("{path}: {e}"))
     }
 
+    /// An attachment's decoded bytes; empty when there is none.
+    pub fn attachment_data(&self, font: bool, name: &str) -> Vec<u8> {
+        self.ed.doc.attachment_data(font, name).unwrap_or_default()
+    }
+
     pub fn remove_attachment(&mut self, font: bool, name: &str) {
         let name = name.to_string();
         self.edit("Delete attachment", move |d| {
