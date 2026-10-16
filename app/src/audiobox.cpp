@@ -178,7 +178,9 @@ void AudioView::paintOverlay(QPainter &p) {
     p.setPen(QPen(col(theme::AudioKeyframe), 1, Qt::DashLine));
     for (qint64 kf : b.m_tab->keyframes()) {
         const qint64 t = video->hasVideo() ? video->timeAtStart(kf) : -1; // where snapping puts a line
-        if (t < l || t > r || !st.value("audio/drawKeyframes", true).toBool()) continue;
+        // Aegisub's Keyframes in Dialogue Mode and in Karaoke Mode
+        if (t < l || t > r || !st.value(b.m_karaoke ? "audio/drawKeyframesKaraoke" : "audio/drawKeyframes", true).toBool())
+            continue;
         p.drawLine(b.xOf(t), RulerH, b.xOf(t), h);
     }
     // inactive lines: shaded, with dotted boundaries; those a Ctrl+drag takes along go with the marker

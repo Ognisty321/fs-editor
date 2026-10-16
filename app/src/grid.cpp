@@ -61,7 +61,7 @@ void eachSpan(const std::vector<size_t> &spans, const QString &raw, const QStrin
 } // namespace
 
 Grid::Grid(TabPanel *tab) : QAbstractScrollArea(tab), m_tab(tab) {
-    setFocusPolicy(Qt::StrongFocus);
+    applyFocusPolicy();
     viewport()->setMouseTracking(true);
     connect(&m_edgeTimer, &QTimer::timeout, this, [this] {
         if (m_selectTo < 0) return m_edgeTimer.stop();
@@ -104,6 +104,11 @@ void Grid::setColumnHidden(int c, bool hidden) {
     QSettings().setValue("grid/hiddenColumns", l);
     layoutColumns();
     viewport()->update();
+}
+
+void Grid::applyFocusPolicy() {
+    // off, a click selects without taking the keys from the edit box; Tab still reaches the grid
+    setFocusPolicy(QSettings().value("grid/focusOnClick", true).toBool() ? Qt::StrongFocus : Qt::TabFocus);
 }
 
 void Grid::setTagMode(int mode) {
@@ -512,7 +517,7 @@ void Grid::clickRow(int vi, Qt::KeyboardModifiers mods) {
 }
 
 void Grid::mousePressEvent(QMouseEvent *e) {
-    setFocus();
+    if (focusPolicy() & Qt::ClickFocus) setFocus();
     const int vi = rowAt(int(e->position().y()));
     const int col = colAt(int(e->position().x()));
     if (vi < 0) return;

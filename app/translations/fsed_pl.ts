@@ -3616,6 +3616,18 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Klatki kluczowe na pasku przewijania</translation>
     </message>
     <message>
+        <source>Only show visual tools when the mouse is over the video</source>
+        <translation>Narzędzia wizualne tylko z myszą nad wideo</translation>
+    </message>
+    <message>
+        <source>Show keyframes in the audio in karaoke mode</source>
+        <translation>Klatki kluczowe w audio w trybie karaoke</translation>
+    </message>
+    <message>
+        <source>A click in the grid moves the keyboard focus there</source>
+        <translation>Kliknięcie w siatce przenosi tam fokus klawiatury</translation>
+    </message>
+    <message>
         <source>Shift+Enter adds \n</source>
         <translation>Shift+Enter wstawia \n</translation>
     </message>

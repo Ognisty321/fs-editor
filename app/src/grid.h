@@ -31,6 +31,7 @@ public:
     void setCompare(std::map<size_t, std::vector<size_t>> rows);
     // rows timed with the other split-view tab's active line, marked at the left edge
     void setLinked(std::set<size_t> rows);
+    void applyFocusPolicy(); // Aegisub's Subtitle/Grid/Focus Allow
     void setTagMode(int mode); // Aegisub's: 0 show tags, 1 simplify them to ☀, 2 hide them
     static QString colName(int c);
     void setColumnHidden(int c, bool hidden);

@@ -171,7 +171,8 @@ void VideoView::render(QRhiCommandBuffer *cb) {
                 p.setPen(QPen(Qt::yellow, 1, Qt::DashLine));
                 p.drawRect(QRectF(m_zoomDragStart, mapFromGlobal(QCursor::pos()).toPointF()));
             }
-            m_box->m_tools->paint(p);
+            // Aegisub's Tool/Visual/Autohide: the tools only while the mouse is over the video
+            if (!QSettings().value("video/autohideTools", false).toBool() || underMouse()) m_box->m_tools->paint(p);
         }
         if (uploadImage(rhi(), m_overlayTex, ov, u)) m_overlayQuad.setTexture(m_overlayTex.get());
         m_overlayDirty = false;

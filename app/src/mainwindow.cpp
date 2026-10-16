@@ -925,6 +925,7 @@ void MainWindow::buildMenus() {
             action("sessionAtStart")->setChecked(QSettings().value("main/askSession", true).toBool()); // the menu's tick
             for (auto *t : tabs()) { // the limits colour the grid and the edit box
                 t->grid()->viewport()->update();
+                t->grid()->applyFocusPolicy();
                 t->edit()->reload();
                 t->audio()->docChanged(); // inactive lines
                 t->audio()->settingsChanged();
