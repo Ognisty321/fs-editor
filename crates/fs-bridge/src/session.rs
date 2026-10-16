@@ -19,8 +19,8 @@ use fs_core::{Color, Document, Event, EventEntry, EventId, Time};
 use fs_formats::{Format, LoadOptions, SaveOptions, TextImport};
 
 use crate::ffi::{
-    ColumnInfo, ComparePair, ExportSpec, FileInfo, FilterSpec, FindHit, FindMatch, FindSpec,
-    PostSpec, ResampleSpec, Row, RowSpan, ShiftSpec, StyleData, Syllable, Visual,
+    ColumnInfo, ComparePair, ConvertSpec, ExportSpec, FileInfo, FilterSpec, FindHit, FindMatch,
+    FindSpec, PostSpec, ResampleSpec, Row, RowSpan, ShiftSpec, StyleData, Syllable, Visual,
 };
 
 pub struct Session {
@@ -47,6 +47,8 @@ pub struct Session {
     pub(crate) framerate: Option<Framerate>,
     /// The rate a file in frames (MicroDVD) was read in, to write it in the same.
     subs_fps: Option<Framerate>,
+    /// Kainote's conversion FPS, for a file in frames without its own rate or a video's.
+    default_fps: Option<Framerate>,
     pub(crate) keyframes: Vec<i64>,
     /// Aegisub's `Properties.automation_settings`: each export filter's settings as the file
     /// last exported with them, by inline-string-encoded filter name. Kept for the file while it
@@ -80,6 +82,7 @@ impl Default for Session {
             video_sar: (0, 0),
             framerate: None,
             subs_fps: None,
+            default_fps: None,
             keyframes: Vec::new(),
             filter_settings: HashMap::new(),
             convert_undo: Vec::new(),
@@ -562,6 +565,7 @@ impl Session {
             // frames as they were read, so the lines no one moved keep theirs
             fps: (self.subs_fps.clone())
                 .or_else(|| self.framerate.clone())
+                .or_else(|| self.default_fps.clone())
                 .unwrap_or_else(|| Framerate::from_rational(24000, 1001, false).unwrap()),
             ..Default::default()
         }
@@ -599,6 +603,16 @@ impl Session {
     /// Switch the format the file is saved in (Kainote "Conversion"): the lines become what it
     /// holds, as one undo step, and the next Save asks for a name.
     pub fn convert(&mut self, format: &str) -> Result<(), String> {
+        self.convert_with(format, &ConvertSpec::default())
+    }
+
+    /// Kainote's frame rate for files in frames with no rate of their own or a video's (0: 23.976).
+    pub fn set_default_fps(&mut self, fps: f64) {
+        self.default_fps = (fps > 0.0).then(|| Framerate::from_fps(fps).ok()).flatten();
+    }
+
+    /// A conversion with Kainote's settings, all in its one undo step.
+    pub fn convert_with(&mut self, format: &str, spec: &ConvertSpec) -> Result<(), String> {
         let f = Format::from_name(format).ok_or_else(|| format!("unknown format {format}"))?;
         if self.tl {
             return Err("translation mode is on: turn it off to convert".into());
@@ -606,8 +620,45 @@ impl Session {
         let opts = self.save_options();
         let before = (self.format, self.path.clone());
         let g = self.ed.generation();
-        if !f.is_ass() {
-            self.edit(CONVERT, |d| fs_formats::reduce(d, f, &opts));
+        let to_ass = f.is_ass() && !self.format.is_ass();
+        let ends = (spec.new_ends && f != Format::Tmp) || self.format == Format::Tmp;
+        let style = (to_ass && !spec.style.is_empty())
+            .then(|| {
+                Document::parse(&format!("{CATALOG_HEAD}{}\n", spec.style))
+                    .styles()
+                    .next()
+                    .cloned()
+            })
+            .flatten();
+        if !f.is_ass() || to_ass || ends {
+            self.edit(CONVERT, |d| {
+                fs_formats::reduce(d, f, &opts);
+                if to_ass {
+                    if spec.res_x > 0 && spec.res_y > 0 {
+                        d.set_info("PlayResX", &spec.res_x.to_string());
+                        d.set_info("PlayResY", &spec.res_y.to_string());
+                    }
+                    if let Some(mut st) = style {
+                        st.name = "Default".into();
+                        match d.style_index("Default").and_then(|i| d.style_mut(i)) {
+                            Some(old) => *old = st,
+                            None => {
+                                d.add_style(st);
+                            }
+                        }
+                    }
+                    if !spec.tags.is_empty() {
+                        for i in 0..d.event_count() {
+                            if let Some(e) = d.event_mut(i) {
+                                e.text.insert_str(0, &spec.tags);
+                            }
+                        }
+                    }
+                }
+                if ends {
+                    fs_core::ops::new_end_times(d, i64::from(spec.ms_per_char));
+                }
+            });
         }
         // a conversion that changed no line (to ASS) has no step to undo
         if self.ed.generation() != g {
@@ -4262,6 +4313,35 @@ mod tests {
         s.set_video_context(640, 480, 1, 1, &[0, 100, 200, 300], &[]);
         s.open(path).unwrap();
         assert_eq!(s.row(0).start, 2450); // frame 25 at 10 fps
+        std::fs::remove_file(p).ok();
+    }
+
+    #[test]
+    fn a_conversion_to_ass_takes_kainotes_settings() {
+        let p = std::env::temp_dir().join(format!("fsb-conv-{}.srt", std::process::id()));
+        std::fs::write(
+            &p,
+            "1\n00:00:01,000 --> 00:00:09,000\nabcd\n\n2\n00:00:03,000 --> 00:00:04,000\nxy\n",
+        )
+        .unwrap();
+        let mut s = Session::default();
+        s.open(p.to_str().unwrap()).unwrap();
+        let spec = ConvertSpec {
+            res_x: 1280,
+            res_y: 720,
+            style: "Style: Mine,Arial,40,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1".into(),
+            tags: r"{e1}".into(),
+            new_ends: true,
+            ms_per_char: 1000,
+        };
+        s.convert_with("ass", &spec).unwrap();
+        assert_eq!(s.file_info().play_res_x, 1280);
+        assert_eq!(s.row(0).text, r"{e1}abcd");
+        assert_eq!((s.row(0).end, s.row(1).end), (3000, 5000)); // 4 s cut at the next start; 2 s
+        let st = s.styles();
+        assert_eq!((st[0].name.as_str(), st[0].size), ("Default", 40.0));
+        s.undo(); // one step back to the SRT as read
+        assert_eq!((s.row(0).end, s.row(0).text.as_str()), (9000, "abcd"));
         std::fs::remove_file(p).ok();
     }
 

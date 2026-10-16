@@ -34,6 +34,7 @@
 #include <csignal>
 #include <numeric>
 #include <cstdio>
+#include <ranges>
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -288,8 +289,8 @@ int main(int argc, char **argv) {
                     {"FSED_SMOKE_EDITKEY",
                      w.current()->edit()->findChild<SubsTextEdit *>({}, Qt::FindDirectChildrenOnly)}};
                 for (const auto &[var, view] : keyTargets)
-                    if (const QKeySequence k(qEnvironmentVariable(var)); !k.isEmpty()) {
-                        QKeyEvent e(QEvent::KeyPress, k[0].key(), k[0].keyboardModifiers());
+                    for (const QKeySequence k(qEnvironmentVariable(var)); int i : std::views::iota(0, k.count())) {
+                        QKeyEvent e(QEvent::KeyPress, k[i].key(), k[i].keyboardModifiers()); // "F, Esc": in turn
                         QApplication::sendEvent(view, &e);
                     }
                 // FSED_SMOKE_DRAG="x1,y1,x2,y2": a left-button drag on the video, in view fractions 0..1;

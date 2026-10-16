@@ -2221,8 +2221,23 @@ void MainWindow::convert(const QString &format) {
                                  .arg(format),
                              QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
         return;
+    // Kainote's conversion settings, shown first when asked for
+    if (QSettings().value("convert/showSettings", false).toBool()) {
+        QDialog d(this);
+        d.setWindowTitle(tr("Conversion"));
+        auto *form = new QFormLayout(&d);
+        const auto save = SettingsDialog::conversionPage(form, &d);
+        auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &d);
+        connect(bb, &QDialogButtonBox::accepted, &d, &QDialog::accept);
+        connect(bb, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+        form->addRow(bb);
+        if (d.exec() != QDialog::Accepted) return;
+        save();
+    }
+    const auto info = tab->video()->info();
     try {
-        tab->s().convert(fs::Utf8(format));
+        tab->s().set_default_fps(QSettings().value("convert/fps", 23.976).toDouble());
+        tab->s().convert_with(fs::Utf8(format), SettingsDialog::conversionSpec(info.width, info.height));
     } catch (const rust::Error &e) {
         return error(QString::fromUtf8(e.what()));
     }

@@ -188,6 +188,12 @@ class SettingsDialog : public QDialog {
 public:
     explicit SettingsDialog(QWidget *parent);
     static constexpr int Restored = 2; // exec()'s result after Restore Defaults
+    // Kainote's conversion settings on `form`, for this dialog's page and the window shown before a
+    // conversion; the function returned stores them
+    static std::function<void()> conversionPage(QFormLayout *form, QWidget *owner);
+    // those settings for a conversion; converted to ASS, the subtitles take the video's resolution
+    // (w, h above 0), else that of new files
+    static fsb::ConvertSpec conversionSpec(int w, int h);
 
 signals:
     void applied(); // OK, Apply or Restore Defaults saved the options

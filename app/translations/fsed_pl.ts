@@ -3560,6 +3560,34 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Wczytuj ostatnią sesję przy starcie</translation>
     </message>
     <message>
+        <source>The file&apos;s own</source>
+        <translation>Własny pliku</translation>
+    </message>
+    <message>
+        <source>Style of subtitles converted to ASS</source>
+        <translation>Styl napisów konwertowanych do ASS</translation>
+    </message>
+    <message>
+        <source>Tags put before each line converted to ASS</source>
+        <translation>Tagi wstawiane na początku linii przy konwersji do ASS</translation>
+    </message>
+    <message>
+        <source>New end times by the length of the text</source>
+        <translation>Nowe czasy końca według długości tekstu</translation>
+    </message>
+    <message>
+        <source>Time per character (TMP always gets new end times)</source>
+        <translation>Czas na znak (TMP zawsze dostaje nowe czasy końca)</translation>
+    </message>
+    <message>
+        <source>MicroDVD frame rate without a video</source>
+        <translation>Klatki na sekundę MicroDVD bez wideo</translation>
+    </message>
+    <message>
+        <source>Show these settings before a conversion</source>
+        <translation>Pokazuj te ustawienia przed konwersją</translation>
+    </message>
+    <message>
         <source>Editor</source>
         <translation>Edytor</translation>
     </message>
@@ -3582,6 +3610,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Colors</source>
         <translation>Kolory</translation>
+    </message>
+    <message>
+        <source>Conversion</source>
+        <translation>Konwersja</translation>
     </message>
     <message>
         <source>File associations</source>

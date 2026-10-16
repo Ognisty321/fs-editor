@@ -83,6 +83,20 @@ pub mod ffi {
         keyframes_file: String,
     }
 
+    /// Kainote's conversion settings. To ASS from another format: the resolution (when both are
+    /// above 0), a `Style:` line taking Default's place and tags put before each line. New end
+    /// times: `ms_per_char` per character without tags, at least a second, cut at the next start;
+    /// a TMP file (no end times) always gets them.
+    #[derive(Debug, Clone, Default)]
+    struct ConvertSpec {
+        res_x: i32,
+        res_y: i32,
+        style: String,
+        tags: String,
+        new_ends: bool,
+        ms_per_char: i32,
+    }
+
     #[derive(Debug, Clone, Default)]
     struct StyleData {
         name: String,
@@ -587,6 +601,9 @@ pub mod ffi {
         /// Write the copy as ASS (Aegisub's `.AUTOSAVE.ass`).
         fn write(self: &Backup, path: &str) -> Result<()>;
         fn convert(self: &mut Session, format: &str) -> Result<()>;
+        fn convert_with(self: &mut Session, format: &str, spec: &ConvertSpec) -> Result<()>;
+        /// Kainote's conversion FPS for files in frames without their own rate or a video's (0: 23.976).
+        fn set_default_fps(self: &mut Session, fps: f64);
         /// Whether the format was converted since the file was read or saved: Save asks for a name.
         fn converted(self: &Session) -> bool;
         /// Forget the file (a recovered autosave): Save asks for a name, modified until then.

@@ -1579,6 +1579,64 @@ std::vector<fsb::StyleData> catalogStyles(const QString &name) {
     return {parsed.begin(), parsed.end()};
 }
 
+std::function<void()> SettingsDialog::conversionPage(QFormLayout *form, QWidget *owner) {
+    const QSettings st;
+    auto *style = new QComboBox(owner);
+    style->addItem(tr("The file's own"), QString());
+    for (const QString &cat : styleCatalogs())
+        for (const auto &s : catalogStyles(cat)) {
+            const QString name = fs::q(s.name);
+            style->addItem(cat + " / " + name, cat + "\n" + name);
+        }
+    style->setCurrentIndex(std::max(0, style->findData(st.value("convert/style"))));
+    form->addRow(tr("Style of subtitles converted to ASS"), style);
+    auto *tags = new QLineEdit(st.value("convert/tags").toString(), owner);
+    tags->setPlaceholderText("{\\be1}");
+    form->addRow(tr("Tags put before each line converted to ASS"), tags);
+    auto *ends = new QCheckBox(tr("New end times by the length of the text"), owner);
+    ends->setChecked(st.value("convert/newEnds", false).toBool());
+    form->addRow(ends);
+    auto *perChar = new QSpinBox(owner);
+    perChar->setRange(30, 1000);
+    perChar->setSuffix(" ms");
+    perChar->setValue(st.value("convert/msPerChar", 110).toInt());
+    form->addRow(tr("Time per character (TMP always gets new end times)"), perChar);
+    auto *fps = new QComboBox(owner);
+    fps->setEditable(true);
+    fps->addItems({"23.976", "24", "25", "29.97", "30", "50", "59.94", "60"});
+    fps->setValidator(new QDoubleValidator(1, 1000, 3, fps));
+    fps->setCurrentText(st.value("convert/fps", "23.976").toString());
+    form->addRow(tr("MicroDVD frame rate without a video"), fps);
+    auto *show = new QCheckBox(tr("Show these settings before a conversion"), owner);
+    show->setChecked(st.value("convert/showSettings", false).toBool());
+    form->addRow(show);
+    return [=] {
+        QSettings st;
+        st.setValue("convert/style", style->currentData());
+        st.setValue("convert/tags", tags->text());
+        st.setValue("convert/newEnds", ends->isChecked());
+        st.setValue("convert/msPerChar", perChar->value());
+        st.setValue("convert/fps", QLocale::c().toDouble(fps->currentText().replace(',', '.')) > 0
+                                       ? fps->currentText().replace(',', '.')
+                                       : QString("23.976"));
+        st.setValue("convert/showSettings", show->isChecked());
+    };
+}
+
+fsb::ConvertSpec SettingsDialog::conversionSpec(int w, int h) {
+    const QSettings st;
+    fsb::ConvertSpec spec;
+    spec.res_x = w > 0 && h > 0 ? w : st.value("subs/defaultResWidth", 1920).toInt();
+    spec.res_y = w > 0 && h > 0 ? h : st.value("subs/defaultResHeight", 1080).toInt();
+    if (const QStringList cs = st.value("convert/style").toString().split('\n'); cs.size() == 2)
+        for (const auto &s : catalogStyles(cs[0]))
+            if (fs::q(s.name) == cs[1]) spec.style = fsb::style_lines({&s, 1});
+    spec.tags = fs::rs(st.value("convert/tags").toString());
+    spec.new_ends = st.value("convert/newEnds", false).toBool();
+    spec.ms_per_char = st.value("convert/msPerChar", 110).toInt();
+    return spec;
+}
+
 void StyleManager::saveCatalog() {
     QSaveFile f(catalogFile(m_catalog->currentText()));
     if (!f.open(QIODevice::WriteOnly)) return m_main->error(f.errorString());
@@ -2188,7 +2246,9 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         return form;
     };
     QFormLayout *editor = page(tr("Editor")), *subs = page(tr("Subtitles")), *video = page(tr("Video")),
-                *audio = page(tr("Audio")), *automation = page(tr("Automation")), *colors = page(tr("Colors"));
+                *audio = page(tr("Audio")), *automation = page(tr("Automation")), *colors = page(tr("Colors")),
+                *conversion = page(tr("Conversion"));
+    const auto saveConversion = conversionPage(conversion, this);
     buildColorsPage(colors);
     // Kainote's file associations: the types ticked open here from Explorer
     std::vector<std::pair<QString, QCheckBox *>> types;
@@ -2488,7 +2548,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                                         QDialogButtonBox::RestoreDefaults,
                                     this);
     const auto save = [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs,
-                       trace, tracks, tagMark, fontsDir, device, autosaveFolder, autoloadPath, includePath, scriptEditor, types] {
+                       trace, tracks, tagMark, saveConversion, fontsDir, device, autosaveFolder, autoloadPath, includePath, scriptEditor, types] {
         QSettings st;
         QSettings classes(assoc::kClasses, QSettings::NativeFormat);
         bool associated = false;
@@ -2512,6 +2572,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         st.setValue("audio/leadIn", leadIn->value());
         st.setValue("audio/preferredTracks", tracks->text().trimmed());
         st.setValue("grid/tagMark", tagMark->text());
+        saveConversion();
         st.setValue("fonts/externalDir", QDir::fromNativeSeparators(fontsDir->text().trimmed()));
         st.setValue("audio/device", device->currentData());
         st.setValue("main/autosaveDir", QDir::fromNativeSeparators(autosaveFolder->text().trimmed()));
@@ -2535,7 +2596,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                          "audio/inactiveLines",   "audio/leadIn",     "audio/leadOut",    "audio/preferredTracks",
                          "fonts/externalDir",     "audio/device",     "main/autosaveDir", "main/autosaveSeconds",
                          "video/openWithSubs",    "grid/font",        "edit/font",        "automation/autoloadPath",
-                         "automation/includePath", "automation/editor", "grid/tagMark"};
+                         "automation/includePath", "automation/editor", "grid/tagMark", "convert/style",
+                         "convert/tags", "convert/newEnds", "convert/msPerChar", "convert/fps", "convert/showSettings"};
     for (const auto &[k, w] : boxes) owned << k;
     for (const auto &[k, w] : spins) owned << k;
     for (const auto &[k, w] : catalogs) owned << k;

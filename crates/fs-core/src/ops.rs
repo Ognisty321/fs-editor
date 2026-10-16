@@ -761,6 +761,27 @@ pub fn overlapping_with(doc: &Document, row: usize) -> Vec<usize> {
 
 /// Duplicate rows: the copies of each block of adjacent rows go after the block, in order
 /// (Aegisub, Kainote). Returns the new row indices.
+/// Kainote's new end times of a conversion: each dialogue lasts `ms_per_char` per character of
+/// its text without tags, at least a second, and the one before it ends by its start.
+pub fn new_end_times(doc: &mut Document, ms_per_char: i64) {
+    let mut prev: Option<usize> = None;
+    for i in 0..doc.event_count() {
+        let Some(e) = doc.event(i).filter(|e| e.kind == EventKind::Dialogue) else {
+            continue;
+        };
+        let (start, chars) = (e.start, tags::strip_tags(&e.text).chars().count() as i64);
+        if let Some(p) = prev.and_then(|p| doc.event_mut(p))
+            && p.end > start
+        {
+            p.end = start;
+        }
+        if let Some(e) = doc.event_mut(i) {
+            e.end = Time(start.0 + (ms_per_char * chars).max(1000));
+        }
+        prev = Some(i);
+    }
+}
+
 pub fn duplicate(doc: &mut Document, rows: &[usize]) -> Vec<usize> {
     let mut rows = rows.to_vec();
     rows.sort_unstable();
@@ -1730,6 +1751,23 @@ pub fn stats(doc: &Document, cps_limit: f64) -> Stats {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_end_times_by_characters() {
+        let mut d = Document::new();
+        d.remove_event(0);
+        d.push_event(Event::dialogue(
+            Time(0),
+            Time(9000),
+            "Default",
+            r"{\i1}abcdefghij",
+        ));
+        d.push_event(Event::dialogue(Time(1500), Time(2000), "Default", "ab"));
+        new_end_times(&mut d, 200);
+        // ten characters (the tag not counted) would end at 2 s: cut to the next start
+        assert_eq!(d.event(0).unwrap().end, Time(1500));
+        assert_eq!(d.event(1).unwrap().end, Time(2500)); // at least a second
+    }
 
     #[test]
     fn transform_place_scales_and_turns_around_one_point() {
