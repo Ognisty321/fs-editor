@@ -90,7 +90,9 @@ protected:
                                          SyntaxDrawingY, SyntaxDrawingX,   SyntaxDrawingY,        SyntaxBrackets,
                                          SyntaxSlashes,  SyntaxTags,       SyntaxError,           SyntaxParameters,
                                          SyntaxLineBreak, SyntaxKaraokeTemplate, SyntaxKaraokeVariable};
-        const auto runs = fsb::syntax_styles(fs::Utf8(t), *m_template);
+        // Aegisub's Subtitle/Highlight/Syntax; the misspellings are underlined either way
+        const auto runs = QSettings().value("edit/syntax", true).toBool() ? fsb::syntax_styles(fs::Utf8(t), *m_template)
+                                                                          : rust::Vec<uint32_t>{};
         int at = 0;
         for (size_t i = 0; i + 1 < runs.size(); i += 2) {
             const size_t style = std::min<size_t>(runs[i], std::size(roles) - 1);
@@ -1277,7 +1279,7 @@ void EditBox::runCommand(const QString &id, SubsTextEdit *e) {
         if (b < t.size() && t[b] == ' ') ++b;
         c.setPosition(a);
         c.setPosition(b, QTextCursor::KeepAnchor);
-        c.insertText("\\N");
+        c.insertText(QSettings().value("edit/softBreak", false).toBool() ? "\\n" : "\\N"); // Aegisub's Soft Line Break
         e->setTextCursor(c);
     } else if (id == "editHardSpace") e->insertPlainText("\\h");
     else if (id == "editBold") toggleTag("b");

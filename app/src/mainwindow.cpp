@@ -429,6 +429,11 @@ TabPanel *MainWindow::newTab() {
     auto *tab = new TabPanel(this);
     if (const auto cat = catalogStyles(QSettings().value("styles/newFileCatalog", "Default").toString()); !cat.empty())
         tab->s().start_with_styles({cat.data(), cat.size()});
+    // Aegisub's Subtitle/Default Resolution
+    if (QSettings st; !st.value("subs/defaultResAuto", true).toBool()) {
+        tab->s().set_info_quietly("PlayResX", fs::Utf8(st.value("subs/defaultResWidth", 1920).toString()));
+        tab->s().set_info_quietly("PlayResY", fs::Utf8(st.value("subs/defaultResHeight", 1080).toString()));
+    }
     slot->layout()->addWidget(tab);
     slot->setProperty("panel", QVariant::fromValue<QObject *>(tab));
     const int i = m_tabs->addTab(slot, tab->title());
@@ -908,6 +913,7 @@ void MainWindow::buildMenus() {
     add("settings", tr("Settings"), {}, file, [this] {
         if (SettingsDialog(this).exec() != QDialog::Accepted) return;
         (*m_automation)->set_trace_level(QSettings().value("automation/traceLevel", 3).toInt());
+        if (m_toolbar) m_toolbar->setIconSize(QSize(22, 22) * QSettings().value("main/toolbarIconSize", 22).toInt() / 22);
         for (auto *t : tabs()) { // the limits colour the grid and the edit box
             t->grid()->viewport()->update();
             t->edit()->reload();
@@ -1942,7 +1948,7 @@ void MainWindow::buildToolbar() {
     m_toolbar = new QToolBar(tr("Toolbar"), this);
     m_toolbar->setObjectName("toolbar");
     m_toolbar->setMovable(false);
-    m_toolbar->setIconSize(QSize(22, 22));
+    m_toolbar->setIconSize(QSize(22, 22) * QSettings().value("main/toolbarIconSize", 22).toInt() / 22);
     static const Qt::ToolBarArea areas[] = {Qt::LeftToolBarArea, Qt::TopToolBarArea, Qt::RightToolBarArea,
                                             Qt::BottomToolBarArea};
     auto *menuStyle = new MenuButtonStyle;

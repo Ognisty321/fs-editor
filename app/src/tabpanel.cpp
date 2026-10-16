@@ -275,9 +275,11 @@ bool TabPanel::save(const QString &target) {
     try {
         // written only when non-zero, as Aegisub does; a video that did not open keeps its old position
         auto setNum = [this](rust::Str key, qint64 v) { s().set_project_value(key, fs::Utf8(v ? QString::number(v) : QString())); };
-        setNum("Active Line", std::max(0, m_active));
-        setNum("Scroll Position", m_grid->verticalScrollBar()->value());
-        if (m_video->hasVideo()) setNum("Video Position", m_video->frame());
+        // Aegisub's App/Save UI State: off, the file keeps none of them
+        const bool ui = QSettings().value("main/saveUiState", true).toBool();
+        setNum("Active Line", ui ? std::max(0, m_active) : 0);
+        setNum("Scroll Position", ui ? m_grid->verticalScrollBar()->value() : 0);
+        if (m_video->hasVideo() || !ui) setNum("Video Position", ui ? m_video->frame() : 0);
         s().save(fs::Utf8(p));
     } catch (const rust::Error &e) {
         m_main->error(QString::fromUtf8(e.what()));
@@ -569,7 +571,9 @@ void TabPanel::matchResolution() {
     const int vx = qRound(info.width * std::max(1.0, par)), vy = qRound(info.height * std::max(1.0, 1 / par));
     if (vx <= 0 || vy <= 0 || (fi.play_res_x == vx && fi.play_res_y == vy)) return;
     const bool unset = fs::q(ss.info_value("PlayResX")).toInt() <= 0 && fs::q(ss.info_value("PlayResY")).toInt() <= 0;
-    if (untouched()) { // watching a video in a new tab does not ask to save it
+    // watching a video in a new tab does not ask to save it; Aegisub's "resolution of the first video
+    // opened" when on, else the new file keeps its own and is asked about like any other
+    if (untouched() && QSettings().value("subs/defaultResAuto", true).toBool()) {
         ss.set_info_quietly("PlayResX", fs::Utf8(QString::number(vx)));
         ss.set_info_quietly("PlayResY", fs::Utf8(QString::number(vy)));
         changed();

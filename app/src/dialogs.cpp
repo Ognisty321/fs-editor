@@ -2204,6 +2204,10 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     struct Check { const char *key; const char *label; bool def; QFormLayout *page; };
     const Check checks[] = {
         {"main/askSession", QT_TR_NOOP("Load the last session at startup"), true, editor},
+        {"main/saveUiState", QT_TR_NOOP("Save UI state in subtitles files"), true, editor},
+        {"edit/syntax", QT_TR_NOOP("Syntax highlighting in the edit box"), true, editor},
+        {"edit/softBreak", QT_TR_NOOP("Shift+Enter adds \\n"), false, editor},
+        {"subs/defaultResAuto", QT_TR_NOOP("New files use the resolution of the first video opened"), true, subs},
         {"subs/cpsIgnoreWhitespace", QT_TR_NOOP("Ignore whitespace in characters per second"), true, subs},
         {"subs/cpsIgnorePunctuation", QT_TR_NOOP("Ignore punctuation in characters per second"), true, subs},
         {"video/openAudio", QT_TR_NOOP("Open audio together with video"), true, video},
@@ -2289,6 +2293,18 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     fastJump->setValue(st.value("video/fastJump", 10).toInt());
     video->addRow(tr("Frames skipped by a fast jump"), fastJump);
     spins.emplace_back("video/fastJump", fastJump);
+    // Aegisub's Subtitle/Default Resolution, when the first video does not set it, and App/Toolbar Icon Size
+    const std::tuple<const char *, int, int, int, QFormLayout *, const char *> moreSpins[] = {
+        {"subs/defaultResWidth", 1920, 1, 16384, subs, QT_TR_NOOP("Default width of new files")},
+        {"subs/defaultResHeight", 1080, 1, 16384, subs, QT_TR_NOOP("Default height of new files")},
+        {"main/toolbarIconSize", 22, 12, 64, editor, QT_TR_NOOP("Toolbar icon size")}};
+    for (auto [key, def, lo, hi, form, label] : moreSpins) {
+        auto *s = new QSpinBox(this);
+        s->setRange(lo, hi);
+        s->setValue(st.value(key, def).toInt());
+        form->addRow(tr(label), s);
+        spins.emplace_back(key, s);
+    }
     // Aegisub's line boundaries thickness, snap distance and start drag sensitivity; Kainote's mark play time
     const std::tuple<const char *, int, int, int, const char *, const char *> audioSpins[] = {
         {"audio/boundaryWidth", 2, 1, 10, QT_TR_NOOP("Line boundaries thickness"), " px"},

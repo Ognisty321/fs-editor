@@ -3576,6 +3576,22 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Pliki napisów zaznaczonych typów otwierają się w tym programie. Program wybrany dla typu w Eksploratorze pozostaje domyślnym; ten jest wtedy na jego liście &quot;Otwórz za pomocą&quot;.</translation>
     </message>
     <message>
+        <source>Save UI state in subtitles files</source>
+        <translation>Zapisuj stan interfejsu w plikach napisów</translation>
+    </message>
+    <message>
+        <source>Syntax highlighting in the edit box</source>
+        <translation>Podświetlanie składni w polu edycji</translation>
+    </message>
+    <message>
+        <source>Shift+Enter adds \n</source>
+        <translation>Shift+Enter wstawia \n</translation>
+    </message>
+    <message>
+        <source>New files use the resolution of the first video opened</source>
+        <translation>Nowe pliki biorą rozdzielczość z pierwszego otwartego wideo</translation>
+    </message>
+    <message>
         <source>Ignore whitespace in characters per second</source>
         <translation>Ignoruj spacje w znakach na sekundę</translation>
     </message>
@@ -3710,6 +3726,18 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Frames skipped by a fast jump</source>
         <translation>Klatki przeskakiwane szybkim skokiem</translation>
+    </message>
+    <message>
+        <source>Default width of new files</source>
+        <translation>Domyślna szerokość nowych plików</translation>
+    </message>
+    <message>
+        <source>Default height of new files</source>
+        <translation>Domyślna wysokość nowych plików</translation>
+    </message>
+    <message>
+        <source>Toolbar icon size</source>
+        <translation>Rozmiar ikon paska narzędzi</translation>
     </message>
     <message>
         <source>Line boundaries thickness</source>
