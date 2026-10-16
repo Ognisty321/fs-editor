@@ -77,7 +77,7 @@ public:
     bool hasAudio() const { return m_audio.has_value(); }
     const fsb::Audio *source() const { return m_audio ? &**m_audio : nullptr; }
     void open(const QString &path);
-    void openBlank(qint64 ms);
+    void openBlank(qint64 ms, bool noise = false);
     void close();
     QString path() const { return m_path; }
 

@@ -1353,6 +1353,8 @@ void MainWindow::buildMenus() {
         if (!tab()->video()->path().isEmpty()) tab()->openAudio(tab()->video()->path());
     });
     add("blankAudio", tr("Open blank 2h30m audio"), {}, audio, [=] { tab()->openBlankAudio(150LL * 60 * 1000); });
+    // Aegisub's audio/open/noise
+    add("noiseAudio", tr("Open 2h30m noise audio"), {}, audio, [=] { tab()->openBlankAudio(150LL * 60 * 1000, true); });
     add("closeAudio", tr("Close audio"), {}, audio, [=] { tab()->closeAudio(); });
     // Aegisub's audio/view/spectrum|waveform
     add("audioSpectrum", tr("Spectrum display"), {}, audio, [=] { tab()->audio()->setSpectrum(true); });

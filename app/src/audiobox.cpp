@@ -626,9 +626,9 @@ void AudioBox::open(const QString &path) {
     }).detach();
 }
 
-void AudioBox::openBlank(qint64 ms) {
+void AudioBox::openBlank(qint64 ms, bool noise) {
     close();
-    m_audio.emplace(fsb::blank_audio(ms));
+    m_audio.emplace(fsb::blank_audio(ms, noise));
     m_path.clear();
     loaded();
 }

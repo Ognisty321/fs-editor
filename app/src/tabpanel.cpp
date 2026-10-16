@@ -439,7 +439,7 @@ void TabPanel::openAudio(const QString &path) {
     m_main->addRecent("audio", path);
 }
 
-void TabPanel::openBlankAudio(qint64 ms) { m_audio->openBlank(ms); }
+void TabPanel::openBlankAudio(qint64 ms, bool noise) { m_audio->openBlank(ms, noise); }
 
 void TabPanel::closeAudio() {
     m_audio->close();

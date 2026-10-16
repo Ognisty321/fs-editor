@@ -259,11 +259,19 @@ impl Audio {
     /// Silent audio for timing without a sound track (Kainote "dummy audio"). At 1 kHz every
     /// millisecond is a sample and Aegisub's 2h30m takes 18 MB (800 at 44.1 kHz); the player
     /// resamples for the device. A day at most: a wild length must not abort on the allocation.
-    pub fn blank(ms: i64) -> Self {
-        Self::from_pcm(PcmBuffer::new(
-            1000,
-            vec![0; ms.clamp(0, 24 * 3600 * 1000) as usize],
-        ))
+    /// `noise`: Aegisub's noise audio instead, white noise of ±5000.
+    pub fn blank(ms: i64, noise: bool) -> Self {
+        let mut pcm = vec![0; ms.clamp(0, 24 * 3600 * 1000) as usize];
+        if noise {
+            let mut x = 0x9E37_79B9_7F4A_7C15_u64; // xorshift64*
+            for s in &mut pcm {
+                x ^= x >> 12;
+                x ^= x << 25;
+                x ^= x >> 27;
+                *s = ((x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 32) % 10001) as i16 - 5000;
+            }
+        }
+        Self::from_pcm(PcmBuffer::new(1000, pcm))
     }
 
     pub fn duration_ms(&self) -> i64 {
@@ -371,9 +379,26 @@ mod tests {
     }
 
     #[test]
+    fn noise_audio_is_not_silent_and_stays_in_range() {
+        let a = Audio::blank(2000, true);
+        let s = a.peaks.pcm().samples();
+        assert_eq!(s.len(), 2000);
+        assert!(s.iter().all(|v| (-5000..=5000).contains(v)));
+        assert!(s.iter().any(|&v| v < -2500) && s.iter().any(|&v| v > 2500));
+        assert!(
+            Audio::blank(10, false)
+                .peaks
+                .pcm()
+                .samples()
+                .iter()
+                .all(|&v| v == 0)
+        );
+    }
+
+    #[test]
     fn save_clip_writes_the_range() {
         use fs_audio::AudioSource;
-        let a = Audio::blank(2000);
+        let a = Audio::blank(2000, false);
         let out = std::env::temp_dir().join(format!("fsb-clip-{}.wav", std::process::id()));
         a.save_clip(out.to_str().unwrap(), 500, 1500).unwrap();
         let wav = fs_audio::wav::read(&std::fs::read(&out).unwrap()).unwrap();

@@ -952,7 +952,8 @@ pub mod ffi {
 
         type Audio;
         fn open_audio(path: &str, cache_dir: &str, progress: &Progress) -> Result<Box<Audio>>;
-        fn blank_audio(ms: i64) -> Box<Audio>;
+        /// Silent audio, or Aegisub's white noise.
+        fn blank_audio(ms: i64, noise: bool) -> Box<Audio>;
         fn duration_ms(self: &Audio) -> i64;
         fn save_clip(self: &Audio, path: &str, start_ms: i64, end_ms: i64) -> Result<()>;
         fn rate(self: &Audio) -> u32;
@@ -1214,8 +1215,8 @@ fn open_audio(path: &str, cache_dir: &str, progress: &ffi::Progress) -> Result<B
     Audio::open(path, cache_dir, |d, t| progress.report(d, t)).map(Box::new)
 }
 
-fn blank_audio(ms: i64) -> Box<Audio> {
-    Box::new(Audio::blank(ms))
+fn blank_audio(ms: i64, noise: bool) -> Box<Audio> {
+    Box::new(Audio::blank(ms, noise))
 }
 
 fn new_automation(data_dir: &str, user_dir: &str) -> Box<Automation> {

@@ -74,7 +74,7 @@ public:
     void openVideo(const QString &path, qint64 frame = 0, double ar = 0);
     void openDummyVideo(const QString &spec); // VideoBox::openDummy's
     void openAudio(const QString &path);
-    void openBlankAudio(qint64 ms);
+    void openBlankAudio(qint64 ms, bool noise = false);
     void closeAudio();
     void closeVideo();
     QString keyframesPath() const { return m_keyframesPath; } // empty: the video's own
