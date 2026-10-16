@@ -141,9 +141,13 @@ jobs:
       - name: Media tests
         shell: bash
         run: cargo test --locked -p fs-media -p fs-bridge
+      # Polish and English spell checking and thesauri, so a package works with no setup
+      - name: Dictionaries
+        shell: bash
+        run: python -I tools/dictionaries.py "$RUNNER_TEMP/dictionaries"
       - name: Configure
         shell: bash
-        run: cd app && cmake --preset ${{ matrix.preset }} -DFS_DEPS_DIR="$FS_DEPS_ROOT/installed/${{ matrix.triplet }}"
+        run: cd app && cmake --preset ${{ matrix.preset }} -DFS_DEPS_DIR="$FS_DEPS_ROOT/installed/${{ matrix.triplet }}" -DFS_DICTIONARIES_DIR="$RUNNER_TEMP/dictionaries"
       - name: Build
         shell: bash
         run: cmake --build app/build-${{ matrix.preset }} --config Release
@@ -158,6 +162,17 @@ jobs:
           ldd_out=$(env -u LD_LIBRARY_PATH ldd "$RUNNER_TEMP"/pkg/*/bin/fsed)
           echo "$ldd_out"
           if grep 'not found' <<<"$ldd_out"; then exit 1; fi
+      - name: Check package dictionaries
+        shell: bash
+        run: |
+          python -I -c '
+          import sys, zipfile
+          names = zipfile.ZipFile(sys.argv[1]).namelist()
+          need = ["pl_PL.aff", "pl_PL.dic", "en_US.aff", "en_US.dic", "th_pl_PL_v2.idx", "th_pl_PL_v2.dat", "th_en_US_v2.idx", "th_en_US_v2.dat"]
+          missing = [f for f in need if not any(n.endswith("/bin/dictionaries/" + f) for n in names)]
+          print("missing:", missing or "none")
+          sys.exit(bool(missing))
+          ' app/build-${{ matrix.preset }}/*.zip
       - uses: actions/upload-artifact@v7
         with:
           name: fs-editor-${{ matrix.os }}

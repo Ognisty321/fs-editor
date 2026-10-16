@@ -59,12 +59,14 @@ Wersje pochodzą z [docs/research/dependencies.md](docs/research/dependencies.md
 
 ## Słowniki pisowni
 
-Słowniki nie są dołączane do repozytorium. Pliki `.aff` i `.dic` (Hunspell) wrzuca się do katalogu `dictionaries` obok programu albo wskazuje w ustawieniach. Sprawdzone źródła:
+Słowniki nie leżą w repozytorium, ale paczki z CI je zawierają: `tools/dictionaries.py` pobiera przypięte wersje (sprawdzane SHA-256) do `bin/dictionaries` paczki, razem z plikami README/licencji każdego z nich. Inne słowniki Hunspell (`.aff` + `.dic`) i tezaurusy MyThes (`th_*.idx` + `.dat`) wrzuca się do tego katalogu albo wskazuje folder w ustawieniach.
 
 | Słownik | Źródło | Licencja |
 |---|---|---|
 | polski `pl_PL` | [sjp.pl/sl/en](https://sjp.pl/sl/en/), plik `sjp-hunspell-pl-*.zip` | do wyboru GPL-2, LGPL-2.1, MPL-1.1, CC BY 4.0, Apache-2.0 |
 | angielski `en_US` | [en-wl/wordlist](https://github.com/en-wl/wordlist/releases), plik `hunspell-en_US-*.zip` (SCOWL) | licencja SCOWL (typu MIT) |
+| tezaurus polski `th_pl_PL_v2` | Dobry słownik / Marcin Miłkowski, z [LibreOffice/dictionaries](https://github.com/LibreOffice/dictionaries/tree/master/pl_PL) | LGPL-2.1 |
+| tezaurus angielski `th_en_US_v2` | WordNet (Princeton), z [LibreOffice/dictionaries](https://github.com/LibreOffice/dictionaries/tree/master/en) | licencja WordNet (typu BSD) |
 
 ## Pliki testowe
 

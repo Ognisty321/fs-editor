@@ -144,7 +144,7 @@ fsed napisy.ass wideo.mkv
 
 Pliki podane w wierszu poleceń otwierają się w karcie. Napisy, wideo, audio i keyframe'y można też przeciągnąć w dowolne miejsce okna. Wideo z tekstowymi ścieżkami napisów (ASS, SSA, SRT) otwarte w pustej karcie pyta, czy wczytać którąś z nich.
 
-**Sprawdzanie pisowni** używa słowników Hunspell (`xx_YY.aff` + `xx_YY.dic`). Wrzuć je do katalogu `dictionaries/` obok programu albo wskaż folder i język w ustawieniach. Aktualne słowniki: polski z [sjp.pl](https://sjp.pl/sl/en/), angielski z [en-wl/wordlist](https://github.com/en-wl/wordlist/releases).
+**Sprawdzanie pisowni** używa słowników Hunspell (`xx_YY.aff` + `xx_YY.dic`), a podpowiedzi synonimów tezaurusów MyThes (`th_xx_YY*.idx` + `.dat`). Paczki z CI mają już polski i angielski słownik z tezaurusami w `bin/dictionaries/` (`tools/dictionaries.py`); inne wrzuć do tego katalogu albo wskaż folder i język w ustawieniach. Aktualne słowniki: polski z [sjp.pl](https://sjp.pl/sl/en/), angielski z [en-wl/wordlist](https://github.com/en-wl/wordlist/releases).
 
 ### Wiersz poleceń
 
