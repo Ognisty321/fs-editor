@@ -564,6 +564,7 @@ void VisualTools::setTool(int t) {
         m_shapeBox->setVisible(t != RClip);
     }
     m_trackPts = 0;
+    if (t == Pos || t == Scale) prepareMeasurer(); // their rectangles measure the line
     reload();
     m_box->view()->setCursor(t == Pointer ? Qt::ArrowCursor : Qt::CrossCursor);
     m_box->view()->updateOverlay();
@@ -828,17 +829,25 @@ void VisualTools::paintRect(QPainter &p, QRectF sr, QColor c) const {
     for (QPointF k : {r.topLeft(), r.topRight(), r.bottomLeft(), r.bottomRight()}) handle(p, k, false, c);
 }
 
+void VisualTools::prepareMeasurer() {
+    const QString path = m_box->path();
+    if (path == m_measurerVideo && (m_measurer || m_measurerNext.valid())) return;
+    m_measurer.reset();
+    m_measurerVideo = path;
+    // a video's attachments can be large: read once, while the user is still picking the rectangle
+    m_measurerNext = std::async(std::launch::async, [p = path.toStdString()] {
+        auto r = fsb::new_renderer();
+        if (!p.empty()) r->load_attached_fonts(p);
+        return r;
+    });
+}
+
 bool VisualTools::measure() {
     auto *tab = m_box->tab();
     try {
-        if (!m_measurer || m_measurerVideo != m_box->path()) {
-            // shortcut: the video's attached fonts are read on the GUI thread, once a video; move it to a
-            // worker if a file with huge attachments makes the first rectangle stall
-            auto r = fsb::new_renderer();
-            r->load_attached_fonts(fs::Utf8(m_box->path()));
-            m_measurer.emplace(std::move(r));
-            m_measurerVideo = m_box->path();
-        }
+        prepareMeasurer();
+        if (m_measurerNext.valid()) m_measurer.emplace(m_measurerNext.get()); // waits only if not read yet
+        if (!m_measurer) m_measurer.emplace(fsb::new_renderer()); // the fonts failed: the system's only
         const auto b = (*m_measurer)->line_box(tab->s(), size_t(tab->active()), m_box->time());
         m_fitBox.assign(b.begin(), b.end());
     } catch (const rust::Error &) {

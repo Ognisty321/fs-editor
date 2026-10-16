@@ -11,6 +11,7 @@
 #include <QRectF>
 #include <QTransform>
 #include <array>
+#include <future>
 #include <optional>
 #include <set>
 #include <span>
@@ -105,6 +106,7 @@ private:
     static QRectF rectDrag(QRectF r, int code, QPointF by, QPointF from, QPointF to);
     void paintRect(QPainter &p, QRectF r, QColor c) const;
     bool measure();  // m_fitBox: the active line as libass draws it now; false when nothing shows
+    void prepareMeasurer(); // starts reading the video's fonts for measure(), off the GUI thread
     void fitPos();   // the grabbed lines moved so the active one sits in m_fit by m_posAlign
     void fitScale(); // the grabbed lines' scale tags changed so the active line fills m_fit
     QString clipTag() const;
@@ -182,6 +184,7 @@ private:
     bool m_fitOn = false, m_origOn = false;
     std::vector<double> m_fitBox; // Renderer::line_box of the active line as a drag began
     std::optional<rust::Box<fsb::Renderer>> m_measurer; // with the fonts of m_measurerVideo
+    std::future<rust::Box<fsb::Renderer>> m_measurerNext; // m_measurer, while its fonts are read
     QString m_measurerVideo;
     QComboBox *m_shapeBox = nullptr; // ready shapes dragged out on the video (Kainote)
     size_t m_shapeFrom = 0;          // first command of the shape being dragged
