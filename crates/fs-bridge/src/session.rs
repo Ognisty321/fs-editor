@@ -52,7 +52,14 @@ pub struct Session {
     /// last exported with them, by inline-string-encoded filter name. Kept for the file while it
     /// is open, never written into it (as in Aegisub).
     pub(crate) filter_settings: HashMap<String, String>,
+    /// The format and path from before each conversion step still to undo, and from before each
+    /// one undone, to redo: undo takes the format back with the lines.
+    convert_undo: Vec<(Format, Option<PathBuf>)>,
+    convert_redo: Vec<(Format, Option<PathBuf>)>,
 }
+
+/// The undo step of a conversion.
+const CONVERT: &str = "Convert";
 
 impl Default for Session {
     fn default() -> Self {
@@ -75,6 +82,8 @@ impl Default for Session {
             subs_fps: None,
             keyframes: Vec::new(),
             filter_settings: HashMap::new(),
+            convert_undo: Vec::new(),
+            convert_redo: Vec::new(),
         };
         // Document::new already holds the one empty line a new tab starts with
         s.ed.mark_saved();
@@ -593,9 +602,14 @@ impl Session {
             return Err("translation mode is on: turn it off to convert".into());
         }
         let opts = self.save_options();
-        // shortcut: undo brings the lines back but not the format, a history entry for it if missed
+        let before = (self.format, self.path.clone());
+        let g = self.ed.generation();
         if !f.is_ass() {
-            self.edit("Convert", |d| fs_formats::reduce(d, f, &opts));
+            self.edit(CONVERT, |d| fs_formats::reduce(d, f, &opts));
+        }
+        // a conversion that changed no line (to ASS) has no step to undo
+        if self.ed.generation() != g {
+            self.convert_undo.push(before);
         }
         self.format = f;
         if let Some(p) = &mut self.path {
@@ -2308,12 +2322,30 @@ impl Session {
     // ---- history ----------------------------------------------------------
 
     pub fn undo(&mut self) -> bool {
-        let r = self.ed.undo().is_some();
+        let r = self.undo_step();
         self.refresh();
         r
     }
 
+    /// One step back, a conversion's format and path with it.
+    fn undo_step(&mut self) -> bool {
+        if self.ed.undo_description() == Some(CONVERT)
+            && let Some(prev) = self.convert_undo.pop()
+        {
+            let now = (self.format, self.path.take());
+            (self.format, self.path) = prev;
+            self.convert_redo.push(now);
+        }
+        self.ed.undo().is_some()
+    }
+
     pub fn redo(&mut self) -> bool {
+        if self.ed.redo_description() == Some(CONVERT)
+            && let Some(next) = self.convert_redo.pop()
+        {
+            self.convert_undo.push((self.format, self.path.take()));
+            (self.format, self.path) = next;
+        }
         let r = self.ed.redo().is_some();
         self.refresh();
         r
@@ -2366,7 +2398,7 @@ impl Session {
 
     pub fn undo_to(&mut self, steps: usize) {
         for _ in 0..steps {
-            if self.ed.undo().is_none() {
+            if !self.undo_step() {
                 break;
             }
         }
@@ -4125,6 +4157,12 @@ mod tests {
         assert!(s.lossless("a.srt") && s.row_count() <= n);
         s.undo();
         assert_eq!(s.row_count(), n);
+        // the format goes back with the lines, and comes again with redo
+        assert!(!s.converted());
+        s.redo();
+        assert!(s.converted());
+        s.undo_to(1);
+        assert!(!s.converted());
         let p = std::env::temp_dir().join(format!("fsb-conv-{}.srt", std::process::id()));
         s.convert("srt").unwrap();
         s.save(p.to_str().unwrap()).unwrap();

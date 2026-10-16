@@ -274,6 +274,11 @@ impl Editor {
         !self.redo.is_empty()
     }
 
+    /// Changes with every step made, undone or redone.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     pub fn undo_description(&self) -> Option<&str> {
         self.undo.last().map(|s| s.description.as_str())
     }
