@@ -999,6 +999,10 @@ pub mod ffi {
         fn set_audio_device(name: &str);
         /// Kainote's audio delay in ms, for audio opened after this.
         fn set_audio_delay(ms: i64);
+        /// Aegisub's CleanCache of the index files in `dir` on a thread of its own: the ones used
+        /// longest ago go until at most `max_files` (0: any number) of `max_mb` in all are left;
+        /// those of `used`, the media file just opened, count as used now.
+        fn clean_index_cache(dir: &str, used: &str, max_mb: u64, max_files: usize);
         fn audio_devices() -> Vec<String>;
         /// The audio streams; empty when the file cannot be read.
         fn audio_tracks(path: &str) -> Vec<SubTrack>;
@@ -1308,6 +1312,18 @@ fn set_audio_device(name: &str) {
 
 fn set_audio_delay(ms: i64) {
     media::set_audio_delay(ms);
+}
+
+fn clean_index_cache(dir: &str, used: &str, max_mb: u64, max_files: usize) {
+    let dir = std::path::PathBuf::from(dir);
+    // BestSource names an index "<file name>_<hash>_..."
+    let used = std::path::Path::new(used)
+        .file_name()
+        .map(|n| format!("{}_", n.to_string_lossy()))
+        .unwrap_or_default();
+    std::thread::spawn(move || {
+        fs_media::clean_cache(&dir, ".bsindex", &used, max_mb << 20, max_files)
+    });
 }
 
 fn audio_devices() -> Vec<String> {

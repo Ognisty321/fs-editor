@@ -3880,6 +3880,14 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Pamięć podręczna spektrum (MB)</translation>
     </message>
     <message>
+        <source>Index cache files kept (0: any number)</source>
+        <translation>Zachowywane pliki indeksów (0: dowolnie wiele)</translation>
+    </message>
+    <message>
+        <source>Index cache size (MB)</source>
+        <translation>Rozmiar pamięci indeksów (MB)</translation>
+    </message>
+    <message>
         <source>Undo levels</source>
         <translation>Poziomy cofania</translation>
     </message>

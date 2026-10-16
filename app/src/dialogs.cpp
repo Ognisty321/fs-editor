@@ -1557,6 +1557,14 @@ QStringList styleCatalogs() {
 
 // Kainote's external fonts folder (libass renders from it and the font lists show its fonts) and
 // the audio output device
+void cleanIndexCache(const QString &used) {
+    const QSettings st;
+    fsb::clean_index_cache(fs::Utf8(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex"),
+                           fs::Utf8(used),
+                           st.value("video/indexCacheMb", 42).toULongLong(),
+                           st.value("video/indexCacheFiles", 20).toULongLong());
+}
+
 void applyMediaSettings() {
     fsb::set_audio_device(fs::Utf8(QSettings().value("audio/device").toString()));
     fsb::set_audio_delay(QSettings().value("audio/delay", 0).toLongLong());
@@ -2398,6 +2406,9 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"subs/defaultResHeight", 1080, 1, 16384, subs, QT_TR_NOOP("Default height of new files")},
         {"main/toolbarIconSize", 22, 12, 64, editor, QT_TR_NOOP("Toolbar icon size")},
         {"audio/spectrumCacheMb", 128, 2, 1024, audio, QT_TR_NOOP("Spectrum cache memory (MB)")},
+        // Aegisub's FFmpegSource Cache/Files and Size for the index files, Kainote's cache files limit
+        {"video/indexCacheFiles", 20, 0, 100000, video, QT_TR_NOOP("Index cache files kept (0: any number)")},
+        {"video/indexCacheMb", 42, 1, 100000, video, QT_TR_NOOP("Index cache size (MB)")},
         // Aegisub's Limits/Undo Levels and Find Replace
         {"main/undoLevels", 500, 2, 10000, editor, QT_TR_NOOP("Undo levels")},
         {"find/recentCount", 20, 0, 99, editor, QT_TR_NOOP("Find and replace history entries")},

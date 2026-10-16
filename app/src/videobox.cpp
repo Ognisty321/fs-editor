@@ -1,6 +1,7 @@
 #include "videobox.h"
 
 #include "audiobox.h"
+#include "dialogs.h"
 #include "icons.h"
 #include "editbox.h"
 #include "grid.h"
@@ -783,6 +784,7 @@ void VideoBox::open(const QString &path, qint64 frame, double ar) {
             m_chapters.clear();
             for (const auto &[ms, title] : chapters) m_chapters.emplace_back(frameAtStart(ms), title);
             m_tab->main()->status(QString());
+            cleanIndexCache(m_path);
             emit opened();
         });
     });

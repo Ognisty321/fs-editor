@@ -208,6 +208,9 @@ QString autosaveDir();
 QStringList styleCatalogs();
 std::vector<fsb::StyleData> catalogStyles(const QString &name);
 void applyMediaSettings();
+// The index files of the videos and audio used longest ago go over the limits (Aegisub's
+// CleanCache); `used` was just opened
+void cleanIndexCache(const QString &used);
 
 // Aegisub's "Open autosave file": files on the left, their versions (newest first) on the right.
 class AutosaveDialog : public QDialog {

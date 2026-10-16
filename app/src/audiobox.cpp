@@ -1,5 +1,6 @@
 #include "audiobox.h"
 
+#include "dialogs.h"
 #include "editbox.h"
 #include "grid.h"
 #include "icons.h"
@@ -676,6 +677,7 @@ void AudioBox::loaded() {
     updateScroll();
     lineChanged();
     m_tab->main()->status(QString());
+    cleanIndexCache(m_path);
     emit opened();
 }
 

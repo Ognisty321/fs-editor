@@ -48,6 +48,78 @@ pub fn default_cache_dir() -> std::path::PathBuf {
     base.join("fs-editor").join("bsindex")
 }
 
+/// Aegisub's CleanCache: the oldest files ending in `ext` in `dir` go until at most `max_files`
+/// of at most `max_bytes` in all are left (0: no limit on the number); the newest always stays.
+/// Those starting with `used` (the file just opened) are dated now first, so the ones used
+/// longest ago go, not the index in use. Returns how many went.
+pub fn clean_cache(dir: &Path, ext: &str, used: &str, max_bytes: u64, max_files: usize) -> usize {
+    if !used.is_empty() {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            if e.file_name().to_string_lossy().starts_with(used) {
+                let _ = std::fs::File::options()
+                    .write(true)
+                    .open(e.path())
+                    .and_then(|f| f.set_modified(std::time::SystemTime::now()));
+            }
+        }
+    }
+    let max_files = if max_files == 0 {
+        usize::MAX
+    } else {
+        max_files
+    };
+    let mut files: Vec<(std::time::SystemTime, u64, std::path::PathBuf)> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().ends_with(ext))
+        .filter_map(|e| {
+            let m = e.metadata().ok().filter(|m| m.is_file())?;
+            Some((m.modified().ok()?, m.len(), e.path()))
+        })
+        .collect();
+    files.sort();
+    let mut total: u64 = files.iter().map(|f| f.1).sum();
+    let mut left = files.len();
+    let mut gone = 0;
+    for (_, size, path) in &files {
+        if (total <= max_bytes && left <= max_files) || left < 2 {
+            break;
+        }
+        if std::fs::remove_file(path).is_ok() {
+            total -= size;
+            left -= 1;
+            gone += 1;
+        }
+    }
+    gone
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn clean_cache_keeps_the_newest_within_limits() {
+        let dir = tempfile::tempdir().unwrap();
+        let t0 = std::time::SystemTime::now() - std::time::Duration::from_secs(100);
+        for (k, size) in [10usize, 20, 30, 40].into_iter().enumerate() {
+            let p = dir.path().join(format!("{k}.bsindex"));
+            std::fs::write(&p, vec![0u8; size]).unwrap();
+            let f = std::fs::File::options().write(true).open(&p).unwrap();
+            f.set_modified(t0 + std::time::Duration::from_secs(k as u64))
+                .unwrap();
+        }
+        std::fs::write(dir.path().join("other.txt"), "x").unwrap();
+        // three files at most: the oldest goes; then 70 bytes at most: the next one too
+        assert_eq!(super::clean_cache(dir.path(), ".bsindex", "", 1000, 3), 1);
+        // the oldest left was just used: the next one goes in its place
+        assert_eq!(super::clean_cache(dir.path(), ".bsindex", "1.", 1000, 2), 1);
+        assert!(dir.path().join("1.bsindex").exists() && !dir.path().join("2.bsindex").exists());
+        // the newest (now 1) stays even over the size
+        assert_eq!(super::clean_cache(dir.path(), ".bsindex", "", 0, 0), 1);
+        assert!(dir.path().join("1.bsindex").exists() && dir.path().join("other.txt").exists());
+    }
+}
+
 /// All streams in a media file.
 pub fn list_tracks(path: &Path) -> Result<Vec<TrackInfo>> {
     Ok(bridge::list_tracks(path_str(path)?)?)
