@@ -287,12 +287,13 @@ int main(int argc, char **argv) {
                         QApplication::sendEvent(view, &e);
                     }
                 // FSED_SMOKE_DRAG="x1,y1,x2,y2": a left-button drag on the video, in view fractions 0..1;
-                // "x1,y1,x2,y2,z" zooms in a step first; "...;x1,y1,x2,y2" drags again
+                // "x1,y1,x2,y2,z" zooms in a step first; "...;x1,y1,x2,y2" drags again; more pairs drag
+                // through each point
                 for (const QString &drag : qEnvironmentVariable("FSED_SMOKE_DRAG").split(';')) {
                     const QStringList d = drag.split(',');
                     if (d.size() < 4) return;
                     QWidget *view = w.current()->video()->view();
-                    if (d.size() > 4) {
+                    if (d.size() % 2) {
                         const QPointF c(view->width() / 2.0, view->height() / 2.0);
                         QWheelEvent e(c, view->mapToGlobal(c), {}, {0, 120}, Qt::NoButton, Qt::NoModifier,
                                       Qt::NoScrollPhase, false);
@@ -306,8 +307,10 @@ int main(int argc, char **argv) {
                         QApplication::sendEvent(view, &e);
                     };
                     send(QEvent::MouseButtonPress, at(0), Qt::LeftButton);
-                    for (int k = 1; k <= 4; ++k) send(QEvent::MouseMove, at(0) + (at(2) - at(0)) * k / 4, Qt::LeftButton);
-                    send(QEvent::MouseButtonRelease, at(2), Qt::NoButton);
+                    const int last = (d.size() / 2 - 1) * 2;
+                    for (int p = 2; p <= last; p += 2)
+                        for (int k = 1; k <= 4; ++k) send(QEvent::MouseMove, at(p - 2) + (at(p) - at(p - 2)) * k / 4, Qt::LeftButton);
+                    send(QEvent::MouseButtonRelease, at(last), Qt::NoButton);
                 }
             });
     // FSED_SMOKE_ACTION runs a menu command by id ("a;b" one after the other); a modal dialog

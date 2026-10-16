@@ -207,8 +207,8 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
     vh->setSpacing(1);
     auto *modes = m_vecModes = new QButtonGroup(vec);
     const char *mi[] = {"arrows-move", "line",    "vector-bezier-2", "point",        "x",
-                        "scribble",    "circle-plus", "replace",      "vector-spline"};
-    for (int k = 0; k < 9; ++k) {
+                        "scribble",    "circle-plus", "replace",      "vector-spline", "wave-sine"};
+    for (int k = 0; k < VecModeCount; ++k) {
         auto *b = new QToolButton(vec);
         b->setIcon(icon(mi[k], QColor(k == 4 ? 0xf2665c : 0xb48cff)));
         b->setToolTip(tr(kVecModes[k]));
@@ -217,7 +217,7 @@ QWidget *VisualTools::toolRow(QWidget *parent) {
         modes->addButton(b, k);
         vh->addWidget(b);
     }
-    m_vecMode = std::clamp(QSettings().value("visual/vecMode", 0).toInt(), 0, 8);
+    m_vecMode = std::clamp(QSettings().value("visual/vecMode", 0).toInt(), 0, VecModeCount - 1);
     modes->button(m_vecMode)->setChecked(true);
     connect(modes, &QButtonGroup::idClicked, this, &VisualTools::setVecMode);
     m_sub->addWidget(vec);
@@ -1455,7 +1455,8 @@ bool VisualTools::press(QMouseEvent *e) {
             writeVector();
             return true;
         }
-        if (m_vecMode == VecFreehand && e->button() == Qt::LeftButton) {
+        if ((m_vecMode == VecFreehand || m_vecMode == VecFreehandSmooth) && e->button() == Qt::LeftButton) {
+            m_freehandFrom = m_vec.cmds.size();
             m_vec.cmds.push_back({'m', {pt}});
             m_drag = 6;
             writeVector();
@@ -1687,8 +1688,8 @@ bool VisualTools::move(QMouseEvent *e) {
             break;
         }
         if (m_drag == 6) {
-            // freehand: a new line point every 30 screen pixels (Aegisub's freehand mode)
-            if (QLineF(vecW(m_vec.last()), e->position()).length() >= 30) {
+            // freehand: a new line point every 30 screen pixels, 60 when smoothed (Aegisub's)
+            if (QLineF(vecW(m_vec.last()), e->position()).length() >= (m_vecMode == VecFreehandSmooth ? 60 : 30)) {
                 m_vec.cmds.push_back({'l', {pt}});
                 writeVector();
             }
@@ -1750,6 +1751,18 @@ bool VisualTools::release(QMouseEvent *e) {
         const QRectF box = QRectF(m_pressW, e->position()).normalized();
         for (const auto &h : m_vec.handles())
             if (box.contains(vecW(m_vec.at(h)))) m_vecSel.insert(h);
+    }
+    if (m_drag == 6 && m_vecMode == VecFreehandSmooth && m_freehandFrom < m_vec.cmds.size()) {
+        // the figure just drawn, its lines turned into curves (Aegisub's Spline::Smooth)
+        std::vector<double> pts;
+        for (size_t i = m_freehandFrom; i < m_vec.cmds.size(); ++i)
+            for (const QPointF &q : m_vec.cmds[i].pts) pts.insert(pts.end(), {q.x(), q.y()});
+        const auto ctl = fsb::smooth_figure(rust::Slice<const double>(pts.data(), pts.size()));
+        for (size_t i = m_freehandFrom + 1, k = 0; i < m_vec.cmds.size() && k + 4 <= ctl.size(); ++i, k += 4) {
+            auto &c = m_vec.cmds[i];
+            c = {'b', {QPointF(ctl[k], ctl[k + 1]), QPointF(ctl[k + 2], ctl[k + 3]), c.pts.back()}};
+        }
+        if (!ctl.empty()) writeVector();
     }
     m_drag = 0;
     m_vecHandle = {-1, -1};

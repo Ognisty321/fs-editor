@@ -60,6 +60,43 @@ pub fn fit_anchor(b: &[f64], r: &[f64], align: u8) -> [f64; 2] {
     }
 }
 
+/// See the bridge's `smooth_figure`: Aegisub's `Spline::Smooth` (Maxim Shemanarev's
+/// interpolation with Bézier curves), each segment's control points from its neighbours.
+pub fn smooth_figure(pts: &[f64]) -> Vec<f64> {
+    const SMOOTH: f64 = 1.0; // Aegisub's default
+    let n = pts.len() / 2;
+    if n < 3 {
+        return Vec::new();
+    }
+    let p = |i: usize| [pts[i % n * 2], pts[i % n * 2 + 1]];
+    let mid = |a: [f64; 2], b: [f64; 2]| [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+    let len = |a: [f64; 2], b: [f64; 2]| (b[0] - a[0]).hypot(b[1] - a[1]);
+    let lerp =
+        |a: [f64; 2], b: [f64; 2], k: f64| [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+    let mut out = Vec::with_capacity((n - 1) * 4);
+    for i in 0..n - 1 {
+        // the segment p1-p2, its neighbours p0 and p3 around the closed figure
+        let (p0, p1, p2, p3) = (p(i + n - 1), p(i), p(i + 1), p(i + 2));
+        let (len1, len2, len3) = (len(p0, p1), len(p1, p2), len(p2, p3));
+        if len2 == 0.0 {
+            out.extend([p1[0], p1[1], p2[0], p2[1]]);
+            continue;
+        }
+        let (c1, c2, c3) = (mid(p0, p1), mid(p1, p2), mid(p2, p3));
+        let m1 = lerp(c1, c2, len1 / (len1 + len2));
+        let m2 = lerp(c2, c3, len2 / (len2 + len3));
+        let a = lerp(m1, c2, SMOOTH);
+        let b = lerp(m2, c2, SMOOTH);
+        out.extend([
+            a[0] + p1[0] - m1[0],
+            a[1] + p1[1] - m1[1],
+            b[0] + p2[0] - m2[0],
+            b[1] + p2[1] - m2[1],
+        ]);
+    }
+    out
+}
+
 /// libass's 3D transform of a line (`calc_transform_matrix`) as a 3×4 projective matrix, row
 /// after row: a point (x, y, z) of the line as laid out, unturned and unsheared, in script pixels
 /// goes to `(r0·p / r2·p, r1·p / r2·p)` on the screen, p = (x, y, z, 1). `rot`: \frx, \fry,
@@ -206,6 +243,21 @@ pub fn of_event(doc: &Document, ev: &Event) -> Visual {
 
 #[cfg(test)]
 mod tests {
+    /// A square's sides bulge out evenly; points on a line stay on it; too few points or a
+    /// segment of no length stay straight.
+    #[test]
+    fn a_freehand_figure_smooths_into_curves() {
+        let square = super::smooth_figure(&[0.0, 0.0, 10.0, 0.0, 10.0, 10.0, 0.0, 10.0]);
+        assert_eq!(square.len(), 12);
+        assert_eq!(&square[..4], &[2.5, -2.5, 7.5, -2.5]);
+        assert_eq!(&square[4..8], &[12.5, 2.5, 12.5, 7.5]);
+        let line = super::smooth_figure(&[0.0, 0.0, 10.0, 0.0, 20.0, 0.0, 30.0, 0.0]);
+        assert!(line.chunks(2).all(|c| c[1] == 0.0));
+        assert!(super::smooth_figure(&[0.0, 0.0, 10.0, 0.0]).is_empty());
+        let still = super::smooth_figure(&[0.0, 0.0, 5.0, 5.0, 5.0, 5.0, 0.0, 9.0]);
+        assert_eq!(&still[4..8], &[5.0, 5.0, 5.0, 5.0]);
+    }
+
     #[test]
     fn a_box_fits_a_rectangle_each_of_the_21_ways() {
         let (b, r) = ([-50.0, -20.0, 50.0, 20.0], [100.0, 100.0, 300.0, 200.0]);

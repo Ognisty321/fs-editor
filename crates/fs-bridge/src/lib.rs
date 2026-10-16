@@ -893,6 +893,10 @@ pub mod ffi {
         /// an1-9 inside, left/centre/right below, left/centre/right above, before
         /// top/middle/bottom, after top/middle/bottom).
         fn fit_anchor(line: &[f64], rect: &[f64], align: u8) -> Vec<f64>;
+        /// A closed figure's points (x, y after each other) joined by Bézier curves instead of
+        /// lines (Aegisub's smoothed freehand): each segment's two control points, four numbers
+        /// a segment, the closing one left out; none for fewer than three points.
+        fn smooth_figure(pts: &[f64]) -> Vec<f64>;
         /// libass's 3D transform of the line `v` (\frx, \fry, \frz around its \org, \fax and
         /// \fay from (`at_x`, `at_y`), a drawing's (0,0)) for a video `storage_height` high: a
         /// 3×4 projective matrix, row after row, from (x, y, z, 1) as laid out to the screen,
@@ -1182,6 +1186,10 @@ fn open_video(path: &str, cache_dir: &str, progress: &ffi::Progress) -> Result<B
 
 fn fit_anchor(line: &[f64], rect: &[f64], align: u8) -> Vec<f64> {
     visual::fit_anchor(line, rect, align).to_vec()
+}
+
+fn smooth_figure(pts: &[f64]) -> Vec<f64> {
+    visual::smooth_figure(pts)
 }
 
 fn line_projection(v: &ffi::Visual, at_x: f64, at_y: f64, storage_height: f64) -> Vec<f64> {
