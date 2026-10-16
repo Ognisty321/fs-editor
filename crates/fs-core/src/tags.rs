@@ -861,7 +861,14 @@ mod tests {
         let got: Vec<&str> = translatable_ranges(t).into_iter().map(|r| &t[r]).collect();
         assert_eq!(got, ["Hello ", "wörld", "end"]);
         assert!(translatable_ranges("{\\pos(1,2)}  ").is_empty());
-        assert_eq!(translatable_ranges("{open"), [0..5]);
+        let open = "{open"; // unterminated: text, as VSFilter shows it
+        assert_eq!(
+            translatable_ranges(open)
+                .into_iter()
+                .map(|r| &open[r])
+                .collect::<Vec<_>>(),
+            [open]
+        );
     }
 
     #[test]

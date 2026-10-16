@@ -1052,16 +1052,8 @@ Każdy zmieniany plik jest najpierw kopiowany do %2</translation>
         <translation>Zaznacz dwie linijki, żeby je zamienić</translation>
     </message>
     <message>
-        <source>Lines are not joined in translation mode</source>
-        <translation>W trybie tłumacza linijek się nie łączy</translation>
-    </message>
-    <message>
         <source>Select from 2 to 20 lines to join them</source>
         <translation>Zaznacz od 2 do 20 linijek, żeby je złączyć</translation>
-    </message>
-    <message>
-        <source>Lines are not split in translation mode</source>
-        <translation>W trybie tłumacza linijek się nie dzieli</translation>
     </message>
     <message>
         <source>Insert lines</source>
@@ -1556,6 +1548,18 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Historia</translation>
     </message>
     <message>
+        <source>Copy lines</source>
+        <translation>Kopiuj linijki</translation>
+    </message>
+    <message>
+        <source>Cut lines</source>
+        <translation>Wytnij linijki</translation>
+    </message>
+    <message>
+        <source>Paste lines</source>
+        <translation>Wklej linijki</translation>
+    </message>
+    <message>
         <source>Find and replace</source>
         <translation>Znajdź i zamień</translation>
     </message>
@@ -1868,6 +1872,22 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Wysokość</translation>
     </message>
     <message>
+        <source>Back several frames</source>
+        <translation>Kilka klatek wstecz</translation>
+    </message>
+    <message>
+        <source>Forward several frames</source>
+        <translation>Kilka klatek naprzód</translation>
+    </message>
+    <message>
+        <source>Vector clip modes</source>
+        <translation>Tryby wycinka wektorowego</translation>
+    </message>
+    <message>
+        <source>Center the zoomed video</source>
+        <translation>Wyśrodkuj powiększone wideo</translation>
+    </message>
+    <message>
         <source>Zoom in</source>
         <translation>Powiększ</translation>
     </message>
@@ -1890,6 +1910,22 @@ Backspace: rozłącz ostatnią grupę</translation>
     <message>
         <source>Waveform display</source>
         <translation>Widok fali dźwiękowej</translation>
+    </message>
+    <message>
+        <source>Timing keys anywhere (Medusa mode)</source>
+        <translation>Klawisze timingu w całym oknie (tryb Medusa)</translation>
+    </message>
+    <message>
+        <source>Show toolbar</source>
+        <translation>Pokaż pasek narzędzi</translation>
+    </message>
+    <message>
+        <source>Translation assistant...</source>
+        <translation>Asystent tłumaczenia...</translation>
+    </message>
+    <message>
+        <source>Translation assistant keys</source>
+        <translation>Klawisze asystenta tłumaczenia</translation>
     </message>
     <message>
         <source>Automation Script referenced with unknown location specifier character.
@@ -2150,14 +2186,6 @@ Można nim też dopasować napisy do wideo o innej prędkości, np. przy przyspi
     <message>
         <source>Next frame</source>
         <translation>Klatka w przód</translation>
-    </message>
-    <message>
-        <source>Back 10 frames</source>
-        <translation>10 klatek w tył</translation>
-    </message>
-    <message>
-        <source>Forward 10 frames</source>
-        <translation>10 klatek w przód</translation>
     </message>
     <message>
         <source>Go to start time of line</source>
@@ -3522,6 +3550,14 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Domyślny czas trwania linii</translation>
     </message>
     <message>
+        <source> frames</source>
+        <translation> klatek</translation>
+    </message>
+    <message>
+        <source>Frames skipped by a fast jump</source>
+        <translation>Klatki przeskakiwane szybkim skokiem</translation>
+    </message>
+    <message>
         <source>Grid font (applies to new tabs)</source>
         <translation>Czcionka siatki (dla nowych zakładek)</translation>
     </message>
@@ -4491,6 +4527,81 @@ Dopasować rozdzielczość napisów do wideo?</translation>
     </message>
 </context>
 <context>
+    <name>TranslationAssistant</name>
+    <message>
+        <source>Accept changes</source>
+        <translation>Zatwierdź zmiany</translation>
+    </message>
+    <message>
+        <source>Preview changes</source>
+        <translation>Podgląd zmian</translation>
+    </message>
+    <message>
+        <source>Previous line</source>
+        <translation>Poprzednia linijka</translation>
+    </message>
+    <message>
+        <source>Next line</source>
+        <translation>Następna linijka</translation>
+    </message>
+    <message>
+        <source>Insert original</source>
+        <translation>Wstaw oryginał</translation>
+    </message>
+    <message>
+        <source>Play video</source>
+        <translation>Odtwórz wideo</translation>
+    </message>
+    <message>
+        <source>Play audio</source>
+        <translation>Odtwórz audio</translation>
+    </message>
+    <message>
+        <source>Translation assistant</source>
+        <translation>Asystent tłumaczenia</translation>
+    </message>
+    <message>
+        <source>Original</source>
+        <translation>Oryginał</translation>
+    </message>
+    <message>
+        <source>Translation</source>
+        <translation>Tłumaczenie</translation>
+    </message>
+    <message>
+        <source>Keys</source>
+        <translation>Klawisze</translation>
+    </message>
+    <message>
+        <source>Enable preview</source>
+        <translation>Włącz podgląd</translation>
+    </message>
+    <message>
+        <source>Delete line</source>
+        <translation>Usuń linijkę</translation>
+    </message>
+    <message>
+        <source>Actions</source>
+        <translation>Akcje</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>Zamknij</translation>
+    </message>
+    <message>
+        <source>There is nothing to translate in the file.</source>
+        <translation>W pliku nie ma nic do tłumaczenia.</translation>
+    </message>
+    <message>
+        <source>No more lines to translate.</source>
+        <translation>Nie ma więcej linijek do tłumaczenia.</translation>
+    </message>
+    <message>
+        <source>Current line: %1/%2</source>
+        <translation>Bieżąca linijka: %1/%2</translation>
+    </message>
+</context>
+<context>
     <name>VideoBox</name>
     <message>
         <source>Previous file</source>
@@ -4825,6 +4936,10 @@ Dopasować rozdzielczość napisów do wideo?</translation>
     <message>
         <source>Add B-spline point</source>
         <translation>Dodaj punkt B-spline</translation>
+    </message>
+    <message>
+        <source>Draw smoothed freehand</source>
+        <translation>Rysuj odręcznie z wygładzeniem</translation>
     </message>
     <message>
         <source>Invert clip</source>
