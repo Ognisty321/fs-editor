@@ -10,6 +10,7 @@
 #include "visualtools.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -636,6 +637,14 @@ VideoBox::VideoBox(TabPanel *tab) : QWidget(tab), m_tab(tab), m_media(std::make_
         pause();
         seekFrame(0);
     });
+    // Kainote's full screen panel: the visual tools shown or not, with subtitles to edit by default
+    m_fsToolbar = new QCheckBox(tr("Show toolbar"), m_controls);
+    m_fsToolbar->hide();
+    row->addWidget(m_fsToolbar);
+    connect(m_fsToolbar, &QCheckBox::toggled, this, [this](bool on) {
+        QSettings().setValue("video/fullscreenToolbar", on);
+        if (isFullScreen()) m_toolRow->setVisible(on);
+    });
     m_timeField = new QLineEdit(m_controls);
     m_timeField->setReadOnly(true);
     m_timeField->setMinimumWidth(fontMetrics().horizontalAdvance("0:00:00,000; 000000; 00; -00000ms, -00000ms") + 12);
@@ -1096,7 +1105,10 @@ void VideoBox::setFullscreen(bool on, QScreen *on_screen) {
             showNormal(); // to another monitor (Kainote)
         } else {
             if (!m_detached) undock();
-            m_toolRow->hide();
+            const QSignalBlocker block(m_fsToolbar);
+            m_fsToolbar->setChecked(QSettings().value("video/fullscreenToolbar", !m_tab->playerMode()).toBool());
+            m_fsToolbar->show();
+            m_toolRow->setVisible(m_fsToolbar->isChecked());
         }
         // Qt fills the screen the window is on; an undocked box's old position means nothing
         if (!m_detached || target != screen()) move(target->geometry().topLeft());
@@ -1105,6 +1117,7 @@ void VideoBox::setFullscreen(bool on, QScreen *on_screen) {
         if (!isFullScreen()) return;
         showNormal();
         if (!m_detached) dock();
+        m_fsToolbar->hide();
         m_toolRow->setVisible(!m_tab->playerMode());
         // Kainote's: the grid finds the line seen last in full screen
         if (!m_tab->path().isEmpty() && QSettings().value("grid/visibleAfterFullscreen", false).toBool())

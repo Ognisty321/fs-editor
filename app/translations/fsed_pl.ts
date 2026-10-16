@@ -4777,6 +4777,50 @@ do czasu audio</translation>
 <context>
     <name>StyleEditor</name>
     <message>
+        <source>Font catalog</source>
+        <translation>Katalog czcionek</translation>
+    </message>
+    <message>
+        <source>Catalog name:</source>
+        <translation>Nazwa katalogu:</translation>
+    </message>
+    <message>
+        <source>A catalog named &quot;%1&quot; cannot be made</source>
+        <translation>Nie można utworzyć katalogu o nazwie „%1”</translation>
+    </message>
+    <message>
+        <source>Font catalogs</source>
+        <translation>Katalogi czcionek</translation>
+    </message>
+    <message>
+        <source>Catalogs</source>
+        <translation>Katalogi</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Dodaj</translation>
+    </message>
+    <message>
+        <source>Rename</source>
+        <translation>Zmień nazwę</translation>
+    </message>
+    <message>
+        <source>Remove</source>
+        <translation>Usuń</translation>
+    </message>
+    <message>
+        <source>Filter fonts</source>
+        <translation>Filtruj czcionki</translation>
+    </message>
+    <message>
+        <source>Only the fonts in the catalog</source>
+        <translation>Tylko czcionki z katalogu</translation>
+    </message>
+    <message>
+        <source>Remove the catalog &quot;%1&quot;?</source>
+        <translation>Usunąć katalog „%1”?</translation>
+    </message>
+    <message>
         <source>Style editor</source>
         <translation>Edytor stylów</translation>
     </message>
@@ -4803,6 +4847,26 @@ do czasu audio</translation>
     <message>
         <source>Strikeout</source>
         <translation>Przekreślenie</translation>
+    </message>
+    <message>
+        <source>All fonts</source>
+        <translation>Wszystkie czcionki</translation>
+    </message>
+    <message>
+        <source>Fonts in no catalog</source>
+        <translation>Czcionki bez katalogu</translation>
+    </message>
+    <message>
+        <source>Add the font to a catalog</source>
+        <translation>Dodaj czcionkę do katalogu</translation>
+    </message>
+    <message>
+        <source>New catalog...</source>
+        <translation>Nowy katalog...</translation>
+    </message>
+    <message>
+        <source>Catalogs...</source>
+        <translation>Katalogi...</translation>
     </message>
     <message>
         <source>Font and size</source>
@@ -5066,6 +5130,14 @@ do czasu audio</translation>
         <translation>Zmienić nazwę tego stylu we wszystkich liniach napisów?</translation>
     </message>
     <message>
+        <source>Edit styles</source>
+        <translation>Edycja stylów</translation>
+    </message>
+    <message>
+        <source>Change all the selected styles (%1 more) in the same way?</source>
+        <translation>Zmienić tak samo wszystkie zaznaczone style (jeszcze %1)?</translation>
+    </message>
+    <message>
         <source>Catalog</source>
         <translation>Katalog</translation>
     </message>
@@ -5150,6 +5222,22 @@ do czasu audio</translation>
     <message>
         <source>Spell checker language</source>
         <translation>Język sprawdzania pisowni</translation>
+    </message>
+    <message>
+        <source>Look up the translation of the word on ling.pl</source>
+        <translation>Szukaj tłumaczenia słowa na ling.pl</translation>
+    </message>
+    <message>
+        <source>Look up the translation of the word on bab.la</source>
+        <translation>Szukaj tłumaczenia słowa na bab.la</translation>
+    </message>
+    <message>
+        <source>Search for the selected phrase on Google</source>
+        <translation>Szukaj zaznaczonej frazy w Google</translation>
+    </message>
+    <message>
+        <source>Look up synonyms on synonim.net</source>
+        <translation>Szukaj synonimów na synonim.net</translation>
     </message>
     <message>
         <source>Split at cursor (estimate times)</source>
@@ -5617,6 +5705,10 @@ Dopasować rozdzielczość napisów do wideo?</translation>
     <message>
         <source>Copy the coordinates under the mouse</source>
         <translation>Kopiuj współrzędne pod kursorem</translation>
+    </message>
+    <message>
+        <source>Show toolbar</source>
+        <translation>Pokaż pasek narzędzi</translation>
     </message>
     <message>
         <source>Volume</source>

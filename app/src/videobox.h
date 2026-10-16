@@ -247,6 +247,7 @@ private:
     QSlider *m_seek, *m_volume;
     QLineEdit *m_timeField;
     QWidget *m_controls, *m_toolRow;
+    class QCheckBox *m_fsToolbar; // full screen only
     QComboBox *m_seekOn, *m_playOn;
     QWidget *m_fsParent = nullptr;
     int m_fsIndex = -1;

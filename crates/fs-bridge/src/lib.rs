@@ -16,7 +16,7 @@ pub use kanji::KanjiTimer;
 use kanji::new_kanji_timer;
 pub use media::{Audio, Renderer, Video};
 pub use session::{Backup, FontUses, RenderSubs, Session};
-use session::{collect_fonts, parse_style_lines, style_lines, syllables_of};
+use session::{collect_fonts, parse_style_lines, style_lines, style_with_changes, syllables_of};
 pub use spell::{Speller, Thesaurus};
 use spell::{new_speller, new_thesaurus, text_words, thesaurus_word};
 
@@ -97,7 +97,7 @@ pub mod ffi {
         ms_per_char: i32,
     }
 
-    #[derive(Debug, Clone, Default)]
+    #[derive(Debug, Clone, Default, PartialEq)]
     struct StyleData {
         name: String,
         font: String,
@@ -777,6 +777,20 @@ pub mod ffi {
         fn parse_style_lines(text: &str) -> Vec<StyleData>;
         /// `styles` as `Style:` lines, one per line, as a catalog file holds them.
         fn style_lines(styles: &[StyleData]) -> String;
+        /// Kainote's editing of several styles: what changed from `before` to `after` (not the
+        /// name), set on `target`; `change_styles` does it to the file's styles at `indices` in
+        /// one undo step and returns how many changed.
+        fn style_with_changes(
+            before: &StyleData,
+            after: &StyleData,
+            target: &StyleData,
+        ) -> StyleData;
+        fn change_styles(
+            self: &mut Session,
+            before: &StyleData,
+            after: &StyleData,
+            indices: &[usize],
+        ) -> usize;
         /// `index` < 0 adds it; a rename moves the lines to the new name when `rename_lines`.
         fn set_style(self: &mut Session, index: i64, style: &StyleData, rename_lines: bool);
         /// Whether lines, their `\r` tags or the translation pairing use the style: a rename asks

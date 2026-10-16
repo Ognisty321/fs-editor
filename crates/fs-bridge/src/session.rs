@@ -2695,6 +2695,35 @@ impl Session {
         });
     }
 
+    /// `style_with_changes` on the styles at `indices`, in one undo step; how many changed.
+    pub fn change_styles(
+        &mut self,
+        before: &StyleData,
+        after: &StyleData,
+        indices: &[usize],
+    ) -> usize {
+        let changed: Vec<(usize, StyleData)> = (self.ed.doc.styles().enumerate())
+            .filter(|(i, _)| indices.contains(i))
+            .map(|(i, s)| {
+                let old = style_data(s);
+                (i, style_with_changes(before, after, &old), old)
+            })
+            .filter(|(_, new, old)| new != old)
+            .map(|(i, new, _)| (i, new))
+            .collect();
+        let n = changed.len();
+        if n > 0 {
+            self.edit("Edit styles", move |d| {
+                for (i, new) in changed {
+                    if let Some(s) = d.style_mut(i) {
+                        apply_style_data(s, &new);
+                    }
+                }
+            });
+        }
+        n
+    }
+
     /// Delete styles no line uses; returns their names (no undo step when none).
     pub fn style_in_use(&self, name: &str) -> bool {
         let d = &self.ed.doc;
@@ -3443,6 +3472,44 @@ fn system_fonts() -> fontdb::Database {
 /// The syllables `text` would have on a line from `start` to `end` (a proposed split, before it
 /// is written).
 const CATALOG_HEAD: &str = "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n";
+
+/// Kainote's editing of several styles: what changed from `before` to `after` (not the name), set
+/// on `target`.
+pub fn style_with_changes(before: &StyleData, after: &StyleData, target: &StyleData) -> StyleData {
+    let mut t = target.clone();
+    macro_rules! take {
+        ($($f:ident),*) => {$(
+            if before.$f != after.$f {
+                t.$f = after.$f.clone();
+            }
+        )*};
+    }
+    take!(
+        font,
+        size,
+        primary,
+        secondary,
+        outline_color,
+        back,
+        bold,
+        italic,
+        underline,
+        strikeout,
+        scale_x,
+        scale_y,
+        spacing,
+        angle,
+        border_style,
+        outline,
+        shadow,
+        alignment,
+        margin_l,
+        margin_r,
+        margin_v,
+        encoding
+    );
+    t
+}
 
 pub fn parse_style_lines(text: &str) -> Vec<StyleData> {
     let lines: String = text
@@ -4862,6 +4929,34 @@ mod tests {
         assert!(s.styles().is_empty());
         assert!(s.undo());
         assert_eq!(names(&s), ["Main", "Orig"]);
+    }
+
+    #[test]
+    fn several_styles_take_the_changes_of_one() {
+        let mut s = session(ASS);
+        let mut other = s.styles()[0].clone();
+        other.name = "Sign".into();
+        other.font = "Impact".into();
+        s.set_style(-1, &other, false);
+        let before = s.styles()[0].clone();
+        let after = StyleData {
+            size: 60.0,
+            bold: true,
+            ..before.clone()
+        };
+        assert_eq!(s.change_styles(&before, &after, &[1, 7]), 1);
+        let sign = &s.styles()[1];
+        assert_eq!(
+            (sign.name.as_str(), sign.font.as_str(), sign.size, sign.bold),
+            ("Sign", "Impact", 60.0, true)
+        );
+        // nothing more to change: no step
+        assert_eq!(s.change_styles(&before, &after, &[1]), 0);
+        assert!(s.undo());
+        assert_eq!(
+            (s.styles()[1].size, s.styles()[1].bold),
+            (before.size, before.bold)
+        );
     }
 
     #[test]

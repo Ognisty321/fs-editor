@@ -939,6 +939,140 @@ QString uniqueName(const QString &first, const QStringList &taken) {
 
 // Laid out like Kainote's style panel (two columns, colours with alpha under them, big preview);
 // the Apply / rename / name-clash logic follows Aegisub's DialogStyleEditor.
+// ---- font catalogs ------------------------------------------------------------
+
+// Kainote's font catalogs: named lists of font families in the settings; a font may be in several
+static QStringList fontCatalogs() {
+    QSettings st;
+    st.beginGroup("fontCatalogs");
+    QStringList names = st.childKeys();
+    names.sort(Qt::CaseInsensitive);
+    return names;
+}
+
+static QStringList catalogFonts(const QString &catalog) {
+    QStringList fonts = QSettings().value("fontCatalogs/" + catalog).toStringList();
+    fonts.removeAll(QString()); // an empty list may come back as one empty string
+    return fonts;
+}
+
+static void setCatalogFonts(const QString &catalog, QStringList fonts) {
+    fonts.removeDuplicates();
+    fonts.sort(Qt::CaseInsensitive);
+    QSettings().setValue("fontCatalogs/" + catalog, fonts);
+}
+
+QString StyleEditor::askCatalogName(QWidget *parent, const QString &old) {
+    const QString name =
+        QInputDialog::getText(parent, tr("Font catalog"), tr("Catalog name:"), QLineEdit::Normal, old).trimmed();
+    if (name.isEmpty() || name == old) return {};
+    // a slash would make a settings group of it
+    if (name.contains('/') || name.contains('\\') || fontCatalogs().contains(name, Qt::CaseInsensitive)) {
+        QMessageBox::warning(parent, tr("Font catalog"), tr("A catalog named \"%1\" cannot be made").arg(name));
+        return {};
+    }
+    return name;
+}
+
+void StyleEditor::manageFontCatalogs(QWidget *parent, const QString &font) {
+    QDialog d(parent);
+    d.setWindowTitle(tr("Font catalogs"));
+    auto *lay = new QHBoxLayout(&d);
+    auto *left = new QVBoxLayout;
+    auto *cats = new QListWidget(&d);
+    left->addWidget(new QLabel(tr("Catalogs"), &d));
+    left->addWidget(cats, 1);
+    auto *buttons = new QHBoxLayout;
+    auto *add = new QPushButton(tr("Add"), &d), *rename = new QPushButton(tr("Rename"), &d),
+         *remove = new QPushButton(tr("Remove"), &d);
+    for (auto *b : {add, rename, remove}) buttons->addWidget(b);
+    left->addLayout(buttons);
+    lay->addLayout(left, 1);
+    auto *right = new QVBoxLayout;
+    auto *filter = new QLineEdit(&d);
+    filter->setPlaceholderText(tr("Filter fonts"));
+    filter->setClearButtonEnabled(true);
+    auto *onlyIn = new QCheckBox(tr("Only the fonts in the catalog"), &d);
+    auto *fonts = new QListWidget(&d);
+    fonts->setUniformItemSizes(true);
+    right->addWidget(filter);
+    right->addWidget(onlyIn);
+    right->addWidget(fonts, 1);
+    auto *close = new QDialogButtonBox(QDialogButtonBox::Close, &d);
+    connect(close, &QDialogButtonBox::rejected, &d, &QDialog::reject);
+    right->addWidget(close);
+    lay->addLayout(right, 2);
+    const QStringList families = QFontDatabase::families();
+    const auto current = [cats] { return cats->currentItem() ? cats->currentItem()->text() : QString(); };
+    const auto fillFonts = [=] {
+        const QString cat = current();
+        const QStringList in = catalogFonts(cat);
+        QSignalBlocker block(fonts);
+        fonts->clear();
+        // a catalog's fonts not installed here are listed too, to be taken out
+        QStringList all = families;
+        for (const QString &f : in)
+            if (!all.contains(f)) all << f;
+        for (const QString &f : all) {
+            const bool member = in.contains(f);
+            if (!f.contains(filter->text(), Qt::CaseInsensitive) || (onlyIn->isChecked() && !member)) continue;
+            auto *it = new QListWidgetItem(f, fonts);
+            it->setFont(QFont(f, fonts->font().pointSize()));
+            it->setFlags(cat.isEmpty() ? Qt::NoItemFlags : Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
+            it->setCheckState(member ? Qt::Checked : Qt::Unchecked);
+        }
+        if (auto found = fonts->findItems(font, Qt::MatchExactly); !found.isEmpty()) fonts->scrollToItem(found[0]);
+    };
+    const auto fillCats = [=](const QString &select) {
+        cats->clear();
+        cats->addItems(fontCatalogs());
+        const auto found = cats->findItems(select, Qt::MatchExactly);
+        cats->setCurrentRow(found.isEmpty() ? 0 : cats->row(found[0]));
+        rename->setEnabled(cats->count());
+        remove->setEnabled(cats->count());
+        fillFonts();
+    };
+    connect(fonts, &QListWidget::itemChanged, &d, [=](QListWidgetItem *it) {
+        QStringList in = catalogFonts(current());
+        if (it->checkState() == Qt::Checked) in << it->text();
+        else in.removeAll(it->text());
+        setCatalogFonts(current(), in);
+    });
+    connect(cats, &QListWidget::currentRowChanged, &d, fillFonts);
+    connect(filter, &QLineEdit::textChanged, &d, fillFonts);
+    connect(onlyIn, &QCheckBox::toggled, &d, fillFonts);
+    connect(add, &QPushButton::clicked, &d, [=, &d] {
+        if (const QString name = askCatalogName(&d, {}); !name.isEmpty()) {
+            setCatalogFonts(name, {});
+            fillCats(name);
+        }
+    });
+    connect(rename, &QPushButton::clicked, &d, [=, &d] {
+        const QString old = current();
+        if (const QString name = askCatalogName(&d, old); !name.isEmpty()) {
+            setCatalogFonts(name, catalogFonts(old));
+            QSettings().remove("fontCatalogs/" + old);
+            fillCats(name);
+        }
+    });
+    connect(remove, &QPushButton::clicked, &d, [=, &d] {
+        if (QMessageBox::question(&d, tr("Font catalogs"), tr("Remove the catalog \"%1\"?").arg(current())) !=
+            QMessageBox::Yes)
+            return;
+        QSettings().remove("fontCatalogs/" + current());
+        fillCats({});
+    });
+    QString first;
+    for (const QString &c : fontCatalogs())
+        if (catalogFonts(c).contains(font)) {
+            first = c;
+            break;
+        }
+    fillCats(first);
+    d.resize(640, 480);
+    d.exec();
+}
+
 StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog(parent), m_style(style) {
     setWindowTitle(tr("Style editor"));
     auto *v = new QVBoxLayout(this);
@@ -997,6 +1131,69 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
     m_strike->setChecked(style.strikeout);
     int fc = 0;
     for (auto *c : {m_bold, m_italic, m_underline, m_strike}) fontL->addWidget(c, 1, fc++);
+    // Kainote's font catalogs: the font list narrowed to one, fonts added to them, and their window
+    auto *catalog = new QComboBox(this);
+    catalog->setToolTip(tr("Font catalog"));
+    const auto filterFonts = [this, catalog] {
+        const QString cat = catalog->currentData().toString(), text = m_font->currentText();
+        QStringList families = QFontDatabase::families();
+        if (cat == "/") { // the fonts in no catalog
+            QSet<QString> listed;
+            for (const QString &c : fontCatalogs())
+                for (const QString &f : catalogFonts(c)) listed.insert(f);
+            families.removeIf([&listed](const QString &f) { return listed.contains(f); });
+        } else if (!cat.isEmpty()) {
+            families = catalogFonts(cat);
+        }
+        const QSignalBlocker block(m_font);
+        m_font->clear();
+        m_font->addItems(families);
+        m_font->setCurrentText(text);
+        QSettings().setValue("style/fontCatalog", cat);
+    };
+    const auto fillCatalogs = [this, catalog, filterFonts] {
+        const QSignalBlocker block(catalog);
+        catalog->clear();
+        catalog->addItem(tr("All fonts"), QString());
+        catalog->addItem(tr("Fonts in no catalog"), QStringLiteral("/"));
+        for (const QString &c : fontCatalogs()) catalog->addItem(c, c);
+        catalog->setCurrentIndex(std::max(0, catalog->findData(QSettings().value("style/fontCatalog").toString())));
+        filterFonts();
+    };
+    fillCatalogs();
+    connect(catalog, &QComboBox::currentIndexChanged, this, filterFonts);
+    auto *addTo = new QToolButton(this);
+    addTo->setText("+");
+    addTo->setToolTip(tr("Add the font to a catalog"));
+    connect(addTo, &QToolButton::clicked, this, [this, addTo, fillCatalogs] {
+        const QString font = m_font->currentText().trimmed();
+        if (font.isEmpty()) return;
+        QMenu menu;
+        for (const QString &c : fontCatalogs()) {
+            auto *a = menu.addAction(c, [c, font] {
+                QStringList in = catalogFonts(c);
+                if (in.contains(font)) in.removeAll(font);
+                else in << font;
+                setCatalogFonts(c, in);
+            });
+            a->setCheckable(true);
+            a->setChecked(catalogFonts(c).contains(font));
+        }
+        menu.addSeparator();
+        menu.addAction(tr("New catalog..."), [this, font] {
+            if (const QString name = askCatalogName(this, {}); !name.isEmpty()) setCatalogFonts(name, {font});
+        });
+        menu.exec(addTo->mapToGlobal(QPoint(0, addTo->height())));
+        fillCatalogs();
+    });
+    auto *manage = new QPushButton(tr("Catalogs..."), this);
+    connect(manage, &QPushButton::clicked, this, [this, fillCatalogs] {
+        manageFontCatalogs(this, m_font->currentText());
+        fillCatalogs();
+    });
+    fontL->addWidget(catalog, 2, 0, 1, 2);
+    fontL->addWidget(addTo, 2, 2);
+    fontL->addWidget(manage, 2, 3);
     group(left, tr("Font and size"), fontL);
 
     auto *colorL = new QGridLayout;
@@ -1298,10 +1495,11 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     for (auto *b : {fNew, fCopy, fEdit, fDel, fClear, fClean, fSort, fImport}) fb->addWidget(b);
     fb->addStretch();
     g->addLayout(fb, 5, 1);
-    m_forOne[0] = {sCopy, sEdit};
-    m_forAny[0] = {sDel, toFile, toAll};
-    m_forOne[1] = {fCopy, fEdit};
-    m_forAny[1] = {fDel, toStore};
+    // Edit with several selected: the others take what changes in the current one (Kainote)
+    m_forOne[0] = {sCopy};
+    m_forAny[0] = {sEdit, sDel, toFile, toAll};
+    m_forOne[1] = {fCopy};
+    m_forAny[1] = {fEdit, fDel, toStore};
     const auto moveButtons = [this](QBoxLayout *column, bool storage) {
         static const char *const names[] = {"arrow-bar-to-up", "arrow-up", "arrow-down", "arrow-bar-to-down"};
         static const char *const tips[] = {QT_TR_NOOP("Move to top"), QT_TR_NOOP("Move up"), QT_TR_NOOP("Move down"),
@@ -1370,8 +1568,17 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         const int i = m_file->currentRow();
         if (i < 0) return;
         int idx = i;
+        const std::vector<size_t> others = otherSelected(m_file);
         StyleEditor e(session().styles()[size_t(i)], this);
-        e.onApply = [&](const fsb::StyleData &s) { return applyToFile(idx, s); };
+        e.onApply = [&](const fsb::StyleData &s) {
+            const auto before = session().styles()[size_t(idx)];
+            if (!applyToFile(idx, s)) return false;
+            if (changeSelected(others, before, s) && session().change_styles(before, s, fs::slice(others))) {
+                m_main->current()->changed();
+                reload();
+            }
+            return true;
+        };
         e.exec();
     };
     connect(fEdit, &QPushButton::clicked, this, editFile);
@@ -1491,8 +1698,19 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         const int i = m_storage->currentRow();
         if (i < 0) return;
         int idx = i;
+        const std::vector<size_t> others = otherSelected(m_storage);
         StyleEditor e(m_stored[size_t(i)], this);
-        e.onApply = [&](const fsb::StyleData &s) { return applyToStorage(idx, s); };
+        e.onApply = [&](const fsb::StyleData &s) {
+            const auto before = m_stored[size_t(idx)];
+            if (!applyToStorage(idx, s)) return false;
+            if (changeSelected(others, before, s)) {
+                for (size_t k : others)
+                    if (k < m_stored.size()) m_stored[k] = fsb::style_with_changes(before, s, m_stored[k]);
+                saveCatalog();
+                reload();
+            }
+            return true;
+        };
         e.exec();
     };
     connect(sEdit, &QPushButton::clicked, this, editStored);
@@ -1958,6 +2176,22 @@ bool StyleManager::applyToFile(int &index, const fsb::StyleData &s) {
     m_main->current()->changed();
     reload();
     return true;
+}
+
+std::vector<size_t> StyleManager::otherSelected(QListWidget *list) {
+    std::vector<size_t> rows;
+    for (auto *it : list->selectedItems())
+        if (const int r = list->row(it); r != list->currentRow()) rows.push_back(size_t(r));
+    return rows;
+}
+
+bool StyleManager::changeSelected(const std::vector<size_t> &others, const fsb::StyleData &before,
+                                  const fsb::StyleData &after) {
+    if (others.empty() || fsb::style_with_changes(before, after, before) == before) return false; // a rename only
+    return qEnvironmentVariableIsSet("FSED_SMOKE") || // asks nothing in a smoke test
+           QMessageBox::question(this, tr("Edit styles"),
+                                 tr("Change all the selected styles (%1 more) in the same way?").arg(others.size())) ==
+               QMessageBox::Yes;
 }
 
 bool StyleManager::applyToStorage(int &index, const fsb::StyleData &s) {

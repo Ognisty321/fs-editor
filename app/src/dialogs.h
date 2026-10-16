@@ -103,9 +103,12 @@ public:
     // Apply / OK hand the style here; false (e.g. a name clash) keeps the editor open
     std::function<bool(const fsb::StyleData &)> onApply;
     void accept() override;
+    // Kainote's font catalogs window, `font` shown in the first catalog holding it
+    static void manageFontCatalogs(QWidget *parent, const QString &font);
 protected:
     void resizeEvent(QResizeEvent *e) override;
 private:
+    static QString askCatalogName(QWidget *parent, const QString &old); // empty: none or not allowed
     void preview();
     QLineEdit *m_previewText;
     QComboBox *m_encodingBox, *m_border;
@@ -133,6 +136,10 @@ private:
     // checks the name like Aegisub, then stores the style; index -1 = new, set to where it landed
     bool applyToFile(int &index, const fsb::StyleData &s);
     bool applyToStorage(int &index, const fsb::StyleData &s);
+    // Kainote's editing of several styles: the rows selected besides the current one, and whether
+    // they take the changes from `before` to `after` (asked)
+    static std::vector<size_t> otherSelected(QListWidget *list);
+    bool changeSelected(const std::vector<size_t> &others, const fsb::StyleData &before, const fsb::StyleData &after);
     // Aegisub: the block from the first to the last selected style goes to the top (0), up (1),
     // down (2) or to the bottom (3)
     void moveStyles(bool storage, int type);

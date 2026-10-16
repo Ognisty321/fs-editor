@@ -17,6 +17,7 @@
 #include <QCompleter>
 #include <QContextMenuEvent>
 #include <QCoreApplication>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFontDialog>
 #include <QInputDialog>
@@ -34,6 +35,7 @@
 #include <QSyntaxHighlighter>
 #include <QTextBlock>
 #include <QToolButton>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
@@ -421,6 +423,18 @@ void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
             m->insertSeparator(first);
             break;
         }
+    // Kainote's look-ups of the selected phrase in the browser
+    const QString phrase = textCursor().selectedText().simplified();
+    m->addSeparator();
+    const std::pair<const char *, const char *> sites[] = {
+        {QT_TR_NOOP("Look up the translation of the word on ling.pl"), "https://ling.pl/"},
+        {QT_TR_NOOP("Look up the translation of the word on bab.la"), "https://pl.bab.la/slownik/angielski-polski/"},
+        {QT_TR_NOOP("Search for the selected phrase on Google"), "https://www.google.com/search?q="},
+        {QT_TR_NOOP("Look up synonyms on synonim.net"), "https://synonim.net/synonim/"}};
+    for (auto [label, site] : sites)
+        m->addAction(tr(label), this, [site, phrase] {
+            QDesktopServices::openUrl(QUrl(QString::fromLatin1(site) + QString::fromLatin1(QUrl::toPercentEncoding(phrase))));
+        })->setEnabled(!phrase.isEmpty());
     // Aegisub's split commands
     m->addSeparator();
     m->addAction(tr("Split at cursor (estimate times)"), this, [this] { emit splitRequested(-1); });

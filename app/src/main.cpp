@@ -13,6 +13,7 @@
 #include <QDialog>
 #include <QDir>
 #include <QDropEvent>
+#include <QEventLoop>
 #include <QLibraryInfo>
 #include <QListWidget>
 #include <QLockFile>
@@ -369,10 +370,24 @@ int main(int argc, char **argv) {
     // FSED_SMOKE_CLICK="Check" presses that button in the open dialog, else in the main window;
     // "Replace;Close" presses one after the other, a button with no text goes by its tooltip;
     // "^" closes the dialog (to shoot the main window after a non-modal one); "Sort#2" presses the
-    // second such button; a text no button has selects the list items and the tabs with it.
-    if (const QString texts = qEnvironmentVariable("FSED_SMOKE_CLICK"); !texts.isEmpty())
-        QTimer::singleShot(std::max(800, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 5 / 6), &w, [&w, texts] {
-            for (QString text : texts.split(';')) {
+    // second such button; a text no button has selects the list items and the tabs with it; "~500"
+    // waits half a second (for a search on a worker); "Edit@" presses Edit with the rest pressed half
+    // a second later, in the modal dialog it opens.
+    static std::function<void(QStringList)> clicks;
+    clicks = [&w](QStringList texts) {
+            while (!texts.isEmpty()) {
+                QString text = texts.takeFirst();
+                if (text.endsWith('@')) {
+                    text.chop(1);
+                    QTimer::singleShot(500, &w, [rest = texts] { clicks(rest); });
+                    texts.clear();
+                }
+                if (text.startsWith('~')) {
+                    QEventLoop wait;
+                    QTimer::singleShot(text.mid(1).toInt(), &wait, &QEventLoop::quit);
+                    wait.exec();
+                    continue;
+                }
                 QWidget *top = smokeDialog(w);
                 if (text == "^" && top) top->close();
                 int nth = 1;
@@ -394,7 +409,10 @@ int main(int argc, char **argv) {
                             if (tb->tabText(i) == text) tb->setCurrentIndex(i);
                 }
             }
-        });
+        };
+    if (const QString texts = qEnvironmentVariable("FSED_SMOKE_CLICK"); !texts.isEmpty())
+        QTimer::singleShot(std::max(800, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 5 / 6), &w,
+                           [texts] { clicks(texts.split(';')); });
     if (const QString out = qEnvironmentVariable("FSED_SMOKE"); !out.isEmpty())
         QTimer::singleShot(std::max(1000, qEnvironmentVariableIntValue("FSED_SMOKE_MS")), &w, [&w, out] {
             QWidget *shot = smokeDialog(w);
