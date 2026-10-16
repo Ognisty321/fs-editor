@@ -1920,7 +1920,30 @@ impl Session {
         });
     }
 
-    /// Rows that stay visible under the filter.
+    /// The rows' lasting ids (their main event's, which translating or turning translator mode
+    /// off keeps), for remembering lines across edits that move them.
+    pub fn row_ids(&self, rows: &[usize]) -> Vec<u64> {
+        (rows.iter())
+            .filter_map(|&r| self.ed.doc.event_id(self.tl_row(r)?.main()))
+            .collect()
+    }
+
+    /// The rows, in order, that hold any of `ids` ([`Session::row_ids`]).
+    pub fn rows_of_ids(&self, ids: &[u64]) -> Vec<usize> {
+        if ids.is_empty() {
+            return Vec::new();
+        }
+        let want: HashSet<u64> = ids.iter().copied().collect();
+        let doc = &self.ed.doc;
+        (0..self.rows.len())
+            .filter(|&i| {
+                let r = self.rows[i];
+                (std::iter::once(r.original).chain(r.translation))
+                    .any(|e| doc.event_id(e).is_some_and(|id| want.contains(&id)))
+            })
+            .collect()
+    }
+
     /// Rows the grid shows. Reads the events directly: building a `Row` per
     /// line (text copies, CPS) made this the slowest step of an edit.
     pub fn filter(&self, spec: &FilterSpec) -> Vec<usize> {
@@ -3589,6 +3612,21 @@ mod tests {
         assert_eq!((r, s.row(3).start, s.row(3).end), (3, 4000, 5000));
         s.delete_rows(&(0..s.row_count()).collect::<Vec<_>>());
         assert_eq!((s.row_count(), s.row(0).text.as_str()), (1, ""));
+    }
+
+    /// Lines remembered by id stay themselves when lines are added before them or translated.
+    #[test]
+    fn row_ids_follow_their_lines() {
+        let mut s = session(ASS);
+        let ids = s.row_ids(&[1, 2]);
+        s.insert_row(0, 0, 500);
+        assert_eq!(s.rows_of_ids(&ids), [2, 3]);
+        s.tl_enable(true);
+        s.paste_translation(2, "dwa");
+        assert_eq!(s.rows_of_ids(&ids), [2, 3]);
+        s.delete_rows(&[2]);
+        assert_eq!(s.rows_of_ids(&ids), [2]);
+        assert!(s.rows_of_ids(&[]).is_empty());
     }
 
     #[test]

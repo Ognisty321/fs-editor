@@ -639,6 +639,10 @@ pub mod ffi {
         fn clear_text_keep_tags(self: &mut Session, rows: &[usize]);
         /// Kainote's trees: the rows closed trees fold away.
         fn tree_hidden(self: &Session) -> Vec<usize>;
+        /// The rows' lasting ids, which edits that move lines do not change.
+        fn row_ids(self: &Session, rows: &[usize]) -> Vec<u64>;
+        /// The rows, in order, that hold any of `ids`.
+        fn rows_of_ids(self: &Session, ids: &[u64]) -> Vec<usize>;
         /// The rows of the tree `row` describes (empty when it describes none).
         fn tree_members(self: &Session, row: usize) -> Vec<usize>;
         /// A closed tree for each run of the rows, its description line holding `description`;

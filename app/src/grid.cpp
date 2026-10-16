@@ -80,7 +80,7 @@ Grid::Grid(TabPanel *tab) : QAbstractScrollArea(tab), m_tab(tab) {
 }
 
 void Grid::resetFilter() {
-    filterSpec.hide_rows.clear();
+    m_hiddenIds.clear();
     m_expanded.clear();
     m_keptHidden.clear();
     filterOn = QSettings().value("grid/filterAfterLoad").toBool() &&
@@ -136,10 +136,13 @@ const fsb::ColumnInfo &Grid::columnInfo() {
 void Grid::applyFilter() {
     m_vis.clear();
     if (filterOn) {
-        m_vis = fs::vec(m_tab->s().filter(filterSpec));
+        auto &s = m_tab->s();
+        filterSpec.hide_rows = s.rows_of_ids({m_hiddenIds.data(), m_hiddenIds.size()});
+        m_vis = fs::vec(s.filter(filterSpec));
         if (!m_keptHidden.empty()) {
+            const auto kept = fs::vec(s.rows_of_ids({m_keptHidden.data(), m_keptHidden.size()}));
             std::vector<size_t> shown;
-            std::ranges::set_difference(m_vis, m_keptHidden, std::back_inserter(shown));
+            std::ranges::set_difference(m_vis, kept, std::back_inserter(shown));
             m_vis = std::move(shown);
         }
         if (!m_expanded.empty()) {
@@ -164,12 +167,13 @@ void Grid::applyFilter() {
 
 void Grid::filterNow() {
     m_keptHidden.clear();
-    // shortcut: the kept rows are row numbers, as hide_rows; lines inserted above shift them
     if (filterOn && QSettings().value("grid/filterKeep").toBool()) {
-        std::vector<size_t> all(m_tab->s().row_count()), shown;
+        std::vector<size_t> all(m_tab->s().row_count()), shown, hidden;
         std::iota(all.begin(), all.end(), size_t(0));
         std::ranges::set_union(m_vis, m_folded, std::back_inserter(shown)); // folded is not filtered
-        std::ranges::set_difference(all, shown, std::back_inserter(m_keptHidden));
+        std::ranges::set_difference(all, shown, std::back_inserter(hidden));
+        const auto ids = m_tab->s().row_ids(fs::slice(hidden));
+        m_keptHidden.assign(ids.begin(), ids.end());
     }
     filterOn = true;
     m_expanded.clear();
@@ -184,7 +188,7 @@ void Grid::filterNow() {
 
 void Grid::filterOff() {
     filterOn = false;
-    filterSpec.hide_rows.clear(); // the options stay for the next filter (Kainote)
+    m_hiddenIds.clear(); // the options stay for the next filter (Kainote)
     m_keptHidden.clear();
     applyFilter();
 }
@@ -192,8 +196,8 @@ void Grid::filterOff() {
 void Grid::hideSelected() {
     const auto sel = m_tab->selection();
     if (sel.empty()) return;
-    filterSpec.hide_rows.clear();
-    for (size_t r : sel) filterSpec.hide_rows.push_back(r);
+    const auto ids = m_tab->s().row_ids(fs::slice(sel));
+    m_hiddenIds.assign(ids.begin(), ids.end());
     filterNow();
 }
 

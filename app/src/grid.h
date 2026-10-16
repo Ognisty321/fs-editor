@@ -111,7 +111,9 @@ private:
     std::vector<int> m_cols;     // visible columns in order
     std::vector<int> m_widths;
     std::set<int> m_userHidden;
-    std::vector<size_t> m_keptHidden; // what earlier filters hid, kept by "do not reset" (Kainote)
+    // as row ids, so lines added or removed before them do not shift them
+    std::vector<uint64_t> m_keptHidden; // what earlier filters hid, kept by "do not reset" (Kainote)
+    std::vector<uint64_t> m_hiddenIds;  // the lines "Hide selected lines" hid
     std::set<size_t> m_collisions, m_onVideo, m_linked;
     std::map<size_t, std::vector<size_t>> m_compare;
     quint64 m_gen = ~0ull;
