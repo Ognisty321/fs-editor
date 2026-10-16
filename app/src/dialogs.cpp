@@ -1200,7 +1200,7 @@ StyleEditor::StyleEditor(const fsb::StyleData &style, QWidget *parent) : QDialog
         if (font.isEmpty()) return;
         QMenu menu;
         for (const QString &c : fontCatalogs()) {
-            auto *a = menu.addAction(c, [c, font] {
+            auto *a = menu.addAction(fs::menuText(c), [c, font] {
                 QStringList in = catalogFonts(c);
                 if (in.contains(font)) in.removeAll(font);
                 else in << font;

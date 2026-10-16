@@ -402,7 +402,7 @@ void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
             const QString word = t.mid(s, l);
             const auto replace = replacer(s, l);
             const auto use = [this, replace](QMenu *menu, const QString &suggestion) {
-                menu->addAction(suggestion, this, [replace, suggestion] {
+                menu->addAction(fs::menuText(suggestion), this, [replace, suggestion] {
                     replace(fs::q(fsb::thesaurus_word(fs::Utf8(suggestion))));
                 });
             };
@@ -419,7 +419,7 @@ void SubsTextEdit::contextMenuEvent(QContextMenuEvent *e) {
                         use(menu, fs::q(en.meaning));
                         continue;
                     }
-                    auto *sub = menu->addMenu(fs::q(en.meaning));
+                    auto *sub = menu->addMenu(fs::menuText(fs::q(en.meaning)));
                     for (const auto &syn : en.synonyms) use(sub, fs::q(syn));
                 }
                 m->insertMenu(first, menu);

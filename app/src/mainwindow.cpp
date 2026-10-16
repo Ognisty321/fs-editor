@@ -294,7 +294,7 @@ MainWindow::MainWindow() {
         for (const auto &s : other->s().styles()) {
             const QString name = fs::q(s.name);
             if (!mine.contains(name)) continue;
-            auto *a = stMenu->addAction(name, this, [this, other, by, name] {
+            auto *a = stMenu->addAction(fs::menuText(name), this, [this, other, by, name] {
                 QStringList now = QSettings().value("compare/styles").toStringList();
                 if (!now.removeAll(name)) now << name;
                 QSettings().setValue("compare/styles", now);
@@ -484,7 +484,7 @@ QList<TabPanel *> MainWindow::tabs() const {
 static QString tabText(TabPanel *tab) {
     const QString t = tab->title();
     const int n = std::max(20, QSettings().value("main/tabTitleChars", 40).toInt());
-    return t.size() > n ? t.left(n - 1) + QChar(0x2026) : t;
+    return fs::menuText(t.size() > n ? t.left(n - 1) + QChar(0x2026) : t);
 }
 
 TabPanel *MainWindow::newTab() {
@@ -729,16 +729,17 @@ void MainWindow::openFiles(QStringList files) {
 // ---- actions ------------------------------------------------------------------
 
 namespace {
-void showHotkey(QAction *a) {
-    const QString key = QKeySequence::listToString(a->shortcuts(), QKeySequence::NativeText);
-    a->setToolTip(key.isEmpty() ? a->text() : QString("%1 (%2)").arg(a->text(), key));
-}
-
-// the command's own name: a menu text may say more (Undo's step)
+// the command's own name: a menu text may say more (Undo's step); a macro's is kept apart
 QString commandName(const QAction *a) {
     const QVariant name = a->property("name");
-    return (name.isValid() ? name.toString() : a->text()).remove('&');
+    return name.isValid() ? name.toString() : fs::plainText(a->text());
 }
+
+void showHotkey(QAction *a) {
+    const QString key = QKeySequence::listToString(a->shortcuts(), QKeySequence::NativeText);
+    a->setToolTip(key.isEmpty() ? commandName(a) : QString("%1 (%2)").arg(commandName(a), key));
+}
+
 
 QList<QKeySequence> defaultKeys(const QAction *a) {
     const auto k = a->property("defaultKey").value<QKeySequence>();
@@ -1750,7 +1751,7 @@ void MainWindow::buildMenus() {
         byStyle->clear();
         for (const auto &st : tab()->s().styles()) {
             const QString name = fs::q(st.name);
-            auto *a = byStyle->addAction(name);
+            auto *a = byStyle->addAction(fs::menuText(name));
             a->setCheckable(true);
             a->setChecked(std::any_of(spec().hide_styles.begin(), spec().hide_styles.end(),
                                       [&](auto &x) { return fs::q(x) == name; }));
@@ -2097,7 +2098,7 @@ QMenu *MainWindow::recentMenu(const QString &kind) {
         m->clear();
         QSettings st;
         for (const QString &f : st.value("recent/" + kind).toStringList().mid(0, st.value("main/recentCount", 20).toInt())) {
-            m->addAction(QFileInfo(f).fileName(), this, [this, f, kind] {
+            m->addAction(fs::menuText(QFileInfo(f).fileName()), this, [this, f, kind] {
                 if (kind == "subs") openFile(f);
                 else if (kind == "video") current()->openVideo(f);
                 else if (kind == "audio") current()->openAudio(f);
@@ -2638,7 +2639,7 @@ void MainWindow::editHotkeys() {
         QString menu;
         for (QObject *o : a->associatedObjects())
             if (auto *m = qobject_cast<QMenu *>(o)) {
-                menu = QString(m->title()).remove('&');
+                menu = fs::plainText(m->title());
                 break;
             }
         auto *it = new QTreeWidgetItem(list, {commandName(a), menu});
@@ -2867,13 +2868,16 @@ void MainWindow::buildAutomationMenu() {
         for (const QString &p : parts) {
             key += p + "/";
             if (!submenus.contains(key)) {
-                submenus[key] = parent->addMenu(p);
+                submenus[key] = parent->addMenu(fs::menuText(p));
                 submenus[key]->installEventFilter(this);
             }
             parent = submenus[key];
         }
         const size_t id = mi.id;
-        auto *a = add("macro:" + fs::q(mi.script) + "/" + fs::q(mi.name), name, {}, parent, [this, id] { runMacro(id); });
+        auto *a = add("macro:" + fs::q(mi.script) + "/" + fs::q(mi.name), fs::menuText(name), {}, parent,
+                      [this, id] { runMacro(id); });
+        a->setProperty("name", name); // its own, as fs::plainText would read it back
+        showHotkey(a);
         a->setToolTip(fs::q(mi.description));
         a->setProperty("macroId", qulonglong(id));
     }

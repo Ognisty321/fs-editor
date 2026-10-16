@@ -13,6 +13,14 @@ namespace fs {
 
 inline QString q(const rust::String &s) { return QString::fromUtf8(s.data(), qsizetype(s.size())); }
 inline QString q(rust::Str s) { return QString::fromUtf8(s.data(), qsizetype(s.size())); }
+// a name from data (a file, style, track, macro) as a menu, button or tab text: its & no mnemonic
+inline QString menuText(QString s) { return s.replace('&', QStringLiteral("&&")); }
+// a menu text as read: && one &, a lone & only marks the mnemonic
+inline QString plainText(QString s) {
+    s.replace(QStringLiteral("&&"), QChar(0));
+    s.remove('&');
+    return s.replace(QChar(0), '&');
+}
 
 // Keeps the UTF-8 bytes alive for the duration of a call taking rust::Str.
 struct Utf8 {

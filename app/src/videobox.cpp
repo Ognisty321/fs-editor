@@ -471,7 +471,7 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
         auto *chMenu = m.addMenu(tr("Chapters"));
         for (size_t i = 0; i < ch.size(); ++i) {
             const qint64 f = ch[i].first;
-            auto *a = chMenu->addAction(QString("%1\t[%2]").arg(ch[i].second, fs::fmtTime(m_box->timeAt(f))), m_box,
+            auto *a = chMenu->addAction(QString("%1\t[%2]").arg(fs::menuText(ch[i].second), fs::fmtTime(m_box->timeAt(f))), m_box,
                                         [this, f] { m_box->seekFrame(f); });
             a->setCheckable(true); // the one playing
             a->setChecked(f <= m_box->frame() && (i + 1 == ch.size() || ch[i + 1].first > m_box->frame()));
@@ -484,7 +484,7 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
         if (audio.size() > 1) {
             auto *aMenu = m.addMenu(tr("Audio streams"));
             for (const auto &t : audio) {
-                auto *a = aMenu->addAction(MainWindow::trackName(t), m_box, [au, path, i = t.index] { au->open(path, true, i); });
+                auto *a = aMenu->addAction(fs::menuText(MainWindow::trackName(t)), m_box, [au, path, i = t.index] { au->open(path, true, i); });
                 a->setCheckable(true);
                 a->setChecked(au->path() == path && au->track() == t.index);
             }
@@ -492,7 +492,7 @@ void VideoView::contextMenuEvent(QContextMenuEvent *e) {
         if (const auto subs = fsb::subtitle_tracks(fs::Utf8(path)); !subs.empty()) {
             auto *sMenu = m.addMenu(tr("Subtitle streams"));
             for (const auto &t : subs)
-                sMenu->addAction(MainWindow::trackName(t), m_box, [mw, tab = m_box->tab(), path, i = t.index] {
+                sMenu->addAction(fs::menuText(MainWindow::trackName(t)), m_box, [mw, tab = m_box->tab(), path, i = t.index] {
                     if (mw->maybeSave(tab)) tab->openEmbedded(path, i);
                 });
         }

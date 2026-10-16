@@ -17,6 +17,7 @@
 #include <QEventLoop>
 #include <QLibraryInfo>
 #include <QListWidget>
+#include <QTreeWidget>
 #include <QLockFile>
 #include <QMenu>
 #include <QMessageBox>
@@ -358,13 +359,16 @@ int main(int argc, char **argv) {
     static std::function<void(QString)> videoMenu;
     videoMenu = [&w](const QString &title) {
         QWidget *view = w.current()->video()->view();
-        QTimer::singleShot(300, &w, [title] {
+        // the menu shows once the main thread is free (a load reports progress): tried till then
+        static std::function<void(QString, int)> openSub;
+        openSub = [](const QString &title, int tries) {
             auto *m = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            if (!m && tries > 0) return QTimer::singleShot(300, [title, tries] { openSub(title, tries - 1); });
             for (auto *a : m ? m->actions() : QList<QAction *>())
-                if (a->menu() && a->text().remove('&') == title.section('>', 1, 1)) {
+                if (a->menu() && fs::plainText(a->text()) == title.section('>', 1, 1)) {
                     if (const QString item = title.section('>', 2); !item.isEmpty()) {
                         for (auto *x : a->menu()->actions())
-                            if (x->text().remove('&') == item) {
+                            if (fs::plainText(x->text()) == item) {
                                 m->close();
                                 x->trigger();
                             }
@@ -374,7 +378,8 @@ int main(int argc, char **argv) {
                     QKeyEvent right(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
                     QApplication::sendEvent(m, &right);
                 }
-        });
+        };
+        QTimer::singleShot(300, &w, [title] { openSub(title, 40); });
         const QPoint at = view->rect().center();
         QContextMenuEvent e(QContextMenuEvent::Mouse, at, view->mapToGlobal(at));
         QApplication::sendEvent(view, &e); // the menu runs in here till the shot
@@ -383,7 +388,7 @@ int main(int argc, char **argv) {
         QTimer::singleShot(std::max(700, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 2 / 3), &w, [&w, title] {
             if (title.startsWith("video>")) return videoMenu(title);
             for (auto *m : w.findChildren<QMenu *>())
-                if (QString(m->title()).remove('&') == title) return m->popup(w.mapToGlobal(QPoint(0, 30)));
+                if (fs::plainText(m->title()) == title) return m->popup(w.mapToGlobal(QPoint(0, 30)));
         });
     // FSED_SMOKE_SEEK="0.5" clicks the video's seek bar halfway ("0.5,s": with Shift); "w,-1" turns
     // the wheel over it a notch down ("w,-1,s": with Shift)
@@ -420,7 +425,7 @@ int main(int argc, char **argv) {
     // FSED_SMOKE_CLICK="Check" presses that button in the open dialog, else in the main window;
     // "Replace;Close" presses one after the other, a button with no text goes by its tooltip;
     // "^" closes the dialog (to shoot the main window after a non-modal one); "Sort#2" presses the
-    // second such button; a text no button has selects the list items and the tabs with it; "~500"
+    // second such button; a text no button has selects the list and tree items and the tabs with it; "~500"
     // waits half a second (for a search on a worker); "Edit@" presses Edit with the rest pressed half
     // a second later, in the modal dialog it opens. "+Bold" presses it with Shift (by its text or tooltip),
     // "?Bold" writes the tooltip it shows to <shot>.txt.
@@ -469,6 +474,11 @@ int main(int argc, char **argv) {
                 if (!clicked) {
                     for (auto *l : (top ? top : &w)->findChildren<QListWidget *>())
                         for (auto *it : l->findItems(text, Qt::MatchExactly)) l->setCurrentItem(it, QItemSelectionModel::Select);
+                    for (auto *t : (top ? top : &w)->findChildren<QTreeWidget *>())
+                        for (auto *it : t->findItems(text, Qt::MatchExactly | Qt::MatchRecursive)) {
+                            t->setCurrentItem(it);
+                            t->scrollToItem(it);
+                        }
                     for (auto *tb : (top ? top : &w)->findChildren<QTabBar *>())
                         for (int i = 0; i < tb->count(); ++i)
                             if (tb->tabText(i) == text) tb->setCurrentIndex(i);
@@ -482,6 +492,12 @@ int main(int argc, char **argv) {
         QTimer::singleShot(std::max(1000, qEnvironmentVariableIntValue("FSED_SMOKE_MS")), &w, [&w, out] {
             QWidget *shot = smokeDialog(w);
             if (!shot) shot = &w;
+            // the audio open then, which a shot cannot tell (a track still loading looks like silence)
+            if (auto *au = w.current()->audio(); !au->path().isEmpty()) {
+                QFile f(out + ".txt");
+                if (f.open(QIODevice::WriteOnly | QIODevice::Append))
+                    f.write(QString("audio %1 track %2" + QString(QChar(10))).arg(au->path()).arg(au->track()).toUtf8());
+            }
             QPixmap px = shot->grab();
             {
                 // tool tips and popups are windows of their own: drawn where they are over it
