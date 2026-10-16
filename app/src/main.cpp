@@ -27,6 +27,7 @@
 #include <QSettings>
 #include <QSlider>
 #include <QTabBar>
+#include <QTabWidget>
 #include <QTextEdit>
 #include <QTimer>
 #include <QToolTip>
@@ -353,40 +354,62 @@ int main(int argc, char **argv) {
             for (const QString &id : ids.split(';'))
                 if (auto *a = w.action(id)) a->trigger();
         });
-    // FSED_SMOKE_MENU="Automation" opens that menu of the window (its title without the &);
-    // "video>Audio streams" opens the video's context menu with that submenu shown;
-    // "video>Audio streams>#2 aac" picks that item, then shows the submenu again
-    static std::function<void(QString)> videoMenu;
-    videoMenu = [&w](const QString &title) {
-        QWidget *view = w.current()->video()->view();
-        // the menu shows once the main thread is free (a load reports progress): tried till then
-        static std::function<void(QString, int)> openSub;
-        openSub = [](const QString &title, int tries) {
-            auto *m = qobject_cast<QMenu *>(QApplication::activePopupWidget());
-            if (!m && tries > 0) return QTimer::singleShot(300, [title, tries] { openSub(title, tries - 1); });
-            for (auto *a : m ? m->actions() : QList<QAction *>())
-                if (a->menu() && fs::plainText(a->text()) == title.section('>', 1, 1)) {
-                    if (const QString item = title.section('>', 2); !item.isEmpty()) {
-                        for (auto *x : a->menu()->actions())
-                            if (fs::plainText(x->text()) == item) {
-                                m->close();
-                                x->trigger();
-                            }
-                        return QTimer::singleShot(1500, [t = title.section('>', 0, 1)] { videoMenu(t); });
-                    }
-                    m->setActiveAction(a);
-                    QKeyEvent right(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
-                    QApplication::sendEvent(m, &right);
+    // FSED_SMOKE_MENU="Automation" opens that menu of the window, or a submenu of it, by its title;
+    // "video>Audio streams" opens the video's context menu with that submenu shown ("tabs>..." the
+    // tab bar's, "edit:7>..." the line text's at its character 7), more ">" for submenus in it; an
+    // item at the end is picked, then the menu is shown again FSED_SMOKE_REOPEN ms later (1500)
+    static std::function<void(QString)> contextMenu;
+    static std::function<void(QString, int, int)> walk;
+    // the menu shows once the main thread is free (a load reports progress): tried till then
+    walk = [](const QString &path, int level, int tries) {
+        const QStringList parts = path.split('>');
+        auto *m = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+        QAction *a = nullptr;
+        for (auto *x : m ? m->actions() : QList<QAction *>())
+            if (fs::plainText(x->text()) == parts[level]) a = x;
+        if (!a) {
+            if (tries > 0) QTimer::singleShot(300, [path, level, tries] { walk(path, level, tries - 1); });
+            return;
+        }
+        if (!a->menu()) {
+            for (int k = 0; k < 10 && QApplication::activePopupWidget(); ++k) QApplication::activePopupWidget()->close();
+            a->trigger();
+            const int wait = qEnvironmentVariableIsSet("FSED_SMOKE_REOPEN") ? qEnvironmentVariableIntValue("FSED_SMOKE_REOPEN") : 1500;
+            return QTimer::singleShot(wait, [back = parts.mid(0, level).join('>')] { contextMenu(back); });
+        }
+        m->setActiveAction(a);
+        QKeyEvent right(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
+        QApplication::sendEvent(m, &right);
+        if (level + 1 < parts.size()) QTimer::singleShot(300, [path, level] { walk(path, level + 1, 40); });
+    };
+    contextMenu = [&w](const QString &path) {
+        const QString target = path.section('>', 0, 0);
+        QWidget *on = nullptr;
+        QPoint at;
+        if (target == "video") {
+            on = w.current()->video()->view();
+            at = on->rect().center();
+        } else if (target == "tabs") {
+            for (auto *bar : w.findChildren<QTabBar *>())
+                if (!on && bar->isVisible() && bar->contextMenuPolicy() == Qt::CustomContextMenu &&
+                    qobject_cast<QTabWidget *>(bar->parentWidget()))
+                    on = bar, at = bar->tabRect(0).center();
+        } else if (target.startsWith("edit:")) {
+            for (auto *te : w.findChildren<SubsTextEdit *>())
+                if (te->isVisible()) {
+                    QTextCursor c = te->textCursor();
+                    c.setPosition(target.mid(5).toInt());
+                    on = te->viewport(), at = te->cursorRect(c).center();
                 }
-        };
-        QTimer::singleShot(300, &w, [title] { openSub(title, 40); });
-        const QPoint at = view->rect().center();
-        QContextMenuEvent e(QContextMenuEvent::Mouse, at, view->mapToGlobal(at));
-        QApplication::sendEvent(view, &e); // the menu runs in here till the shot
+        }
+        if (!on) return;
+        if (path.contains('>')) QTimer::singleShot(300, &w, [path] { walk(path, 1, 40); });
+        QContextMenuEvent e(QContextMenuEvent::Mouse, at, on->mapToGlobal(at));
+        QApplication::sendEvent(on, &e); // the menu runs in here till the shot
     };
     if (const QString title = qEnvironmentVariable("FSED_SMOKE_MENU"); !title.isEmpty())
         QTimer::singleShot(std::max(700, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 2 / 3), &w, [&w, title] {
-            if (title.startsWith("video>")) return videoMenu(title);
+            if (title.startsWith("video") || title.startsWith("tabs") || title.startsWith("edit:")) return contextMenu(title);
             for (auto *m : w.findChildren<QMenu *>())
                 if (fs::plainText(m->title()) == title) return m->popup(w.mapToGlobal(QPoint(0, 30)));
         });
@@ -423,7 +446,7 @@ int main(int argc, char **argv) {
             QApplication::sendEvent(target, &drop);
         });
     // FSED_SMOKE_CLICK="Check" presses that button in the open dialog, else in the main window;
-    // "Replace;Close" presses one after the other, a button with no text goes by its tooltip;
+    // "Replace;Close" presses one after the other, a button goes by its text or its tooltip;
     // "^" closes the dialog (to shoot the main window after a non-modal one); "Sort#2" presses the
     // second such button; a text no button has selects the list and tree items and the tabs with it; "~500"
     // waits half a second (for a search on a worker); "Edit@" presses Edit with the rest pressed half
@@ -453,7 +476,7 @@ int main(int argc, char **argv) {
                     nth = text.mid(h + 1).toInt(), text.truncate(h);
                 bool clicked = false;
                 for (auto *b : (top ? top : &w)->findChildren<QAbstractButton *>())
-                    if ((b->text() == text || ((b->text().isEmpty() || !how.isNull()) && b->toolTip() == text)) &&
+                    if ((b->text() == text || b->toolTip() == text) &&
                         b->isVisible() && --nth == 0) {
                         const QPoint c = b->rect().center();
                         if (how == '+') {
@@ -498,13 +521,19 @@ int main(int argc, char **argv) {
                 if (f.open(QIODevice::WriteOnly | QIODevice::Append))
                     f.write(QString("audio %1 track %2" + QString(QChar(10))).arg(au->path()).arg(au->track()).toUtf8());
             }
-            QPixmap px = shot->grab();
+            // tool tips and popups are windows of their own: drawn where they are, the shot grown to
+            // take in those reaching past it
+            QList<QWidget *> pops;
+            QRect all(shot->mapToGlobal(QPoint()), shot->size());
+            for (QWidget *pop : QApplication::topLevelWidgets())
+                if (pop->isVisible() && (pop->windowType() == Qt::ToolTip || pop->windowType() == Qt::Popup))
+                    pops << pop, all |= QRect(pop->mapToGlobal(QPoint()), pop->size());
+            QPixmap px(all.size());
+            px.fill(Qt::black);
             {
-                // tool tips and popups are windows of their own: drawn where they are over it
                 QPainter p(&px);
-                for (QWidget *pop : QApplication::topLevelWidgets())
-                    if (pop->isVisible() && (pop->windowType() == Qt::ToolTip || pop->windowType() == Qt::Popup))
-                        p.drawPixmap(pop->mapToGlobal(QPoint()) - shot->mapToGlobal(QPoint()), pop->grab());
+                p.drawPixmap(shot->mapToGlobal(QPoint()) - all.topLeft(), shot->grab());
+                for (QWidget *pop : pops) p.drawPixmap(pop->mapToGlobal(QPoint()) - all.topLeft(), pop->grab());
             }
             px.save(out);
             QApplication::exit(0);
