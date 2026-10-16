@@ -156,6 +156,8 @@ Wszystkie operacje są wywoływalne z CLI, GUI i Lua:
 | TranStation | – | ✔ | eksport, czasy SMPTE przy wybranym FPS |
 | EBU STL (tech 3264) | – | ✔ | eksport binarny z ustawieniami Aegisub (standard TV, kodowanie, zawijanie, przesunięcie TC) |
 
+Każdy importowany format (SRT, MicroDVD, MPL2, TMP, TTXT, zwykły tekst, też ścieżka z MKV) ma w ustawieniach własny katalog stylów menedżera, jak w Aegisub: wczytane napisy dostają jego style (domyślnie katalog „Default”), więc tak wyglądają na wideo i po konwersji do ASS. Media zapisane w skrypcie otwierają się z nim zawsze, nigdy albo po pytaniu z listą plików (Aegisub App/Auto/Load Linked Files); to, co już jest otwarte, zostaje.
+
 Kodowanie: UTF-8/UTF-16 z BOM jest rozpoznawane deterministycznie, w pozostałych przypadkach używany jest `chardetng` z preferencją Windows-1250 dla polskich plików. Zapis domyślnie UTF-8 z BOM, jak w Aegisub, albo w kodowaniu źródłowym.
 
 ## 5. Media i audio

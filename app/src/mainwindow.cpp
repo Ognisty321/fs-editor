@@ -425,8 +425,6 @@ TabPanel *MainWindow::newTab() {
     slot->setLayout(new QVBoxLayout);
     slot->layout()->setContentsMargins(0, 0, 0, 0);
     auto *tab = new TabPanel(this);
-    // shortcut: only new files take a catalog; Aegisub has one for each imported format too, add
-    // them if SRT/TXT conversions should start styled
     if (const auto cat = catalogStyles(QSettings().value("styles/newFileCatalog", "Default").toString()); !cat.empty())
         tab->s().start_with_styles({cat.data(), cat.size()});
     slot->layout()->addWidget(tab);
@@ -1126,18 +1124,36 @@ void MainWindow::buildMenus() {
         QDialog d(this);
         d.setWindowTitle(tr("Dummy video"));
         auto *f = new QFormLayout(&d);
+        // the last ones used, as Aegisub keeps them
+        QSettings st;
         auto *w = new QSpinBox(&d), *h = new QSpinBox(&d);
         w->setRange(16, 8192);
         h->setRange(16, 8192);
-        w->setValue(1920);
-        h->setValue(1080);
+        w->setValue(st.value("video/dummyWidth", 1920).toInt());
+        h->setValue(st.value("video/dummyHeight", 1080).toInt());
+        // Aegisub's resolution shortcuts
+        static const std::tuple<int, int, const char *> sizes[] = {
+            {640, 480, QT_TR_NOOP("SD fullscreen")},         {704, 480, QT_TR_NOOP("SD anamorphic")},
+            {640, 360, QT_TR_NOOP("SD widescreen")},         {704, 396, QT_TR_NOOP("SD widescreen")},
+            {640, 352, QT_TR_NOOP("SD widescreen MOD16")},   {704, 400, QT_TR_NOOP("SD widescreen MOD16")},
+            {1024, 576, QT_TR_NOOP("SuperPAL widescreen")},  {1280, 720, QT_TR_NOOP("HD 720p")},
+            {1920, 1080, QT_TR_NOOP("FHD 1080p")},           {2560, 1440, QT_TR_NOOP("QHD 1440p")},
+            {3840, 2160, QT_TR_NOOP("4K UHD 2160p")},        {1080, 1920, QT_TR_NOOP("FHD vertical")}};
+        auto *preset = new QComboBox(&d);
+        for (auto [pw, ph, name] : sizes) preset->addItem(QString("%1×%2 (%3)").arg(pw).arg(ph).arg(tr(name)), QSize(pw, ph));
+        const auto matchPreset = [=] { preset->setCurrentIndex(preset->findData(QSize(w->value(), h->value()))); };
+        matchPreset();
+        connect(preset, &QComboBox::activated, &d, [=] {
+            const QSize s = preset->currentData().toSize();
+            w->setValue(s.width());
+            h->setValue(s.height());
+        });
+        for (auto *s : {w, h}) connect(s, &QSpinBox::valueChanged, &d, matchPreset);
         auto *fps = new QDoubleSpinBox(&d);
         fps->setRange(1, 240);
         fps->setDecimals(3);
-        fps->setValue(23.976);
-        auto *len = new QLineEdit("0:30:00.00", &d);
-        // the colour and Aegisub's checkerboard, the last ones used
-        QSettings st;
+        fps->setValue(st.value("video/dummyFps", 23.976).toDouble());
+        auto *len = new QLineEdit(st.value("video/dummyLength", "0:30:00.00").toString(), &d);
         QColor colour = st.value("video/dummyColor", QColor(0x30, 0x30, 0x30)).value<QColor>();
         auto *pick = new QPushButton(&d);
         const auto show = [pick, &colour] { pick->setStyleSheet(QString("background:%1").arg(colour.name())); };
@@ -1147,6 +1163,7 @@ void MainWindow::buildMenus() {
         });
         auto *pattern = new QCheckBox(tr("Checkerboard pattern"), &d);
         pattern->setChecked(st.value("video/dummyPattern").toBool());
+        f->addRow(tr("Resolution"), preset);
         f->addRow(tr("Width"), w);
         f->addRow(tr("Height"), h);
         f->addRow(tr("FPS"), fps);
@@ -1161,6 +1178,10 @@ void MainWindow::buildMenus() {
         const qint64 ms = fs::parseTime(len->text());
         st.setValue("video/dummyColor", colour);
         st.setValue("video/dummyPattern", pattern->isChecked());
+        st.setValue("video/dummyWidth", w->value());
+        st.setValue("video/dummyHeight", h->value());
+        st.setValue("video/dummyFps", fps->value());
+        st.setValue("video/dummyLength", len->text());
         tab()->openDummyVideo(VideoBox::dummySpec(fps->value(), std::max<qint64>(1, qint64((ms > 0 ? ms : 1800000) * fps->value() / 1000)),
                                                   w->value(), h->value(), colour, pattern->isChecked()));
     });

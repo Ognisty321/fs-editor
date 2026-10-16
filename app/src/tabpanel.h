@@ -41,6 +41,7 @@ public:
     static bool askTextImport(QWidget *parent);
     // Subtitle stream `index` of a video, as an unsaved script.
     bool openEmbedded(const QString &video, int index);
+    void importStyles(bool plainText);
     bool save(const QString &path = {});
     bool saveTranslation(const QString &path);
     // Drop the subtitles, keep video and audio (Kainote "Remove subtitles from the editor").

@@ -175,6 +175,8 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
         m_main->error(QString::fromUtf8(e.what()));
         return false;
     }
+    // plain text comes in as a new script, with no file behind it
+    importStyles(path.endsWith(".txt", Qt::CaseInsensitive) && fs::q(s().file_info().path).isEmpty());
     noteDisk();
     // Aegisub's backup of the file as opened, kept in the autosave folder (File > Open autosave)
     if (const QFileInfo fi(path); fi.absolutePath() != QFileInfo(autosaveDir()).absoluteFilePath()) {
@@ -199,20 +201,55 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
         const QString abs = QFileInfo(v).isAbsolute() ? v : dir.filePath(v);
         return QFileInfo::exists(abs) ? abs : QString();
     };
-    if (QSettings().value("video/openWithSubs", true).toBool()) {
-        if (const QString v = fs::q(s().project_value("Video File")); v.startsWith("?dummy")) m_video->openDummy(v);
-        if (const QString v = resolve("Video File"); !v.isEmpty()) {
+    // Aegisub's App/Auto/Load Linked Files: never, always, or after asking; only what is not open
+    // already, and what is open stays when the script names nothing
+    const auto same = [](const QString &a, const QString &b) {
+        return !b.isEmpty() && QFileInfo(a).canonicalFilePath() == QFileInfo(b).canonicalFilePath();
+    };
+    const QString named = fs::q(s().project_value("Video File"));
+    const QString dummy = named.startsWith("?dummy") && named != m_video->dummySpec() ? named : QString();
+    QString video = resolve("Video File"), audio = resolve("Audio File"), keyframes = resolve("Keyframes File"),
+            timecodes = resolve("Timecodes File");
+    if (same(video, m_video->path())) video.clear();
+    if (same(audio, m_audio->path()) || same(audio, video)) audio.clear();
+    if (same(keyframes, m_keyframesPath)) keyframes.clear();
+    if (same(timecodes, m_timecodesPath)) timecodes.clear();
+    const int linked = QSettings()
+                           .value("video/linkedFiles", QSettings().value("video/openWithSubs", true).toBool() ? 1 : 0)
+                           .toInt();
+    bool load = linked == 1;
+    if (linked == 2 && !(dummy + video + audio + keyframes + timecodes).isEmpty()) {
+        QString q = tr("Do you want to load the associated files?") + "\n";
+        if (!dummy.isEmpty()) q += "\n" + tr("Load dummy video: %1").arg(dummy);
+        if (!video.isEmpty()) q += "\n" + tr("Load video file: %1").arg(QDir::toNativeSeparators(video));
+        if (!audio.isEmpty()) q += "\n" + tr("Load audio file: %1").arg(QDir::toNativeSeparators(audio));
+        if (!timecodes.isEmpty()) q += "\n" + tr("Load timecodes file: %1").arg(QDir::toNativeSeparators(timecodes));
+        if (!keyframes.isEmpty()) q += "\n" + tr("Load keyframes file: %1").arg(QDir::toNativeSeparators(keyframes));
+        load = QMessageBox::question(this, tr("Load files?"), q) == QMessageBox::Yes;
+    }
+    if (load) {
+        if (!dummy.isEmpty()) m_video->openDummy(dummy);
+        if (!video.isEmpty()) {
             const double ar = VideoBox::aspectOfMode(fs::q(s().project_value("Video AR Mode")).toInt(),
                                                      fs::q(s().project_value("Video AR Value")).toDouble());
-            openVideo(v, fs::q(s().project_value("Video Position")).toLongLong(), ar);
+            openVideo(video, fs::q(s().project_value("Video Position")).toLongLong(), ar);
         }
-        if (const QString a = resolve("Audio File"); !a.isEmpty() && a != resolve("Video File")) openAudio(a);
-        if (const QString k = resolve("Keyframes File"); !k.isEmpty()) openKeyframes(k);
-        if (const QString t = resolve("Timecodes File"); !t.isEmpty()) openTimecodes(t);
+        if (!audio.isEmpty()) openAudio(audio);
+        if (!keyframes.isEmpty()) openKeyframes(keyframes);
+        if (!timecodes.isEmpty()) openTimecodes(timecodes);
     }
     emit titleChanged();
     m_main->loadLocalScripts(this);
     return true;
+}
+
+// Aegisub's style catalog of each imported format: the lines show, and convert to ASS, with its styles
+void TabPanel::importStyles(bool plainText) {
+    QString fmt = fs::q(s().file_info().format).toUpper();
+    if (plainText) fmt = "TXT";
+    else if (fmt == "ASS" || fmt == "SSA") return;
+    if (const auto cat = catalogStyles(QSettings().value("styles/importCatalog/" + fmt, "Default").toString()); !cat.empty())
+        s().start_with_styles({cat.data(), cat.size()});
 }
 
 bool TabPanel::openEmbedded(const QString &video, int index) {
@@ -222,6 +259,7 @@ bool TabPanel::openEmbedded(const QString &video, int index) {
         m_main->error(QString::fromUtf8(e.what()));
         return false;
     }
+    importStyles(false);
     m_sel.clear();
     m_active = 0;
     m_grid->resetFilter();

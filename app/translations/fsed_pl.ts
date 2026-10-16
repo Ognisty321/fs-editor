@@ -1880,8 +1880,52 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Dummy wideo</translation>
     </message>
     <message>
+        <source>SD fullscreen</source>
+        <translation>SD pełny ekran</translation>
+    </message>
+    <message>
+        <source>SD anamorphic</source>
+        <translation>SD anamorficzne</translation>
+    </message>
+    <message>
+        <source>SD widescreen</source>
+        <translation>SD panoramiczne</translation>
+    </message>
+    <message>
+        <source>SD widescreen MOD16</source>
+        <translation>SD panoramiczne MOD16</translation>
+    </message>
+    <message>
+        <source>SuperPAL widescreen</source>
+        <translation>SuperPAL panoramiczne</translation>
+    </message>
+    <message>
+        <source>HD 720p</source>
+        <translation>HD 720p</translation>
+    </message>
+    <message>
+        <source>FHD 1080p</source>
+        <translation>FHD 1080p</translation>
+    </message>
+    <message>
+        <source>QHD 1440p</source>
+        <translation>QHD 1440p</translation>
+    </message>
+    <message>
+        <source>4K UHD 2160p</source>
+        <translation>4K UHD 2160p</translation>
+    </message>
+    <message>
+        <source>FHD vertical</source>
+        <translation>FHD pionowe</translation>
+    </message>
+    <message>
         <source>Checkerboard pattern</source>
         <translation>Wzór szachownicy</translation>
+    </message>
+    <message>
+        <source>Resolution</source>
+        <translation>Rozdzielczość</translation>
     </message>
     <message>
         <source>Width</source>
@@ -3644,10 +3688,6 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Język (po ponownym uruchomieniu)</translation>
     </message>
     <message>
-        <source>A new file starts with the styles of this catalog of the style manager</source>
-        <translation>Nowy plik dostaje style tego katalogu z menedżera stylów</translation>
-    </message>
-    <message>
         <source>Style catalog of new files</source>
         <translation>Katalog stylów nowych plików</translation>
     </message>
@@ -3718,6 +3758,34 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Always</source>
         <translation>Zawsze</translation>
+    </message>
+    <message>
+        <source>Style catalog of imported SRT</source>
+        <translation>Katalog stylów importowanych SRT</translation>
+    </message>
+    <message>
+        <source>Style catalog of imported MicroDVD</source>
+        <translation>Katalog stylów importowanych MicroDVD</translation>
+    </message>
+    <message>
+        <source>Style catalog of imported MPL2</source>
+        <translation>Katalog stylów importowanych MPL2</translation>
+    </message>
+    <message>
+        <source>Style catalog of imported TMPlayer</source>
+        <translation>Katalog stylów importowanych TMPlayer</translation>
+    </message>
+    <message>
+        <source>Style catalog of imported TTXT</source>
+        <translation>Katalog stylów importowanych TTXT</translation>
+    </message>
+    <message>
+        <source>Style catalog of imported plain text</source>
+        <translation>Katalog stylów importowanego zwykłego tekstu</translation>
+    </message>
+    <message>
+        <source>The subtitles start with the styles of this catalog of the style manager</source>
+        <translation>Napisy zaczynają ze stylami tego katalogu menedżera stylów</translation>
     </message>
     <message>
         <source>Dark</source>
@@ -4549,6 +4617,34 @@ do czasu audio</translation>
     <message>
         <source>Comment starter:</source>
         <translation>Początek komentarza:</translation>
+    </message>
+    <message>
+        <source>Do you want to load the associated files?</source>
+        <translation>Wczytać powiązane pliki?</translation>
+    </message>
+    <message>
+        <source>Load dummy video: %1</source>
+        <translation>Wczytaj sztuczne wideo: %1</translation>
+    </message>
+    <message>
+        <source>Load video file: %1</source>
+        <translation>Wczytaj plik wideo: %1</translation>
+    </message>
+    <message>
+        <source>Load audio file: %1</source>
+        <translation>Wczytaj plik audio: %1</translation>
+    </message>
+    <message>
+        <source>Load timecodes file: %1</source>
+        <translation>Wczytaj plik timecodów: %1</translation>
+    </message>
+    <message>
+        <source>Load keyframes file: %1</source>
+        <translation>Wczytaj plik klatek kluczowych: %1</translation>
+    </message>
+    <message>
+        <source>Load files?</source>
+        <translation>Wczytać pliki?</translation>
     </message>
     <message>
         <source>Untagged video</source>

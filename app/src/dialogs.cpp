@@ -2187,7 +2187,6 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"subs/cpsIgnoreWhitespace", QT_TR_NOOP("Ignore whitespace in characters per second"), true, subs},
         {"subs/cpsIgnorePunctuation", QT_TR_NOOP("Ignore punctuation in characters per second"), true, subs},
         {"video/openAudio", QT_TR_NOOP("Open audio together with video"), true, video},
-        {"video/openWithSubs", QT_TR_NOOP("Open video and audio named in the subtitles"), true, video},
         {"video/askResolution", QT_TR_NOOP("Ask to resample the subtitles to a video of another resolution"), true,
          video},
         {"video/untaggedWarning", QT_TR_NOOP("Warn on untagged video color matrix"), true, video},
@@ -2291,12 +2290,25 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     language->addItem("Polski", "pl");
     language->setCurrentIndex(std::max(0, language->findData(st.value("main/language", ""))));
     editor->addRow(tr("Language (after restart)"), language);
-    auto *newCatalog = new QComboBox(this);
-    newCatalog->addItem(tr("None"), "");
-    for (const QString &c : styleCatalogs()) newCatalog->addItem(c, c);
-    newCatalog->setCurrentIndex(std::max(0, newCatalog->findData(st.value("styles/newFileCatalog", "Default"))));
-    newCatalog->setToolTip(tr("A new file starts with the styles of this catalog of the style manager"));
-    subs->addRow(tr("Style catalog of new files"), newCatalog);
+    // Aegisub's default style catalogs: of new files and of each imported format
+    std::vector<std::pair<QString, QComboBox *>> catalogs;
+    const std::pair<const char *, const char *> catalogKeys[] = {
+        {"styles/newFileCatalog", QT_TR_NOOP("Style catalog of new files")},
+        {"styles/importCatalog/SRT", QT_TR_NOOP("Style catalog of imported SRT")},
+        {"styles/importCatalog/MICRODVD", QT_TR_NOOP("Style catalog of imported MicroDVD")},
+        {"styles/importCatalog/MPL2", QT_TR_NOOP("Style catalog of imported MPL2")},
+        {"styles/importCatalog/TMP", QT_TR_NOOP("Style catalog of imported TMPlayer")},
+        {"styles/importCatalog/TTXT", QT_TR_NOOP("Style catalog of imported TTXT")},
+        {"styles/importCatalog/TXT", QT_TR_NOOP("Style catalog of imported plain text")}};
+    for (auto [key, label] : catalogKeys) {
+        auto *c = new QComboBox(this);
+        c->addItem(tr("None"), "");
+        for (const QString &n : styleCatalogs()) c->addItem(n, n);
+        c->setCurrentIndex(std::max(0, c->findData(st.value(key, "Default"))));
+        c->setToolTip(tr("The subtitles start with the styles of this catalog of the style manager"));
+        subs->addRow(tr(label), c);
+        catalogs.emplace_back(key, c);
+    }
     // Aegisub's Automation/Trace Level: aegisub.debug.out messages above it are not shown
     auto *trace = new QComboBox(this);
     trace->addItems({tr("0: Fatal"), tr("1: Error"), tr("2: Warning"), tr("3: Hint"), tr("4: Debug"), tr("5: Trace")});
@@ -2311,6 +2323,9 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         video->addRow(label, c);
         combos.emplace_back(key, c);
     };
+    // Aegisub's App/Auto/Load Linked Files; it was a tick box before
+    combo("video/linkedFiles", st.value("video/openWithSubs", true).toBool() ? 1 : 0,
+          tr("Open video and audio named in the subtitles"), {tr("Never"), tr("Always"), tr("Ask")});
     combo("video/noMatrix", 1, tr("Use video's YCbCr Matrix when script has no matrix set"),
           {tr("Never"), tr("Ask"), tr("Always set")});
     combo("video/matrixMismatch", 1, tr("Match video's YCbCr Matrix on open"), {tr("Never"), tr("Ask"), tr("Always set")});
@@ -2320,7 +2335,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
           {tr("Never"), tr("When aspect ratio changes"), tr("Always")});
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(bb, &QDialogButtonBox::accepted, this,
-            [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, newCatalog, trace,
+            [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs, trace,
              types] {
         QSettings st;
         QSettings classes(assoc::kClasses, QSettings::NativeFormat);
@@ -2332,7 +2347,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
             }
         if (associated) assoc::notifyShell();
         st.setValue("automation/traceLevel", trace->currentIndex());
-        st.setValue("styles/newFileCatalog", newCatalog->currentData());
+        for (auto &[k, c] : catalogs) st.setValue(k, c->currentData());
         st.setValue("main/language", language->currentData());
         st.setValue("spell/dir", QDir::fromNativeSeparators(dictDir->text()));
         st.setValue("spell/lang", dictLang->currentData().toString());
