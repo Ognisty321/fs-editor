@@ -514,7 +514,9 @@ impl Session {
     }
 
     fn load(&mut self, l: fs_formats::Loaded, path: Option<PathBuf>) {
+        let limit = self.ed.limit;
         self.ed = Editor::new(l.doc);
+        self.ed.limit = limit;
         self.subs_fps = None;
         self.filter_settings.clear();
         self.path = path;
@@ -2410,6 +2412,12 @@ impl Session {
         self.ed.can_undo()
     }
 
+    /// Aegisub's Limits/Undo Levels, kept for the files opened in this session later; the
+    /// steps over it go with the next edit.
+    pub fn set_undo_limit(&mut self, steps: usize) {
+        self.ed.limit = steps.max(2);
+    }
+
     pub fn can_redo(&self) -> bool {
         self.ed.can_redo()
     }
@@ -3511,6 +3519,28 @@ mod tests {
     }
 
     const ASS: &str = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,one\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,two\nDialogue: 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,three\n";
+
+    #[test]
+    fn undo_levels_hold_across_opening() {
+        let mut s = Session::default();
+        s.set_undo_limit(2);
+        let dir = std::env::temp_dir().join(format!("fsb-undo-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("u.ass");
+        std::fs::write(&p, ASS).unwrap();
+        s.open(p.to_str().unwrap()).unwrap();
+        for k in 0..5 {
+            let mut r = s.row(0);
+            r.text = format!("edit {k}");
+            s.set_row(0, &r, "");
+        }
+        let mut undone = 0;
+        while s.undo() {
+            undone += 1;
+        }
+        assert_eq!(undone, 2);
+        assert_eq!(s.row(0).text, "edit 2");
+    }
 
     #[test]
     fn a_line_is_measured_whole_past_the_screen_edges() {

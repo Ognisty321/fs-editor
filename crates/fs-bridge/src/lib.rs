@@ -729,6 +729,8 @@ pub mod ffi {
         fn undo(self: &mut Session) -> bool;
         fn redo(self: &mut Session) -> bool;
         fn can_undo(self: &Session) -> bool;
+        /// Aegisub's undo levels (at least 2), kept for files opened in this session later.
+        fn set_undo_limit(self: &mut Session, steps: usize);
         fn can_redo(self: &Session) -> bool;
         fn history(self: &Session) -> Vec<String>;
         fn undo_to(self: &mut Session, steps: usize);

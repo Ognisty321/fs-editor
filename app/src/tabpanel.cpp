@@ -26,6 +26,7 @@
 #include <QVBoxLayout>
 
 TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fsb::new_session()) {
+    m_session->set_undo_limit(size_t(QSettings().value("main/undoLevels", 500).toInt())); // Aegisub's Undo Levels
     m_grid = new Grid(this);
     m_edit = new EditBox(this);
     m_shift = new ShiftPanel(this);

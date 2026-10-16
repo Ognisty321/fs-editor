@@ -3780,6 +3780,14 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Pamięć podręczna spektrum (MB)</translation>
     </message>
     <message>
+        <source>Undo levels</source>
+        <translation>Poziomy cofania</translation>
+    </message>
+    <message>
+        <source>Find and replace history entries</source>
+        <translation>Wpisy historii wyszukiwania i zamiany</translation>
+    </message>
+    <message>
         <source>Line boundaries thickness</source>
         <translation>Grubość granic linijki</translation>
     </message>

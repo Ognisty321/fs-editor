@@ -928,6 +928,7 @@ void MainWindow::buildMenus() {
                 t->edit()->reload();
                 t->audio()->docChanged(); // inactive lines
                 t->audio()->settingsChanged();
+                t->s().set_undo_limit(size_t(QSettings().value("main/undoLevels", 500).toInt()));
             }
         };
         for (;;) {

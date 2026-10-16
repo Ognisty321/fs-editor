@@ -289,7 +289,7 @@ void FindDialog::remember(bool replace) {
         QStringList l = st.value(key).toStringList();
         l.removeAll(t);
         l.prepend(t);
-        l = l.mid(0, 20);
+        l = l.mid(0, QSettings().value("find/recentCount", 20).toInt());
         st.setValue(key, l);
         box->clear(); // the list shows the new order at once
         box->addItems(l);
@@ -2312,7 +2312,10 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"subs/defaultResWidth", 1920, 1, 16384, subs, QT_TR_NOOP("Default width of new files")},
         {"subs/defaultResHeight", 1080, 1, 16384, subs, QT_TR_NOOP("Default height of new files")},
         {"main/toolbarIconSize", 22, 12, 64, editor, QT_TR_NOOP("Toolbar icon size")},
-        {"audio/spectrumCacheMb", 128, 2, 1024, audio, QT_TR_NOOP("Spectrum cache memory (MB)")}};
+        {"audio/spectrumCacheMb", 128, 2, 1024, audio, QT_TR_NOOP("Spectrum cache memory (MB)")},
+        // Aegisub's Limits/Undo Levels and Find Replace
+        {"main/undoLevels", 500, 2, 10000, editor, QT_TR_NOOP("Undo levels")},
+        {"find/recentCount", 20, 0, 99, editor, QT_TR_NOOP("Find and replace history entries")}};
     for (auto [key, def, lo, hi, form, label] : moreSpins) {
         auto *s = new QSpinBox(this);
         s->setRange(lo, hi);
