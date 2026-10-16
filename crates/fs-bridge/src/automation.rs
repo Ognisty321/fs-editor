@@ -669,9 +669,11 @@ impl Automation {
         }
         let generic = |p: &Path| p.to_string_lossy().replace('\\', "/");
         let abs = generic(&script);
-        let base = relative(&script, &self.automation_base()).map(|r| generic(&r));
+        // the folders canonical too, as the script is: a short 8.3 name in one (a TEMP folder)
+        // would otherwise leave nothing in common
+        let base = relative(&script, &canonical(&self.automation_base())).map(|r| generic(&r));
         let near = (session.path.as_deref().and_then(Path::parent))
-            .and_then(|d| relative(&script, d))
+            .and_then(|d| relative(&script, &canonical(d)))
             .map(|r| generic(&r));
         list.push(match (base, near) {
             (Some(b), n)
