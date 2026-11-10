@@ -322,6 +322,8 @@ fn lua_event(e: &Event, extra: &Extra) -> LuaEvent {
     ids.dedup();
     let mut event = e.clone();
     event.text = text.to_string();
+    // the times a script reads are whole centiseconds ([`event_table`])
+    (event.start, event.end) = (e.start.round_cs(), e.end.round_cs());
     LuaEvent { event, extra: ids }
 }
 
@@ -748,8 +750,9 @@ fn event_table(lua: &Lua, ev: &Event, text: &str, ids: &[u32], x: &Extra) -> mlu
     t.set("section", "[Events]")?;
     t.set("comment", ev.is_comment())?;
     t.set("layer", ev.layer)?;
-    t.set("start_time", ev.start.0)?;
-    t.set("end_time", ev.end.0)?;
+    // Aegisub's `agi::Time` reads as milliseconds rounded to the centisecond ASS holds
+    t.set("start_time", ev.start.round_cs().0)?;
+    t.set("end_time", ev.end.round_cs().0)?;
     t.set("style", ev.style.as_str())?;
     t.set("actor", ev.actor.as_str())?;
     t.set("margin_l", ev.margin_l)?;
@@ -833,7 +836,7 @@ pub(crate) fn table_style(t: &Table, base: Option<&Style>) -> Res<Style> {
     Ok(s)
 }
 
-fn table_event(t: &Table, base: Option<&Event>, x: &mut Extra) -> Res<LuaEvent> {
+fn table_event(t: &Table, base: Option<&Event>, x: &mut ExtraId) -> Res<LuaEvent> {
     let c = "dialogue";
     let mut e = base.cloned().unwrap_or_default();
     e.kind = if get_bool(t, "comment", c)? {
@@ -870,7 +873,7 @@ fn table_event(t: &Table, base: Option<&Event>, x: &mut Extra) -> Res<LuaEvent> 
                         .to_string_lossy(),
                     _ => "<not a string>".into(),
                 };
-                ids.push(x.id(k.to_string_lossy(), v));
+                ids.push(x(k.to_string_lossy(), v));
             }
             ids.sort_unstable();
             ids.dedup();
@@ -883,8 +886,13 @@ fn table_event(t: &Table, base: Option<&Event>, x: &mut Extra) -> Res<LuaEvent> 
     })
 }
 
-/// Convert a Lua value to a line; `base` is the line it replaces (if any).
-fn value_line(v: &Value, base: Option<&Line>, x: &mut Extra) -> Res<Line> {
+/// Gives the id of an extradata key and value ([`Extra::id`]).
+type ExtraId<'a> = dyn FnMut(String, String) -> u32 + 'a;
+
+/// Convert a Lua value to a line; `base` is the line it replaces (if any). Reading the fields
+/// runs the table's metamethods, which may use the subtitles object themselves: never call this
+/// with the state locked ([`Handle::extra_id`] locks only while it looks an id up).
+fn value_line(v: &Value, base: Option<&Line>, x: &mut ExtraId) -> Res<Line> {
     let Value::Table(t) = v else {
         return Err("Can't convert a non-table value to AssEntry".into());
     };
@@ -1076,10 +1084,29 @@ impl Handle {
         }
     }
 
+    /// Whether the object can still be read, or changed for `modify` ([`with`](Self::with)'s
+    /// errors), before the Lua values of a call are read.
+    fn check(&self, lua: &Lua, modify: bool) -> mlua::Result<Res<()>> {
+        self.with(lua, modify, |_| Ok(()))
+    }
+
+    /// The ids of the extradata a converted line names, each looked up under a lock of its own.
+    fn extra_id(&self) -> impl FnMut(String, String) -> u32 + '_ {
+        |key, value| {
+            let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            g.as_mut().map_or(0, |st| st.extra.id(key, value))
+        }
+    }
+
+    /// The lines of Lua values, read with the state unlocked.
+    fn lines_of(&self, vals: &[Value]) -> Res<Vec<Line>> {
+        let mut id = self.extra_id();
+        vals.iter().map(|v| value_line(v, None, &mut id)).collect()
+    }
+
     /// Aegisub's `ObjectAppend`: after the last line of the same class.
-    fn append_lines(st: &mut State, vals: &[Value]) -> Res<()> {
-        for v in vals {
-            let line = value_line(v, None, &mut st.extra)?;
+    fn append_lines(st: &mut State, lines: Vec<Line>) -> Res<()> {
+        for line in lines {
             let class = line.class();
             let from_end = st.lines.iter().rev().position(|l| l.class() == class);
             let at = from_end.map_or(st.lines.len(), |p| st.lines.len() - p);
@@ -1089,18 +1116,14 @@ impl Handle {
         Ok(())
     }
 
-    fn insert_lines(st: &mut State, at: i64, vals: &[Value]) -> Res<()> {
+    fn insert_lines(st: &mut State, at: i64, lines: Vec<Line>) -> Res<()> {
         if at < 1 || at as usize > st.lines.len() + 1 {
             return Err("bad argument #1 to 'insert' (Out of range line index)".into());
         }
         if at as usize == st.lines.len() + 1 {
             // Aegisub: inserting after the last line appends, each line to its own section
-            return Self::append_lines(st, vals);
+            return Self::append_lines(st, lines);
         }
-        let lines = vals
-            .iter()
-            .map(|v| value_line(v, None, &mut st.extra))
-            .collect::<Res<Vec<_>>>()?;
         lines.iter().for_each(|l| st.touch(l.class()));
         st.lines.insert(at as usize - 1, lines);
         Ok(())
@@ -1148,24 +1171,41 @@ impl UserData for Handle {
         });
         m.add_method("set", |lua, h, (i, v): (Value, Value)| {
             let i = to_index(&i).unwrap_or(0);
+            if i > 0 && v.is_nil() {
+                let r = h.with(lua, true, |st| Handle::delete_lines(st, vec![i]))?;
+                return Handle::reply(lua, r);
+            }
+            // the line it replaces, then the new one read with the state unlocked: the table's
+            // metamethods may read the subtitles themselves
+            let old = h.with(lua, true, |st| {
+                if i <= 0 {
+                    return Ok(None);
+                }
+                (st.lines.get(i as usize - 1).cloned().map(Some))
+                    .ok_or_else(|| format!("Out of range line index {i}"))
+            })?;
+            let old = match old {
+                Ok(old) => old,
+                Err(msg) => return fail(lua, msg),
+            };
+            let line = match value_line(&v, old.as_ref(), &mut h.extra_id()) {
+                Ok(line) => line,
+                Err(msg) => return fail(lua, msg),
+            };
             let r = h.with(lua, true, |st| {
                 if i == 0 {
-                    return Handle::append_lines(st, &[v]);
+                    return Handle::append_lines(st, vec![line]);
                 }
                 if i < 0 {
-                    return Handle::insert_lines(st, -i, &[v]);
+                    return Handle::insert_lines(st, -i, vec![line]);
                 }
-                if v.is_nil() {
-                    return Handle::delete_lines(st, vec![i]);
-                }
-                let idx = i as usize - 1;
-                let Some(old) = st.lines.get(idx).cloned() else {
+                // a metamethod may have removed lines meanwhile
+                let Some(slot) = st.lines.get_mut(i as usize - 1) else {
                     return Err(format!("Out of range line index {i}"));
                 };
-                let line = value_line(&v, Some(&old), &mut st.extra)?;
-                st.touch(old.class());
-                st.touch(line.class());
-                *st.lines.get_mut(idx).expect("checked above") = line;
+                let classes = [slot.class(), line.class()];
+                *slot = line;
+                classes.into_iter().for_each(|c| st.touch(c));
                 Ok(())
             })?;
             Handle::reply(lua, r)
@@ -1216,12 +1256,26 @@ impl UserData for Handle {
             let mut it = args.into_iter();
             let at = it.next().as_ref().and_then(to_index).unwrap_or(0);
             let vals: Vec<Value> = it.collect();
-            let r = h.with(lua, true, |st| Handle::insert_lines(st, at, &vals))?;
+            if let Err(msg) = h.check(lua, true)? {
+                return fail(lua, msg);
+            }
+            let lines = match h.lines_of(&vals) {
+                Ok(lines) => lines,
+                Err(msg) => return fail(lua, msg),
+            };
+            let r = h.with(lua, true, |st| Handle::insert_lines(st, at, lines))?;
             Handle::reply(lua, r)
         });
         m.add_method("append", |lua, h, args: MultiValue| {
             let vals: Vec<Value> = args.into_iter().collect();
-            let r = h.with(lua, true, |st| Handle::append_lines(st, &vals))?;
+            if let Err(msg) = h.check(lua, true)? {
+                return fail(lua, msg);
+            }
+            let lines = match h.lines_of(&vals) {
+                Ok(lines) => lines,
+                Err(msg) => return fail(lua, msg),
+            };
+            let r = h.with(lua, true, |st| Handle::append_lines(st, lines))?;
             Handle::reply(lua, r)
         });
         m.add_method("script_resolution", |lua, h, ()| {
@@ -1229,12 +1283,14 @@ impl UserData for Handle {
             Handle::reply(lua, r)
         });
         m.add_method("parse_karaoke", |lua, h, line: Value| {
-            let r = h.with(lua, false, |_| {
-                match value_line(&line, None, &mut Extra::default())? {
+            // extradata ids do not matter here: the line is only read
+            let mut scratch = Extra::default();
+            let r = h.check(lua, false)?.and_then(|()| {
+                match value_line(&line, None, &mut |k, v| scratch.id(k, v))? {
                     Line::Event { event: Some(e), .. } => Ok(e),
                     _ => Err("bad argument #1 to 'parse_karaoke_data' (Subtitle line must be a dialogue line)".into()),
                 }
-            })?;
+            });
             let e = match r {
                 Ok(e) => e,
                 Err(msg) => return fail(lua, msg),

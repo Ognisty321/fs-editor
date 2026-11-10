@@ -1103,3 +1103,75 @@ fn search_paths_take_aegisubs_tokens() {
     p.set_search("|", "");
     assert_eq!(p.autoload, standard);
 }
+
+/// A line table may take its fields from a metatable (Aegisub reads them with lua_getfield), and
+/// that metamethod may read the subtitles: reading the table must not hold the state's lock.
+#[test]
+fn line_fields_from_a_metamethod_that_reads_the_subtitles() {
+    let f = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let s = f.script(
+        dir.path(),
+        "meta.lua",
+        r#"aegisub.register_macro('M', '', function(subs, sel)
+    local first = sel[1]
+    local like = function(i) return setmetatable({}, {__index = function(_, k) return subs[i][k] end}) end
+    subs[0] = like(first)
+    subs.append(like(first), like(first))
+    subs.insert(first, like(first))
+    subs[-first] = like(first + 1)
+    subs[first] = setmetatable({text = "changed"}, {__index = function(_, k) return subs[first][k] end})
+    aegisub.debug.out(#aegisub.parse_karaoke_data(like(first)) .. " syllables\n")
+end)
+"#,
+    );
+    let d = doc("kara-templater-retime.ass");
+    let n = d.event_count();
+    let out = s
+        .run_macro(0, &d, &[0], Some(0), &Context::default())
+        .unwrap();
+    let new = &out.commits.last().unwrap().1;
+    assert_eq!(new.event_count(), n + 5);
+    assert_eq!(new.event(0).unwrap().text, "changed");
+    let copies = (0..new.event_count())
+        .filter(|&i| new.event(i).unwrap().text == d.event(0).unwrap().text)
+        .count();
+    assert_eq!(copies, 5, "{}", f.log());
+    assert!(f.log().contains("syllables"), "{}", f.log());
+}
+
+/// Aegisub hands a script times rounded to the centisecond; a line written back as it was read
+/// keeps the milliseconds it has in memory (a frame-snapped or SRT time).
+#[test]
+fn script_times_are_whole_centiseconds() {
+    let f = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let s = f.script(
+        dir.path(),
+        "times.lua",
+        r#"aegisub.register_macro('T', '', function(subs, sel)
+    local l = subs[sel[1]]
+    aegisub.debug.out(l.start_time .. " " .. l.end_time .. "\n")
+    subs[sel[1]] = l
+    local m = subs[sel[1] + 1]
+    m.text = "edited"
+    subs[sel[1] + 1] = m
+end)
+"#,
+    );
+    let mut d = doc("kara-templater-retime.ass");
+    for i in 0..2 {
+        let e = d.event_mut(i).unwrap();
+        (e.start, e.end) = (fs_core::Time(1001), fs_core::Time(2345));
+    }
+    let out = s
+        .run_macro(0, &d, &[0], Some(0), &Context::default())
+        .unwrap();
+    assert!(f.log().contains("1000 2350"), "{}", f.log());
+    let new = &out.commits.last().unwrap().1;
+    let times = |i: usize| (new.event(i).unwrap().start.0, new.event(i).unwrap().end.0);
+    // untouched: as it was; edited: what the script saw, as in Aegisub
+    assert_eq!(times(0), (1001, 2345));
+    assert_eq!(new.event_id(0), d.event_id(0));
+    assert_eq!(times(1), (1000, 2350));
+}
