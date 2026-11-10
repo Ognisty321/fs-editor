@@ -345,6 +345,7 @@ MainWindow::MainWindow() {
         if (s == Qt::ApplicationActive) checkDisk(current());
     });
     auto *autosave = new QTimer(this);
+    autosave->setObjectName("autosave");
     connect(autosave, &QTimer::timeout, this, [this, autosave] {
         const int secs = QSettings().value("main/autosaveSeconds", 60).toInt();
         autosave->setInterval(std::max(secs, 10) * 1000);
@@ -492,13 +493,7 @@ TabPanel *MainWindow::newTab() {
     slot->setLayout(new QVBoxLayout);
     slot->layout()->setContentsMargins(0, 0, 0, 0);
     auto *tab = new TabPanel(this);
-    if (const auto cat = catalogStyles(QSettings().value("styles/newFileCatalog", "Default").toString()); !cat.empty())
-        tab->s().start_with_styles({cat.data(), cat.size()});
-    // Aegisub's Subtitle/Default Resolution
-    if (QSettings st; !st.value("subs/defaultResAuto", true).toBool()) {
-        tab->s().set_info_quietly("PlayResX", fs::Utf8(st.value("subs/defaultResWidth", 1920).toString()));
-        tab->s().set_info_quietly("PlayResY", fs::Utf8(st.value("subs/defaultResHeight", 1080).toString()));
-    }
+    tab->startNew();
     slot->layout()->addWidget(tab);
     slot->setProperty("panel", QVariant::fromValue<QObject *>(tab));
     const int i = m_tabs->addTab(slot, tabText(tab));
@@ -660,7 +655,8 @@ void MainWindow::openFile(const QString &path, const QString &encoding) {
         if (const auto tracks = fsb::subtitle_tracks(fs::Utf8(path)); !tracks.empty() && untouched(current()))
             if (const int i = pickTrack(tracks, tr("The video contains subtitles. Load them?")); i >= 0)
                 current()->openEmbedded(path, i);
-        current()->openVideo(path);
+        // unless the subtitles loaded above opened it, at the frame and aspect they were saved with
+        if (QFileInfo(current()->video()->wanted()) != QFileInfo(path)) current()->openVideo(path);
         updateActions();
     } else if (kAudioExt.contains(ext)) {
         current()->openAudio(path);
@@ -690,7 +686,7 @@ void MainWindow::openFile(const QString &path, const QString &encoding) {
         // Kainote: a tab with no video offers the video named like the subtitles, when they name none
         // (a named one may be loading in the background)
         if (const QString video = m_openingPairs ? QString() : sameNamed(path, kVideoExt);
-            !video.isEmpty() && tab->video()->path().isEmpty() && tab->s().project_value("Video File").empty() &&
+            !video.isEmpty() && tab->video()->wanted().isEmpty() && tab->s().project_value("Video File").empty() &&
             confirm(tr("Load the video from the folder: \"%1\"?").arg(QFileInfo(video).fileName())))
             tab->openVideo(video);
         updateActions();
@@ -1128,6 +1124,11 @@ void MainWindow::buildMenus() {
             watchScripts();
             if (m_toolbar) m_toolbar->setIconSize(QSize(22, 22) * QSettings().value("main/toolbarIconSize", 22).toInt() / 22);
             action("sessionAtStart")->setChecked(QSettings().value("main/askSession", true).toBool()); // the menu's tick
+            // another autosave interval counts from now, not from the end of the one running
+            if (auto *timer = findChild<QTimer *>("autosave", Qt::FindDirectChildrenOnly)) {
+                const int ms = std::max(QSettings().value("main/autosaveSeconds", 60).toInt(), 10) * 1000;
+                if (timer->interval() != ms) timer->start(ms);
+            }
             for (auto *t : tabs()) { // the limits colour the grid and the edit box
                 t->grid()->viewport()->update();
                 t->grid()->applySettings();
@@ -1444,7 +1445,9 @@ void MainWindow::buildMenus() {
         st.setValue("video/dummyHeight", h->value());
         st.setValue("video/dummyFps", fps->value());
         st.setValue("video/dummyLength", len->text());
-        tab()->openDummyVideo(VideoBox::dummySpec(fps->value(), std::max<qint64>(1, qint64((ms > 0 ? ms : 1800000) * fps->value() / 1000)),
+        tab()->openDummyVideo(VideoBox::dummySpec(fps->value(),
+                                                  std::clamp<qint64>(qint64((ms > 0 ? ms : 1800000) * fps->value() / 1000), 1,
+                                                                     VideoBox::kMaxDummyFrames),
                                                   w->value(), h->value(), colour, pattern->isChecked()));
     });
     video->addSeparator();
@@ -2120,6 +2123,18 @@ void MainWindow::checkDisk(TabPanel *t) {
     if (!t || t->path().isEmpty() || m_checkingDisk) return;
     const QFileInfo fi(t->path());
     if (!fi.exists() || fi.lastModified() == t->diskTime()) return;
+    // Not under a dialog or a running script: they hold rows and styles of the file as it is,
+    // and a macro's result would go over the lines read again. Asked once they are done.
+    if (QApplication::activeModalWidget() || m_scriptsRunning) {
+        if (!m_diskRetry) {
+            m_diskRetry = true;
+            QTimer::singleShot(500, this, [this] {
+                m_diskRetry = false;
+                checkDisk(current());
+            });
+        }
+        return;
+    }
     t->noteDisk(); // asked once for each change
     m_checkingDisk = true;
     const auto r = QMessageBox::question(
@@ -2129,6 +2144,17 @@ void MainWindow::checkDisk(TabPanel *t) {
             .arg(fi.fileName()));
     m_checkingDisk = false;
     if (r == QMessageBox::Yes) t->openSubs(t->path());
+    updateActions();
+}
+
+void MainWindow::rereadChanged() {
+    for (auto *t : tabs()) {
+        if (t->path().isEmpty()) continue;
+        const QFileInfo fi(t->path());
+        if (!fi.exists() || fi.lastModified() == t->diskTime()) continue;
+        if (t->modified()) checkDisk(t); // its changes or the file's: the user's choice
+        else t->openSubs(t->path());
+    }
     updateActions();
 }
 
@@ -2503,7 +2529,8 @@ void MainWindow::openSession(const QStringList &files, int front) {
     for (int k = 0; k < files.size(); ++k) {
         if (!QFileInfo::exists(files[k])) continue;
         // each file its own tab: a video alone would otherwise take the next script in
-        if (!untouched(current()) || current()->video()->hasVideo()) newTab();
+        // (one still being indexed too)
+        if (!untouched(current()) || current()->video()->hasVideo() || !current()->video()->wanted().isEmpty()) newTab();
         openFile(files[k]);
         if (k == front || !pick) pick = current();
     }
@@ -2618,6 +2645,9 @@ bool MainWindow::setHotkey(QAction *a, const QList<QKeySequence> &keys) {
 // Aegisub's and Kainote's hotkey list: every command, also those only reachable by a key (tabs);
 // a hotkey that differs from the default is bold.
 void MainWindow::editHotkeys() {
+    // the macros of the autoload scripts are listed too; loading them later would also build
+    // the automation menu anew under the list
+    ensureAutoload();
     QDialog d(this);
     d.setWindowTitle(tr("Hotkeys"));
     d.resize(680, 600);
@@ -2644,13 +2674,16 @@ void MainWindow::editHotkeys() {
             }
         auto *it = new QTreeWidgetItem(list, {commandName(a), menu});
         it->setIcon(0, a->icon().isNull() ? QIcon(blank) : a->icon());
-        it->setData(0, Qt::UserRole, QVariant::fromValue(a));
+        // watched: a script read again while the list is open takes its macros' actions away
+        it->setData(0, Qt::UserRole, QVariant::fromValue(QPointer<QAction>(a)));
     }
     list->sortItems(1, Qt::AscendingOrder);
     const auto refresh = [list] {
         for (int i = 0; i < list->topLevelItemCount(); ++i) {
             auto *it = list->topLevelItem(i);
-            auto *a = it->data(0, Qt::UserRole).value<QAction *>();
+            const auto a = it->data(0, Qt::UserRole).value<QPointer<QAction>>();
+            it->setDisabled(!a);
+            if (!a) continue;
             it->setText(2, QKeySequence::listToString(a->shortcuts(), QKeySequence::NativeText));
             QFont f = it->font(0);
             f.setBold(a->shortcuts() != defaultKeys(a));
@@ -2669,9 +2702,9 @@ void MainWindow::editHotkeys() {
                           !it->text(2).contains(s, Qt::CaseInsensitive));
         }
     });
-    const auto current = [list] {
+    const auto current = [list]() -> QAction * {
         auto *it = list->currentItem();
-        return it ? it->data(0, Qt::UserRole).value<QAction *>() : nullptr;
+        return it ? it->data(0, Qt::UserRole).value<QPointer<QAction>>().data() : nullptr;
     };
     const auto change = [=, this] {
         if (auto *a = current()) assignHotkey(a);
@@ -2758,7 +2791,9 @@ bool MainWindow::eventFilter(QObject *o, QEvent *e) {
                 }
                 auto *me = static_cast<QMouseEvent *>(e);
                 if (me->button() == Qt::LeftButton && (me->modifiers() & Qt::ShiftModifier)) {
-                    QTimer::singleShot(0, this, [this, a] { assignHotkey(a); });
+                    QTimer::singleShot(0, this, [this, id] {
+                        if (QAction *later = action(id)) assignHotkey(later);
+                    });
                     return true;
                 }
             }
@@ -2902,7 +2937,7 @@ void MainWindow::startAutoload() {
     m_autoloadJob.emplace((*m_automation)->start_autoload());
     auto *poll = new QTimer(this);
     connect(poll, &QTimer::timeout, this, [this, poll] {
-        if (m_autoloadJob && !fsb::autoload_done(**m_autoloadJob)) return;
+        if (m_autoloadJob && !(*m_automation)->autoload_done(**m_autoloadJob)) return;
         poll->deleteLater();
         ensureAutoload();
     });
@@ -3489,6 +3524,8 @@ void MainWindow::runScript(fsb::ScriptJob &job) {
     // Aegisub's BackgroundScriptRunner: the script runs on a worker and m_host brings its dialogs
     // and progress back here. Input waits for the first 300 ms, then the progress window holds it.
     m_host->begin();
+    ++m_scriptsRunning;
+    const auto done = qScopeGuard([this] { --m_scriptsRunning; });
     QFutureWatcher<void> watch;
     QEventLoop loop;
     connect(&watch, &QFutureWatcher<void>::finished, &loop, &QEventLoop::quit);

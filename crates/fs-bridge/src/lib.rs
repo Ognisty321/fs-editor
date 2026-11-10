@@ -10,7 +10,7 @@ mod spell;
 mod split;
 mod visual;
 
-use automation::{AutoloadJob, autoload_done, run_script_job};
+use automation::{AutoloadJob, run_script_job};
 pub use automation::{Automation, ScriptJob};
 use fs_core::tags::{set_cps_ignore, set_wraps_ignore};
 pub use kanji::KanjiTimer;
@@ -887,6 +887,8 @@ pub mod ffi {
         );
         fn remove_tags(self: &mut Session, rows: &[usize], names: &str, amend: &str);
         fn set_drawing(self: &mut Session, row: usize, drawing: &str, amend: &str);
+        /// With an `amend` key (a drag), `dx` and `dy` count from the lines as the first edit
+        /// of that key found them.
         fn shift_positions(
             self: &mut Session,
             rows: &[usize],
@@ -1115,7 +1117,9 @@ pub mod ffi {
         /// own; finished, they are waited for and added (the load errors returned).
         type AutoloadJob;
         fn start_autoload(self: &mut Automation) -> Box<AutoloadJob>;
-        fn autoload_done(job: &AutoloadJob) -> bool;
+        /// Whether they are loaded; also answers what the loading scripts ask of the GUI thread
+        /// (the clipboard), so it is to be polled.
+        fn autoload_done(self: &Automation, job: &AutoloadJob) -> bool;
         fn finish_autoload(self: &mut Automation, job: Box<AutoloadJob>) -> Vec<String>;
         fn load_script(self: &mut Automation, path: &str) -> Result<()>;
         /// Reload script `index` (of `scripts()`) in place.

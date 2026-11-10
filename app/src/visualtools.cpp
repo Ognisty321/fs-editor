@@ -79,6 +79,13 @@ QString Drawing::toString() const {
     return out.join(' ');
 }
 
+// After commands were taken out: the first one left starts the shape, so it becomes a move to
+// its last point; one with no point at all (a spline's "c") goes too.
+void Drawing::startWithMove() {
+    while (!cmds.empty() && cmds[0].pts.empty()) cmds.erase(cmds.begin());
+    if (!cmds.empty() && cmds[0].type != 'm') cmds[0] = {'m', {cmds[0].pts.back()}};
+}
+
 std::vector<std::pair<int, int>> Drawing::handles() const {
     std::vector<std::pair<int, int>> h;
     for (int i = 0; i < int(cmds.size()); ++i)
@@ -1271,6 +1278,7 @@ void VisualTools::paint(QPainter &p) {
 
 bool VisualTools::press(QMouseEvent *e) {
     m_mouseW = e->position();
+    m_moved = false;
     auto *tab = m_box->tab();
     if (m_tool == Pointer) {
         if (shown() && (e->button() == Qt::MiddleButton ||
@@ -1400,7 +1408,7 @@ bool VisualTools::press(QMouseEvent *e) {
             m_drag = 0;
             if (h < 0) return false;
             m_vec.cmds.erase(m_vec.cmds.begin() + hs[h].first);
-            if (!m_vec.cmds.empty() && m_vec.cmds[0].type != 'm') m_vec.cmds[0] = {'m', {m_vec.cmds[0].pts.back()}};
+            m_vec.startWithMove();
             writeVector();
             return true;
         }
@@ -1508,6 +1516,7 @@ bool VisualTools::press(QMouseEvent *e) {
 
 bool VisualTools::move(QMouseEvent *e) {
     m_mouseW = e->position();
+    if (e->type() == QEvent::MouseMove) m_moved = true; // press() comes here with its own event
     if (m_tool == Pointer) return true;
     if (!m_drag || !m_valid) return false;
     const QPointF now = s(e->position());
@@ -1547,7 +1556,12 @@ bool VisualTools::move(QMouseEvent *e) {
             break;
         }
         QPointF a(m_start.x, m_start.y), b(m_start.x2, m_start.y2);
-        if (m_drag == 2) b = m_start.has_move || near(w(b), m_pressW, 9) ? b + delta : now;
+        const bool endDragged = m_start.has_move || near(w(b), m_pressW, 9);
+        // a click alone writes nothing, as Aegisub's drag writes only once the mouse moves: the
+        // tag, a \pos or the \move with its times, stays as it is. The right button's click away
+        // from the end puts the end there.
+        if (!m_moved && (m_drag != 2 || endDragged)) break;
+        if (m_drag == 2) b = endDragged ? b + delta : now;
         else a += delta;
         QString t = QString("\\move(%1,%2,%3,%4").arg(n2(a.x()), n2(a.y()), n2(b.x()), n2(b.y()));
         qint64 t1 = m_start.t1, t2 = m_start.t2;
@@ -1730,15 +1744,13 @@ bool VisualTools::move(QMouseEvent *e) {
         break;
     }
     case Shifter: {
-        static QPointF applied;
         if (m_drag == 1) {
-            applied = {};
+            m_rows = tab->selection();
             m_drag = 3;
         }
-        const QPointF step = delta - applied;
-        applied = delta;
-        tab->s().shift_positions(fs::slice(tab->selection()), step.x(), step.y(), uint8_t(m_shiftWhat),
-                                   fs::Utf8(m_amend));
+        if (!m_moved) break; // a click alone writes nothing
+        // the whole way dragged: the session shifts the lines from where the drag found them
+        tab->s().shift_positions(fs::slice(m_rows), delta.x(), delta.y(), uint8_t(m_shiftWhat), fs::Utf8(m_amend));
         tab->changed(TabPanel::FromVideo);
         break;
     }
@@ -1791,7 +1803,7 @@ bool VisualTools::vecKey(QKeyEvent *e) {
         std::set<int> cmds;
         for (const auto &h : m_vecSel) cmds.insert(h.first);
         for (auto it = cmds.rbegin(); it != cmds.rend(); ++it) m_vec.cmds.erase(m_vec.cmds.begin() + *it);
-        if (!m_vec.cmds.empty() && m_vec.cmds[0].type != 'm') m_vec.cmds[0] = {'m', {m_vec.cmds[0].pts.back()}};
+        m_vec.startWithMove();
         m_vecSel.clear();
         m_amend = QString("visual-%1").arg(++m_dragId);
         writeVector();

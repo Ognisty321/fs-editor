@@ -81,7 +81,9 @@ TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fs
         if (!m_video->dummySpec().isEmpty()) s().set_project_value("Video File", fs::Utf8(m_video->dummySpec()));
         if (!m_video->path().isEmpty()) {
             s().set_project_value("Video File", fs::Utf8(m_video->path()));
-            if (QSettings().value("video/openAudio", true).toBool() && !m_audio->hasAudio())
+            // Aegisub's LoadVideo: another video brings its audio, in place of the one open
+            if (QSettings().value("video/openAudio", true).toBool() && m_audioWithVideo &&
+                QFileInfo(m_audio->wanted()) != QFileInfo(m_video->path()))
                 m_audio->open(m_video->path(), true);
         }
         m_video->subsChanged();
@@ -220,6 +222,8 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
     const QString dummy = named.startsWith("?dummy") && named != m_video->dummySpec() ? named : QString();
     QString video = resolve("Video File"), audio = resolve("Audio File"), keyframes = resolve("Keyframes File"),
             timecodes = resolve("Timecodes File");
+    // the audio the script names stays, or loads, in place of its video's
+    const bool ownAudio = !audio.isEmpty() && !same(audio, video);
     if (same(video, m_video->path())) video.clear();
     if (same(audio, m_audio->path()) || same(audio, video)) audio.clear();
     if (same(keyframes, m_keyframesPath)) keyframes.clear();
@@ -242,7 +246,7 @@ bool TabPanel::openSubs(const QString &path, const QString &encoding) {
         if (!video.isEmpty()) {
             const double ar = VideoBox::aspectOfMode(fs::q(s().project_value("Video AR Mode")).toInt(),
                                                      fs::q(s().project_value("Video AR Value")).toDouble());
-            openVideo(video, fs::q(s().project_value("Video Position")).toLongLong(), ar);
+            openVideo(video, fs::q(s().project_value("Video Position")).toLongLong(), ar, !ownAudio);
         }
         if (!audio.isEmpty()) openAudio(audio);
         if (!keyframes.isEmpty()) openKeyframes(keyframes);
@@ -312,13 +316,35 @@ bool TabPanel::saveTranslation(const QString &p) {
     return true;
 }
 
+void TabPanel::startNew() {
+    QSettings st;
+    if (const auto cat = catalogStyles(st.value("styles/newFileCatalog", "Default").toString()); !cat.empty())
+        s().start_with_styles({cat.data(), cat.size()});
+    if (!st.value("subs/defaultResAuto", true).toBool()) {
+        s().set_info_quietly("PlayResX", fs::Utf8(st.value("subs/defaultResWidth", 1920).toString()));
+        s().set_info_quietly("PlayResY", fs::Utf8(st.value("subs/defaultResHeight", 1080).toString()));
+    }
+}
+
+// The tab as a new one, its video and audio kept.
 void TabPanel::clearSubs() {
     m_session = fsb::new_session();
+    m_session->set_undo_limit(size_t(QSettings().value("main/undoLevels", 500).toInt()));
+    startNew();
     m_embedded = {{}, -1};
+    // what belonged to the file that is gone: its autosave mark and where a recovered copy saves to
+    setProperty("autosaved", QVariant());
+    setProperty("savePath", QVariant());
     updateVideoContext();
+    if (!m_video->dummySpec().isEmpty()) s().set_project_value("Video File", fs::Utf8(m_video->dummySpec()));
+    if (!m_video->path().isEmpty()) s().set_project_value("Video File", fs::Utf8(m_video->path()));
     m_sel.clear();
+    m_active = 0;
+    m_edit->load(-1); // forget the revert text of the old file
+    m_grid->resetFilter();
     changed();
     setActive(0);
+    emit titleChanged();
 }
 
 void TabPanel::setActive(int row, bool select, bool follow) {
@@ -421,11 +447,12 @@ void TabPanel::syncSelection() {
     s().set_selection(fs::slice(selection()), m_active);
 }
 
-void TabPanel::openVideo(const QString &path, qint64 frame, double ar) {
+void TabPanel::openVideo(const QString &path, qint64 frame, double ar, bool withAudio) {
     if (ar <= 0) { // another video: its own aspect, as Aegisub resets it
         s().set_project_value("Video AR Mode", "");
         s().set_project_value("Video AR Value", "");
     }
+    m_audioWithVideo = withAudio;
     m_video->open(path, frame, ar);
     m_main->addRecent("video", path);
 }

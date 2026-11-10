@@ -189,20 +189,22 @@ impl Editor {
         self.edit_inner(description, Some(amend_key), f)
     }
 
+    /// Whether an [`edit_amend`](Self::edit_amend) with this key would merge into the last
+    /// step: that step has the key, nothing was undone since and the document is not the
+    /// saved one.
+    pub fn would_amend(&self, amend_key: &str) -> bool {
+        self.redo.is_empty()
+            && (self.undo.last()).is_some_and(|s| s.amend_key.as_deref() == Some(amend_key))
+            && self.saved_generation != self.generation
+    }
+
     fn edit_inner<R>(
         &mut self,
         description: &str,
         amend: Option<&str>,
         f: impl FnOnce(&mut Document) -> R,
     ) -> R {
-        let merge = amend.is_some()
-            && self.redo.is_empty()
-            && self
-                .undo
-                .last()
-                .is_some_and(|s| s.amend_key.as_deref() == amend)
-            && self.saved_generation != self.generation;
-        if merge {
+        if amend.is_some_and(|key| self.would_amend(key)) {
             // The step already holds the state before the first merged edit, so no
             // snapshot: the sections stay unshared and typing edits them in place.
             // The document is already modified, so a no-op here changes nothing visible.

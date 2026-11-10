@@ -666,6 +666,7 @@ void AudioBox::open(const QString &path, bool withVideo, int track) {
     }
     close(); // also stops a load still decoding
     m_openCancel = std::make_shared<std::atomic_bool>(false);
+    m_opening = path;
     m_tab->main()->status(tr("Loading audio %1…").arg(path));
     const QString cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex";
     QPointer<AudioBox> self(this);
@@ -691,6 +692,7 @@ void AudioBox::open(const QString &path, bool withVideo, int track) {
                 if (cancel == self->m_openCancel) self->m_tab->main()->status(QString());
                 return;
             }
+            self->m_opening.clear();
             if (!err.isEmpty()) {
                 self->m_tab->main()->error(err);
                 return;
@@ -731,6 +733,7 @@ void AudioBox::settingsChanged() {
 
 void AudioBox::close() {
     *m_openCancel = true;
+    m_opening.clear();
     stop();
     m_audio.reset();
     m_path.clear();

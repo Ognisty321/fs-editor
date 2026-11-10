@@ -42,6 +42,7 @@ struct Drawing {
     QPointF &at(std::pair<int, int> h) { return cmds[h.first].pts[h.second]; }
     QRectF bounds() const;
     void translate(QPointF d);
+    void startWithMove(); // after commands were taken out
     QPointF last() const; // the last point of the figure being drawn
 };
 
@@ -156,6 +157,7 @@ private:
     qint64 m_first = 0, m_last = -1; // the frames the active line is shown on
     std::vector<size_t> m_rows;      // the lines a drag moves, and how they were
     std::vector<fsb::Visual> m_starts;
+    bool m_moved = false; // the mouse moved since the press
     // the other selected lines on the frame and where they are on the widget (the position tool)
     std::vector<std::pair<size_t, QPointF>> others() const;
     Drawing m_vec;            // vector clip or drawing being edited

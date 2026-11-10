@@ -631,7 +631,7 @@ VideoBox::VideoBox(TabPanel *tab) : QWidget(tab), m_tab(tab), m_media(std::make_
     connect(&m_thread, &QThread::finished, m_worker, &QObject::deleteLater);
     m_thread.start();
     connect(m_worker, &FrameWorker::ready, this, [this](quint64, qint64, QImage img) {
-        m_view->setFrame(img);
+        if (hasVideo()) m_view->setFrame(img); // not a frame that was on its way as the video closed
         // a tool's handles come and go with the line's frames (Aegisub redraws them on each frame);
         // the move tool marks where the line is on each, the position tool the other selected lines on it
         const int tool = m_tools->tool();
@@ -770,6 +770,7 @@ void VideoBox::open(const QString &path, qint64 frame, double ar) {
     m_tab->main()->status(tr("Indexing %1…").arg(name));
     *m_openCancel = true; // a file still indexing is replaced
     m_openCancel = std::make_shared<std::atomic_bool>(false);
+    m_opening = path;
     auto media = m_media;
     auto cancel = m_openCancel;
     const QString cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex";
@@ -809,6 +810,7 @@ void VideoBox::open(const QString &path, qint64 frame, double ar) {
                 if (cancel == m_openCancel) m_tab->main()->status(QString());
                 return;
             }
+            m_opening.clear();
             if (!err.isEmpty()) {
                 m_tab->main()->error(err);
                 return;
@@ -883,7 +885,7 @@ bool VideoBox::openDummy(const QString &spec) {
     };
     double fps = t[0].toDouble();
     if (const QStringList nd = t[0].split('/'); nd.size() == 2 && nd[1].toDouble() > 0) fps = nd[0].toDouble() / nd[1].toDouble();
-    const qint64 frames = num(1, 1, 100'000'000);
+    const qint64 frames = num(1, 1, kMaxDummyFrames);
     if (!ok) return false;
     const int w = int(num(2, 16, 8192));
     if (!ok) return false;
@@ -894,6 +896,7 @@ bool VideoBox::openDummy(const QString &spec) {
     if (!ok || !(fps > 0 && fps <= 1000)) return false;
     const qint64 ms = qint64(frames * 1000 / fps);
     *m_openCancel = true; // a video still being indexed would replace it
+    m_opening.clear();
     {
         std::lock_guard g(m_media->m);
         m_media->video.reset();
@@ -917,6 +920,7 @@ bool VideoBox::openDummy(const QString &spec) {
     m_dummyFps = fps;
     m_dummySpec = spec;
     m_timecodes.clear();
+    m_timecodes.reserve(size_t(m_frames) + 1);
     for (qint64 f = 0; f <= m_frames; ++f) m_timecodes.push_back(qint64(f * 1000 / fps));
     m_keyframes.clear();
     m_chapters.clear();
@@ -931,6 +935,7 @@ bool VideoBox::openDummy(const QString &spec) {
 void VideoBox::close() {
     pause();
     *m_openCancel = true; // else the lock below waits for the indexing to finish
+    m_opening.clear();
     {
         std::lock_guard g(m_media->m);
         m_media->video.reset();

@@ -58,6 +58,9 @@ pub struct Session {
     /// one undone, to redo: undo takes the format back with the lines.
     convert_undo: Vec<(Format, Option<PathBuf>)>,
     convert_redo: Vec<(Format, Option<PathBuf>)>,
+    /// The amend key of a position shift being dragged, and the text of each event it moves
+    /// as its first edit found it (`shift_positions`).
+    shift_from: Option<(String, Vec<(usize, String)>)>,
 }
 
 /// The undo step of a conversion.
@@ -87,6 +90,7 @@ impl Default for Session {
             filter_settings: HashMap::new(),
             convert_undo: Vec::new(),
             convert_redo: Vec::new(),
+            shift_from: None,
         };
         // Document::new already holds the one empty line a new tab starts with
         s.ed.mark_saved();
@@ -1651,10 +1655,13 @@ impl Session {
     }
 
     pub fn swap_rows(&mut self, a: usize, b: usize) {
-        let (Some(ra), Some(rb)) = (self.tl_row(a), self.tl_row(b)) else {
+        if a == b || a.max(b) >= self.rows.len() {
             return;
-        };
-        self.edit("Swap lines", |d| ops::swap_rows(d, ra.main(), rb.main()));
+        }
+        // a row's original goes with its translation
+        let mut groups = self.groups();
+        groups.swap(a, b);
+        self.set_groups("Swap lines", groups);
     }
 
     pub fn explode_rows(
@@ -3243,8 +3250,22 @@ impl Session {
     }
 
     /// `what` bits: 1 \pos, 2 \move start, 4 \move end, 8 clips, 16 drawings, 32 \org.
+    /// With an `amend` key (a drag) `dx`, `dy` are the whole way dragged: every edit of the key
+    /// shifts the lines from where its first one found them. Steps written one over another
+    /// would add up the rounding of each.
     pub fn shift_positions(&mut self, rows: &[usize], dx: f64, dy: f64, what: u8, amend: &str) {
         let evs = self.main_events(rows);
+        let from = match &self.shift_from {
+            Some((key, from)) if key == amend && self.ed.would_amend(amend) => from.clone(),
+            _ => {
+                let doc = &self.ed.doc;
+                let from: Vec<(usize, String)> = (evs.iter())
+                    .filter_map(|&e| Some((e, doc.event(e)?.text.clone())))
+                    .collect();
+                self.shift_from = (!amend.is_empty()).then(|| (amend.to_owned(), from.clone()));
+                from
+            }
+        };
         let what = ops::MoveTargets {
             pos: what & 1 != 0,
             move_start: what & 2 != 0,
@@ -3254,6 +3275,11 @@ impl Session {
             org: what & 32 != 0,
         };
         self.edit_amend(amend, "Shift positions", move |d| {
+            for (e, text) in from {
+                if let Some(ev) = d.event_mut(e) {
+                    ev.text = text;
+                }
+            }
             let rest = ops::MoveTargets {
                 drawing: false,
                 ..what
@@ -4091,6 +4117,19 @@ mod tests {
             s.row(0).text,
             r"{\pos(10,0)\fscx200\frz90\p1}m 0 10 l 10 10 10 20"
         );
+        // a drag: every step from the line as it was, in one undo step
+        let start = [r"{\pos(0.5,0)\p1}m 0 0 l 3 0".to_string()];
+        s.set_texts(&[0], &start, "edit");
+        for k in 0..=30 {
+            s.shift_positions(&[0], f64::from(k) / 3.0, 0.0, 16 | 1, "drag-1");
+        }
+        assert_eq!(s.row(0).text, r"{\pos(10.5,0)\p1}m 10 0 l 13 0");
+        // the next drag starts from there
+        s.shift_positions(&[0], 1.0, 2.0, 1, "drag-2");
+        s.shift_positions(&[0], 2.0, 4.0, 1, "drag-2");
+        assert_eq!(s.row(0).text, r"{\pos(12.5,4)\p1}m 10 0 l 13 0");
+        assert!(s.undo() && s.undo());
+        assert_eq!(s.row(0).text, start[0]);
     }
 
     #[test]
@@ -4207,6 +4246,12 @@ mod tests {
         assert_eq!(s.join_rows(&[2, 0, 1], 0), 0);
         assert_eq!(view(&s), [own("one two three", "jeden trzy", 1000, 6000)]);
         assert_eq!(s.row_count(), 1);
+        s.undo();
+        // swapped rows keep their originals
+        s.swap_rows(2, 0);
+        assert_eq!(view(&s)[0], own("three", "trzy", 5000, 6000));
+        assert_eq!(view(&s)[2], own("one", "jeden", 1000, 2000));
+        s.swap_rows(1, 7);
         s.undo();
         // keep last; an untranslated first row becomes a pair
         assert_eq!(s.join_rows(&[1, 2], 2), 1);

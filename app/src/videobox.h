@@ -137,6 +137,10 @@ public:
     void close();
     bool hasVideo() const { return m_frames > 0; }
     QString path() const { return m_path; }
+    // the file open, or the one still being indexed that replaces it
+    QString wanted() const { return m_opening.isEmpty() ? m_path : m_opening; }
+    // Aegisub's dummy video dialog: ten hours at 1000 fps
+    static constexpr qint64 kMaxDummyFrames = 36'000'000;
     fsb::VideoInfo info() const { return m_info; }
     // the video's own pixel aspect; info()'s is the one shown, after a ratio set by hand
     std::pair<int, int> videoSar() const { return {m_videoSarNum, m_videoSarDen}; }
@@ -228,6 +232,7 @@ private:
     quint64 m_reqId = 0;
     bool m_busy = false, m_pending = false;
     QString m_path;
+    QString m_opening; // being indexed
     fsb::VideoInfo m_info{};
     qint64 m_frames = 0, m_frame = 0;
     qint64 m_scriptAt = -2; // frame of a one-frame script; -1 the whole script; -2 out of date

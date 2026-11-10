@@ -458,6 +458,8 @@ void FindDialog::replaceInFiles() {
         if (!d.failed.isEmpty()) msg += "\n\n" + tr("Not saved:") + "\n" + d.failed.join('\n');
         m_main->status(tr("Replaced %1 times in %2 files.").arg(d.replaced).arg(d.files));
         if (!smoke) QMessageBox::information(this, tr("Replace in files"), msg);
+        // a file among them open in a tab: the tab would save its old lines over the new ones
+        if (d.files) m_main->rereadChanged();
     });
     watch->setFuture(QtConcurrent::run([dir, filters, flags, s, backup, noCopy] {
         Done d;
@@ -592,7 +594,11 @@ void FindDialog::replaceChecked() {
                 const size_t n = session->replace_matches(m_resultSpec, ticks);
                 if (!n) continue;
                 // never saved without its copy (Kainote's ReplaceBackup)
-                const QString copy = backup + "/" + file->text(0);
+                // under its path in the folder searched; a name that would leave the backup
+                // folder is cut to the file's own
+                QString name = file->text(0);
+                if (QDir::isAbsolutePath(name) || QDir::cleanPath(name).startsWith("..")) name = QFileInfo(path).fileName();
+                const QString copy = backup + "/" + name;
                 if (!QDir().mkpath(QFileInfo(copy).path()) || !QFile::copy(path, copy)) {
                     m_main->error(tr("%1 could not be copied to the backup folder, left as it was")
                                       .arg(QDir::toNativeSeparators(path)));
@@ -680,6 +686,7 @@ void FindDialog::findNext() {
     const bool orig = !on || m_hit.original;
     const size_t pos = !on ? 0 : s.field == 0 ? size_t(tab->edit()->textSelection(orig).second) : m_hit.end;
     const size_t n = tab->s().row_count();
+    if (n == 0) return m_main->status(tr("Nothing found")); // no line to go on from
     try {
         auto &subs = tab->s();
         // the style, actor and effect are searched line by line (Aegisub); an empty match (^, $, \b)
@@ -2994,15 +3001,19 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     recent->setValue(st.value("main/recentCount", 20).toInt());
     editor->addRow(tr("Recently opened files listed"), recent);
     spins.emplace_back("main/recentCount", recent);
-    const auto fontButton = [this, editor](const QString &key, const QFont &def, const QString &label,
-                                           QFormLayout *form = nullptr) {
+    // the fonts picked, written with the rest by OK or Apply (Cancel leaves the ones set)
+    const auto fonts = std::make_shared<std::map<QString, QFont>>();
+    const auto fontButton = [this, editor, fonts](const QString &key, const QFont &def, const QString &label,
+                                                  QFormLayout *form = nullptr) {
         const auto name = [](const QFont &f) { return QString("%1, %2 pt").arg(f.family()).arg(f.pointSize()); };
         auto *b = new QPushButton(name(QSettings().value(key, def).value<QFont>()), this);
-        connect(b, &QPushButton::clicked, this, [=] {
+        connect(b, &QPushButton::clicked, this, [=, this] {
             bool ok;
-            const QFont f = QFontDialog::getFont(&ok, QSettings().value(key, def).value<QFont>());
+            const auto picked = fonts->find(key);
+            const QFont f = QFontDialog::getFont(
+                &ok, picked != fonts->end() ? picked->second : QSettings().value(key, def).value<QFont>(), this);
             if (ok) {
-                QSettings().setValue(key, f);
+                (*fonts)[key] = f;
                 b->setText(name(f));
             }
         });
@@ -3021,9 +3032,9 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     auto *dictLang = new QComboBox(this);
     spell::fillLanguages(dictLang, st.value("spell/lang").toString());
     connect(dictDir, &QLineEdit::editingFinished, this, [dictDir, dictLang] {
+        // the languages of the folder typed; the folder is set by OK or Apply
         const QString keep = dictLang->currentData().toString();
-        QSettings().setValue("spell/dir", QDir::fromNativeSeparators(dictDir->text()));
-        spell::fillLanguages(dictLang, keep);
+        spell::fillLanguages(dictLang, keep, QDir::fromNativeSeparators(dictDir->text().trimmed()));
     });
     editor->addRow(tr("Spell check language"), dictLang);
     auto *fontsDir = new QLineEdit(QDir::toNativeSeparators(st.value("fonts/externalDir").toString()), this);
@@ -3117,7 +3128,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply |
                                         QDialogButtonBox::RestoreDefaults,
                                     this);
-    const auto save = [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs,
+    const auto save = [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs, fonts,
                        trace, tracks, tagMark, fontFilter, saveConversion, saveScriptDefaults, fontsDir, device, autosaveFolder, autoloadPath, includePath, scriptEditor, types] {
         QSettings st;
         QSettings classes(assoc::kClasses, QSettings::NativeFormat);
@@ -3134,8 +3145,11 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         st.setValue("automation/editor", QDir::fromNativeSeparators(scriptEditor->text().trimmed()));
         for (auto &[k, c] : catalogs) st.setValue(k, c->currentData());
         st.setValue("main/language", language->currentData());
-        st.setValue("spell/dir", QDir::fromNativeSeparators(dictDir->text()));
+        // none typed: the folder next to the program again
+        if (const QString dd = QDir::fromNativeSeparators(dictDir->text().trimmed()); dd.isEmpty()) st.remove("spell/dir");
+        else st.setValue("spell/dir", dd);
         st.setValue("spell/lang", dictLang->currentData().toString());
+        for (const auto &[k, f] : *fonts) st.setValue(k, f);
         spell::reload();
         for (auto &[k, b] : boxes) st.setValue(k, b->isChecked());
         st.setValue("audio/inactiveLines", inactive->currentIndex());
@@ -3168,6 +3182,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                          "audio/inactiveLines",   "audio/leadIn",     "audio/leadOut",    "audio/preferredTracks",
                          "fonts/externalDir",     "audio/device",     "main/autosaveDir", "main/autosaveSeconds",
                          "video/openWithSubs",    "grid/font",        "edit/font",        "automation/autoloadPath",
+                         "main/programFont",      "audio/karaokeFont",
                          "automation/includePath", "automation/editor", "grid/tagMark", "style/fontFilterText", "convert/style",
                          "convert/tags", "convert/newEnds", "convert/msPerChar", "convert/fps", "convert/showSettings"};
     owned << scriptDefaultKeys();

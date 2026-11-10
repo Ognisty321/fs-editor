@@ -84,6 +84,8 @@ public:
     void openBlank(qint64 ms, bool noise = false);
     void close();
     QString path() const { return m_path; }
+    // the file open, or the one still being decoded that replaces it
+    QString wanted() const { return m_opening.isEmpty() ? m_path : m_opening; }
 
     void play(qint64 from, qint64 to, bool withVideo = false); // without: the video stops (Aegisub)
     void setSpectrum(bool on); // the spectrum or the waveform, as its toggle sets it
@@ -140,6 +142,7 @@ private:
     TabPanel *m_tab;
     std::optional<rust::Box<fsb::Audio>> m_audio;
     QString m_path;
+    QString m_opening; // being loaded
     int m_track = -1;
     // set to stop a load still decoding (close, a newer open, destruction)
     std::shared_ptr<std::atomic_bool> m_openCancel = std::make_shared<std::atomic_bool>(false);

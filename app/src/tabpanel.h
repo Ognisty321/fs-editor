@@ -48,6 +48,9 @@ public:
     bool saveTranslation(const QString &path);
     // Drop the subtitles, keep video and audio (Kainote "Remove subtitles from the editor").
     void clearSubs();
+    // a new script's styles (the catalog picked for new files) and resolution (Aegisub's
+    // Subtitle/Default Resolution), on the empty session of a new tab or of clearSubs
+    void startNew();
     QString path() const;
     QString title() const;
     bool modified() const;
@@ -74,7 +77,9 @@ public:
     void reselect();
 
     // media
-    void openVideo(const QString &path, qint64 frame = 0, double ar = 0);
+    // withAudio: the video brings its audio along (Aegisub's Video/Open Audio), unless it is
+    // the audio open already
+    void openVideo(const QString &path, qint64 frame = 0, double ar = 0, bool withAudio = true);
     void openDummyVideo(const QString &spec); // VideoBox::openDummy's
     void openAudio(const QString &path);
     void openBlankAudio(qint64 ms, bool noise = false);
@@ -142,6 +147,7 @@ private:
     bool m_hideOriginal = false;
     std::vector<std::int64_t> m_keyframes;
     QString m_keyframesPath, m_timecodesPath; // loaded from files, kept over the video's own
+    bool m_audioWithVideo = true; // of the video opening
     QPair<QString, int> m_embedded{{}, -1};
     QTimer *m_saveLater = nullptr;
     QDateTime m_diskTime;

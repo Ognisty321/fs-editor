@@ -33,8 +33,9 @@ namespace spell {
 fsb::Speller *get(); // nullptr when disabled or no dictionary could be loaded
 void reload();       // after a settings change: reload the dictionary, re-highlight
 QString dir();
-QStringList languages();
-void fillLanguages(QComboBox *box, const QString &current); // "polski (pl_PL)", the code as data
+QStringList languages(const QString &in = {}); // of the dictionaries in a folder: the one set, unless given
+// "polski (pl_PL)", the code as data
+void fillLanguages(QComboBox *box, const QString &current, const QString &in = {});
 void addWord(const QString &word); // to the user dictionary of the loaded language
 void removeWord(const QString &word);
 void removeWords(const QStringList &words); // several at once (Kainote), one reload

@@ -143,9 +143,9 @@ QString spell::dir() {
     return QSettings().value("spell/dir", QCoreApplication::applicationDirPath() + "/dictionaries").toString();
 }
 
-QStringList spell::languages() {
+QStringList spell::languages(const QString &in) {
     QStringList out;
-    for (const QFileInfo &fi : QDir(dir()).entryInfoList({"*.dic"}, QDir::Files, QDir::Name))
+    for (const QFileInfo &fi : QDir(in.isEmpty() ? dir() : in).entryInfoList({"*.dic"}, QDir::Files, QDir::Name))
         if (QFileInfo::exists(fi.absolutePath() + "/" + fi.completeBaseName() + ".aff")) out << fi.completeBaseName();
     return out;
 }
@@ -156,9 +156,9 @@ static QString languageLabel(const QString &code) {
     return l.language() == QLocale::C ? code : QString("%1 (%2)").arg(l.nativeLanguageName(), code);
 }
 
-void spell::fillLanguages(QComboBox *box, const QString &current) {
+void spell::fillLanguages(QComboBox *box, const QString &current, const QString &in) {
     box->clear();
-    for (const QString &code : languages()) box->addItem(languageLabel(code), code);
+    for (const QString &code : languages(in)) box->addItem(languageLabel(code), code);
     box->setCurrentIndex(std::max(0, box->findData(current)));
 }
 
@@ -1149,6 +1149,8 @@ void EditBox::setColorTag(int which, bool sampler) {
     };
     ++m_undoStep;
     bool previewed = false;
+    // a preview that left the line as it was made no undo step: Cancel has none of its own to undo
+    const auto unchanged = m_tab->s().generation();
     const auto live = [&](const QColor &col) {
         {
             const QSignalBlocker quiet(m_text); // the colour and its alpha as one change
@@ -1161,7 +1163,7 @@ void EditBox::setColorTag(int which, bool sampler) {
         emit m_text->textChanged();
     };
     const QColor c = sampler ? ColorPicker::sample(this, start, live) : ColorPicker::get(this, start, true, live);
-    if (!c.isValid() && previewed) {
+    if (!c.isValid() && previewed && m_tab->s().generation() != unchanged) {
         m_tab->undo();
         // a preview longer than the 30 s of a typing step spans two of them: the text goes back anyway
         if (m_text->toPlainText() != before) restore();

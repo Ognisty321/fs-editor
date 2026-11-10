@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 use cxx::UniquePtr;
 use fs_automation::{
@@ -114,13 +114,63 @@ impl GuiHost {
     }
 }
 
-impl Clipboard for GuiHost {
-    fn get(&self) -> Option<String> {
+/// A clipboard call of a script that is loading on a worker of `load_scripts`. The thread that
+/// asked for the scripts answers it: that is the GUI's own, which would never get to a call
+/// queued to it while it waits for the loading.
+enum LoaderCall {
+    Get(mpsc::Sender<Option<String>>),
+    Set(String, mpsc::Sender<bool>),
+}
+
+thread_local! {
+    /// Where a worker of `load_scripts` sends its clipboard calls.
+    static LOADER: std::cell::RefCell<Option<mpsc::Sender<LoaderCall>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn loader_calls() -> Option<mpsc::Sender<LoaderCall>> {
+    LOADER.with_borrow(Clone::clone)
+}
+
+impl GuiHost {
+    fn clipboard_text(&self) -> Option<String> {
         self.with(|h| h.clipboard_get().to_string())
             .filter(|s| !s.is_empty())
     }
-    fn set(&self, text: &str) -> bool {
+
+    fn set_clipboard_text(&self, text: &str) -> bool {
         self.with(|h| h.clipboard_set(text)).unwrap_or(false)
+    }
+
+    fn answer(&self, call: LoaderCall) {
+        // a loader that is gone meanwhile does not want the answer
+        match call {
+            LoaderCall::Get(reply) => drop(reply.send(self.clipboard_text())),
+            LoaderCall::Set(text, reply) => drop(reply.send(self.set_clipboard_text(&text))),
+        }
+    }
+
+    /// The loading scripts' calls answered until the loading is over (every sender gone).
+    fn serve(&self, calls: &mpsc::Receiver<LoaderCall>) {
+        calls.iter().for_each(|c| self.answer(c));
+    }
+}
+
+impl Clipboard for GuiHost {
+    fn get(&self) -> Option<String> {
+        let Some(calls) = loader_calls() else {
+            return self.clipboard_text();
+        };
+        let (reply, answer) = mpsc::channel();
+        calls.send(LoaderCall::Get(reply)).ok()?;
+        answer.recv().ok().flatten()
+    }
+    fn set(&self, text: &str) -> bool {
+        let Some(calls) = loader_calls() else {
+            return self.set_clipboard_text(text);
+        };
+        let (reply, answer) = mpsc::channel();
+        calls.send(LoaderCall::Set(text.to_owned(), reply)).is_ok() && answer.recv() == Ok(true)
     }
 }
 
@@ -384,14 +434,22 @@ fn filter_configs(
 }
 
 /// Scripts loaded side by side (Aegisub's autoload loads each file with std::async), in the
-/// order given. A script that panicked while loading is None.
-fn load_scripts(paths: &[PathBuf], env: &Env) -> Vec<Option<Script>> {
+/// order given. A script that panicked while loading is None. Their clipboard calls go to
+/// `calls`; whoever waits for the scripts answers them meanwhile ([`GuiHost::serve`]).
+fn load_scripts(
+    paths: &[PathBuf],
+    env: &Env,
+    calls: &mpsc::Sender<LoaderCall>,
+) -> Vec<Option<Script>> {
     let next = AtomicUsize::new(0);
     let slots: Vec<Mutex<Option<Script>>> = paths.iter().map(|_| Mutex::new(None)).collect();
     let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
     std::thread::scope(|s| {
         for _ in 0..workers.min(paths.len()) {
-            s.spawn(|| {
+            let calls = calls.clone();
+            let (next, slots) = (&next, &slots);
+            s.spawn(move || {
+                LOADER.set(Some(calls));
                 loop {
                     let i = next.fetch_add(1, Ordering::Relaxed);
                     let Some(p) = paths.get(i) else { break };
@@ -414,10 +472,8 @@ fn load_scripts(paths: &[PathBuf], env: &Env) -> Vec<Option<Script>> {
 pub struct AutoloadJob {
     files: Vec<PathBuf>,
     thread: std::thread::JoinHandle<Vec<Option<Script>>>,
-}
-
-pub fn autoload_done(job: &AutoloadJob) -> bool {
-    job.thread.is_finished()
+    /// The loading scripts' clipboard calls, answered by `autoload_done` and `finish_autoload`.
+    calls: mpsc::Receiver<LoaderCall>,
 }
 
 /// `path` relative to `base`, both absolute on the same drive (agi::Path::MakeRelative).
@@ -504,7 +560,14 @@ impl Automation {
     /// Scripts loaded side by side, then put in the list in the order given (a path loaded
     /// already is replaced); returns the load errors.
     fn add_all(&mut self, paths: &[PathBuf]) -> Vec<String> {
-        let loaded = load_scripts(paths, &self.env);
+        let (env, host) = (&self.env, &self.host);
+        let (calls, asked) = mpsc::channel();
+        let loaded = std::thread::scope(|s| {
+            let loading = s.spawn(move || load_scripts(paths, env, &calls));
+            host.serve(&asked);
+            loading.join()
+        });
+        let loaded = loaded.unwrap_or_else(|_| paths.iter().map(|_| None).collect());
         self.add_loaded(paths, loaded)
     }
 
@@ -571,13 +634,26 @@ impl Automation {
         let files = fs_automation::autoload_files(&self.env.paths);
         self.autoload = files.iter().cloned().collect();
         let (paths, env) = (files.clone(), self.env.clone());
-        let thread = std::thread::spawn(move || load_scripts(&paths, &env));
-        Box::new(AutoloadJob { files, thread })
+        let (calls, asked) = mpsc::channel();
+        let thread = std::thread::spawn(move || load_scripts(&paths, &env, &calls));
+        Box::new(AutoloadJob {
+            files,
+            thread,
+            calls: asked,
+        })
+    }
+
+    /// Whether the scripts of `start_autoload` are loaded; what they asked of the GUI thread
+    /// meanwhile is answered here, so call it till they are.
+    pub fn autoload_done(&self, job: &AutoloadJob) -> bool {
+        job.calls.try_iter().for_each(|c| self.host.answer(c));
+        job.thread.is_finished()
     }
 
     /// The scripts of `start_autoload`, waited for; returns the load errors.
     #[allow(clippy::boxed_local)] // cxx hands the job over boxed
     pub fn finish_autoload(&mut self, job: Box<AutoloadJob>) -> Vec<String> {
+        self.host.serve(&job.calls);
         let loaded = job.thread.join();
         let loaded = loaded.unwrap_or_else(|_| job.files.iter().map(|_| None).collect());
         self.add_loaded(&job.files, loaded)
@@ -1502,6 +1578,45 @@ end)"#,
             .collect();
         let want: Vec<String> = (0..24).map(|k| format!("S{k:02}")).collect();
         assert_eq!(names, want);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A script that uses the clipboard while it loads is answered by the thread waiting for it.
+    #[test]
+    fn a_loading_script_reads_the_clipboard() {
+        let dir = std::env::temp_dir().join(format!("fsb-clip-{}", std::process::id()));
+        let autoload = dir.join("user").join("automation").join("autoload");
+        std::fs::create_dir_all(&autoload).unwrap();
+        for k in 0..4 {
+            std::fs::write(
+                autoload.join(format!("clip{k}.lua")),
+                "local clipboard = require 'aegisub.clipboard'\n\
+                 script_name = 'Clip ' .. tostring(clipboard.get()) .. tostring(clipboard.set('x'))\n",
+            )
+            .unwrap();
+        }
+        let data = concat!(env!("CARGO_MANIFEST_DIR"), "/../fs-automation");
+        let mut a = Automation::new(data, dir.join("user").to_str().unwrap());
+        fs_automation::set_clipboard(Some(a.host.clone()));
+        let names = |a: &Automation| -> Vec<String> {
+            (a.scripts.iter().map(|s| s.name.clone()))
+                .filter(|n| n.starts_with("Clip"))
+                .collect()
+        };
+        // no clipboard behind the host here: empty and read-only
+        assert_eq!(a.load_autoload(), [""; 0]);
+        assert_eq!(names(&a), ["Clip nilfalse"; 4]);
+        assert_eq!(a.reload(), [""; 0]);
+        let job = a.start_autoload();
+        while !a.autoload_done(&job) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(a.finish_autoload(job), [""; 0]);
+        assert_eq!(names(&a), ["Clip nilfalse"; 4]);
+        // waited for at once, as the window does when the scripts are wanted before they are in
+        let job = a.start_autoload();
+        assert_eq!(a.finish_autoload(job), [""; 0]);
+        fs_automation::set_clipboard(None);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -40,6 +40,9 @@ public:
 
     TabPanel *current() const;
     QList<TabPanel *> tabs() const;
+    // The tabs whose files the program itself wrote anew on disk (replace in files) read them
+    // again; one with changes of its own is asked first.
+    void rereadChanged();
     static bool isVideoFile(const QString &path); // by its extension
     void showPanel(TabPanel *t); // brings its tab to the front
     TabPanel *newTab();
@@ -123,6 +126,8 @@ private:
     QFileSystemWatcher *m_scriptWatch = nullptr;
     QMap<QString, QAction *> m_actions;
     bool m_openingPairs = false; // openFiles pairs the files itself: no same-named file offered
+    int m_scriptsRunning = 0;    // runScript calls under way
+    bool m_diskRetry = false;    // checkDisk waits for a dialog or a script to end
     QMap<QString, QMenu *> m_recent;
     QLabel *m_statusFields[9];
     FindDialog *m_find = nullptr;

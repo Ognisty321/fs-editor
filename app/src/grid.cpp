@@ -507,7 +507,9 @@ void Grid::ensureVisible(int row) {
 void Grid::clickRow(int vi, Qt::KeyboardModifiers mods) {
     const size_t row = m_vis[vi];
     if (mods & Qt::ShiftModifier) {
-        const int a = std::min(m_anchor, vi), b = std::max(m_anchor, vi);
+        // the anchor is a place among the shown rows, fewer now maybe (deleted, filtered out)
+        const int anchor = std::clamp(m_anchor, 0, int(m_vis.size()) - 1);
+        const int a = std::min(anchor, vi), b = std::max(anchor, vi);
         // with Ctrl the range adds to the selection (Aegisub)
         std::vector<size_t> rows = mods & Qt::ControlModifier ? m_tab->selection() : std::vector<size_t>{};
         for (int k = a; k <= b; ++k) rows.push_back(m_vis[k]);
