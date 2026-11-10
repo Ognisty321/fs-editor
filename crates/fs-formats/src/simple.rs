@@ -118,8 +118,8 @@ pub fn parse_mpl2(text: &str) -> Vec<Sub> {
                 None => continue,
             },
         };
-        let start = Time(start * 100);
-        let end = end.map(|e| Time(e * 100)).unwrap_or(start + Time(3000));
+        let start = Time(start.saturating_mul(100));
+        let end = (end.map(|e| Time(e.saturating_mul(100)))).unwrap_or(start + Time(3000));
         out.push(Sub {
             start,
             end,

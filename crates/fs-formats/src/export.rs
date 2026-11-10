@@ -213,6 +213,8 @@ pub fn write_transtation(doc: &Document, fps: &Framerate) -> String {
 // MPEG-4 Timed Text
 // ---------------------------------------------------------------------------
 
+/// Characters XML 1.0 has no way to write (control codes but tab and line ends, U+FFFE and
+/// U+FFFF) are left out: with one of them nothing would read the file back.
 fn xml_escape(s: &str, out: &mut String) {
     for c in s.chars() {
         match c {
@@ -220,6 +222,8 @@ fn xml_escape(s: &str, out: &mut String) {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
+            '\t' | '\n' | '\r' => out.push(c),
+            '\0'..='\x1f' | '\u{fffe}' | '\u{ffff}' => {}
             _ => out.push(c),
         }
     }
@@ -983,16 +987,17 @@ fn write_ebu_stl_at(doc: &Document, s: &EbuSettings, stamp: &str) -> Result<Vec<
     gsi[251..253].copy_from_slice(format!("{:02}", s.max_line_length.min(99)).as_bytes());
     gsi[253..255].copy_from_slice(b"99");
     gsi[255] = b'1';
-    let [h, m, sec, f] = s.timecode_offset;
-    gsi[256..264].copy_from_slice(format!("{h:02}{m:02}{sec:02}{f:02}").as_bytes());
-    let first = &tti[0][5..9];
-    gsi[264..272].copy_from_slice(
-        format!(
-            "{:02}{:02}{:02}{:02}",
-            first[0], first[1], first[2], first[3]
-        )
-        .as_bytes(),
-    );
+    // two digits each: an hour past 99 (an offset typed so, a line that far) must not widen the field
+    let hhmmssff = |tc: &[u8]| -> [u8; 8] {
+        let mut out = [b'0'; 8];
+        for (k, v) in tc.iter().take(4).enumerate() {
+            let v = (*v).min(99);
+            (out[2 * k], out[2 * k + 1]) = (b'0' + v / 10, b'0' + v % 10);
+        }
+        out
+    };
+    gsi[256..264].copy_from_slice(&hhmmssff(&s.timecode_offset));
+    gsi[264..272].copy_from_slice(&hhmmssff(&tti[0][5..9]));
     gsi[272] = b'1';
     gsi[273] = b'1';
     gsi[274..277].copy_from_slice(b"XXX");
@@ -1103,6 +1108,25 @@ mod tests {
             got,
             [(1000, 2000, "one\\Ntwo & <three>"), (3000, 4000, "four")]
         );
+        // characters XML cannot hold are left out, so the file still reads back
+        let d = doc_of(&[(1000, 2000, "a\0b\u{1}c\u{ffff}d\te")]);
+        let subs = parse_ttxt(&write_ttxt(&d, Time(3000))).unwrap();
+        assert_eq!(subs[0].text, "abcd\te");
+    }
+
+    #[test]
+    fn ebu_header_fields_keep_their_width() {
+        // an offset of 255 hours and a line 300 hours in: two digits each in the header
+        let d = doc_of(&[(300 * 3_600_000, 300 * 3_600_000 + 1000, "far")]);
+        let s = EbuSettings {
+            tv_standard: 2,
+            timecode_offset: [255, 255, 255, 255],
+            ..EbuSettings::default()
+        };
+        let f = write_ebu_stl_at(&d, &s, "261015120000").unwrap();
+        assert_eq!(f.len(), 1024 + 128);
+        assert!(f[256..272].iter().all(u8::is_ascii_digit));
+        assert_eq!(&f[256..264], b"99999999");
     }
 
     #[test]

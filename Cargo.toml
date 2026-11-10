@@ -12,7 +12,7 @@ edition = "2024"
 rust-version = "1.99"
 license = "BSD-3-Clause"
 authors = ["FS Editor contributors"]
-repository = "https://github.com/fs-editor/fs-editor"
+repository = "https://github.com/Ognisty321/fs-editor"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

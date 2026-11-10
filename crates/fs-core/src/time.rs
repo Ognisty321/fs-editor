@@ -27,8 +27,12 @@ impl Time {
         self.0
     }
 
+    /// Saturating, like all arithmetic on times: a hostile number in a file gives a far time,
+    /// never a wrapped or a panicking one.
     pub const fn from_hmsms(h: i64, m: i64, s: i64, ms: i64) -> Self {
-        Time(((h * 60 + m) * 60 + s) * 1000 + ms)
+        let minutes = h.saturating_mul(60).saturating_add(m);
+        let seconds = minutes.saturating_mul(60).saturating_add(s);
+        Time(seconds.saturating_mul(1000).saturating_add(ms))
     }
 
     /// Round to the nearest centisecond (half away from zero), as ASS can only
@@ -36,9 +40,9 @@ impl Time {
     pub fn round_cs(self) -> Self {
         let ms = self.0;
         let r = if ms >= 0 {
-            (ms + 5).div_euclid(10) * 10
+            ms.saturating_add(5).div_euclid(10) * 10
         } else {
-            -((-ms + 5).div_euclid(10) * 10)
+            -(ms.saturating_neg().saturating_add(5).div_euclid(10) * 10)
         };
         Time(r)
     }
@@ -247,29 +251,29 @@ impl fmt::Display for Time {
 impl Add for Time {
     type Output = Time;
     fn add(self, rhs: Time) -> Time {
-        Time(self.0 + rhs.0)
+        Time(self.0.saturating_add(rhs.0))
     }
 }
 impl Sub for Time {
     type Output = Time;
     fn sub(self, rhs: Time) -> Time {
-        Time(self.0 - rhs.0)
+        Time(self.0.saturating_sub(rhs.0))
     }
 }
 impl AddAssign for Time {
     fn add_assign(&mut self, rhs: Time) {
-        self.0 += rhs.0;
+        self.0 = self.0.saturating_add(rhs.0);
     }
 }
 impl SubAssign for Time {
     fn sub_assign(&mut self, rhs: Time) {
-        self.0 -= rhs.0;
+        self.0 = self.0.saturating_sub(rhs.0);
     }
 }
 impl Neg for Time {
     type Output = Time;
     fn neg(self) -> Time {
-        Time(-self.0)
+        Time(self.0.saturating_neg())
     }
 }
 
@@ -289,6 +293,20 @@ mod tests {
             Time::from_ass_field("99999999999999999999:00:00.00"),
             Time(0)
         );
+    }
+
+    #[test]
+    fn arithmetic_saturates() {
+        let far = Time(i64::MAX);
+        assert_eq!(far + Time(3000), far);
+        assert_eq!(Time(i64::MIN) - Time(1), Time(i64::MIN));
+        assert_eq!(-Time(i64::MIN), far);
+        assert_eq!(Time::from_hmsms(i64::MAX, 59, 59, 999), far);
+        assert_eq!(far.round_cs().to_ass(), Time(i64::MAX / 10 * 10).to_ass());
+        let mut t = far;
+        t += Time(1);
+        t -= Time(-1);
+        assert_eq!(t, far);
     }
 
     #[test]

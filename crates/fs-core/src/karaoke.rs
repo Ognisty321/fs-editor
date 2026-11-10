@@ -38,11 +38,15 @@ impl Karaoke {
                 text: e.text.clone(),
             }];
         }
-        Self {
+        let mut k = Self {
             line_start: e.start,
             line_end: e.end,
             syls,
-        }
+        };
+        // one syllable after another, as every edit below keeps them (and Aegisub's karaoke
+        // mode reads them): a `\kt` that jumps back would leave boundaries out of order
+        k.recompute_starts();
+        k
     }
 
     pub fn text(&self) -> String {
@@ -152,7 +156,7 @@ impl Karaoke {
             return t;
         }
         let lo = self.syls[i - 1].start_ms;
-        let hi = self.syls[i].start_ms + self.syls[i].duration_ms;
+        let hi = (self.syls[i].start_ms + self.syls[i].duration_ms).max(lo);
         let rel = round_cs((t - self.line_start).ms()).clamp(lo, hi);
         self.syls[i - 1].duration_ms = rel - lo;
         self.syls[i].duration_ms = hi - rel;
@@ -278,6 +282,18 @@ mod tests {
         assert_eq!(k.text(), r"{\k20}ka{\kf30}ra{\k50}o{\b1}ke");
         assert_eq!(k.syl_at(Time(1499)), Some(1));
         assert_eq!(k.syl_display(2), "oke");
+    }
+
+    #[test]
+    fn a_kt_that_jumps_back_keeps_the_boundaries_in_order() {
+        // the second syllable would start before the first: moving its boundary used to panic
+        let mut k = Karaoke::from_event(&ev(r"{\kt100\k10}a{\kt0\k10}b", 0, 5000));
+        assert!(k.syls[0].start_ms <= k.syls[1].start_ms);
+        let at = k.set_marker(1, Time(1050));
+        assert_eq!(at, k.syl_start(1));
+        k.shift_markers(1, Time(-400));
+        k.shift_markers(1, Time(400));
+        assert!(k.syls.iter().all(|s| s.duration_ms >= 0));
     }
 
     #[test]

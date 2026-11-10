@@ -154,12 +154,324 @@ fn exercise_text(text: &str) {
     }
 }
 
-fn exercise_doc(mut doc: Document) {
+/// The editing helpers of the text field: highlighting, call tips, searching and replacing,
+/// tag adjusting and the kanji timer.
+fn exercise_text_tools(text: &str) {
+    use fs_core::ops::{CaseRule, Field, Replace, TextMatcher};
+    use fs_core::tag_adjust::{TagAdjust, adjust_tag, line_values};
+
+    let bounds: Vec<usize> = (0..=text.len())
+        .filter(|&i| text.is_char_boundary(i))
+        .collect();
+    let some: Vec<usize> = bounds
+        .iter()
+        .copied()
+        .step_by(1 + bounds.len() / 8)
+        .chain([text.len(), text.len() + 3])
+        .collect();
+    for template in [false, true] {
+        let runs = fs_core::syntax::highlight(text, template);
+        assert_eq!(runs.iter().map(|r| r.1).sum::<usize>(), text.len());
+    }
+    for &p in &some {
+        let _ = fs_core::calltip::calltip(text, p);
+    }
+    let _ = tags::translatable_ranges(text);
+    let _ = tags::without_plain_text(text);
+    let _ = tags::wrap_len(text);
+    for span in tags::block_spans(text) {
+        let _ = &text[span];
+    }
+    let turn = |x: f64, y: f64| (-y, x);
+    let _ = ops::transform_place(text, &turn, true, (10.0, 20.0));
+    let _ = ops::transform_place(text, &turn, false, (10.0, 20.0));
+
+    let modes = [
+        TagAdjust::Add,
+        TagAdjust::Scale,
+        TagAdjust::Set,
+        TagAdjust::Insert { at: None },
+        TagAdjust::Insert {
+            at: Some((bounds[bounds.len() / 3], bounds[bounds.len() / 2])),
+        },
+        TagAdjust::Multiply,
+        TagAdjust::GradientLine { increasing: true },
+        TagAdjust::GradientText { increasing: false },
+    ];
+    for tag in [
+        "alpha", "1a", "c", "3c", "fad", "move", "clip", "bord", "fax", "org", "t", "blur", "k",
+    ] {
+        let _ = line_values(text, None, tag, 4);
+        for mode in modes {
+            let _ = adjust_tag(text, None, tag, mode, &[2.0, -3.5, 1e12, f64::NAN], 1, 3);
+            let _ = adjust_tag(text, None, tag, mode, &[], 0, 1);
+        }
+    }
+
+    let patterns = [
+        ("", false),
+        ("a", false),
+        ("\\", false),
+        ("{", false),
+        ("", true),
+        ("a*", true),
+        (r"\b", true),
+        (r"(.)(.)?", true),
+        (r"\\N|$", true),
+        (r"[^{}]*", true),
+    ];
+    static MATCHERS: std::sync::OnceLock<Vec<TextMatcher>> = std::sync::OnceLock::new();
+    let matchers = MATCHERS.get_or_init(|| {
+        (patterns.iter())
+            .filter_map(|&(pat, is_regex)| TextMatcher::new(pat, is_regex, false, Field::Text).ok())
+            .collect()
+    });
+    for matcher in matchers {
+        for (strip_tags, only_tags) in [(false, false), (true, false), (false, true)] {
+            let mut matcher = matcher.clone();
+            matcher.strip_tags = strip_tags;
+            matcher.only_tags = only_tags;
+            for case in [CaseRule::Written, CaseRule::Follow, CaseRule::Upper] {
+                let r = Replace {
+                    matcher: matcher.clone(),
+                    replacement: r"<$2\1${1}$9\\\N\1c>ż".into(),
+                    first_only: false,
+                    case,
+                };
+                for &p in &some {
+                    if let Some(at) = r.matcher.find_at(text, p) {
+                        assert!(text.is_char_boundary(at.start) && text.is_char_boundary(at.end));
+                        assert!(at.start <= at.end && at.end <= text.len());
+                        let _ = r.replace_one(text, at);
+                    }
+                }
+            }
+        }
+    }
+
+    let syls: Vec<(i64, String)> = tags::karaoke_syllables(text)
+        .into_iter()
+        .map(|s| (s.duration_ms, s.text))
+        .collect();
+    let names: Vec<&str> = syls.iter().map(|s| s.1.as_str()).collect();
+    let _ = fs_core::kanji_timer::auto_match(&names, text);
+    let mut m = fs_core::kanji_timer::KanjiMatcher::new(syls, &tags::strip_tags(text));
+    for step in 0..64 {
+        match step % 7 {
+            0 => m.auto_match(),
+            1 => drop(m.increase_source()),
+            2 => drop(m.increase_destination()),
+            3 => drop(m.decrease_source()),
+            4 => drop(m.accept()),
+            5 => drop(m.decrease_destination()),
+            _ => drop(m.accept()),
+        }
+        let _ = (m.output(), m.groups(), m.remaining());
+        let _ = (m.source_selection(), m.unmatched_source());
+        let _ = (m.destination_selection(), m.unmatched_destination());
+    }
+    while m.undo() {}
+
+    let _ = fs_core::Time::parse_ass(text);
+    let _ = fs_core::Time::parse_srt(text);
+    let _ = fs_core::Time::parse_offset(text);
+    let _ = fs_core::Time::from_ass_field(text).to_ass();
+    let _ = fs_core::Color::parse_style(text);
+    let _ = fs_core::Color::parse_tag(text);
+    let _ = fs_core::Color::parse_alpha(text);
+    let _ = fs_core::Color::parse_html(text);
+}
+
+/// The document-wide tools: shifting, post-processing, resampling, replacing, filtering, the
+/// translation grid, undo and the exporters.
+fn exercise_doc_tools(doc: &Document) {
+    use fs_core::Time;
+    use fs_core::ops::{
+        ArMode, CaseRule, Field, Filter, MoveTargets, PostProcess, Replace, Resample, ShiftAmount,
+        ShiftWhich, TextMatcher,
+    };
+    use fs_formats::export;
+
+    // the first lines are enough: every tool below walks the whole document several times
+    let mut doc = doc.clone();
+    let extra: Vec<usize> = (60..doc.event_count()).collect();
+    doc.remove_events(&extra);
+    let doc = &doc;
+    let n = doc.event_count();
+    let fr = Framerate::from_rational(24000, 1001, true).unwrap();
+    let vfr = Framerate::from_timecodes(vec![0, 40, 90, 91, 500, 5000]).unwrap();
+    let mut history = fs_core::history::Editor::new(doc.clone());
+
+    for (amount, which) in [
+        (ShiftAmount::Time(Time(-123_456)), ShiftWhich::Both),
+        (ShiftAmount::Time(Time(i64::MAX / 4)), ShiftWhich::End),
+        (ShiftAmount::Frames(-7, &fr), ShiftWhich::Start),
+        (ShiftAmount::Frames(1_000_000, &vfr), ShiftWhich::Both),
+    ] {
+        history.edit("shift", |d| {
+            ops::shift_times(d, &Rows::All, amount, which, None);
+            ops::shift_times(
+                d,
+                &Rows::From(n / 2),
+                amount,
+                which,
+                Some(&["Default".into()]),
+            );
+        });
+    }
+
+    let keyframes = [0, 3, 10, 11, 250, 100_000];
+    for (i, f) in [&fr, &vfr].into_iter().enumerate() {
+        let pp = PostProcess {
+            lead_in: Some(Time(120)),
+            lead_out: Some(Time(-50)),
+            adjacent_threshold: Some(Time(300)),
+            adjacent_overlap: Some(Time(100)),
+            adjacent_bias: i as f64,
+            keyframes: Some((&keyframes, f)),
+            kf_before_start: Time(200),
+            kf_after_start: Time(300),
+            kf_before_end: Time(400),
+            kf_after_end: Time(500),
+            styles: Vec::new(),
+        };
+        history.edit("post-process", |d| {
+            ops::post_process(d, &Rows::All, &pp);
+            ops::post_process(d, &Rows::Selected(vec![0, n / 2, n + 5]), &pp);
+        });
+    }
+
+    for (ar_mode, to) in [
+        (ArMode::Stretch, (0, 0)),
+        (ArMode::AddBorder, (1920, 1080)),
+        (ArMode::RemoveBorder, (640, 1080)),
+        (ArMode::Manual, (i32::MAX, 1)),
+    ] {
+        let r = Resample {
+            from: (1280, 720),
+            to,
+            margin: [10, -2000, 3, i32::MIN / 2],
+            ar_mode,
+            matrix: Some(("TV.601".into(), "PC.709".into())),
+        };
+        history.edit("resample", |d| ops::resample(d, &r));
+    }
+
+    let targets = MoveTargets {
+        drawing: true,
+        ..MoveTargets::DEFAULT
+    };
+    history.edit("move", |d| {
+        ops::translate_positions(d, &Rows::All, -1e6, 0.125, targets)
+    });
+
+    for (pat, is_regex) in [("a", false), (r"(\w)(\W)?", true), ("", true)] {
+        for (field, strip_tags) in [
+            (Field::Text, true),
+            (Field::Text, false),
+            (Field::Style, false),
+            (Field::Actor, false),
+            (Field::Effect, false),
+        ] {
+            let mut matcher = TextMatcher::new(pat, is_regex, false, field).unwrap();
+            matcher.strip_tags = strip_tags;
+            let filter = Filter {
+                text: Some(matcher.clone()),
+                only_overlapping: strip_tags,
+                min_cps: Some(1.0),
+                invert: is_regex,
+                ..Filter::default()
+            };
+            let _ = filter.apply(&history.doc);
+            let r = Replace {
+                matcher,
+                replacement: r"$2{\1}".into(),
+                first_only: strip_tags,
+                case: CaseRule::Follow,
+            };
+            history.edit("replace", |d| ops::replace(d, &Rows::All, &r));
+        }
+    }
+
+    history.edit("rows", |d| {
+        ops::new_end_times(d, 60);
+        let copies = ops::duplicate(d, &[0, n / 2, n + 1]);
+        ops::set_comment(d, &copies, None);
+        ops::swap_rows(d, 0, n);
+        ops::swap_rows(d, n / 2, n * 4);
+        ops::strip_all_tags(d, &Rows::From(n / 2));
+        ops::strip_comments(d, &Rows::All);
+        ops::delete_rows(d, &copies);
+    });
+
+    history.edit("translation", |d| {
+        tlmode::enable(d);
+        let rows = tlmode::rows(d);
+        if let Some(&row) = rows.get(rows.len() / 2) {
+            let row = tlmode::set_translation(d, row, "tłumaczenie {\\i1}x");
+            let row = tlmode::set_doubtful(d, row, true);
+            let _ = tlmode::original_text(d, row);
+            let _ = tlmode::translation_text(d, row);
+        }
+        let _ = tlmode::next_doubtful(d, 0);
+        let _ = tlmode::next_untranslated(d, n);
+        let _ = tlmode::paste_translation(d, n / 3, &["a", "", "b\\Nc"]);
+        for op in [
+            tlmode::Shift::InsertTranslation,
+            tlmode::Shift::JoinTranslation,
+            tlmode::Shift::DeleteTranslation,
+            tlmode::Shift::InsertOriginal,
+            tlmode::Shift::JoinOriginal,
+            tlmode::Shift::DeleteOriginal,
+        ] {
+            tlmode::shift(d, n / 4, 3, op);
+            tlmode::shift(d, tlmode::rows(d).len().saturating_sub(1), 9, op);
+        }
+        let _ = tlmode::translation_only(d);
+    });
+
+    while history.undo().is_some() {}
+    assert_eq!(history.doc.to_ass_string(), doc.to_ass_string());
+    while history.redo().is_some() {}
+    let _ = (history.undo_memory(), history.is_modified());
+
+    let _ = export::pieces(doc);
+    for f in [&fr, &vfr] {
+        let _ = export::write_encore(doc, f);
+        let _ = export::write_transtation(doc, f);
+    }
+    let ttxt = export::write_ttxt(doc, Time(3000));
+    assert!(export::parse_ttxt(&ttxt).is_some());
+    for (tv_standard, line_wrapping, max_line_length) in
+        [(0, 0, 0), (4, 1, 1), (2, 2, 42), (5, 3, 9)]
+    {
+        let s = export::EbuSettings {
+            tv_standard,
+            line_wrapping,
+            max_line_length,
+            text_encoding: tv_standard % 5,
+            ..export::EbuSettings::default()
+        };
+        let _ = export::write_ebu_stl(doc, &s);
+    }
+    let _ = fs_formats::write_plain_text(doc);
+    let _ = doc.attachments();
+    let _ = doc.embedded_fonts();
+}
+
+/// `tools`: the slower editing tools too (once per input, in the format it is detected as).
+fn exercise_doc(mut doc: Document, tools: bool) {
     let _ = doc.to_ass_string();
+    if tools {
+        exercise_doc_tools(&doc);
+    }
     let n = doc.event_count();
     for i in 0..n.min(40) {
         let e = doc.event(i).unwrap().clone();
         exercise_text(&e.text);
+        if tools && i < 3 {
+            exercise_text_tools(&e.text);
+        }
         let mut k = Karaoke::from_event(&e);
         let _ = k.markers();
         let _ = k.text();
@@ -201,6 +513,8 @@ fn exercise_doc(mut doc: Document) {
 fn exercise(bytes: &[u8], ext: Option<&str>) {
     let _ = keyframes::parse(&String::from_utf8_lossy(bytes));
     let _ = Framerate::parse_timecodes(&String::from_utf8_lossy(bytes));
+    let _ = fs_formats::export::parse_ttxt(&String::from_utf8_lossy(bytes));
+    let _ = fs_formats::load_plain_text(bytes, &LoadOptions::default());
     let forced = [
         None,
         Some(Format::Ass),
@@ -208,6 +522,7 @@ fn exercise(bytes: &[u8], ext: Option<&str>) {
         Some(Format::Mpl2),
         Some(Format::MicroDvd),
         Some(Format::Tmp),
+        Some(Format::Ttxt),
     ];
     for format in forced {
         let opts = LoadOptions {
@@ -224,10 +539,11 @@ fn exercise(bytes: &[u8], ext: Option<&str>) {
             Format::Mpl2,
             Format::MicroDvd,
             Format::Tmp,
+            Format::Ttxt,
         ] {
             let _ = save_bytes(&l.doc, f, &SaveOptions::default());
         }
-        exercise_doc(l.doc);
+        exercise_doc(l.doc, format.is_none());
     }
 }
 

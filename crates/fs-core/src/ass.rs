@@ -959,11 +959,27 @@ impl Parser {
         // a later Format line in the current section overrides its first one
         let mut style_fmt: Option<Vec<StyleField>> = None;
         let mut event_fmt: Option<Vec<EventField>> = None;
+        // inside the data of a `[Fonts]`/`[Graphics]` entry, where a line can look like a
+        // section header (Aegisub's `ParseAttachmentLine`)
+        let mut in_attachment = false;
 
         for (lineno0, (text, ending)) in lines.iter().enumerate() {
             let lineno = lineno0 + 1;
             let raw = RawLine::new(*text, *ending);
             let trimmed = text.trim();
+
+            if in_attachment {
+                if let Cur::Section(i) = cur
+                    && crate::attachments::is_data_line(text)
+                    && let SectionBody::Raw(l) = &mut Arc::make_mut(&mut doc.sections[i]).body
+                {
+                    // a line shorter than a full one is the entry's last
+                    in_attachment = text.len() == crate::attachments::DATA_LINE_LEN;
+                    l.push(raw);
+                    continue;
+                }
+                in_attachment = false;
+            }
 
             // Section header?
             if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.len() >= 2 {
@@ -1034,8 +1050,12 @@ impl Parser {
 
             // Script type hint from [Script Info] before any styles section.
             let next_id = &mut doc.next_id;
+            let kind = doc.sections[si].kind;
             match &mut Arc::make_mut(&mut doc.sections[si]).body {
-                SectionBody::Raw(l) => l.push(raw),
+                SectionBody::Raw(l) => {
+                    in_attachment = crate::attachments::starts_entry(text, kind);
+                    l.push(raw)
+                }
                 SectionBody::Info(sec) => {
                     if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with("!:") {
                         pending.push(raw);

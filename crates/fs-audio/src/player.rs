@@ -34,6 +34,9 @@ struct Shared {
     playing: AtomicBool,
     /// Bumped by `play` so the callback picks up a new start position.
     seek_gen: AtomicU64,
+    /// The `seek_gen` of the range the callback played to its end (`u64::MAX`: none). A flag
+    /// the callback cleared could switch off a `play` that came while it filled its buffer.
+    done_gen: AtomicU64,
     seek_to: AtomicI64,
     end: AtomicI64,
     volume: AtomicU32,
@@ -94,6 +97,7 @@ impl Player {
         let shared = Arc::new(Shared {
             playing: AtomicBool::new(false),
             seek_gen: AtomicU64::new(0),
+            done_gen: AtomicU64::new(u64::MAX),
             seek_to: AtomicI64::new(0),
             end: AtomicI64::new(0),
             volume: AtomicU32::new(1f32.to_bits()),
@@ -171,7 +175,8 @@ impl Player {
     }
 
     pub fn is_playing(&self) -> bool {
-        self.shared.playing.load(SeqCst)
+        let s = &self.shared;
+        s.playing.load(SeqCst) && s.done_gen.load(SeqCst) != s.seek_gen.load(SeqCst)
     }
 
     pub fn set_volume(&self, v: f32) {
@@ -216,13 +221,20 @@ where
     let mut gen_seen = u64::MAX;
     let mut pos = 0f64;
     let data_cb = move |out: &mut [T], info: &cpal::OutputCallbackInfo| {
-        let g = sh.seek_gen.load(Acquire);
-        if g != gen_seen {
-            gen_seen = g;
-            pos = sh.seek_to.load(Acquire) as f64;
-        }
-        let playing = sh.playing.load(Acquire);
-        let end = sh.end.load(Acquire) as f64;
+        // read again when a `play` came in between: its range, not the last one's position
+        // with the new end
+        let (g, playing, end) = loop {
+            let g = sh.seek_gen.load(Acquire);
+            if g != gen_seen {
+                gen_seen = g;
+                pos = sh.seek_to.load(Acquire) as f64;
+            }
+            let playing = sh.playing.load(Acquire) && sh.done_gen.load(Acquire) != g;
+            let end = sh.end.load(Acquire) as f64;
+            if sh.seek_gen.load(Acquire) == g {
+                break (g, playing, end);
+            }
+        };
         let vol = f32::from_bits(sh.volume.load(Relaxed));
         if playing {
             // when the first frame of this buffer will be heard
@@ -234,6 +246,12 @@ where
             let audible = sh.epoch.elapsed() + latency;
             sh.buf_pos.store(pos.to_bits(), Release);
             sh.buf_audible_ns.store(audible.as_nanos() as i64, Release);
+            if sh.seek_gen.load(Acquire) != g {
+                // a `play` since: its start stands as the position, till its first buffer
+                sh.buf_pos
+                    .store((sh.seek_to.load(Acquire) as f64).to_bits(), Release);
+                sh.buf_audible_ns.store(i64::MAX, Release);
+            }
         }
         let samples = pcm.samples();
         let mut finished = !playing;
@@ -253,7 +271,7 @@ where
             frame.fill(s);
         }
         if playing && finished {
-            sh.playing.store(false, Release);
+            sh.done_gen.store(g, Release);
         }
     };
     let err_cb = |e: cpal::Error| eprintln!("audio stream error: {e}");

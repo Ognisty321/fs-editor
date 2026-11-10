@@ -78,6 +78,23 @@ fn header_name(line: &str, font: bool) -> Option<&str> {
         .map(|_| l[key.len()..].trim())
 }
 
+/// The longest line of UUE data; a shorter one ends its entry.
+pub(crate) const DATA_LINE_LEN: usize = 80;
+
+/// Whether `line` can be UUE data: 1 to 80 characters of the encoding's alphabet.
+pub(crate) fn is_data_line(line: &str) -> bool {
+    (1..=DATA_LINE_LEN).contains(&line.len()) && line.bytes().all(|b| (33..97).contains(&b))
+}
+
+/// Whether `line` names an entry of a section of `kind`, so its data follows.
+pub(crate) fn starts_entry(line: &str, kind: SectionKind) -> bool {
+    match kind {
+        SectionKind::Fonts => header_name(line, true).is_some(),
+        SectionKind::Graphics => header_name(line, false).is_some(),
+        _ => false,
+    }
+}
+
 /// `(name, data line range)` of each entry in a section's raw lines.
 fn entries(lines: &[RawLine], font: bool) -> Vec<(String, Range<usize>)> {
     let mut out: Vec<(String, Range<usize>)> = Vec::new();
@@ -251,6 +268,31 @@ mod tests {
         }
         // "Man" -> 6-bit groups 19 22 5 46, each + 33
         assert_eq!(uuencode(b"Man"), ["47&O"]);
+    }
+
+    #[test]
+    fn a_data_line_that_looks_like_a_section_header_stays_data() {
+        // the second full line reads "[...]": 6-bit values 58 and 60 at its ends
+        let mut chars = vec![b'A'; 240];
+        (chars[80], chars[159]) = (b'[', b']');
+        let lines: Vec<&str> = chars
+            .chunks(80)
+            .map(|l| std::str::from_utf8(l).unwrap())
+            .collect();
+        let font = uudecode(lines.iter().copied());
+        let mut d = Document::parse("[Script Info]\nScriptType: v4.00+\n\n[Events]\n");
+        d.attach(true, "A.ttf", &font);
+        d.attach(true, "B.ttf", b"second");
+        let text = d.to_ass_string();
+        assert!(text.contains(&format!("\n{}\n", lines[1])));
+        let parsed = Document::parse(&text);
+        assert_eq!(parsed.sections.len(), d.sections.len());
+        assert_eq!(parsed.attachment_data(true, "A_0.ttf").unwrap(), font);
+        assert_eq!(parsed.attachment_data(true, "B_0.ttf").unwrap(), b"second");
+        assert_eq!(parsed.to_ass_string(), text);
+        // after a short last line the entry is over: a header is a header again
+        let parsed = Document::parse("[Fonts]\nfontname: a.ttf\nAAAA\n[EVENTS]\n");
+        assert_eq!(parsed.sections.len(), 2);
     }
 
     #[test]

@@ -165,9 +165,10 @@ impl Framerate {
             tc.iter_mut().for_each(|t| *t -= front);
         }
         self.denominator = DEFAULT_DENOMINATOR;
-        let n = (tc.len() - 1) as i64;
-        self.numerator = n * self.denominator * 1000 / *tc.last().unwrap();
-        self.last = n * self.denominator * 1000;
+        // i128: the product passes i64 from nine million frames on
+        let span = (tc.len() - 1) as i128 * self.denominator as i128 * 1000;
+        self.numerator = sat(span / *tc.last().unwrap() as i128);
+        self.last = sat(span);
         Ok(())
     }
 

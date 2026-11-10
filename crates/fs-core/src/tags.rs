@@ -235,6 +235,25 @@ impl Line {
         }
     }
 
+    /// [`for_each_tag_mut`](Self::for_each_tag_mut) that goes into `\t` too: `f` gets the tags a
+    /// transform animates in place of the `\t` itself, which is rewritten when one changed.
+    pub fn for_each_tag_deep_mut(&mut self, mut f: impl FnMut(&mut Tag)) {
+        self.for_each_tag_mut(|t| {
+            let Some(mut inner) = t.transform_tags() else {
+                return f(t);
+            };
+            let before = inner.clone();
+            inner.iter_mut().for_each(&mut f);
+            if inner != before {
+                let mut args = t.args.clone();
+                if let Some(last) = args.last_mut() {
+                    *last = inner.iter().map(Tag::to_text).collect();
+                }
+                t.set_args(args);
+            }
+        });
+    }
+
     /// Set a tag at the start of the line, as Aegisub's `SetOverride` does: in the first override
     /// block (made if the line starts with text), where it takes the place of the first tag of
     /// the same name or an alias and the others go, so no later one in that block wins. Tags

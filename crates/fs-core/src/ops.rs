@@ -123,6 +123,10 @@ pub fn shift_times(
 /// times inside a frame are interpolated, and the relative times of `\t`,
 /// `\move`, `\fad`, `\fade` and karaoke tags are converted too.
 pub fn change_fps(doc: &mut Document, from: &Framerate, to: &Framerate) {
+    // a rate of zero has no frames to map: every time would land on 0 (Aegisub leaves the file)
+    if !from.is_loaded() || !to.is_loaded() {
+        return;
+    }
     let convert = |t: i64| -> i64 {
         let f = from.frame_at_time(t, TimeType::Exact);
         let (fs, fe) = (
@@ -559,8 +563,9 @@ fn shown(text: &str) -> (String, Vec<(usize, usize, usize)>) {
 /// regex crate would look for a group named "1a"); `\1` to `\9` are groups too, unless they open
 /// a colour or alpha tag (`\1c`, `\3a`, which Aegisub would read as a group and a letter); `\\`
 /// is one backslash and `\$` a dollar. Any other backslash stays, so `\N` is still a line break
-/// (Aegisub drops it and leaves "N").
-fn perl_groups(rep: &str) -> String {
+/// (Aegisub drops it and leaves "N"). `$name` is the group of that name when the pattern has
+/// one (`named`), else the text it is: "$USD" stays "$USD".
+fn perl_groups(rep: &str, named: &dyn Fn(&str) -> bool) -> String {
     let (mut out, mut rest) = (String::with_capacity(rep.len()), rep);
     while let Some(i) = rest.find(['$', '\\']) {
         out.push_str(&rest[..i]);
@@ -584,7 +589,14 @@ fn perl_groups(rep: &str) -> String {
             continue;
         }
         let digits = after.bytes().take_while(u8::is_ascii_digit).count();
-        if let Some(r) = after.strip_prefix('$') {
+        // what the regex crate would read as one group name
+        let word = (after.bytes())
+            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+            .count();
+        if digits == 0 && word > 0 && !named(&after[..word]) {
+            out.push_str("$$");
+            rest = after;
+        } else if let Some(r) = after.strip_prefix('$') {
             out.push_str("$$");
             rest = r;
         } else if digits > 0
@@ -649,7 +661,10 @@ impl Replace {
     /// The replacement as written for the regex crate.
     fn rep(&self) -> String {
         if self.matcher.is_regex {
-            perl_groups(&self.replacement)
+            let re = &self.matcher.regex;
+            perl_groups(&self.replacement, &|name| {
+                re.capture_names().flatten().any(|n| n == name)
+            })
         } else {
             self.replacement.clone()
         }
@@ -1092,7 +1107,8 @@ pub fn split_at(
         let total = (la + lb).max(1);
         ev.start + Time(ev.duration().ms() * la / total)
     });
-    let mid = mid.clamp(ev.start, ev.end);
+    // a line that ends before it starts splits at its start (`clamp` panics on min > max)
+    let mid = mid.min(ev.end).max(ev.start);
     {
         let e1 = doc.event_mut(row).unwrap();
         e1.text = a;
@@ -1553,7 +1569,8 @@ pub fn translate_positions(doc: &mut Document, rows: &Rows, dx: f64, dy: f64, wh
     for i in rows.resolve(doc) {
         let mut line = Line::parse(&doc.event(i).unwrap().text);
         let s = |v: f64| crate::model::fmt_f64((v * 1000.0).round() / 1000.0);
-        line.for_each_tag_mut(|t| {
+        // a clip a `\t` animates moves with the line too
+        line.for_each_tag_deep_mut(|t| {
             let n = |k: usize| t.arg_f64(k).unwrap_or(0.0);
             match t.name.as_str() {
                 "pos" if what.pos && t.args.len() >= 2 => {
@@ -1632,7 +1649,7 @@ pub fn transform_place(
     let has = |name: &str| line.tags().any(|t| t.name == name);
     let org_only = turn && has("org");
     let placed = has("pos") || has("move");
-    line.for_each_tag_mut(|t| {
+    line.for_each_tag_deep_mut(|t| {
         let n = |k: usize| t.arg_f64(k).unwrap_or(0.0);
         match t.name.as_str() {
             "pos" | "org" if t.args.len() >= 2 && (t.name == "org" || !org_only) => {
@@ -2041,12 +2058,13 @@ mod tests {
             assert_eq!(r.apply("-", text, 0, false).0, re.replace_all(text, "-"));
             assert_eq!(r.apply("-", text, 0, false).1, re.find_iter(text).count());
         }
+        let named = |n: &str| n == "name";
         assert_eq!(
-            perl_groups("$1a $2 ${3}b $$1x $name $"),
-            "${1}a $2 ${3}b $$1x $name $"
+            perl_groups("$1a $2 ${3}b $$1x $name $ $USD $_", &named),
+            "${1}a $2 ${3}b $$1x $name $ $$USD $$_"
         );
         assert_eq!(
-            perl_groups(r"{\1c&H0&\3a&HFF&}\1x \2 \\N \N \\ \0 \$5 \"),
+            perl_groups(r"{\1c&H0&\3a&HFF&}\1x \2 \\N \N \\ \0 \$5 \", &named),
             r"{\1c&H0&\3a&HFF&}${1}x ${2} \N \N \ \0 $$5 \"
         );
         let r = Replace {
@@ -2056,6 +2074,14 @@ mod tests {
             case: CaseRule::Written,
         };
         assert_eq!(r.apply(&r.rep(), "ab cd", 0, false).0, r"{\1c&HFF&}cd\Nab");
+        // a dollar before a word that names no group is a dollar
+        let r = Replace {
+            matcher: TextMatcher::new(r"(?P<n>\d+) zł", true, true, Field::Text).unwrap(),
+            replacement: "$n $USD".into(),
+            first_only: false,
+            case: CaseRule::Written,
+        };
+        assert_eq!(r.apply(&r.rep(), "5 zł", 0, false).0, "5 $USD");
     }
 
     #[test]
@@ -2097,6 +2123,11 @@ mod tests {
         assert_eq!(d.event(1).unwrap().text, "world");
         assert_eq!(d.event(0).unwrap().end, Time(1500));
         assert_eq!(d.event(1).unwrap().start, Time(1500));
+        // a line that ends before it starts still splits, at its start
+        let mut d = doc(&[("0:00:05.00", "0:00:03.00", "Default", "Hello world")]);
+        assert_eq!(split_at(&mut d, 0, 5, None), Some(1));
+        assert_eq!(split_at(&mut d, 0, 2, Some(Time(9000))), Some(1));
+        assert_eq!(d.event(0).unwrap().end, Time(5000));
     }
 
     #[test]
@@ -2375,6 +2406,23 @@ mod tests {
         assert_eq!(
             d.event(0).unwrap().text,
             r"{\move(11,1,13,3,0,100)\clip(m 10 -1 l 11 0)}x"
+        );
+        // the clip a \t animates to moves along, the rest of the transform is left as written
+        let mut animated = doc(&[(
+            "0:00:00.00",
+            "0:00:01.00",
+            "Default",
+            r"{\clip(0,0,100,100)\t(0,500,\fs40\clip(0,0,200,200))\t(\frz30)}x",
+        )]);
+        translate_positions(&mut animated, &Rows::All, 10.0, 10.0, MoveTargets::DEFAULT);
+        assert_eq!(
+            animated.event(0).unwrap().text,
+            r"{\clip(10,10,110,110)\t(0,500,\fs40\clip(10,10,210,210))\t(\frz30)}x"
+        );
+        let twice = |x: f64, y: f64| (x * 2.0, y * 2.0);
+        assert_eq!(
+            transform_place(r"{\pos(1,1)\t(\clip(1,2,3,4))}x", &twice, false, (0.0, 0.0)),
+            r"{\pos(2,2)\t(\clip(2,4,6,8))}x"
         );
         let only_end = MoveTargets {
             pos: false,

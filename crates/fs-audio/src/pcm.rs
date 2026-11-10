@@ -178,9 +178,10 @@ impl PcmBuffer {
     }
     /// Clamped copy of `[start, end)` (Aegisub's "Save audio clip").
     pub fn slice(&self, start: i64, end: i64) -> &[i16] {
-        let s = start.clamp(0, self.len()) as usize;
-        let e = end.clamp(start.max(0), self.len()) as usize;
-        &self.samples[s..e]
+        let s = start.clamp(0, self.len());
+        // a range past the end is empty (`clamp` panics on min > max)
+        let e = end.clamp(s, self.len());
+        &self.samples[s as usize..e as usize]
     }
 }
 
@@ -249,5 +250,9 @@ mod tests {
         let three = PcmBuffer::load_parts(&[&long, &long, &long], |_, _| true).unwrap();
         assert_eq!(one.samples(), three.samples());
         assert_eq!(pcm.slice(1, 10), &[16384, -32767]);
+        // a selection after the audio's end, or one that ends before it starts, is empty
+        assert!(pcm.slice(50, 60).is_empty());
+        assert!(pcm.slice(2, 1).is_empty());
+        assert!(pcm.slice(-9, -3).is_empty());
     }
 }

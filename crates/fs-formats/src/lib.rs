@@ -251,6 +251,13 @@ pub fn load_bytes(bytes: &[u8], ext: Option<&str>, opts: &LoadOptions) -> Result
     {
         return Err(Error::Empty);
     }
+    // the styles section says which of the two a script is, as the writer reads it: a `ScriptType`
+    // that disagrees would have the first save convert the file
+    let format = match format {
+        Format::Ass | Format::Ssa if doc.version() == AssVersion::Ssa => Format::Ssa,
+        Format::Ass | Format::Ssa => Format::Ass,
+        f => f,
+    };
     Ok(Loaded {
         doc,
         format,
@@ -511,21 +518,31 @@ pub fn reduce(doc: &mut Document, format: Format, opts: &SaveOptions) {
     }
 }
 
-/// The encoding and BOM it was written with: UTF-8 with a BOM, the one Aegisub always saves in,
-/// when `opts.encoding` lacks a character of the text.
-pub fn save_file(
+/// [`save_bytes`] that loses no character: the bytes, and the encoding and BOM they are in,
+/// which is UTF-8 with a BOM (the one Aegisub always saves in) when `opts.encoding` lacks a
+/// character of the text. [`save_bytes`] alone would write such a character as `&#9834;`.
+pub fn save_bytes_fitting(
     doc: &Document,
-    path: &Path,
     format: Format,
     opts: &SaveOptions,
-) -> Result<(&'static Encoding, bool), Error> {
+) -> (Vec<u8>, &'static Encoding, bool) {
     let text = save_text(doc, format, opts);
     let (enc, bom) = if encoding::holds(&text, opts.encoding) {
         (opts.encoding, opts.bom)
     } else {
         (UTF_8, true)
     };
-    let bytes = encoding::encode(&text, enc, bom);
+    (encoding::encode(&text, enc, bom), enc, bom)
+}
+
+/// The encoding and BOM it was written with ([`save_bytes_fitting`]).
+pub fn save_file(
+    doc: &Document,
+    path: &Path,
+    format: Format,
+    opts: &SaveOptions,
+) -> Result<(&'static Encoding, bool), Error> {
+    let (bytes, enc, bom) = save_bytes_fitting(doc, format, opts);
     // Kainote's: a read-only file says so, not with an OS error
     if std::fs::metadata(path).is_ok_and(|m| m.permissions().readonly()) {
         return Err(Error::ReadOnly);
@@ -557,43 +574,47 @@ pub fn save_file(
 }
 
 /// `doc` in the sections of `version`: SSA's `[V4 Styles]` and Format lines or ASS's (legacy
-/// alignment is the writer's, from the version), the attachments as they are.
+/// alignment is the writer's, from the version). Everything else stays as it is: comments, the
+/// attachments, Aegisub's project and extradata sections and the ones nobody knows.
 pub fn convert(doc: &Document, version: AssVersion) -> Document {
+    use fs_core::ass::{FormatLine, SectionBody};
     use fs_core::model::{EventField, StyleField};
-    let mut out = Document::empty();
-    out.default_ending = doc.default_ending;
-    out.bom = doc.bom;
-    for e in doc
-        .info_section()
-        .map(|s| s.entries.as_slice())
-        .unwrap_or(&[])
-    {
-        out.set_info(&e.key, &e.value);
-    }
+    let mut out = doc.clone();
     out.set_info("ScriptType", version.script_type());
-    // creating the styles section uses the document version
-    {
-        let st = out.ensure_styles();
-        st.version = version;
-        st.format.as_mut().unwrap().fields = StyleField::default_format(version);
+    // a new styles section takes the document's version, set above
+    out.ensure_styles();
+    out.ensure_events();
+    for sec in &mut out.sections {
+        let sec = std::sync::Arc::make_mut(sec);
+        match &mut sec.body {
+            SectionBody::Styles(st) => {
+                sec.header.text = version.styles_header().into();
+                st.version = version;
+                let ending = st.format.as_ref().map_or(sec.header.ending, |f| f.ending);
+                st.format = Some(FormatLine {
+                    fields: StyleField::default_format(version),
+                    orig: None,
+                    ending,
+                });
+                // every line is written anew, in the fields of the version
+                for e in &mut st.entries {
+                    std::sync::Arc::make_mut(e).orig = None;
+                }
+            }
+            SectionBody::Events(ev) => {
+                let ending = ev.format.as_ref().map_or(sec.header.ending, |f| f.ending);
+                ev.format = Some(FormatLine {
+                    fields: EventField::default_format(version),
+                    orig: None,
+                    ending,
+                });
+                for e in &mut ev.entries {
+                    std::sync::Arc::make_mut(e).orig = None;
+                }
+            }
+            _ => {}
+        }
     }
-    let le = out.default_ending;
-    if let Some(sec) = out
-        .sections
-        .iter_mut()
-        .find(|s| s.kind == fs_core::SectionKind::Styles)
-    {
-        std::sync::Arc::make_mut(sec).header =
-            fs_core::text::RawLine::new(version.styles_header(), le);
-    }
-    for s in doc.styles() {
-        out.add_style(s.clone());
-    }
-    out.ensure_events().format.as_mut().unwrap().fields = EventField::default_format(version);
-    for e in doc.events() {
-        out.push_event(e.event.clone());
-    }
-    out.copy_attachments(doc);
     out
 }
 
@@ -894,5 +915,58 @@ mod tests {
             !ass.contains("\n\n\n") && !ass.contains("\r\n\r\n\r\n"),
             "{ass}"
         );
+    }
+
+    #[test]
+    fn converting_keeps_comments_and_other_sections() {
+        let ass = "[Script Info]\n; a comment\nTitle: t\nScriptType: v4.00+\n\n\
+            [Aegisub Project Garbage]\nActive Line: 1\n\n\
+            [V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,20\n\n\
+            [Events]\nFormat: Layer, Start, End, Style, Text\n\
+            ; kept\nDialogue: 0,0:00:01.00,0:00:02.00,Default,a,b\n\n\
+            [Aegisub Extradata]\nData: 0,k,ev\n\n[Mine]\nanything\n";
+        let doc = Document::parse(ass);
+        let opts = SaveOptions {
+            bom: false,
+            ..Default::default()
+        };
+        let ssa = String::from_utf8(save_bytes(&doc, Format::Ssa, &opts)).unwrap();
+        for kept in [
+            "; a comment\n",
+            "[Aegisub Project Garbage]\nActive Line: 1\n",
+            "; kept\nDialogue: Marked=0,0:00:01.00,0:00:02.00,Default,,0,0,0,,a,b\n",
+            "[Aegisub Extradata]\nData: 0,k,ev\n",
+            "[Mine]\nanything\n",
+            "[V4 Styles]\n",
+            "ScriptType: v4.00\n",
+        ] {
+            assert!(ssa.contains(kept), "{kept:?} missing in\n{ssa}");
+        }
+        assert!(!ssa.contains("[V4+ Styles]"));
+        // the line keeps its id through the conversion
+        let ids = |d: &Document| d.events().iter().map(|e| e.id).collect::<Vec<_>>();
+        assert_eq!(ids(&convert(&doc, AssVersion::Ssa)), ids(&doc));
+    }
+
+    #[test]
+    fn the_styles_section_decides_between_ssa_and_ass() {
+        // a ScriptType left over from a conversion must not make the next save convert the file
+        let text = "[Script Info]\nScriptType: v4.00\n\n[V4+ Styles]\n\
+            Format: Name, Fontname, Fontsize, Underline\nStyle: Default,Arial,20,-1\n\n\
+            [Events]\nFormat: Layer, Start, End, Style, Text\n\
+            Dialogue: 3,0:00:01.00,0:00:02.00,Default,a\n";
+        let l = load_bytes(text.as_bytes(), Some("ssa"), &LoadOptions::default()).unwrap();
+        assert_eq!(l.format, Format::Ass);
+        let opts = SaveOptions {
+            bom: false,
+            ..Default::default()
+        };
+        assert_eq!(save_bytes(&l.doc, l.format, &opts), text.as_bytes());
+        let forced = LoadOptions {
+            format: Some(Format::Ssa),
+            ..LoadOptions::default()
+        };
+        let l = load_bytes(text.as_bytes(), None, &forced).unwrap();
+        assert_eq!(l.format, Format::Ass);
     }
 }
