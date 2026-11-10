@@ -63,7 +63,7 @@ Słowniki nie leżą w repozytorium, ale paczki z CI je zawierają: `tools/dicti
 
 | Słownik | Źródło | Licencja |
 |---|---|---|
-| polski `pl_PL` | [sjp.pl/sl/en](https://sjp.pl/sl/en/), plik `sjp-hunspell-pl-*.zip` | do wyboru GPL-2, LGPL-2.1, MPL-1.1, CC BY 4.0, Apache-2.0 |
+| polski `pl_PL` | [sjp.pl/sl/en](https://sjp.pl/sl/en/), plik `sjp-hunspell-pl-*.zip`; sjp.pl trzyma tylko najnowsze wydanie, więc gdy przypięte zniknie, do czasu przypięcia nowego wchodzi kopia tego słownika z [LibreOffice/dictionaries](https://github.com/LibreOffice/dictionaries/tree/master/pl_PL) | do wyboru GPL-2, LGPL-2.1, MPL-1.1, CC BY 4.0, Apache-2.0 |
 | angielski `en_US` | [en-wl/wordlist](https://github.com/en-wl/wordlist/releases), plik `hunspell-en_US-*.zip` (SCOWL) | licencja SCOWL (typu MIT) |
 | tezaurus polski `th_pl_PL_v2` | Dobry słownik / Marcin Miłkowski, z [LibreOffice/dictionaries](https://github.com/LibreOffice/dictionaries/tree/master/pl_PL) | LGPL-2.1 |
 | tezaurus angielski `th_en_US_v2` | WordNet (Princeton), z [LibreOffice/dictionaries](https://github.com/LibreOffice/dictionaries/tree/master/en) | licencja WordNet (typu BSD) |
