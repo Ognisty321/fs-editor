@@ -187,6 +187,8 @@ public:
 };
 } // namespace
 
+static QWidget *makeHolder(QWidget *parent); // a PanelHolder
+
 MainWindow::MainWindow() {
     limits::reload(); // the counter options, before any row's characters per second
     applyMediaSettings();
@@ -312,9 +314,7 @@ MainWindow::MainWindow() {
         m.exec(m_tabs->tabBar()->mapToGlobal(pos));
     });
     m_split = new QSplitter(Qt::Horizontal, this);
-    m_right = new QWidget(m_split);
-    m_right->setLayout(new QVBoxLayout);
-    m_right->layout()->setContentsMargins(0, 0, 0, 0);
+    m_right = makeHolder(m_split);
     m_split->addWidget(m_tabs);
     m_split->addWidget(m_right);
     m_split->setChildrenCollapsible(false);
@@ -390,6 +390,56 @@ MainWindow::~MainWindow() {
     while (m_tabs->count()) delete m_tabs->widget(0);
 }
 
+namespace {
+// Holds one panel, filling it: a tab's page, or the split view's right half. Not a layout: a layout
+// passes every layout request from below on to its parent, and the tab widget paints itself whole
+// for each one, so a label in the panel that changed its text (the line's length, its characters
+// per second) had the whole window painted again for every key typed. Here a request goes up only
+// when the panel's own size hints changed.
+class PanelHolder final : public QWidget {
+public:
+    using QWidget::QWidget;
+    void setPanel(QWidget *panel) {
+        m_panel = panel;
+        panel->setParent(this);
+        panel->setGeometry(rect());
+        panel->show();
+        hintsChanged();
+        updateGeometry();
+    }
+    QSize sizeHint() const override { return held() ? m_panel->sizeHint() : QWidget::sizeHint(); }
+    QSize minimumSizeHint() const override { return held() ? m_panel->minimumSizeHint() : QWidget::minimumSizeHint(); }
+
+protected:
+    void resizeEvent(QResizeEvent *) override {
+        if (held()) m_panel->setGeometry(rect());
+    }
+    void showEvent(QShowEvent *e) override { // a hidden holder is told of no request
+        if (hintsChanged()) updateGeometry();
+        QWidget::showEvent(e);
+    }
+    bool event(QEvent *e) override {
+        if (e->type() == QEvent::LayoutRequest) {
+            if (hintsChanged()) updateGeometry();
+            return true;
+        }
+        return QWidget::event(e);
+    }
+
+private:
+    bool held() const { return m_panel && m_panel->parentWidget() == this; } // not while the other holder shows it
+    bool hintsChanged() {
+        const std::pair now{sizeHint(), minimumSizeHint()};
+        return std::exchange(m_hints, now) != now;
+    }
+    QPointer<QWidget> m_panel;
+    std::pair<QSize, QSize> m_hints;
+};
+void hold(QWidget *holder, QWidget *panel) { static_cast<PanelHolder *>(holder)->setPanel(panel); }
+} // namespace
+
+static QWidget *makeHolder(QWidget *parent) { return new PanelHolder(parent); }
+
 TabPanel *MainWindow::current() const { return panel(m_tabs->currentIndex()); }
 
 // Each tab page is a slot holding its TabPanel, so a panel can be shown in the split view's right half.
@@ -405,11 +455,10 @@ int MainWindow::indexOfPanel(TabPanel *t) const {
 }
 
 void MainWindow::setSplit(TabPanel *second) {
-    if (m_second) m_tabs->widget(indexOfPanel(m_second))->layout()->addWidget(m_second);
+    if (m_second) hold(m_tabs->widget(indexOfPanel(m_second)), m_second);
     m_second = second != current() ? second : nullptr;
     if (m_second) {
-        m_right->layout()->addWidget(m_second);
-        m_second->show();
+        hold(m_right, m_second);
         m_split->setSizes({1, 1});
     }
     m_right->setVisible(m_second);
@@ -489,12 +538,10 @@ static QString tabText(TabPanel *tab) {
 }
 
 TabPanel *MainWindow::newTab() {
-    auto *slot = new QWidget;
-    slot->setLayout(new QVBoxLayout);
-    slot->layout()->setContentsMargins(0, 0, 0, 0);
+    auto *slot = new PanelHolder;
     auto *tab = new TabPanel(this);
     tab->startNew();
-    slot->layout()->addWidget(tab);
+    slot->setPanel(tab);
     slot->setProperty("panel", QVariant::fromValue<QObject *>(tab));
     const int i = m_tabs->addTab(slot, tabText(tab));
     connect(tab, &TabPanel::docChanged, this, [this] {
@@ -506,8 +553,12 @@ TabPanel *MainWindow::newTab() {
     auto refreshTitle = [this, tab] {
         const int idx = indexOfPanel(tab);
         if (idx < 0) return;
-        m_tabs->setTabText(idx, tabText(tab));
-        m_tabs->setTabToolTip(idx, tab->path() + (tab->video()->path().isEmpty() ? "" : "\n" + tab->video()->path()));
+        // only what changed: this runs on every change of the lines, and a tab text set again
+        // lays the tab widget out anew, which paints the whole window for each key typed
+        if (const QString text = tabText(tab); m_tabs->tabText(idx) != text) m_tabs->setTabText(idx, text);
+        if (const QString tip = tab->path() + (tab->video()->path().isEmpty() ? "" : "\n" + tab->video()->path());
+            m_tabs->tabToolTip(idx) != tip)
+            m_tabs->setTabToolTip(idx, tip);
         if (tab == current()) setWindowTitle(tab->title() + " - FS Editor");
     };
     connect(tab, &TabPanel::titleChanged, this, refreshTitle);
@@ -2316,22 +2367,26 @@ void MainWindow::updateStatus() {
     auto *v = tab->video();
     const bool has = v->hasVideo();
     const auto info = v->info();
-    for (int i = 1; i < 9; ++i) m_statusFields[i]->clear();
+    // The fields are written only where they differ: this runs on every change of the lines, and
+    // a label cleared and set again lays the status bar out (and paints it) for each key typed.
+    QString fields[9], resolutionStyle;
     if (has && info.width > 0) {
         const QRectF r = v->view()->displayRect();
         const QRectF z = v->view()->zoom();
-        m_statusFields[1]->setText(QString("%1%").arg(qRound(r.width() * z.width() / info.width * 100)));
-        if (z.width() < 0.999) m_statusFields[2]->setText(QString("%1%").arg(qRound(100 / z.width())));
-        m_statusFields[3]->setText(fs::fmtTime(info.duration_ms));
-        m_statusFields[4]->setText(QString::number(info.fps, 'f', 3) + (info.vfr ? " VFR" : ""));
-        m_statusFields[5]->setText(QString("%1x%2").arg(info.width).arg(info.height));
-        const bool mismatch = info.width != fi.play_res_x || info.height != fi.play_res_y;
-        m_statusFields[5]->setStyleSheet(mismatch ? "color: #d04040;" : "");
+        fields[1] = QString("%1%").arg(qRound(r.width() * z.width() / info.width * 100));
+        if (z.width() < 0.999) fields[2] = QString("%1%").arg(qRound(100 / z.width()));
+        fields[3] = fs::fmtTime(info.duration_ms);
+        fields[4] = QString::number(info.fps, 'f', 3) + (info.vfr ? " VFR" : "");
+        fields[5] = QString("%1x%2").arg(info.width).arg(info.height);
+        if (info.width != fi.play_res_x || info.height != fi.play_res_y) resolutionStyle = "color: #d04040;";
         const double sar = info.sar_den > 0 && info.sar_num > 0 ? double(info.sar_num) / info.sar_den : 1.0;
-        m_statusFields[6]->setText(QString::number(info.width * sar / info.height, 'f', 3));
-        m_statusFields[8]->setText(QFileInfo(v->path()).fileName());
+        fields[6] = QString::number(info.width * sar / info.height, 'f', 3);
+        fields[8] = QFileInfo(v->path()).fileName();
     }
-    m_statusFields[7]->setText(QString("%1x%2").arg(fi.play_res_x).arg(fi.play_res_y));
+    fields[7] = QString("%1x%2").arg(fi.play_res_x).arg(fi.play_res_y);
+    for (int i = 1; i < 9; ++i)
+        if (m_statusFields[i]->text() != fields[i]) m_statusFields[i]->setText(fields[i]);
+    if (m_statusFields[5]->styleSheet() != resolutionStyle) m_statusFields[5]->setStyleSheet(resolutionStyle);
 }
 
 void MainWindow::status(const QString &msg) {

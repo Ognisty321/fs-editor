@@ -14,6 +14,7 @@
 #include <QDialog>
 #include <QDir>
 #include <QDropEvent>
+#include <QElapsedTimer>
 #include <QEventLoop>
 #include <QLibraryInfo>
 #include <QListWidget>
@@ -24,6 +25,7 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QFile>
+#include <QScrollBar>
 #include <QSettings>
 #include <QSlider>
 #include <QTabBar>
@@ -38,6 +40,7 @@
 
 #include <atomic>
 #include <csignal>
+#include <functional>
 #include <numeric>
 #include <cstdio>
 #include <ranges>
@@ -517,6 +520,61 @@ int main(int argc, char **argv) {
     if (const QString texts = qEnvironmentVariable("FSED_SMOKE_CLICK"); !texts.isEmpty())
         QTimer::singleShot(std::max(800, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 5 / 6), &w,
                            [texts] { clicks(texts.split(';')); });
+    // FSED_SMOKE_BENCH=out.txt times, on the file loaded, what the window does over and over: a
+    // change shown, a repaint of the grid, a line change, a key typed, an undo, a page scrolled.
+    // Each run counts the events it queued (repaints, 0 ms timers) too.
+    if (const QString out = qEnvironmentVariable("FSED_SMOKE_BENCH"); !out.isEmpty())
+        QTimer::singleShot(std::max(700, qEnvironmentVariableIntValue("FSED_SMOKE_MS") * 2 / 3), &w, [&w, out] {
+            QFile f(out);
+            if (!f.open(QIODevice::WriteOnly)) return;
+            auto *tab = w.current();
+            const auto time = [&f](const char *what, int runs, const std::function<void(int)> &run) {
+                std::vector<qint64> ns;
+                for (int k = 0; k < runs; ++k) {
+                    QElapsedTimer t;
+                    t.start();
+                    run(k);
+                    QCoreApplication::processEvents();
+                    ns.push_back(t.nsecsElapsed());
+                }
+                std::ranges::sort(ns);
+                f.write(QString("%1: median %2 ms, worst %3 ms\n")
+                            .arg(what)
+                            .arg(double(ns[ns.size() / 2]) / 1e6, 0, 'f', 3)
+                            .arg(double(ns.back()) / 1e6, 0, 'f', 3)
+                            .toUtf8());
+            };
+            const int n = int(tab->s().row_count());
+            f.write(QString("rows: %1\n").arg(n).toUtf8());
+            auto *grid = tab->grid();
+            const auto repaint = [grid](int) { grid->viewport()->repaint(); };
+            time("change shown", 7, [tab](int) { tab->changed(); });
+            time("grid repaint", 15, repaint);
+            time("line change", 40, [tab, n](int k) { tab->setActive(std::min(n - 1, n / 2 + k)); });
+            SubsTextEdit *text = nullptr;
+            for (auto *te : w.findChildren<SubsTextEdit *>())
+                if (te->isVisible()) text = te;
+            if (text) {
+                text->setFocus();
+                text->moveCursor(QTextCursor::End);
+                time("key typed", 40, [text](int k) {
+                    QKeyEvent e(QEvent::KeyPress, 0, Qt::NoModifier, QString(QChar('a' + k % 26)));
+                    QApplication::sendEvent(text, &e);
+                });
+            }
+            time("undo", 3, [tab](int) { tab->undo(); });
+            time("redo", 3, [tab](int) { tab->redo(); });
+            auto *bar = grid->verticalScrollBar();
+            time("page scrolled", 30, [bar, grid](int) {
+                bar->setValue(bar->value() + bar->pageStep());
+                grid->viewport()->repaint();
+            });
+            std::vector<size_t> all(static_cast<size_t>(n));
+            std::iota(all.begin(), all.end(), size_t(0));
+            time("select all", 3, [tab, &all, n](int) { tab->setSelection(all, n / 2); });
+            time("grid repaint, all selected", 15, repaint);
+            time("change shown, all selected", 5, [tab](int) { tab->changed(); });
+        });
     if (const QString out = qEnvironmentVariable("FSED_SMOKE"); !out.isEmpty())
         QTimer::singleShot(std::max(1000, qEnvironmentVariableIntValue("FSED_SMOKE_MS")), &w, [&w, out] {
             QWidget *shot = smokeDialog(w);

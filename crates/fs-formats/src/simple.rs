@@ -81,16 +81,16 @@ fn is_srt_timing(l: &str) -> bool {
 }
 
 pub fn write_srt(subs: &[Sub]) -> String {
-    let mut s = String::new();
+    use std::fmt::Write;
+    let mut s = String::with_capacity(subs.iter().map(|sub| sub.text.len() + 40).sum());
     for (n, sub) in subs.iter().enumerate() {
         let (runs, an) = ass_to_runs(&sub.text);
         let body = runs_to_html(&runs, an);
-        s.push_str(&format!(
-            "{}\r\n{} --> {}\r\n",
-            n + 1,
-            sub.start.to_srt(),
-            sub.end.to_srt()
-        ));
+        let _ = write!(s, "{}\r\n", n + 1);
+        sub.start.write_srt(&mut s);
+        s.push_str(" --> ");
+        sub.end.write_srt(&mut s);
+        s.push_str("\r\n");
         // a blank line would end the cue: drop empty lines inside the text
         for l in body.split('\n').filter(|l| !l.trim().is_empty()) {
             s.push_str(l);

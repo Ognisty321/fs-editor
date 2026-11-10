@@ -383,12 +383,38 @@ void Grid::underlineMisspelled(QPainter &p, const fsb::Row &r, const QString &sh
     p.restore();
 }
 
+void Grid::drawCell(QPainter &p, const QRect &rect, const QString &text) {
+    if (text.isEmpty() || rect.width() <= 0) return;
+    const CellKey key{text, rect.width()};
+    QStaticText *laid = m_cellTexts.object(key);
+    if (!laid) {
+        const auto lay = [&p](const QString &s) {
+            auto *st = new QStaticText(s);
+            st->setTextFormat(Qt::PlainText);
+            st->setPerformanceHint(QStaticText::AggressiveCaching);
+            st->prepare(p.transform(), p.font());
+            return st;
+        };
+        laid = lay(text);
+        if (laid->size().width() > rect.width()) { // measured by the layout itself: most cells fit
+            delete laid;
+            laid = lay(p.fontMetrics().elidedText(text, Qt::ElideRight, rect.width()));
+        }
+        m_cellTexts.insert(key, laid); // the cache's now; not dropped at once, one cell costs 1 of 8192
+    }
+    p.drawStaticText(rect.left(), rect.top() + (rect.height() - p.fontMetrics().height()) / 2, *laid);
+}
+
 void Grid::paintEvent(QPaintEvent *) {
     QPainter p(viewport());
     const GridTheme T;
     const int rh = rowHeight(), w = viewport()->width();
     p.fillRect(viewport()->rect(), T.background);
     p.setFont(font());
+    if (m_cellFont != font()) { // another font (the settings, the screen's scale): laid out again
+        m_cellFont = font();
+        m_cellTexts.clear();
+    }
     // the style names, read again only after an edit: a repaint follows every scroll step
     if (m_styleGen != m_tab->s().generation()) {
         m_styleGen = m_tab->s().generation();
@@ -402,8 +428,7 @@ void Grid::paintEvent(QPaintEvent *) {
     int x = 0;
     for (size_t k = 0; k < m_cols.size(); ++k) {
         p.setPen(T.headerText);
-        p.drawText(QRect(x + Pad, 0, m_widths[k] - 2 * Pad, rh), Qt::AlignVCenter | Qt::AlignLeft,
-                   colName(m_cols[k]));
+        drawCell(p, QRect(x + Pad, 0, m_widths[k] - 2 * Pad, rh), colName(m_cols[k]));
         p.setPen(T.lines);
         p.drawLine(x + m_widths[k] - 1, 0, x + m_widths[k] - 1, rh);
         x += m_widths[k];
@@ -430,9 +455,7 @@ void Grid::paintEvent(QPaintEvent *) {
                 const bool closed = std::ranges::binary_search(m_folded, i + 1);
                 p.fillRect(QRect(x, y, w - x, rh), T.comment);
                 p.setPen(T.text);
-                p.drawText(rest, Qt::AlignVCenter | Qt::AlignLeft,
-                           p.fontMetrics().elidedText(QString(closed ? "▶  " : "▼  ") + fs::q(r.text), Qt::ElideRight,
-                                                      rest.width()));
+                drawCell(p, rest, QString(closed ? "▶  " : "▼  ") + fs::q(r.text));
                 break;
             }
             if (c == Num) {
@@ -466,8 +489,7 @@ void Grid::paintEvent(QPaintEvent *) {
                          [&](int x, int w) { p.fillRect(x, cr.top() + 2, std::max(w, 2), rh - 4, T.compareText); });
                 p.restore();
             }
-            p.drawText(cr.adjusted(Pad, 0, -Pad, 0), Qt::AlignVCenter | Qt::AlignLeft,
-                       p.fontMetrics().elidedText(shown, Qt::ElideRight, cr.width() - 2 * Pad));
+            drawCell(p, cr.adjusted(Pad, 0, -Pad, 0), shown);
             if (c == Text) underlineMisspelled(p, r, shown, cr.adjusted(Pad, 0, -Pad, 0));
             p.setPen(T.lines);
             p.drawLine(cr.right(), cr.top(), cr.right(), cr.bottom());

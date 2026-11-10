@@ -211,6 +211,7 @@ GUI czyta zmienne środowiskowe, które pozwalają sprawdzić aplikację bez kli
 | `FSED_SMOKE_CLICK=tekst` | klika przycisk o tym napisie w otwartym dialogu |
 | `FSED_SMOKE_DROP=plik` | upuszcza plik na pole edycji linii |
 | `FSED_SMOKE_SET="klucz=wartość;..."` | ustawia opcje przed startem, np. `spell/lang=pl_PL` |
+| `FSED_SMOKE_BENCH=plik.txt` | mierzy okno na otwartym pliku (pokazanie zmiany, odrysowanie siatki, zmiana linii, wpisany znak, cofnij/ponów, przewinięcie strony, zaznacz wszystko) i zapisuje mediany oraz najgorsze czasy; ustaw `FSED_SMOKE_MS` na kilka sekund |
 
 ```bash
 FSED_SMOKE=out.png FSED_SMOKE_MS=8000 FSED_SMOKE_ROW=1 fsed napisy.ass wideo.mkv

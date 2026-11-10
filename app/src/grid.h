@@ -5,8 +5,11 @@
 #include "bridge.h"
 
 #include <QAbstractScrollArea>
+#include <QCache>
+#include <QFont>
 #include <QHash>
 #include <QSet>
+#include <QStaticText>
 #include <QTimer>
 #include <algorithm>
 #include <map>
@@ -133,5 +136,18 @@ private:
     quint64 m_styleGen = ~quint64(0); // the generation m_styleNames was read at
     QSet<QString> m_styleNames;
     QHash<QString, std::vector<size_t>> m_misspelled; // by line text: (start, length) pairs
+    // A cell's text as it was drawn before: cut to its column and laid out once. Shaping the
+    // text was most of a repaint, and most repaints (a key typed, a line picked, a frame of the
+    // playing video) show the cells the last one did.
+    struct CellKey {
+        QString text;
+        int width;
+        bool operator==(const CellKey &) const = default;
+    };
+    friend size_t qHash(const CellKey &k, size_t seed) { return qHashMulti(seed, k.text, k.width); }
+    QCache<CellKey, QStaticText> m_cellTexts{8192};
+    QFont m_cellFont; // the font they were laid out in
+    // `text` left in `rect`, in the middle of its height, with "…" where it does not fit
+    void drawCell(QPainter &p, const QRect &rect, const QString &text);
     int m_spellGen = -1;
 };

@@ -39,6 +39,24 @@ pub struct Run {
 /// Split ASS text into formatted runs; unsupported tags are dropped except
 /// `\anN`, which is returned separately (players understand `{\an8}` in SRT).
 pub fn ass_to_runs(text: &str) -> (Vec<Run>, Option<u8>) {
+    // `\N`, `\n` and `\h` as the simple formats write them
+    let unescaped = |t: &str| {
+        if t.contains('\\') {
+            t.replace("\\N", "\n")
+                .replace("\\n", "\n")
+                .replace("\\h", "\u{a0}")
+        } else {
+            t.to_string()
+        }
+    };
+    if !text.contains('{') {
+        // no blocks to parse, as in most lines of the formats this is written to: one run
+        let runs = (!text.is_empty()).then(|| Run {
+            fmt: Fmt::default(),
+            text: unescaped(text),
+        });
+        return (runs.into_iter().collect(), None);
+    }
     let line = Line::parse(text);
     let mut fmt = Fmt::default();
     let mut runs: Vec<Run> = Vec::new();
@@ -90,10 +108,7 @@ pub fn ass_to_runs(text: &str) -> (Vec<Run>, Option<u8>) {
                 }
             }
             Block::Text(t) => {
-                let t = t
-                    .replace("\\N", "\n")
-                    .replace("\\n", "\n")
-                    .replace("\\h", "\u{a0}");
+                let t = unescaped(t);
                 match runs.last_mut() {
                     Some(r) if r.fmt == fmt => r.text.push_str(&t),
                     _ => runs.push(Run {

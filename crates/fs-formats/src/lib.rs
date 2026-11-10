@@ -379,9 +379,9 @@ pub fn to_subs(doc: &Document) -> Vec<Sub> {
 /// Whether a line has any text that survives conversion to a simple format
 /// (drawings and tag-only lines do not).
 fn has_visible_text(text: &str) -> bool {
-    if !text.contains('{') {
-        // no blocks to parse: anything but spaces and the \N, \n, \h escapes shows
-        let mut it = text.chars().peekable();
+    // anything but spaces and the \N, \n, \h escapes shows
+    let shows = |t: &str| {
+        let mut it = t.chars().peekable();
         while let Some(c) = it.next() {
             if c == '\\' && it.next_if(|n| matches!(n, 'N' | 'n' | 'h')).is_some() {
                 continue;
@@ -390,7 +390,25 @@ fn has_visible_text(text: &str) -> bool {
                 return true;
             }
         }
-        return false;
+        false
+    };
+    if !text.contains('{') {
+        return shows(text);
+    }
+    if !text.contains("\\p") {
+        // no drawing to tell from text: what stands outside the blocks, without parsing their
+        // tags (an unclosed "{" is text, as the parser has it)
+        let mut rest = text;
+        while let Some(open) = rest.find('{') {
+            if shows(&rest[..open]) {
+                return true;
+            }
+            match rest[open..].find('}') {
+                Some(close) => rest = &rest[open + close + 1..],
+                None => return shows(&rest[open..]),
+            }
+        }
+        return shows(rest);
     }
     markup::ass_to_runs(text)
         .0

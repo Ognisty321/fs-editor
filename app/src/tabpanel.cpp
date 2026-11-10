@@ -412,15 +412,17 @@ void TabPanel::changed(int source) {
     emit titleChanged();
     emit statusChanged();
     // Aegisub's Save on Every Change: the file itself, when it saves without asking; changes a moment
-    // apart (typing) save once
+    // apart (typing) save once. Whether the format holds the lines is asked then too, not here: for
+    // an SRT that writes the file and reads it back, which is not for every key typed.
     if (modified() && !path().isEmpty() && QSettings().value("main/saveOnChange", false).toBool() &&
-        !s().converted() && s().lossless(fs::Utf8(path()))) {
+        !s().converted()) {
         if (!m_saveLater) {
             m_saveLater = new QTimer(this);
             m_saveLater->setSingleShot(true);
             m_saveLater->setInterval(300);
             connect(m_saveLater, &QTimer::timeout, this, [this] {
-                if (modified() && save()) emit titleChanged();
+                if (modified() && !path().isEmpty() && !s().converted() && s().lossless(fs::Utf8(path())) && save())
+                    emit titleChanged();
             });
         }
         m_saveLater->start();

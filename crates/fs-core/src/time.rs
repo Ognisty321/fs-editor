@@ -71,14 +71,23 @@ impl Time {
 
     /// Format as SRT timestamp `HH:MM:SS,mmm`.
     pub fn to_srt(self) -> String {
+        let mut s = String::with_capacity(12);
+        self.write_srt(&mut s);
+        s
+    }
+
+    /// [`Time::to_srt`] onto the end of `out`: a file's worth of them without a string each.
+    pub fn write_srt(self, out: &mut String) {
+        use std::fmt::Write;
         let t = self.0.max(0);
-        format!(
+        let _ = write!(
+            out,
             "{:02}:{:02}:{:02},{:03}",
             t / 3_600_000,
             (t / 60_000) % 60,
             (t / 1000) % 60,
             t % 1000
-        )
+        );
     }
 
     /// Format as `H:MM:SS.mmm` (used in the CLI and GUI time fields when

@@ -58,8 +58,10 @@ void TimeEdit::setFrames(bool on) {
 }
 
 void TimeEdit::setMs(qint64 ms, qint64 frame) {
+    const QString shown = m_frames ? QString::number(frame) : fs::fmtTime(ms);
+    if (displayText() == shown) return; // set again it paints again, and that for every key typed in the text
     const int pos = cursorPosition();
-    setText(m_frames ? QString::number(frame) : fs::fmtTime(ms));
+    setText(shown);
     setCursorPosition(pos);
 }
 
@@ -1251,12 +1253,16 @@ void EditBox::reload() {
 }
 
 void EditBox::updateInfo(const fsb::Row &r) {
-    m_lineLabel->setText(tr("Line: %1").arg(m_row + 1));
-    m_wrapsLabel->setText(tr("Wraps: %1").arg(fs::q(r.wraps)));
-    m_wrapsLabel->setStyleSheet(limits::wrapsOver(fs::q(r.wraps)) ? "color: #e05050" : "");
+    // a style sheet set again, even the same one, polishes the label anew: only when it changes
+    // (this runs for every key typed)
+    const auto show = [](QLabel *label, const QString &text, bool over) {
+        if (label->text() != text) label->setText(text);
+        if (const QString style = over ? "color: #e05050" : ""; label->styleSheet() != style) label->setStyleSheet(style);
+    };
+    show(m_lineLabel, tr("Line: %1").arg(m_row + 1), false);
+    show(m_wrapsLabel, tr("Wraps: %1").arg(fs::q(r.wraps)), limits::wrapsOver(fs::q(r.wraps)));
     const int cps = int(r.cps + 0.5);
-    m_cpsLabel->setText(tr("Characters per second: %1<=%2").arg(cps).arg(limits::cps()));
-    m_cpsLabel->setStyleSheet(cps > limits::cps() ? "color: #e05050" : "");
+    show(m_cpsLabel, tr("Characters per second: %1<=%2").arg(cps).arg(limits::cps()), cps > limits::cps());
 }
 
 void EditBox::commit(const char *field) {
