@@ -118,7 +118,7 @@ enum Cmd {
         #[arg(long)]
         end_only: bool,
         /// Only lines from this 1-based line number onward.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "after")]
         from_line: Option<usize>,
         /// Only lines starting at or after this time.
         #[arg(long)]
@@ -437,14 +437,52 @@ fn load_default(path: &Path) -> Result<Loaded> {
     load(path, &LoadArgs::default())
 }
 
-/// Save an edited document in its original format and encoding.
+/// The format a file name's extension promises, where one extension means one format.
+fn format_of_extension(ext: &str) -> Option<Format> {
+    Some(match ext {
+        "ass" => Format::Ass,
+        "ssa" => Format::Ssa,
+        "srt" => Format::Srt,
+        "sub" => Format::MicroDvd,
+        "ttxt" => Format::Ttxt,
+        _ => return None,
+    })
+}
+
+/// Save an edited document in its original format and encoding (UTF-8 when the encoding lacks a
+/// character the edit brought in).
 fn write_out(input: &Path, loaded: &Loaded, doc: &Document, out: &OutArgs) -> Result<()> {
+    // the file would hold one format under the name of another
+    if let Some(p) = &out.output
+        && let Some(named) = (p.extension().and_then(|e| e.to_str()))
+            .and_then(|e| format_of_extension(&e.to_ascii_lowercase()))
+        && named != loaded.format
+    {
+        bail!(
+            "'{}' names a {} file, but the input is {} and is written as it was read; \
+             use `fsed convert` to change the format",
+            p.display(),
+            named.name(),
+            loaded.format.name()
+        );
+    }
+    // MicroDVD counts frames: at the rate the file declares, else the one it was read with
+    let declared = (loaded.declared_fps).and_then(|f| Framerate::from_fps(f).ok());
     let opts = SaveOptions {
         encoding: loaded.encoding,
         bom: loaded.bom,
+        microdvd_fps_header: declared.is_some(),
+        fps: declared.unwrap_or(LoadOptions::default().fps),
         ..Default::default()
     };
-    let bytes = fs_formats::save_bytes(doc, loaded.format, &opts);
+    let (bytes, enc, _) = fs_formats::save_bytes_fitting(doc, loaded.format, &opts);
+    if enc != loaded.encoding {
+        eprintln!(
+            "{} cannot hold every character: written as {}",
+            loaded.encoding.name(),
+            enc.name()
+        );
+    }
     match (&out.output, out.in_place) {
         (Some(p), _) => {
             std::fs::write(p, bytes).with_context(|| format!("writing {}", p.display()))?
@@ -816,13 +854,9 @@ fn run(cli: Cli) -> Result<ExitCode> {
                         .and_then(|e| e.to_str())
                         .unwrap_or("")
                         .to_ascii_lowercase();
-                    match ext.as_str() {
-                        "ass" => Format::Ass,
-                        "ssa" => Format::Ssa,
-                        "srt" => Format::Srt,
-                        "sub" => Format::MicroDvd,
-                        "ttxt" => Format::Ttxt,
-                        _ => bail!(
+                    match format_of_extension(&ext) {
+                        Some(f) => f,
+                        None => bail!(
                             "cannot infer output format from '{}'; pass --to",
                             output.display()
                         ),

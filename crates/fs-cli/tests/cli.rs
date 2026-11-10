@@ -219,3 +219,52 @@ fn lua_runs_kara_templater() {
         "{out}"
     );
 }
+
+#[test]
+fn edits_keep_the_files_frame_rate_encoding_and_format() {
+    let dir = tempfile::tempdir().unwrap();
+    // MicroDVD keeps the rate it declares, and gains no header it did not have
+    let sub = dir.path().join("a.sub");
+    std::fs::write(&sub, "{1}{1}25\r\n{25}{50}one\r\n{100}{125}two\r\n").unwrap();
+    let (ok, out, err) = run(fsed().args(["shift", "--by", "0"]).arg(&sub));
+    assert!(ok, "{err}");
+    assert_eq!(out, "{1}{1}25\r\n{25}{50}one\r\n{100}{125}two\r\n");
+    std::fs::write(&sub, "{24}{48}one\r\n").unwrap();
+    let (ok, out, err) = run(fsed().args(["shift", "--by", "0"]).arg(&sub));
+    assert!(ok, "{err}");
+    assert_eq!(out, "{24}{48}one\r\n");
+
+    // a character the file's encoding lacks: UTF-8, not "&#9834;"
+    let srt = dir.path().join("a.srt");
+    let text = "1\r\n00:00:01,000 --> 00:00:02,000\r\nża x\r\n";
+    std::fs::write(&srt, encoding_rs::WINDOWS_1250.encode(text).0).unwrap();
+    let (ok, _, err) = run(fsed()
+        .args(["replace", "--find", "x", "--replace", "♪", "--in-place"])
+        .arg(&srt));
+    assert!(ok, "{err}");
+    assert!(err.contains("UTF-8"), "{err}");
+    let written = String::from_utf8(std::fs::read(&srt).unwrap()).unwrap();
+    assert!(written.contains("ża ♪"), "{written}");
+
+    // one format under the name of another is refused; the same format is not
+    let named_ass = dir.path().join("b.ass");
+    let (ok, _, err) = run(fsed()
+        .args(["shift", "--by", "1s"])
+        .arg(&srt)
+        .arg("-o")
+        .arg(&named_ass));
+    assert!(!ok && err.contains("fsed convert"), "{err}");
+    assert!(!named_ass.exists());
+    let (ok, _, err) = run(fsed()
+        .args([
+            "shift",
+            "--by",
+            "1s",
+            "--from-line",
+            "1",
+            "--after",
+            "0:00:01.00",
+        ])
+        .arg(&srt));
+    assert!(!ok && err.contains("cannot be used with"), "{err}");
+}

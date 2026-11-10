@@ -18,7 +18,9 @@ cargo run --release -p fs-cli -- <polecenie> [opcje]
   * do pliku przez `-o plik`;
   * do pliku wejściowego przez `--in-place`. Zapis jest atomowy: plik tymczasowy, potem zmiana nazwy.
 
-  Format, kodowanie i BOM pliku wejściowego zostają zachowane.
+  Format, kodowanie i BOM pliku wejściowego zostają zachowane, a MicroDVD wraca w tym samym FPS, w którym został wczytany.
+  * Gdy rozszerzenie pliku z `-o` wskazuje inny format niż wejściowy (np. `-o wynik.srt` dla pliku ASS), polecenie kończy się błędem i odsyła do `fsed convert`.
+  * Gdy po zmianie tekstu nie da się go zapisać w kodowaniu wejściowym, plik jest zapisywany jako UTF-8 z BOM, a na stderr trafia informacja o tym.
 * **Bezstratność**: linie, których polecenie nie zmieniło, są zapisywane z oryginalnego tekstu, razem z końcami linii, komentarzami i nieznanymi sekcjami.
 * **Czas** można podać jako:
   * `1.5s`, `-250ms`, `300` (milisekundy);
@@ -56,7 +58,7 @@ Opcje poleceń, które wymagają rozwinięcia:
 * **`shift`**:
   * `--start-only` / `--end-only` przesuwają tylko jeden z czasów;
   * `--from-line N` ogranicza zmianę do linii od numeru N;
-  * `--after CZAS` ogranicza ją do linii startujących od podanego czasu;
+  * `--after CZAS` ogranicza ją do linii startujących od podanego czasu (nie łączy się z `--from-line`);
   * `--styles A,B` ogranicza ją do podanych stylów.
 * **`filter`**:
   * `--style`, `--actor` i `--effect` filtrują po polach;
