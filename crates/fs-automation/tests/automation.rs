@@ -1175,3 +1175,178 @@ end)
     assert_eq!(new.event_id(0), d.event_id(0));
     assert_eq!(times(1), (1000, 2350));
 }
+
+/// The corners of the API where a script written for Aegisub would see a difference: the
+/// version table, errors that say where the script went wrong, a line index given as a string,
+/// Aegisub's own `ipairs`, `subs:delete(i)`, the words of its field errors, the colours and
+/// names a style is written with, an undo point without its name, and what a dialog returns
+/// for controls that share a name or have none.
+#[test]
+fn api_corners_match_aegisub() {
+    let f = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let s = f.script(
+        dir.path(),
+        "api.lua",
+        r##"
+        aegisub.register_macro('A', '', function(subs, sel)
+          local v = aegisub.version
+          assert(v.string == '3.5.0' and v.major == 3 and v.minor == 5 and v.patch == 0)
+
+          local ok, err = pcall(function() return subs[100000] end)
+          assert(not ok and err:match('^%[string ".-"%]:%d+: Requested out%-of%-range line from subtitle file: 100000$'), err)
+          ok, err = pcall(function() subs[100000] = subs[1] end)
+          assert(not ok and err:match('^%[string ".-"%]:%d+: Requested out%-of%-range line from subtitle file: 100000$'), err)
+          ok, err = pcall(function() subs[{}] = subs[1] end)
+          assert(not ok and err:match("bad argument #2 to '%?' %(number expected, got table%)$"), err)
+          ok, err = pcall(function() return subs.nothing end)
+          assert(not ok and err:match("^%[string .-: Invalid indexing in Subtitle File object: 'nothing'$"), err)
+          ok, err = pcall(aegisub.gettext)
+          assert(not ok and err == "bad argument #1 to 'gettext' (string expected, got no value)", err)
+          assert(aegisub.gettext('Cancel') == 'Cancel')
+
+          local n = #subs
+          local first, si
+          for i = 1, n do
+            local class = subs[i].class
+            if class == 'dialogue' and not first then first = i end
+            if class == 'style' and not si then si = i end
+          end
+          local l = subs[first]
+          l.text = 'by string index'
+          subs[tostring(first)] = l
+          assert(subs[first].text == 'by string index')
+
+          local it, state, init = ipairs(subs)
+          assert(state == nil and init == 0)
+          local i1, l1 = it(nil, 0)
+          assert(i1 == 1 and l1.class == subs[1].class)
+          assert(it(nil, n) == nil)
+          local count = 0
+          for i, line in ipairs(subs) do
+            count = count + 1
+            assert(i == count and line.class)
+          end
+          assert(count == n)
+
+          subs:delete(n)
+          assert(#subs == n - 1)
+          subs.delete({a = n - 1})
+          assert(#subs == n - 2)
+          ok, err = pcall(subs.delete, 100000)
+          assert(not ok and err == "bad argument #1 to 'delete' (Out of range line index)", err)
+
+          local bad = subs[first]
+          bad.layer = nil
+          ok, err = pcall(function() subs[first] = bad end)
+          assert(not ok and err:match("Invalid or missing field 'layer' in 'dialogue' class subtitle line %(expected string%)$"), err)
+
+          local st = subs[si]
+          st.name, st.fontname = 'a,b', 'x,y'
+          st.color1, st.color2, st.color3, st.color4 = '#102030FF', '-1', 'FF0000', ' &H0000FF&'
+          subs[si] = st
+          st = subs[si]
+          assert(st.name == 'a;b' and st.fontname == 'x;y', st.name)
+          assert(st.color1 == '&H00302010&', st.color1)
+          assert(st.color2 == '&HFFFFFFFF&', st.color2)
+          assert(st.color3 == '&H00FF0000&', st.color3)
+          assert(st.color4 == '&H00000000&', st.color4)
+
+          ok, err = pcall(aegisub.set_undo_point)
+          assert(not ok and err == "bad argument #1 to 'set_undo_point' (string expected, got no value)", err)
+          aegisub.set_undo_point('api')
+          aegisub.set_undo_point() -- nothing to commit: no name is read
+
+          local btn, res = aegisub.dialog.display({
+            {class = 'edit', text = 'unnamed'},
+            {class = 'edit', name = 'twice', text = 'first'},
+            {class = 'edit', name = 'twice', text = 'second'},
+            {class = 'intedit', name = 'gone', value = 3},
+            {class = 'label', name = 'gone', label = 'a label after it'},
+            {class = 'label', name = 'kept', label = 'a label before it'},
+            {class = 'intedit', name = 'kept', value = 4},
+          }, {'Go', 'Stop'}, {OK = 'Go'})
+          assert(btn == 'Go')
+          assert(res[''] == 'unnamed' and res.twice == 'second' and res.gone == nil and res.kept == 4)
+
+          assert(type(require('lpeg').version()) == 'string')
+
+          local p = aegisub.project_properties()
+          assert(p.active_row == 7 and p.scroll_position == 5 and p.video_position == 123 and p.video_zoom == 0.5)
+          assert(p.video_file == '?dummy:23.976000:40000:1920:1080:47:163:254:', p.video_file)
+          assert(p.audio_file == 'dummy-audio:silence?sr=44100', p.audio_file)
+          aegisub.debug.out(p.keyframes_file .. '\n')
+        end)
+        "##,
+    );
+    let mut d = doc("kara-templater-retime.ass");
+    d.set_info("Video File", "?dummy:23.976000:40000:1920:1080:47:163:254:");
+    d.set_info("Audio File", "dummy-audio:silence?sr=44100");
+    d.set_info("Keyframes File", "sub/keys.txt");
+    d.set_info("Active Line", "1");
+    let ctx = Context {
+        subtitle_file: Some(dir.path().join("script.ass")),
+        ui: Some(fs_automation::UiState {
+            active_row: 7,
+            scroll_position: 5,
+            video_position: 123,
+            video_zoom: 0.5,
+        }),
+        ..Default::default()
+    };
+    let out = s.run_macro(0, &d, &[0], Some(0), &ctx).unwrap();
+    assert_eq!(out.commits[0].0, "api");
+    // the dummy video and audio stay what they are; a relative path is next to the script,
+    // with the platform's separators
+    let keys = dir.path().join("sub").join("keys.txt");
+    let keys = keys
+        .to_string_lossy()
+        .replace('/', std::path::MAIN_SEPARATOR_STR);
+    assert!(f.log().contains(&keys), "{} / {keys}", f.log());
+}
+
+/// SSA's Picture, Sound, Movie and Command lines, which Aegisub drops when it reads a file:
+/// a script that rewrites every line leaves them what they are.
+#[test]
+fn other_event_kinds_survive_a_script() {
+    let f = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let s = f.script(
+        dir.path(),
+        "kinds.lua",
+        r#"aegisub.register_macro('K', '', function(subs)
+    for i = 1, #subs do
+        local l = subs[i]
+        if l.class == 'dialogue' then
+            l.layer = l.layer + 1
+            subs[i] = l
+        end
+    end
+end)
+"#,
+    );
+    let d = Document::parse(
+        "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,text\nPicture: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,image.png\nComment: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,note\nSound: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,sound.wav\n",
+    );
+    let out = s
+        .run_macro(0, &d, &[0], Some(0), &Context::default())
+        .unwrap();
+    let new = &out.commits.last().unwrap().1;
+    let kinds: Vec<_> = (0..new.event_count())
+        .map(|i| {
+            (
+                new.event(i).unwrap().kind.key(),
+                new.event(i).unwrap().layer,
+            )
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("Dialogue", 1),
+            ("Picture", 1),
+            ("Comment", 1),
+            ("Sound", 1)
+        ]
+    );
+}

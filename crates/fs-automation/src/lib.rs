@@ -148,6 +148,19 @@ pub struct Context {
     /// Edit box state for arch1t3cht's `aegisub.gui` (1-based byte positions).
     pub edit: EditState,
     pub modified: bool,
+    /// The window's state as it is now; without one `project_properties` has what the file
+    /// was saved with.
+    pub ui: Option<UiState>,
+}
+
+/// What Aegisub keeps in the project's properties as the window changes: the active line
+/// among the dialogue lines, the grid's first row, the video frame and its zoom.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct UiState {
+    pub active_row: i64,
+    pub scroll_position: i64,
+    pub video_position: i64,
+    pub video_zoom: f64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -201,6 +214,7 @@ pub struct DialogResult {
     /// Label of the pressed button (`""` for the default OK); `None` when
     /// the dialog was closed or the button has the `cancel` id.
     pub button: Option<String>,
+    /// By control name, `""` for the controls without one (the last of a name counts).
     pub values: HashMap<String, DialogValue>,
 }
 
@@ -226,7 +240,7 @@ impl Dialog {
             values: self
                 .controls
                 .iter()
-                .filter_map(|c| Some((c.name.clone()?, c.value.clone()?)))
+                .filter_map(|c| Some((c.name.clone().unwrap_or_default(), c.value.clone()?)))
                 .collect(),
         }
     }
@@ -805,13 +819,15 @@ fn dialog_from_lua(
             if !d.buttons.contains(&label) {
                 return Err(format!("Invalid button for id {id}"));
             }
-            d.button_ids.push((id.to_lowercase(), label));
+            // as written: Aegisub knows the ids in lower case only, "OK" is no id
+            d.button_ids.push((id, label));
         }
     }
     Ok(d)
 }
 
-fn dialog_values(lua: &Lua, values: &HashMap<String, DialogValue>) -> mlua::Result<Table> {
+/// An export filter's settings as the table its processing function gets.
+fn settings_table(lua: &Lua, values: &HashMap<String, DialogValue>) -> mlua::Result<Table> {
     let t = lua.create_table()?;
     for (k, v) in values {
         match v {
@@ -819,6 +835,29 @@ fn dialog_values(lua: &Lua, values: &HashMap<String, DialogValue>) -> mlua::Resu
             DialogValue::Int(i) => t.set(k.as_str(), *i)?,
             DialogValue::Float(f) => t.set(k.as_str(), *f)?,
             DialogValue::Bool(b) => t.set(k.as_str(), *b)?,
+        }
+    }
+    Ok(t)
+}
+
+/// Aegisub's LuaDialog::LuaReadBack: every control writes its value under its name, in the
+/// order the dialog has them, a label writing nil. So a control without a name is read back as
+/// `""`, the last control of a name is the one a script sees, and a label after a control of
+/// its name takes that value away.
+fn dialog_values(
+    lua: &Lua,
+    dialog: &Dialog,
+    values: &HashMap<String, DialogValue>,
+) -> mlua::Result<Table> {
+    let t = lua.create_table()?;
+    for c in &dialog.controls {
+        let k = c.name.as_deref().unwrap_or("");
+        match values.get(k).filter(|_| c.class != "label") {
+            Some(DialogValue::Text(s) | DialogValue::Color(s)) => t.set(k, s.as_str())?,
+            Some(DialogValue::Int(i)) => t.set(k, *i)?,
+            Some(DialogValue::Float(f)) => t.set(k, *f)?,
+            Some(DialogValue::Bool(b)) => t.set(k, *b)?,
+            None => t.set(k, Value::Nil)?,
         }
     }
     Ok(t)
@@ -833,27 +872,51 @@ fn project_properties(lua: &Lua, doc: &Document, ctx: &Context) -> mlua::Result<
             .to_string()
     };
     let num = |k: &str| get(k).trim().parse::<f64>().unwrap_or(0.0);
-    let script_dir = ctx.subtitle_file.as_ref().and_then(|f| f.parent());
+    let script_dir = (ctx.subtitle_file.as_ref())
+        .and_then(|f| f.parent())
+        .filter(|d| !d.as_os_str().is_empty());
+    // Aegisub's Path::MakeAbsolute: the platform's separators, a dummy video or audio as it is,
+    // a relative path next to the script
+    let preferred = |p: String| {
+        if cfg!(windows) {
+            p.replace('/', "\\")
+        } else {
+            p
+        }
+    };
     let file = |k: &str| {
-        let v = get(k);
+        let v = preferred(get(k));
         match script_dir {
-            Some(d) if !v.is_empty() && Path::new(&v).is_relative() => {
-                d.join(&v).to_string_lossy().into_owned()
+            Some(d)
+                if !v.is_empty()
+                    && !v.starts_with("?dummy")
+                    && !v.starts_with("dummy-audio:")
+                    && Path::new(&v).is_relative() =>
+            {
+                preferred(d.join(&v).to_string_lossy().into_owned())
             }
             _ => v,
         }
     };
+    // the window's state as it is now, where the host knows it (Aegisub keeps these current);
+    // else as the file was saved
+    let ui = ctx.ui.unwrap_or(UiState {
+        active_row: num("Active Line") as i64,
+        scroll_position: num("Scroll Position") as i64,
+        video_position: num("Video Position") as i64,
+        video_zoom: num("Video Zoom Percent"),
+    });
     let t = lua.create_table()?;
     t.set("automation_scripts", get("Automation Scripts"))?;
     t.set("export_filters", get("Export Filters"))?;
     t.set("export_encoding", get("Export Encoding"))?;
     t.set("style_storage", get("Last Style Storage"))?;
-    t.set("video_zoom", num("Video Zoom Percent"))?;
+    t.set("video_zoom", ui.video_zoom)?;
     t.set("ar_value", num("Video AR Value"))?;
-    t.set("scroll_position", num("Scroll Position") as i64)?;
-    t.set("active_row", num("Active Line") as i64)?;
+    t.set("scroll_position", ui.scroll_position)?;
+    t.set("active_row", ui.active_row)?;
     t.set("ar_mode", num("Video AR Mode") as i64)?;
-    t.set("video_position", num("Video Position") as i64)?;
+    t.set("video_position", ui.video_position)?;
     t.set("audio_file", file("Audio File"))?;
     t.set("video_file", file("Video File"))?;
     t.set("timecodes_file", file("Timecodes File"))?;
@@ -1123,7 +1186,7 @@ fn fs_table(lua: &Lua) -> mlua::Result<Table> {
                 Some(l) => Value::String(lua.create_string(&l)?),
                 None => Value::Boolean(false),
             };
-            ret(lua, (button, dialog_values(lua, &r.values)?))
+            ret(lua, (button, dialog_values(lua, &d, &r.values)?))
         })?,
     )?;
     fs.set(
@@ -1269,11 +1332,10 @@ impl Script {
             }
         }
         let g = lua.globals();
-        if g.get::<Value>("version")
-            .ok()
-            .and_then(|v| lua_str(&lua, &v))
-            .as_deref()
-            == Some("3")
+        // lua_isnumber and lua_tointeger: 3, 3.5 and "3.0" are all Automation 3's
+        if (g.get::<Value>("version").ok())
+            .and_then(|v| lua.coerce_number(v).ok().flatten())
+            .is_some_and(|n| n.trunc() == 3.0)
         {
             return Err("Attempted to load an Automation 3 script as an Automation 4 Lua script. Automation 3 is no longer supported.".into());
         }
@@ -1713,7 +1775,12 @@ impl Script {
         self.begin(rt, &api, ctx, doc, &self.filters[i].name, true, false)?;
         let run = (|| -> Result<_, RunError> {
             let (h, subs) = Self::subs(rt, &api, State::new(doc, true, false))?;
-            let r = call(&rt.lua, &api, &f, (subs, dialog_values(&rt.lua, settings)?));
+            let r = call(
+                &rt.lua,
+                &api,
+                &f,
+                (subs, settings_table(&rt.lua, settings)?),
+            );
             let st = h.0.lock().unwrap_or_else(|e| e.into_inner()).take();
             Ok((r, st, shared(&rt.lua)?.env.host.clone()))
         })();

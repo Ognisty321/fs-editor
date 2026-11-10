@@ -10,11 +10,25 @@ local raw_moon = {}
 local warnings = {}
 local macros, filters = {}, {}
 
--- Rust helpers return (true, values...) or (false, message); raise the
--- message without position info like Aegisub's C error() does.
+-- An API error as Aegisub's C functions raise it (agi::lua::error: luaL_where(L, 1) and the
+-- message): with the position of the script's code that called into the API, which is the
+-- first frame that is not this file's.
+local getinfo = debug.getinfo
+local this_source = getinfo(1, 'S').source
+local function raise(msg)
+  local level = 2
+  while true do
+    local ar = getinfo(level, 'S')
+    if not ar or ar.source ~= this_source then break end
+    level = level + 1
+  end
+  error(msg, level)
+end
+
+-- Rust helpers return (true, values...) or (false, message).
 local function check(ok, ...)
   if ok then return ... end
-  error((...), 0)
+  raise((...))
 end
 local function wrap(f) return function(...) return check(f(...)) end end
 
@@ -22,7 +36,13 @@ local function check_string(v, n, fname)
   local t = type(v)
   if t == 'string' then return v end
   if t == 'number' then return tostring(v) end
-  error(("bad argument #%d to '%s' (string expected, got %s)"):format(n, fname, t), 0)
+  raise(("bad argument #%d to '%s' (string expected, got %s)"):format(n, fname, t == 'nil' and 'no value' or t))
+end
+
+-- lua_tointeger: towards zero
+local function to_int(n)
+  n = tonumber(n) or 0
+  return n < 0 and math.ceil(n) or math.floor(n)
 end
 
 dofile = nil
@@ -79,7 +99,7 @@ package.loaders[2] = function(name)
     if fs.file_exists(path) then
       local f, err = load_file(path)
       if not f then
-        error(('Error loading Lua module "%s":\n%s'):format(path, tostring(err)), 0)
+        raise(('Error loading Lua module "%s":\n%s'):format(path, tostring(err)))
       end
       return f
     end
@@ -98,10 +118,10 @@ function include(name)
       if fs.file_exists(c) then path = c; break end
     end
   end
-  if not path then error('Lua include not found: ' .. name, 0) end
+  if not path then raise('Lua include not found: ' .. name) end
   local f, err = load_file(path)
   if not f then
-    error(('Error loading Lua include "%s":\n%s'):format(name, tostring(err)), 0)
+    raise(('Error loading Lua include "%s":\n%s'):format(name, tostring(err)))
   end
   return f()
 end
@@ -190,15 +210,18 @@ end
 
 aegisub = {
   lua_automation_version = 4,
+  -- the Aegisub whose API this is (aegisub.version: its version string and numbers; `build`,
+  -- a revision count, is absent as in a build that does not know its own)
+  version = { string = '3.5.0', major = 3, minor = 5, patch = 0 },
 
   register_macro = function(name, description, process, validate, is_active)
     name = check_string(name, 1, 'register_macro')
     if type(process) ~= 'function' then
-      error('The macro processing function must be a function', 0)
+      raise('The macro processing function must be a function')
     end
     for _, m in ipairs(macros) do
       if m.name == name then
-        error(("A macro named '%s' is already defined in script '%s'"):format(name, script_stem), 0)
+        raise(("A macro named '%s' is already defined in script '%s'"):format(name, script_stem))
       end
     end
     macros[#macros + 1] = {
@@ -213,12 +236,12 @@ aegisub = {
   register_filter = function(name, description, priority, process, config)
     name = check_string(name, 1, 'register_filter')
     if type(process) ~= 'function' then
-      error('The filter processing function must be a function', 0)
+      raise('The filter processing function must be a function')
     end
     filters[#filters + 1] = {
       name = name,
       description = type(description) == 'string' and description or (type(description) == 'number' and tostring(description)) or '',
-      priority = math.floor(tonumber(priority) or 0),
+      priority = to_int(priority),
       process = process,
       config = type(config) == 'function' and config or nil,
     }
@@ -232,7 +255,7 @@ aegisub = {
   decode_path = function(p) return fs.decode_path(check_string(p, 1, 'decode_path')) end,
   cancel = function() error(nil, 0) end,
   file_name = fs.file_name,
-  gettext = function(s) return s end,
+  gettext = function(s) return check_string(s, 1, 'gettext') end,
   project_properties = fs.project_properties,
   get_audio_selection = fs.get_audio_selection,
   set_status_text = function(s) return fs.set_status_text(check_string(s, 1, 'set_status_text')) end,
@@ -255,7 +278,7 @@ local function debug_out(...)
   local args = { ... }
   local first = 1
   if type(args[1]) == 'number' then
-    if args[1] > fs.trace_level() then return end
+    if to_int(args[1]) > fs.trace_level() then return end
     first = 2
   end
   local msg
@@ -304,8 +327,13 @@ end
 function api.make_subs(h)
   local obj = newproxy(true)
   local mt = getmetatable(obj)
-  local closures = {
-    delete = function(...) return check(h:delete(...)) end,
+  local closures
+  closures = {
+    -- subs:delete(i) works in Aegisub, which reads the line numbers from the last argument back
+    delete = function(...)
+      if rawequal((...), obj) then return check(h:delete(select(2, ...))) end
+      return check(h:delete(...))
+    end,
     deleterange = function(...) return check(h:deleterange(...)) end,
     insert = function(...) return check(h:insert(...)) end,
     append = function(...) return check(h:append(...)) end,
@@ -321,25 +349,31 @@ function api.make_subs(h)
         check(h:len()) -- expiry check
         return c
       end
-      error(("Invalid indexing in Subtitle File object: '%s'"):format(k), 0)
+      raise(("Invalid indexing in Subtitle File object: '%s'"):format(k))
     end
-    error(("Attempt to index a Subtitle File object with value of type '%s'."):format(t), 0)
+    raise(("Attempt to index a Subtitle File object with value of type '%s'."):format(t))
   end
   mt.__newindex = function(_, k, v)
-    if type(k) ~= 'number' then
-      error(("Attempt to index a Subtitle File object with value of type '%s'."):format(type(k)), 0)
+    -- check_int: a number, or a string that reads as one
+    local n = type(k) == 'string' and tonumber(k) or k
+    if type(n) ~= 'number' then
+      raise(("bad argument #2 to '?' (number expected, got %s)"):format(type(k)))
     end
-    check(h:set(k, v))
+    check(h:set(n, v))
   end
   mt.__len = function() return check(h:len()) end
-  mt.__ipairs = function(self)
-    local i = 0
-    return function()
-      i = i + 1
-      if i <= check(h:len()) then return i, self[i] end
-    end, self, 0
+  -- Aegisub's IterNext: stateless, the line after index `i`
+  local function iter_next(_, i)
+    if type(i) == 'string' then i = tonumber(i) end
+    if type(i) ~= 'number' then
+      raise(("bad argument #2 to '?' (number expected, got %s)"):format(i == nil and 'no value' or type(i)))
+    end
+    i = to_int(i)
+    if i < 0 then raise("bad argument #2 to '?' (must be >= 0)") end
+    if i >= check(h:len()) then return nil end
+    return i + 1, check(h:get(i + 1))
   end
-  mt.__tostring = function() return 'Subtitle File object' end
+  mt.__ipairs = function() return iter_next, nil, 0 end
   aegisub.parse_karaoke_data = function(line) return check(h:parse_karaoke(line)) end
   aegisub.set_undo_point = function(desc) check(h:set_undo_point(desc)) end
   return obj

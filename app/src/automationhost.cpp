@@ -163,8 +163,8 @@ std::vector<QWidget *> scriptControls(const rust::Vec<fsb::DialogControlData> &c
             s->setRange(c.has_min ? int(c.min) : INT_MIN, c.has_max ? int(c.max) : INT_MAX);
             s->setValue(int(c.num));
             w = s;
-        } else if (cls == "floatedit" && c.step == 0) {
-            // Aegisub: no step is a plain text field, every digit the value has
+        } else if (cls == "floatedit" && c.step <= 0) {
+            // Aegisub: no step (or one below zero) is a plain text field, every digit the value has
             auto *e = new QLineEdit(QString::number(c.num, 'g', 17), parent);
             auto *v = new QDoubleValidator(e);
             v->setLocale(QLocale::c());
@@ -182,7 +182,8 @@ std::vector<QWidget *> scriptControls(const rust::Vec<fsb::DialogControlData> &c
         } else if (cls == "dropdown") {
             auto *b = new QComboBox(parent);
             for (const auto &it : c.items) b->addItem(fs::q(it));
-            b->setCurrentText(fs::q(c.text));
+            // a value that is no item shows none picked and reads back "" (Aegisub), not the first
+            b->setCurrentIndex(b->findText(fs::q(c.text), Qt::MatchExactly | Qt::MatchCaseSensitive));
             w = b;
         } else if (cls == "checkbox") {
             auto *b = new QCheckBox(fs::q(c.label), parent);
@@ -295,7 +296,11 @@ fsb::DialogReply GuiAutomationHost::dialog(const fsb::DialogData &d) const {
             fsb::DialogReply r;
             r.accepted = accepted;
             r.button = fs::rs(pressed);
-            r.controls = scriptValues(d.controls, widgets);
+            // a dialog closed with no button to stand for that returns what it was shown with:
+            // Aegisub reads the controls only when a button is pressed
+            if (clicked) r.controls = scriptValues(d.controls, widgets);
+            else
+                for (const auto &c : d.controls) r.controls.push_back(c);
             return r;
         });
     });

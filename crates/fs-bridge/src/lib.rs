@@ -476,6 +476,12 @@ pub mod ffi {
         cursor: i64,
         sel_start: i64,
         sel_end: i64,
+        /// The window as it is now, for `aegisub.project_properties` (Aegisub keeps these
+        /// current; the file has them as of its last save): the grid's first row, the video
+        /// frame and the video's zoom (1 = its own size).
+        scroll_position: i64,
+        video_position: i64,
+        video_zoom: f64,
     }
 
     /// One `aegisub.dialog.display` control; `kind` of the value:
@@ -1165,6 +1171,7 @@ pub mod ffi {
             session: &Session,
             rows: &[usize],
             active: i64,
+            editor: &MacroContext,
         ) -> Vec<MacroState>;
         /// A script run in three steps (Aegisub's BackgroundScriptRunner): prepared and applied
         /// on the GUI thread, run on a worker while the host brings dialogs and progress back.

@@ -19,31 +19,32 @@ use std::sync::{Arc, Mutex};
 /// `[Script Info]` keys Aegisub keeps as project properties instead of
 /// exposing them as info lines.
 const HIDDEN_INFO: &[&str] = &[
-    "automation scripts",
-    "export filters",
-    "export encoding",
-    "last style storage",
-    "audio file",
-    "audio uri",
-    "video file",
-    "timecodes file",
-    "keyframes file",
-    "video zoom percent",
-    "aegisub video zoom percent",
-    "scroll position",
-    "aegisub scroll position",
-    "active line",
-    "aegisub active line",
-    "video position",
-    "aegisub video position",
-    "video ar mode",
-    "video ar value",
-    "collisions",
+    "Automation Scripts",
+    "Export Filters",
+    "Export Encoding",
+    "Last Style Storage",
+    "Audio File",
+    "Audio URI",
+    "Video File",
+    "Timecodes File",
+    "Keyframes File",
+    "Video Zoom Percent",
+    "Aegisub Video Zoom Percent",
+    "Scroll Position",
+    "Aegisub Scroll Position",
+    "Active Line",
+    "Aegisub Active Line",
+    "Video Position",
+    "Aegisub Video Position",
+    "Video AR Mode",
+    "Video AR Value",
+    "Collisions",
 ];
 
+/// The keys are matched as written, as Aegisub's parser does: "video file" in another case is
+/// an info line like any other.
 fn hidden_info(key: &str) -> bool {
-    let k = key.to_ascii_lowercase();
-    HIDDEN_INFO.contains(&k.as_str()) || k.starts_with("automation settings ")
+    HIDDEN_INFO.contains(&key) || key.starts_with("Automation Settings ")
 }
 
 /// A dialogue line as a script sees it: the text without the extradata
@@ -580,36 +581,93 @@ fn ass_color(c: Color) -> String {
     format!("{}&", c.to_style_string())
 }
 
-/// agi::Color parsing (style colours and dialog values): `&HAABBGGRR&`,
-/// `&HBBGGRR&`, decimal, `#RRGGBB`, `#RGB`, `rgb(r,g,b)`, `rgba(r,g,b,a)`.
-/// Unparseable input is black, as in Aegisub.
+/// agi::Color parsing (style colours and dialog values), as the grammar in Aegisub's
+/// `libaegisub/common/parser.cpp` reads it. The CSS forms first, from the start of the string
+/// and with whatever follows ignored: `rgb(r, g, b)`, `rgba(r, g, b, a)`, `#RRGGBB` (so
+/// `#RRGGBBAA` is its colour without the alpha) and `#RGB`. Then the ASS forms, which must be
+/// all of the string but for blanks after them: a decimal number that fits an `int` (SSA; "-1"
+/// is opaque white), else an optional `&`, an optional `H`, eight or six hex digits and an
+/// optional `&`. A string that starts with digits is taken as the number, so `00FF00` is not
+/// a colour while `&H00FF00&` and `FF00FF` are. Anything else is black, and no white space
+/// may come first.
 pub(crate) fn parse_color(s: &str) -> Color {
-    let s = s.trim();
-    let hex = s.trim_start_matches('&');
-    if let Some(h) = hex.strip_prefix(['H', 'h']) {
-        let h = h.trim_end_matches('&');
-        if matches!(h.len(), 6 | 8)
-            && let Ok(v) = u32::from_str_radix(h, 16)
-        {
-            return Color::from_abgr(v);
-        }
-        return Color::default();
-    }
-    if s.starts_with('#') {
-        return Color::parse_html(s)
-            .filter(|_| s.len() != 9)
-            .unwrap_or_default();
-    }
-    for (prefix, n) in [("rgba(", 4), ("rgb(", 3)] {
-        if let Some(r) = s.strip_prefix(prefix).and_then(|r| r.strip_suffix(')')) {
-            let v: Vec<u8> = r.split(',').filter_map(|x| x.trim().parse().ok()).collect();
-            if v.len() == n {
-                return Color::rgba(v[0], v[1], v[2], v.get(3).copied().unwrap_or(0));
+    css_form_color(s).unwrap_or_else(|| ass_form_color(s))
+}
+
+fn css_form_color(s: &str) -> Option<Color> {
+    let blanks = |r: &mut &str| *r = r.trim_start_matches([' ', '\t']);
+    // one to three digits that fit a byte
+    let component = |r: &mut &str| {
+        let n = r.bytes().take(3).take_while(u8::is_ascii_digit).count();
+        let v = r[..n].parse::<u8>().ok()?;
+        *r = &r[n..];
+        Some(v)
+    };
+    let list = |mut r: &str, n: usize| {
+        let mut v = [0u8; 4];
+        blanks(&mut r);
+        for (k, slot) in v.iter_mut().enumerate().take(n) {
+            if k > 0 {
+                blanks(&mut r);
+                r = r.strip_prefix(',')?;
+                blanks(&mut r);
             }
-            return Color::default();
+            *slot = component(&mut r)?;
+        }
+        blanks(&mut r);
+        r.starts_with(')')
+            .then_some(Color::rgba(v[0], v[1], v[2], v[3]))
+    };
+    if let Some(c) = s.strip_prefix("rgb(").and_then(|r| list(r, 3)) {
+        return Some(c);
+    }
+    if let Some(c) = s.strip_prefix("rgba(").and_then(|r| list(r, 4)) {
+        return Some(c);
+    }
+    let hex = s.strip_prefix('#')?.as_bytes();
+    let digit = |i: usize| {
+        hex.get(i)
+            .and_then(|b| (*b as char).to_digit(16))
+            .map(|d| d as u8)
+    };
+    if let (Some(a), Some(b), Some(c), Some(d), Some(e), Some(f)) =
+        (digit(0), digit(1), digit(2), digit(3), digit(4), digit(5))
+    {
+        return Some(Color::rgb(a << 4 | b, c << 4 | d, e << 4 | f));
+    }
+    match (digit(0), digit(1), digit(2)) {
+        (Some(r), Some(g), Some(b)) => Some(Color::rgb(r * 17, g * 17, b * 17)),
+        _ => None,
+    }
+}
+
+fn ass_form_color(s: &str) -> Color {
+    let ends = |rest: &str| rest.bytes().all(|b| matches!(b, b' ' | b'\t'));
+    let b = s.as_bytes();
+    let sign = usize::from(matches!(b.first(), Some(b'+' | b'-')));
+    let digits = b[sign..].iter().take_while(|c| c.is_ascii_digit()).count();
+    // a number too large for an int is not one: the hex forms are tried
+    if digits > 0
+        && let Ok(v) = s[..sign + digits].parse::<i32>()
+    {
+        return if ends(&s[sign + digits..]) {
+            Color::from_abgr(v as u32)
+        } else {
+            Color::default()
+        };
+    }
+    let r = s.strip_prefix('&').unwrap_or(s);
+    let r = r.strip_prefix(['H', 'h']).unwrap_or(r);
+    for n in [8, 6] {
+        if r.len() >= n && r.as_bytes()[..n].iter().all(u8::is_ascii_hexdigit) {
+            let rest = &r[n..];
+            return match u32::from_str_radix(&r[..n], 16) {
+                Ok(v) if ends(rest.strip_prefix('&').unwrap_or(rest)) => Color::from_abgr(v),
+                _ => Color::default(),
+            };
         }
     }
-    s.parse::<u32>().map(Color::from_abgr).unwrap_or_default()
+    Color::default()
 }
 
 fn field_err(f: &str, class: &str, ty: &str) -> String {
@@ -629,7 +687,8 @@ fn get_str(t: &Table, f: &str, class: &str) -> Res<String> {
 fn get_num(t: &Table, f: &str, class: &str) -> Res<f64> {
     match t.get::<Option<f64>>(f) {
         Ok(Some(n)) => Ok(n),
-        _ => Err(field_err(f, class, "number")),
+        // "string" for a number too: the word Aegisub's get_field gives every field it reads
+        _ => Err(field_err(f, class, "string")),
     }
 }
 
@@ -803,8 +862,9 @@ fn line_table(lua: &Lua, st: &State, l: &Line) -> mlua::Result<Table> {
 pub(crate) fn table_style(t: &Table, base: Option<&Style>) -> Res<Style> {
     let c = "style";
     let mut s = base.cloned().unwrap_or_default();
-    s.name = get_str(t, "name", c)?;
-    s.font = get_str(t, "fontname", c)?;
+    // Aegisub's AssStyle::UpdateData: a comma would end the field in the file
+    s.name = get_str(t, "name", c)?.replace(',', ";");
+    s.font = get_str(t, "fontname", c)?.replace(',', ";");
     s.size = get_num(t, "fontsize", c)?;
     s.primary = parse_color(&get_str(t, "color1", c)?);
     s.secondary = parse_color(&get_str(t, "color2", c)?);
@@ -839,10 +899,12 @@ pub(crate) fn table_style(t: &Table, base: Option<&Style>) -> Res<Style> {
 fn table_event(t: &Table, base: Option<&Event>, x: &mut ExtraId) -> Res<LuaEvent> {
     let c = "dialogue";
     let mut e = base.cloned().unwrap_or_default();
-    e.kind = if get_bool(t, "comment", c)? {
-        EventKind::Comment
-    } else {
-        EventKind::Dialogue
+    e.kind = match (get_bool(t, "comment", c)?, e.kind) {
+        (true, _) => EventKind::Comment,
+        (false, EventKind::Comment) => EventKind::Dialogue,
+        // SSA's Picture, Sound, Movie and Command lines, which Aegisub does not read at all:
+        // a script that writes one back as it got it (not a comment) leaves it what it is
+        (false, kind) => kind,
     };
     e.layer = get_int(t, "layer", c)? as i32;
     e.start = Time(get_int(t, "start_time", c)?.clamp(0, 35_999_994));
@@ -1039,6 +1101,14 @@ fn fail(lua: &Lua, msg: impl AsRef<str>) -> Ret {
     (false, msg.as_ref()).into_lua_multi(lua)
 }
 
+/// `luaL_typename` of an argument, "no value" for a missing one.
+fn lua_type_name(v: &Value) -> &'static str {
+    match v {
+        Value::Nil => "no value",
+        v => v.type_name(),
+    }
+}
+
 /// `lua_tointeger` of a number or a numeric string, as Aegisub's `check_int`.
 pub(crate) fn to_index(v: &Value) -> Option<i64> {
     match v {
@@ -1133,9 +1203,7 @@ impl Handle {
         let n = st.lines.len() as i64;
         for &i in &ids {
             if i < 1 || i > n {
-                return Err(format!(
-                    "bad argument to 'delete' (Out of range line index {i})"
-                ));
+                return Err("bad argument #1 to 'delete' (Out of range line index)".into());
             }
         }
         ids.sort_unstable();
@@ -1182,7 +1250,7 @@ impl UserData for Handle {
                     return Ok(None);
                 }
                 (st.lines.get(i as usize - 1).cloned().map(Some))
-                    .ok_or_else(|| format!("Out of range line index {i}"))
+                    .ok_or_else(|| format!("Requested out-of-range line from subtitle file: {i}"))
             })?;
             let old = match old {
                 Ok(old) => old,
@@ -1201,7 +1269,9 @@ impl UserData for Handle {
                 }
                 // a metamethod may have removed lines meanwhile
                 let Some(slot) = st.lines.get_mut(i as usize - 1) else {
-                    return Err(format!("Out of range line index {i}"));
+                    return Err(format!(
+                        "Requested out-of-range line from subtitle file: {i}"
+                    ));
                 };
                 let classes = [slot.class(), line.class()];
                 *slot = line;
@@ -1215,8 +1285,17 @@ impl UserData for Handle {
             for (k, a) in args.iter().enumerate() {
                 match a {
                     Value::Table(t) => {
-                        for v in t.sequence_values::<Value>() {
-                            ids.push(to_index(&v?).unwrap_or(0));
+                        // every value of the table, as Aegisub's lua_for_each walks it
+                        for pair in t.pairs::<Value, Value>() {
+                            match to_index(&pair?.1) {
+                                Some(i) => ids.push(i),
+                                None => {
+                                    return fail(
+                                        lua,
+                                        "bad argument #-1 to 'delete' (number expected)",
+                                    );
+                                }
+                            }
                         }
                     }
                     v => match to_index(v) {
@@ -1313,10 +1392,13 @@ impl UserData for Handle {
             ok(lua, out)
         });
         m.add_method("set_undo_point", |lua, h, desc: Value| {
-            let desc = lua
-                .coerce_string(desc)?
-                .map(|s| s.to_string_lossy())
-                .unwrap_or_default();
+            let given = lua_type_name(&desc);
+            let desc = match &desc {
+                Value::String(_) | Value::Integer(_) | Value::Number(_) => {
+                    lua.coerce_string(desc)?.map(|s| s.to_string_lossy())
+                }
+                _ => None,
+            };
             let mut g = h.0.lock().unwrap_or_else(|e| e.into_inner());
             let Some(st) = g.as_mut() else {
                 return fail(lua, "Subtitles object is no longer valid");
@@ -1328,6 +1410,15 @@ impl UserData for Handle {
                 );
             }
             if st.modified {
+                // Aegisub reads the description only when there is something to commit
+                let Some(desc) = desc else {
+                    return fail(
+                        lua,
+                        format!(
+                            "bad argument #1 to 'set_undo_point' (string expected, got {given})"
+                        ),
+                    );
+                };
                 // committed now, so the point costs what changed since the last one
                 let doc = st.commit();
                 st.undo_points.push((desc, doc));
@@ -1347,8 +1438,23 @@ mod tests {
         assert_eq!(parse_color("&H0000FF"), Color::rgb(255, 0, 0));
         assert_eq!(parse_color("#00FF00"), Color::rgb(0, 255, 0));
         assert_eq!(parse_color("rgb(1,2,3)"), Color::rgb(1, 2, 3));
-        assert_eq!(parse_color("#00FF0080"), Color::default());
+        // the grammar of libaegisub/common/parser.cpp
+        assert_eq!(parse_color("#00FF0080"), Color::rgb(0, 255, 0));
+        assert_eq!(parse_color("#0f0"), Color::rgb(0, 255, 0));
+        assert_eq!(parse_color("rgba( 1 , 2,3, 4 )"), Color::rgba(1, 2, 3, 4));
+        assert_eq!(parse_color("rgb(1,2,300)"), Color::default());
+        assert_eq!(parse_color("FF00FF"), Color::rgb(255, 0, 255));
+        assert_eq!(parse_color("&00FF00&  "), Color::rgb(0, 255, 0));
+        assert_eq!(parse_color("00FF00"), Color::default());
+        assert_eq!(parse_color(" &H0000FF&"), Color::default());
+        assert_eq!(parse_color("-1"), Color::rgba(255, 255, 255, 255));
+        assert_eq!(parse_color("255"), Color::rgb(255, 0, 0));
+        assert_eq!(parse_color("4294967295"), Color::default());
+        assert_eq!(parse_color("&H1234567&"), Color::default());
+        assert_eq!(parse_color(""), Color::default());
         assert_eq!(parse_color("junk"), Color::default());
+        assert!(hidden_info("Video File") && hidden_info("Automation Settings x"));
+        assert!(!hidden_info("video file") && !hidden_info("Title"));
         assert_eq!(inline_decode(&inline_encode("a,b:c|#\n")), "a,b:c|#\n");
         assert_eq!(split_extra_ids("{=3=10}x"), (vec![3, 10], "x"));
         assert_eq!(split_extra_ids("{\\b1}x").0, Vec::<u32>::new());

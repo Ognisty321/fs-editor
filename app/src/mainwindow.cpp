@@ -61,6 +61,7 @@
 #include <QCheckBox>
 #include <QCollator>
 #include <QScopedValueRollback>
+#include <QScrollBar>
 #include <QSettings>
 #include <QSpinBox>
 #include <QStandardPaths>
@@ -188,6 +189,24 @@ public:
 } // namespace
 
 static QWidget *makeHolder(QWidget *parent); // a PanelHolder
+
+// What a script is told of the window as it is now: the audio selection, the edit box's cursor,
+// and the scroll position, video frame and zoom of aegisub.project_properties.
+static fsb::MacroContext macroContext(TabPanel *tab) {
+    fsb::MacroContext ctx;
+    if (tab->audio()->hasAudio()) {
+        ctx.has_audio = true;
+        std::tie(ctx.audio_start, ctx.audio_end) = tab->audio()->selection();
+    }
+    tab->edit()->scriptCursor(ctx.cursor, ctx.sel_start, ctx.sel_end);
+    ctx.scroll_position = tab->grid()->verticalScrollBar()->value();
+    auto *v = tab->video();
+    if (const auto info = v->info(); v->hasVideo() && info.width > 0) {
+        ctx.video_position = v->frame();
+        ctx.video_zoom = v->view()->displayRect().width() * v->view()->zoom().width() / info.width;
+    }
+    return ctx;
+}
 
 MainWindow::MainWindow() {
     limits::reload(); // the counter options, before any row's characters per second
@@ -2107,7 +2126,8 @@ void MainWindow::buildMenus() {
         }
         auto *tab = current();
         const auto rows = tab->selection();
-        const auto states = (*m_automation)->macro_states(tab->s(), fs::slice(rows), tab->active());
+        const auto states =
+            (*m_automation)->macro_states(tab->s(), fs::slice(rows), tab->active(), macroContext(tab));
         for (auto *a : m_actions) {
             const QVariant id = a->property("macroId");
             if (!id.isValid() || id.toULongLong() >= states.size()) continue;
@@ -3600,12 +3620,7 @@ void MainWindow::runScript(fsb::ScriptJob &job) {
 void MainWindow::runMacro(size_t id) {
     auto *tab = current();
     const auto rows = tab->selection();
-    fsb::MacroContext ctx;
-    if (tab->audio()->hasAudio()) {
-        ctx.has_audio = true;
-        std::tie(ctx.audio_start, ctx.audio_end) = tab->audio()->selection();
-    }
-    tab->edit()->scriptCursor(ctx.cursor, ctx.sel_start, ctx.sel_end);
+    const fsb::MacroContext ctx = macroContext(tab);
     fsb::MacroResult r;
     QString err;
     try {

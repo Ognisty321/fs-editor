@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex, mpsc};
 use cxx::UniquePtr;
 use fs_automation::{
     Clipboard, Context, Dialog, DialogControl, DialogResult, DialogValue, EditState, Env, Host,
-    Interrupt, MacroOutcome, Paths, RunError, Script, VideoFrame, canonical, inline_string_encode,
-    serialise_settings,
+    Interrupt, MacroOutcome, Paths, RunError, Script, UiState, VideoFrame, canonical,
+    inline_string_encode, serialise_settings,
 };
 use fs_core::Document;
 use fs_core::ops;
@@ -267,10 +267,10 @@ impl Host for GuiHost {
         };
         DialogResult {
             button: reply.accepted.then_some(reply.button),
+            // a control without a name is read back as "" (Aegisub)
             values: reply
                 .controls
                 .iter()
-                .filter(|c| !c.name.is_empty())
                 .filter_map(|c| Some((c.name.clone(), control_value(c)?)))
                 .collect(),
         }
@@ -1060,6 +1060,27 @@ impl Automation {
         }
     }
 
+    /// The context of a macro: the project with what the window shows now, which a validation
+    /// function sees as the macro itself does (the audio selection, the line being edited, and
+    /// the active line, scroll position and video frame of `project_properties`).
+    fn live_context(session: &Session, editor: &MacroContext, active: Option<usize>) -> Context {
+        Context {
+            audio_selection: (editor.has_audio).then_some((editor.audio_start, editor.audio_end)),
+            edit: EditState {
+                cursor: editor.cursor,
+                sel_start: editor.sel_start,
+                sel_end: editor.sel_end,
+            },
+            ui: Some(UiState {
+                active_row: active.map_or(0, |a| a as i64),
+                scroll_position: editor.scroll_position,
+                video_position: editor.video_position,
+                video_zoom: editor.video_zoom,
+            }),
+            ..Self::context(session)
+        }
+    }
+
     fn selection(session: &Session, rows: &[usize], active: i64) -> (Vec<usize>, Option<usize>) {
         let mut sel = session.main_events(rows);
         sel.sort_unstable();
@@ -1071,9 +1092,15 @@ impl Automation {
 
     /// What the Automation menu shows for every macro, by id (Aegisub's validate and
     /// is_active): the selection and the project are read once for all of them.
-    pub fn macro_states(&self, session: &Session, rows: &[usize], active: i64) -> Vec<MacroState> {
+    pub fn macro_states(
+        &self,
+        session: &Session,
+        rows: &[usize],
+        active: i64,
+        editor: &MacroContext,
+    ) -> Vec<MacroState> {
         let (sel, act) = Self::selection(session, rows, active);
-        let ctx = Self::context(session);
+        let ctx = Self::live_context(session, editor, act);
         let doc = &session.ed.doc;
         let shown = self.shown(session);
         self.macros
@@ -1110,15 +1137,7 @@ impl Automation {
             return Err("the macro's script belongs to another file".into());
         }
         let (sel, act) = Self::selection(session, rows, active);
-        let ctx = Context {
-            audio_selection: (editor.has_audio).then_some((editor.audio_start, editor.audio_end)),
-            edit: EditState {
-                cursor: editor.cursor,
-                sel_start: editor.sel_start,
-                sel_end: editor.sel_end,
-            },
-            ..Self::context(session)
-        };
+        let ctx = Self::live_context(session, editor, act);
         let video = ctx
             .video_file
             .as_deref()
@@ -1225,16 +1244,16 @@ end)"#,
         a.load_script(script.to_str().unwrap()).unwrap();
         let mut s = Session::default();
         a.add_local_script(&mut s, script.to_str().unwrap());
-        let st = a.macro_states(&s, &[0], 0);
+        let st = a.macro_states(&s, &[0], 0, &MacroContext::default());
         assert!(st[0].enabled && !st[0].toggle && st[0].help.is_empty());
         assert!(st[1].enabled && st[1].toggle && st[1].checked);
         assert_eq!(st[1].help, "help for 1");
         assert!(!st[2].enabled, "no video");
         s.set_video_context(720, 480, 32, 27, &[], &[]);
-        assert!(a.macro_states(&s, &[0], 0)[2].enabled);
+        assert!(a.macro_states(&s, &[0], 0, &MacroContext::default())[2].enabled);
         // a ratio set by hand is Aegisub's type and value
         s.set_project_value("Video AR Mode", "1");
-        assert!(!a.macro_states(&s, &[0], 0)[2].enabled);
+        assert!(!a.macro_states(&s, &[0], 0, &MacroContext::default())[2].enabled);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1261,7 +1280,7 @@ end)"#,
         let mut r = s.row(0);
         r.text = "abc".into();
         s.set_row(0, &r, "");
-        assert!(a.macro_states(&s, &[0], 0)[0].enabled);
+        assert!(a.macro_states(&s, &[0], 0, &MacroContext::default())[0].enabled);
         let res = run(&a, 0, &mut s, &[0]);
         assert!(res.changed);
         assert_eq!(res.selection, vec![0]);
@@ -1478,7 +1497,8 @@ end)"#,
         let (mut one, two) = (Session::default(), Session::default());
         a.add_local_script(&mut one, mine.to_str().unwrap());
         let id = a.macros().iter().position(|m| m.name == "M").unwrap();
-        let visible = |s: &Session| a.macro_states(s, &[0], 0)[id].visible;
+        let visible =
+            |s: &Session| a.macro_states(s, &[0], 0, &MacroContext::default())[id].visible;
         assert!(visible(&one) && !visible(&two));
         let filters = |s: &Session| a.export_filters(s).iter().any(|f| f.name == "Mine");
         assert!(filters(&one) && !filters(&two));

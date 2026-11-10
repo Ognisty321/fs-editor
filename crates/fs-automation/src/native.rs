@@ -275,22 +275,34 @@ extern "C" fn lfs_mkdir(p: *const c_char, err: *mut *mut c_char) -> bool {
     )
 }
 
+/// Aegisub's `agi::fs::Remove`, which is `std::filesystem::remove`: a file, a link or an empty
+/// directory goes, and nothing there to remove is no error.
 extern "C" fn lfs_rmdir(p: *const c_char, err: *mut *mut c_char) -> bool {
     let p = unsafe { path_arg(p) };
-    let r = if p.is_dir() {
-        std::fs::remove_dir(&p)
-    } else {
-        std::fs::remove_file(&p)
+    let r = match std::fs::symlink_metadata(&p) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+        // a link to a directory is removed as one on Windows, where it is a directory entry
+        Ok(m) if m.is_dir() || (cfg!(windows) && m.is_symlink() && p.is_dir()) => {
+            std::fs::remove_dir(&p)
+        }
+        Ok(_) => std::fs::remove_file(&p),
     };
     io_result(err, r.map(|_| true))
 }
 
+/// Aegisub's `agi::fs::Touch`: the folders the file is in are made first.
 extern "C" fn lfs_touch(p: *const c_char, err: *mut *mut c_char) -> bool {
     let p = unsafe { path_arg(p) };
-    let r = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&p)
+    let parent = p.parent().filter(|d| !d.as_os_str().is_empty());
+    let r = parent
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&p)
+        })
         .and_then(|f| f.set_modified(std::time::SystemTime::now()));
     io_result(err, r.map(|_| true))
 }
@@ -306,13 +318,12 @@ extern "C" fn lfs_get_mtime(p: *const c_char, err: *mut *mut c_char) -> i64 {
 }
 
 extern "C" fn lfs_get_mode(p: *const c_char, _err: *mut *mut c_char) -> *const c_char {
-    let Ok(m) = std::fs::symlink_metadata(unsafe { path_arg(p) }) else {
+    // std::filesystem::status, as Aegisub asks: what a link leads to (a broken one is not there)
+    let Ok(m) = std::fs::metadata(unsafe { path_arg(p) }) else {
         return std::ptr::null();
     };
     let t = m.file_type();
-    let s: &CStr = if t.is_symlink() {
-        c"link"
-    } else if t.is_dir() {
+    let s: &CStr = if t.is_dir() {
         c"directory"
     } else if t.is_file() {
         c"file"
@@ -526,7 +537,24 @@ pub fn install(lua: &Lua) -> Result<mlua::Function> {
         "aegisub.__lfs_impl",
         lua.create_function(|lua, ()| lib_table(lua, &["DirectoryIterator"], lfs_fns()))?,
     )?;
-    preload.set("lpeg", unsafe { lua.create_c_function(luaopen_lpeg)? })?;
+    // LPeg as Aegisub has it: `lpeg.version` is a function there (its LPeg is 0.10), a string
+    // in the LPeg built here, and a script that calls it must get an answer
+    let open_lpeg = unsafe { lua.create_c_function(luaopen_lpeg)? };
+    preload.set(
+        "lpeg",
+        lua.create_function(move |lua, args: mlua::MultiValue| {
+            let lpeg: Table = open_lpeg.call(args)?;
+            if let Ok(Value::String(v)) = lpeg.get::<Value>("version") {
+                let v = v.to_string_lossy();
+                let number = v.strip_prefix("LPeg ").unwrap_or(&v).to_string();
+                lpeg.set(
+                    "version",
+                    lua.create_function(move |_, ()| Ok(number.clone()))?,
+                )?;
+            }
+            Ok(lpeg)
+        })?,
+    )?;
     // luabins as Aegisub loads it: the module, after a deprecation warning
     let open = unsafe { lua.create_c_function(luaopen_luabins)? };
     preload.set(
