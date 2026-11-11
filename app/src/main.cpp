@@ -575,10 +575,35 @@ int main(int argc, char **argv) {
             time("grid repaint, all selected", 15, repaint);
             time("change shown, all selected", 5, [tab](int) { tab->changed(); });
         });
+    // FSED_SMOKE_STALLS=out.txt notes every time the window's thread stayed away from its event
+    // loop for over 50 ms (a 10 ms timer that came late), and when since the start: what freezes
+    // the window while a file opens. A dialog waiting for its answer runs the loop and is no stall.
+    // Its last line, written with the shot, is what the tab held then. FSED_SMOKE_STALL_MS is
+    // another limit than 50.
+    if (const QString out = qEnvironmentVariable("FSED_SMOKE_STALLS"); !out.isEmpty()) {
+        auto *tick = new QTimer(&w);
+        tick->setTimerType(Qt::PreciseTimer);
+        const auto since = std::make_shared<QElapsedTimer>();
+        since->start();
+        const auto last = std::make_shared<qint64>(0);
+        const int limit = qEnvironmentVariableIsSet("FSED_SMOKE_STALL_MS") ? qEnvironmentVariableIntValue("FSED_SMOKE_STALL_MS") : 50;
+        QObject::connect(tick, &QTimer::timeout, &w, [out, since, last, limit] {
+            const qint64 now = since->elapsed();
+            if (QFile f(out); now - *last > limit && f.open(QIODevice::WriteOnly | QIODevice::Append))
+                f.write(QString("at %1 ms: %2 ms" + QString(QChar(10))).arg(*last).arg(now - *last).toUtf8());
+            *last = now;
+        });
+        tick->start(10);
+    }
     if (const QString out = qEnvironmentVariable("FSED_SMOKE"); !out.isEmpty())
         QTimer::singleShot(std::max(1000, qEnvironmentVariableIntValue("FSED_SMOKE_MS")), &w, [&w, out] {
             QWidget *shot = smokeDialog(w);
             if (!shot) shot = &w;
+            if (QFile f(qEnvironmentVariable("FSED_SMOKE_STALLS")); !f.fileName().isEmpty() && f.open(QIODevice::WriteOnly | QIODevice::Append))
+                f.write(QString("at the shot: %1 lines, video %2 (%3)" + QString(QChar(10)))
+                            .arg(w.current()->s().row_count())
+                            .arg(w.current()->video()->wanted(), w.current()->video()->path().isEmpty() ? "opening" : "open")
+                            .toUtf8());
             // the audio open then, which a shot cannot tell (a track still loading looks like silence)
             if (auto *au = w.current()->audio(); !au->path().isEmpty()) {
                 QFile f(out + ".txt");

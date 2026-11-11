@@ -44,9 +44,11 @@ rust::Vec<Chapter> chapters(rust::Str path) {
     return out;
 }
 
-rust::String subtitle_packets(rust::Str path, int32_t index, rust::Vec<SubPacket> &out) {
+rust::String subtitle_packets(rust::Str path, int32_t index, int32_t how, ProgressSink &progress,
+                              rust::Vec<SubPacket> &out) {
     std::vector<fsmedia::SubPacket> v;
-    const std::string header = fsmedia::subtitle_packets(to_path(path), index, v);
+    const std::string header = fsmedia::subtitle_packets(to_path(path), index, v, progress_of(progress),
+                                                         static_cast<fsmedia::SubtitleRead>(how));
     for (const auto &p : v)
         out.push_back(SubPacket{p.start_ms, p.duration_ms, str(p.text)});
     return str(header);

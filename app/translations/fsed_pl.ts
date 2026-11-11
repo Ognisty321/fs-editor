@@ -5689,6 +5689,18 @@ do czasu audio</translation>
         <translation>Bez nazwy</translation>
     </message>
     <message>
+        <source>Reading the subtitles from %1…</source>
+        <translation>Odczytywanie napisów z %1…</translation>
+    </message>
+    <message>
+        <source>Subtitles in the video</source>
+        <translation>Napisy w wideo</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Anuluj</translation>
+    </message>
+    <message>
         <source>Text import options</source>
         <translation>Opcje importu tekstu</translation>
     </message>

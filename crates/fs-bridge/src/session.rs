@@ -511,10 +511,18 @@ impl Session {
 
     /// Subtitle stream `index` of a video file, as an unsaved ASS script.
     pub fn open_embedded(&mut self, video: &str, index: i32) -> Result<(), String> {
-        let (text, ext) = fs_media::extract_subtitles(Path::new(video), index)
-            .map_err(|e| format!("{video}: {e}"))?;
-        let mut l = fs_formats::load_bytes(text.as_bytes(), Some(ext), &LoadOptions::default())
-            .map_err(|e| format!("{video}: {e}"))?;
+        let subs = EmbeddedSubs::read(video, index, |_, _| true)?;
+        self.open_embedded_subs(&subs, video)
+    }
+
+    /// The stream [`EmbeddedSubs::read`] took out of `video`, as an unsaved ASS script.
+    pub fn open_embedded_subs(&mut self, subs: &EmbeddedSubs, video: &str) -> Result<(), String> {
+        let mut l = fs_formats::load_bytes(
+            subs.text.as_bytes(),
+            Some(subs.ext),
+            &LoadOptions::default(),
+        )
+        .map_err(|e| format!("{video}: {e}"))?;
         l.format = Format::Ass;
         self.load(l, None);
         Ok(())
@@ -3673,6 +3681,27 @@ fn bar_syllables(k: &Karaoke) -> Vec<Syllable> {
             text: k.syl_display(i),
         })
         .collect()
+}
+
+/// A subtitle stream read out of a video file: the part of opening it that can take long (a file
+/// with no index of the stream is read whole), so it is done away from the session and its thread.
+pub struct EmbeddedSubs {
+    text: String,
+    ext: &'static str,
+}
+
+impl EmbeddedSubs {
+    /// `progress(done, total)` returns false to cancel, which is an error.
+    pub fn read(
+        video: &str,
+        index: i32,
+        progress: impl FnMut(i64, i64) -> bool,
+    ) -> Result<Self, String> {
+        let how = fs_media::SubtitleRead::Auto;
+        fs_media::extract_subtitles_with(Path::new(video), index, how, progress)
+            .map(|(text, ext)| Self { text, ext })
+            .map_err(|e| format!("{video}: {e}"))
+    }
 }
 
 pub fn collect_fonts(

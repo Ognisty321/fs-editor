@@ -13,17 +13,25 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QFutureWatcher>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QProgressDialog>
 #include <QRadioButton>
 #include <QSettings>
 #include <QScrollBar>
 #include <QSplitter>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QtConcurrentRun>
+
+#include <atomic>
+#include <memory>
+#include <optional>
 
 TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fsb::new_session()) {
     m_session->set_undo_limit(size_t(QSettings().value("main/undoLevels", 500).toInt())); // Aegisub's Undo Levels
@@ -267,8 +275,60 @@ void TabPanel::importStyles(bool plainText) {
 }
 
 bool TabPanel::openEmbedded(const QString &video, int index) {
+    // Read away from the window's thread, as Aegisub reads a Matroska file's subtitles behind a
+    // progress dialog: from the file's index they are there at once, but a file without one is read
+    // whole, video and audio with it, and a film takes its time. The window waits 300 ms without
+    // input, then shows the progress with a Cancel.
+    struct Read {
+        std::optional<rust::Box<fsb::EmbeddedSubs>> subs;
+        QString error;
+        std::atomic_int percent{0};
+        std::atomic_bool cancel{false};
+    };
+    const auto read = std::make_shared<Read>();
+    QFutureWatcher<void> watch;
+    QEventLoop loop;
+    connect(&watch, &QFutureWatcher<void>::finished, &loop, &QEventLoop::quit);
+    watch.setFuture(QtConcurrent::run([read, video, index] {
+        try {
+            const fs::PercentProgress progress([&read](int pct) {
+                read->percent = pct;
+                return !read->cancel;
+            });
+            read->subs.emplace(fsb::read_embedded(fs::Utf8(video), index, progress));
+        } catch (const rust::Error &e) {
+            read->error = QString::fromUtf8(e.what());
+        }
+    }));
+    QTimer::singleShot(300, &loop, &QEventLoop::quit);
+    if (!watch.isFinished()) loop.exec(QEventLoop::ExcludeUserInputEvents);
+    if (!watch.isFinished()) {
+        QProgressDialog progress(tr("Reading the subtitles from %1…").arg(QFileInfo(video).fileName()), tr("Cancel"), 0,
+                                 100, m_main);
+        progress.setWindowTitle(tr("Subtitles in the video"));
+        progress.setWindowModality(Qt::WindowModal);
+        progress.setMinimumDuration(0);
+        progress.setAutoClose(false);
+        progress.setAutoReset(false);
+        progress.setValue(read->percent);
+        connect(&progress, &QProgressDialog::canceled, &loop, [&read] { read->cancel = true; });
+        QTimer shown;
+        connect(&shown, &QTimer::timeout, &progress, [&] {
+            if (!read->cancel) progress.setValue(read->percent);
+        });
+        shown.start(50);
+        loop.exec();
+    }
+    // quitting the application ends the loop early: the read stops at its next read of the file
+    if (!watch.isFinished()) read->cancel = true;
+    watch.waitForFinished();
+    if (read->cancel) return false;
+    if (!read->subs) {
+        m_main->error(read->error);
+        return false;
+    }
     try {
-        s().open_embedded(fs::Utf8(video), index);
+        s().open_embedded_subs(**read->subs, fs::Utf8(video));
     } catch (const rust::Error &e) {
         m_main->error(QString::fromUtf8(e.what()));
         return false;

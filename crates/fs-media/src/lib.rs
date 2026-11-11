@@ -135,12 +135,38 @@ pub fn subtitle_tracks(path: &Path) -> Result<Vec<TrackInfo>> {
         .collect())
 }
 
+/// How a subtitle stream's packets are found in the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubtitleRead {
+    /// From the file's index where it has one that names every block of the stream (Matroska
+    /// written by FFmpeg or mkvmerge): a seek and a few bytes per line. As packets otherwise.
+    Auto = 0,
+    /// As packets, which reads the whole file, video and audio with it.
+    Packets = 1,
+    /// From the index, or an error.
+    Index = 2,
+}
+
 /// One embedded subtitle stream as file text plus its extension: an ASS
 /// script for ASS/SSA streams, SRT for the rest.
 pub fn extract_subtitles(path: &Path, index: i32) -> Result<(String, &'static str)> {
+    extract_subtitles_with(path, index, SubtitleRead::Auto, |_, _| true)
+}
+
+/// [`extract_subtitles`], read as `how` says; `progress(done, total)` returns false to cancel,
+/// which is an error.
+pub fn extract_subtitles_with(
+    path: &Path,
+    index: i32,
+    how: SubtitleRead,
+    progress: impl FnMut(i64, i64) -> bool,
+) -> Result<(String, &'static str)> {
     use fs_core::time::Time;
     let mut packets = Vec::new();
-    let header = bridge::subtitle_packets(path_str(path)?, index, &mut packets)?;
+    let mut sink = ProgressSink(Box::new(progress));
+    let header =
+        bridge::subtitle_packets(path_str(path)?, index, how as i32, &mut sink, &mut packets)?;
+    drop(sink);
     let times = |p: &bridge::SubPacket| {
         let start = Time::from_ms(p.start_ms);
         (start, Time::from_ms(p.start_ms + p.duration_ms.max(0)))

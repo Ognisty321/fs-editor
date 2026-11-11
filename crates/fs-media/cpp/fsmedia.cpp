@@ -4,12 +4,14 @@
 #include <array>
 #include <climits>
 #include <cmath>
+#include <compare>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <deque>
 #include <map>
 #include <set>
+#include <string_view>
 
 #include <audiosource.h>
 #include <tracklist.h>
@@ -174,29 +176,465 @@ std::vector<std::pair<int64_t, std::string>> chapters(const std::filesystem::pat
     return out;
 }
 
-std::string subtitle_packets(const std::filesystem::path &file, int index, std::vector<SubPacket> &out) {
-    AVFormatContext *ctx = nullptr;
-    if (avformat_open_input(&ctx, reinterpret_cast<const char *>(file.u8string().c_str()), nullptr, nullptr) < 0)
+namespace {
+
+// A subtitle track of a Matroska file read from the file's index (Cues): FFmpeg and mkvmerge both
+// write an entry there for every block of a subtitle track, with the block's place in its cluster.
+// It is read as far as that takes: the index, each cluster's time, each block. Anything that is not
+// exactly what is expected here (no index, a block without a place or a duration, compressed or
+// laced blocks, a block that is not where or when the index says) throws NotThis, and the packets
+// are read through FFmpeg instead, which knows the rest of the format.
+class MatroskaIndex {
+public:
+    struct NotThis {};
+    struct Block {
+        int64_t pts = 0, duration = 0; // in the track's ticks, as FFmpeg's packets have them
+        std::string data;
+    };
+
+    // `kinds`: Matroska's type of each track FFmpeg made a stream of, in their order; `which` of
+    // them is the one to read. FFmpeg does not say which track a stream is, so the file's tracks
+    // have to be those, one for one.
+    MatroskaIndex(AVIOContext *pb, std::vector<uint64_t> kinds, size_t which)
+        : pb_(pb), kinds_(std::move(kinds)), which_(which), size_(avio_size(pb)) {
+        if (size_ <= 0 || which_ >= kinds_.size())
+            throw NotThis{};
+    }
+
+    // How many blocks the index names for the track; what blocks() then reads.
+    size_t find() {
+        seek(0);
+        Element ebml = head();
+        if (ebml.id != 0x1A45DFA3 || ebml.size < 0)
+            throw NotThis{};
+        seek(ebml.end());
+        Element segment = head();
+        if (segment.id != 0x18538067)
+            throw NotThis{};
+        if (segment.size < 0 || segment.end() > size_) // written to no end, or cut short
+            segment.size = size_ - segment.data;
+        int64_t cues = -1;
+        std::vector<int64_t> more; // further SeekHeads the first one names
+        bool tracks = false;
+        const auto seek_head = [&](const Element &sh) {
+            children(sh, [&](const Element &entry) {
+                if (entry.id != 0x4DBB)
+                    return true;
+                uint64_t id = 0;
+                int64_t at = -1;
+                children(entry, [&](const Element &e) {
+                    if (e.id == 0x53AB)
+                        id = number(e);
+                    else if (e.id == 0x53AC)
+                        at = segment.data + int64_t(number(e));
+                    return true;
+                });
+                if (id == 0x1C53BB6B && cues < 0)
+                    cues = at;
+                else if (id == 0x114D9B74 && at >= 0 && more.size() < 4)
+                    more.push_back(at);
+                return true;
+            });
+        };
+        children(segment, [&](const Element &e) {
+            switch (e.id) {
+            case 0x114D9B74: seek_head(e); break;
+            case 0x1654AE6B:
+                read_tracks(e);
+                tracks = true;
+                break;
+            case 0x1C53BB6B: cues = e.at; break;
+            case 0x1F43B675: return false; // the clusters: what describes the file is before them
+            }
+            return true;
+        });
+        if (!tracks)
+            throw NotThis{};
+        for (size_t i = 0; cues < 0 && i < more.size(); ++i) {
+            seek(more[i]);
+            const Element sh = head();
+            if (sh.id != 0x114D9B74 || sh.size < 0 || sh.end() > segment.end())
+                throw NotThis{};
+            seek_head(sh);
+        }
+        if (cues < 0 || cues >= segment.end())
+            throw NotThis{};
+        seek(cues);
+        const Element c = head();
+        if (c.id != 0x1C53BB6B || c.size < 0 || c.end() > segment.end())
+            throw NotThis{};
+        children(c, [&](const Element &point) {
+            if (point.id != 0xBB)
+                return true;
+            int64_t time = -1;
+            const size_t first = found_.size();
+            children(point, [&](const Element &e) {
+                if (e.id == 0xB3) {
+                    time = int64_t(number(e));
+                } else if (e.id == 0xB7) {
+                    uint64_t track = 0;
+                    int64_t cluster = -1, place = -1;
+                    children(e, [&](const Element &p) {
+                        if (p.id == 0xF7)
+                            track = number(p);
+                        else if (p.id == 0xF1)
+                            cluster = segment.data + int64_t(number(p));
+                        else if (p.id == 0xF0)
+                            place = int64_t(number(p));
+                        return true;
+                    });
+                    if (track == track_) {
+                        if (cluster < 0 || place < 0)
+                            throw NotThis{};
+                        found_.push_back({cluster, place, 0});
+                    }
+                }
+                return true;
+            });
+            if (time < 0 && found_.size() > first)
+                throw NotThis{};
+            for (size_t i = first; i < found_.size(); ++i)
+                found_[i].time = time;
+            return true;
+        });
+        end_ = segment.end();
+        std::ranges::sort(found_); // as they are in the file: the order FFmpeg gives the packets in
+        found_.erase(std::unique(found_.begin(), found_.end()), found_.end());
+        return found_.size();
+    }
+
+    std::vector<Block> blocks(const Progress &progress) {
+        std::vector<Block> out;
+        out.reserve(found_.size());
+        Element cluster;
+        int64_t cluster_time = -1;
+        for (size_t i = 0; i < found_.size(); ++i) {
+            if (progress && i % 64 == 0 && !progress(int64_t(i), int64_t(found_.size())))
+                throw MediaError("reading the subtitles canceled");
+            const Found &f = found_[i];
+            if (cluster.at != f.cluster) {
+                seek(f.cluster);
+                cluster = head();
+                if (cluster.id != 0x1F43B675)
+                    throw NotThis{};
+                if (cluster.size < 0)
+                    cluster.size = end_ - cluster.data;
+                if (cluster.end() > end_)
+                    throw NotThis{};
+                // its time, which a block's is counted from, comes before the blocks
+                cluster_time = -1;
+                children(cluster, [&](const Element &e) {
+                    if (e.id == 0xE7)
+                        cluster_time = int64_t(number(e));
+                    else if (e.id == 0xA0 || e.id == 0xA3)
+                        throw NotThis{};
+                    return cluster_time < 0;
+                });
+                if (cluster_time < 0)
+                    throw NotThis{};
+            }
+            // A block's place is counted from where the cluster's contents start. FFmpeg's muxer
+            // counts from the cluster's id instead: the file's first block tells which it is, being
+            // there, of the track and at the index's time at one of the two only.
+            if (from_id_ < 0) {
+                try {
+                    out.push_back(block(cluster, cluster.data + f.place, cluster_time, f.time));
+                    from_id_ = 0;
+                } catch (const NotThis &) {
+                    out.push_back(block(cluster, cluster.at + f.place, cluster_time, f.time));
+                    from_id_ = 1;
+                }
+            } else {
+                out.push_back(block(cluster, (from_id_ ? cluster.at : cluster.data) + f.place, cluster_time, f.time));
+            }
+        }
+        return out;
+    }
+
+private:
+    struct Element {
+        uint32_t id = 0;
+        int64_t at = -1;   // where its id starts
+        int64_t data = 0;  // where its contents do
+        int64_t size = -1; // -1: not written (a stream that was never seeked back in)
+        int64_t end() const { return data + size; }
+    };
+    struct Found {
+        int64_t cluster, place, time;
+        auto operator<=>(const Found &) const = default;
+    };
+
+    void seek(int64_t at) {
+        if (at < 0 || at > size_ || avio_seek(pb_, at, SEEK_SET) < 0)
+            throw NotThis{};
+    }
+
+    int byte() {
+        const int b = avio_r8(pb_);
+        if (pb_->eof_reached || pb_->error)
+            throw NotThis{};
+        return b;
+    }
+
+    // A size-style number: its first byte's leading zeros say how many bytes follow.
+    uint64_t vint(bool *unknown = nullptr) {
+        const int first = byte();
+        if (first == 0)
+            throw NotThis{};
+        int len = 1;
+        for (int mask = 0x80; !(first & mask); mask >>= 1)
+            ++len;
+        uint64_t v = uint64_t(first) & (0xFFu >> len);
+        bool ones = v == (0xFFu >> len);
+        for (int i = 1; i < len; ++i) {
+            const int b = byte();
+            v = v << 8 | uint64_t(b);
+            ones = ones && b == 0xFF;
+        }
+        if (unknown)
+            *unknown = ones;
+        else if (ones)
+            throw NotThis{};
+        return v;
+    }
+
+    Element head() {
+        Element e;
+        e.at = avio_tell(pb_);
+        const int first = byte();
+        int len = 1;
+        for (int mask = 0x80; len <= 4 && !(first & mask); mask >>= 1)
+            ++len;
+        if (len > 4)
+            throw NotThis{};
+        e.id = uint32_t(first);
+        for (int i = 1; i < len; ++i)
+            e.id = e.id << 8 | uint32_t(byte());
+        bool unknown = false;
+        const uint64_t size = vint(&unknown);
+        e.data = avio_tell(pb_);
+        if (!unknown) {
+            if (size > uint64_t(size_))
+                throw NotThis{};
+            e.size = int64_t(size);
+        }
+        return e;
+    }
+
+    uint64_t number(const Element &e) {
+        if (e.size < 0 || e.size > 8)
+            throw NotThis{};
+        seek(e.data);
+        uint64_t v = 0;
+        for (int64_t i = 0; i < e.size; ++i)
+            v = v << 8 | uint64_t(byte());
+        return v;
+    }
+
+    // The block the index says is at `at`, at `time`.
+    Block block(const Element &cluster, int64_t at, int64_t cluster_time, int64_t time) {
+        if (at < cluster.data || at >= cluster.end())
+            throw NotThis{};
+        seek(at);
+        const Element group = head();
+        // a SimpleBlock has no duration: a subtitle is written as a BlockGroup
+        if (group.id != 0xA0 || group.size < 0 || group.end() > cluster.end())
+            throw NotThis{};
+        Block b;
+        bool have = false;
+        int64_t duration = -1;
+        children(group, [&](const Element &e) {
+            if (e.id == 0x9B) {
+                duration = int64_t(number(e));
+            } else if (e.id == 0xA1) {
+                if (have)
+                    throw NotThis{};
+                const uint64_t track = vint();
+                const int16_t rel = int16_t(avio_rb16(pb_));
+                const int flags = byte();
+                const int64_t n = e.end() - avio_tell(pb_);
+                // 0x06: several frames laced into one block
+                if (track != track_ || (flags & 0x06) || n < 0 || n > (16 << 20))
+                    throw NotThis{};
+                b.data.resize(size_t(n));
+                if (n > 0 && avio_read(pb_, reinterpret_cast<unsigned char *>(b.data.data()), int(n)) != int(n))
+                    throw NotThis{};
+                b.pts = cluster_time + rel;
+                have = true;
+            }
+            return true;
+        });
+        if (!have || duration < 0 || b.pts != time)
+            throw NotThis{};
+        b.duration = duration;
+        return b;
+    }
+
+    // `each` for every element in `parent` till it returns false; it may read in the element.
+    template <class F>
+    void children(const Element &parent, F &&each) {
+        for (int64_t at = parent.data; at < parent.end();) {
+            seek(at);
+            const Element e = head();
+            if (e.size < 0 || e.end() > parent.end())
+                throw NotThis{};
+            if (!each(e))
+                return;
+            at = e.end();
+        }
+    }
+
+    void read_tracks(const Element &tracks) {
+        size_t n = 0; // of those FFmpeg makes streams of: video, audio, subtitles, metadata with a codec
+        children(tracks, [&](const Element &entry) {
+            if (entry.id != 0xAE)
+                return true;
+            uint64_t num = 0, kind = 0;
+            bool plain = true, codec = false;
+            children(entry, [&](const Element &e) {
+                if (e.id == 0xD7)
+                    num = number(e);
+                else if (e.id == 0x83)
+                    kind = number(e);
+                else if (e.id == 0x86)
+                    codec = e.size > 0;
+                // compressed or encrypted blocks, a time scale of its own, a delay: FFmpeg's to work out
+                else if (e.id == 0x6D80 || e.id == 0x23314F || e.id == 0x56AA)
+                    plain = false;
+                return true;
+            });
+            if (!codec || (kind != 1 && kind != 2 && kind != 0x11 && kind != 0x21))
+                return true;
+            if (n >= kinds_.size() || kinds_[n] != kind || num == 0)
+                throw NotThis{};
+            if (n == which_) {
+                if (!plain)
+                    throw NotThis{};
+                track_ = num;
+            }
+            ++n;
+            return true;
+        });
+        if (n != kinds_.size())
+            throw NotThis{};
+    }
+
+    AVIOContext *pb_;
+    std::vector<uint64_t> kinds_;
+    size_t which_;
+    uint64_t track_ = 0;
+    int64_t size_;
+    int64_t end_ = 0;  // of the segment
+    int from_id_ = -1; // where a block's place is counted from: -1 not known yet
+    std::vector<Found> found_;
+};
+
+// Whether the index of a subtitle track names every block of it: FFmpeg's muxer adds an entry for
+// each subtitle packet it writes, and mkvmerge counts the track's blocks in a tag of its own.
+bool index_is_whole(const AVFormatContext *ctx, const AVStream *st, size_t entries) {
+    if (const AVDictionaryEntry *e = av_dict_get(ctx->metadata, "encoder", nullptr, 0);
+        e && std::string_view(e->value).starts_with("Lavf"))
+        return true;
+    const AVDictionaryEntry *e = nullptr;
+    while ((e = av_dict_iterate(st->metadata, e)))
+        if (std::string_view(e->key).starts_with("NUMBER_OF_FRAMES") && std::to_string(entries) == e->value)
+            return true;
+    return false;
+}
+
+} // namespace
+
+std::string subtitle_packets(const std::filesystem::path &file, int index, std::vector<SubPacket> &out,
+                             const Progress &progress, SubtitleRead how) {
+    const std::u8string url = file.u8string();
+    // Read as packets, the other streams are dropped inside FFmpeg: a call for the next packet comes
+    // back at the next subtitle only, after the last one at the end of the file. So the progress is
+    // told, and a cancel taken, from the reads of the file themselves, every 64th of them.
+    struct Reads {
+        const Progress &progress;
+        AVFormatContext *ctx = nullptr;
+        int64_t size = 0, count = 0;
+        bool on = false, stop = false;
+    } reads{progress};
+    AVFormatContext *ctx = avformat_alloc_context();
+    if (!ctx)
+        throw MediaError("cannot open " + file.filename().string());
+    ctx->interrupt_callback = {[](void *opaque) -> int {
+                                   auto &r = *static_cast<Reads *>(opaque);
+                                   if (r.on && !r.stop && r.progress && r.count++ % 64 == 0 && r.ctx->pb)
+                                       r.stop = !r.progress(r.ctx->pb->pos, r.size);
+                                   return r.stop;
+                               },
+                               &reads};
+    if (avformat_open_input(&ctx, reinterpret_cast<const char *>(url.c_str()), nullptr, nullptr) < 0)
         throw MediaError("cannot open " + file.filename().string());
     std::unique_ptr<AVFormatContext *, void (*)(AVFormatContext **)> guard(&ctx, avformat_close_input);
     if (avformat_find_stream_info(ctx, nullptr) < 0 || index < 0 || unsigned(index) >= ctx->nb_streams ||
         ctx->streams[index]->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE)
         throw MediaError("no subtitle stream " + std::to_string(index));
     const AVStream *st = ctx->streams[index];
-    for (unsigned i = 0; i < ctx->nb_streams; ++i)
-        if (int(i) != index) ctx->streams[i]->discard = AVDISCARD_ALL;
     const auto *x = st->codecpar->extradata;
     std::string header(x ? reinterpret_cast<const char *>(x) : "", x ? size_t(st->codecpar->extradata_size) : 0);
     const AVRational ms{1, 1000};
+
+    // text as the blocks hold it: FFmpeg takes WebVTT's apart and puts it together again
+    const AVCodecID codec = st->codecpar->codec_id;
+    const bool as_stored = codec == AV_CODEC_ID_ASS || codec == AV_CODEC_ID_SSA || codec == AV_CODEC_ID_SUBRIP ||
+                           codec == AV_CODEC_ID_TEXT;
+    // the tracks as FFmpeg has them: its streams but the attachments, which it adds after them
+    std::vector<uint64_t> kinds;
+    size_t which = 0;
+    bool known = true;
+    for (unsigned i = 0; i < ctx->nb_streams; ++i) {
+        const AVMediaType type = ctx->streams[i]->codecpar->codec_type;
+        if (type == AVMEDIA_TYPE_ATTACHMENT)
+            continue;
+        if (int(i) == index)
+            which = kinds.size();
+        known = known && (type == AVMEDIA_TYPE_VIDEO || type == AVMEDIA_TYPE_AUDIO || type == AVMEDIA_TYPE_SUBTITLE ||
+                          type == AVMEDIA_TYPE_DATA);
+        kinds.push_back(type == AVMEDIA_TYPE_VIDEO ? 1 : type == AVMEDIA_TYPE_AUDIO ? 2 : type == AVMEDIA_TYPE_SUBTITLE ? 0x11 : 0x21);
+    }
+    if (how != SubtitleRead::Packets && as_stored && known &&
+        std::string_view(ctx->iformat->name).find("matroska") != std::string_view::npos) {
+        AVIOContext *pb = nullptr;
+        if (avio_open(&pb, reinterpret_cast<const char *>(url.c_str()), AVIO_FLAG_READ) >= 0) {
+            std::unique_ptr<AVIOContext *, int (*)(AVIOContext **)> close(&pb, avio_closep);
+            try {
+                MatroskaIndex mkv(pb, std::move(kinds), which);
+                if (const size_t n = mkv.find(); n > 0 && index_is_whole(ctx, st, n)) {
+                    for (auto &b : mkv.blocks(progress))
+                        out.push_back(SubPacket{av_rescale_q(b.pts, st->time_base, ms),
+                                                av_rescale_q(b.duration, st->time_base, ms), std::move(b.data)});
+                    return header;
+                }
+            } catch (const MatroskaIndex::NotThis &) {
+                out.clear();
+            }
+        }
+    }
+    if (how == SubtitleRead::Index)
+        throw MediaError("the subtitles cannot be read from the file's index");
+
+    for (unsigned i = 0; i < ctx->nb_streams; ++i)
+        if (int(i) != index) ctx->streams[i]->discard = AVDISCARD_ALL;
+    reads.ctx = ctx;
+    reads.size = avio_size(ctx->pb);
+    reads.on = true;
     AVPacket *pkt = av_packet_alloc();
-    while (av_read_frame(ctx, pkt) >= 0) {
+    const std::unique_ptr<AVPacket *, void (*)(AVPacket **)> free_pkt(&pkt, av_packet_free);
+    // a file small enough to be in memory already is read no more: asked here once
+    reads.stop = progress && !progress(avio_tell(ctx->pb), reads.size);
+    while (!reads.stop && av_read_frame(ctx, pkt) >= 0) {
         if (pkt->stream_index == index && pkt->pts != AV_NOPTS_VALUE)
             out.push_back(SubPacket{av_rescale_q(pkt->pts, st->time_base, ms),
                                     av_rescale_q(pkt->duration, st->time_base, ms),
                                     std::string(reinterpret_cast<const char *>(pkt->data), size_t(pkt->size))});
         av_packet_unref(pkt);
     }
-    av_packet_free(&pkt);
+    reads.on = false;
+    if (reads.stop)
+        throw MediaError("reading the subtitles canceled");
     return header;
 }
 

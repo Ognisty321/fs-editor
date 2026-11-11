@@ -16,7 +16,7 @@ use fs_core::tags::{set_cps_ignore, set_wraps_ignore};
 pub use kanji::KanjiTimer;
 use kanji::new_kanji_timer;
 pub use media::{Audio, Renderer, Video};
-pub use session::{Backup, FontUses, RenderSubs, Session};
+pub use session::{Backup, EmbeddedSubs, FontUses, RenderSubs, Session};
 use session::{collect_fonts, parse_style_lines, style_lines, style_with_changes, syllables_of};
 pub use spell::{Speller, Thesaurus};
 use spell::{new_speller, new_thesaurus, text_words, thesaurus_word};
@@ -595,7 +595,8 @@ pub mod ffi {
             comment_starter: &str,
             include_blank: bool,
         ) -> Result<()>;
-        fn open_embedded(self: &mut Session, video: &str, index: i32) -> Result<()>;
+        /// The stream `read_embedded` took out of `video`, as an unsaved ASS script.
+        fn open_embedded_subs(self: &mut Session, subs: &EmbeddedSubs, video: &str) -> Result<()>;
         fn save(self: &mut Session, path: &str) -> Result<()>;
         /// Whether the format a save to `path` writes (its extension's, for a new name) holds
         /// all of the subtitles; Save asks for an ASS name if not.
@@ -954,6 +955,12 @@ pub mod ffi {
         fn open_video(path: &str, cache_dir: &str, progress: &Progress) -> Result<Box<Video>>;
         /// Empty when the file cannot be read or has no text subtitles.
         fn subtitle_tracks(path: &str) -> Vec<SubTrack>;
+        type EmbeddedSubs;
+        /// Subtitle stream `index` of a video file, read on the calling thread, which need not be
+        /// the session's: a Matroska file's index gives the stream at once, a file without one is
+        /// read whole. `progress` returning false cancels, which is an error.
+        fn read_embedded(video: &str, index: i32, progress: &Progress)
+        -> Result<Box<EmbeddedSubs>>;
         /// A .txt file of no subtitle format: plain text for Aegisub's text import.
         fn is_plain_text(path: &str) -> bool;
         /// By start time; empty when the file cannot be read or has none.
@@ -1344,6 +1351,14 @@ fn subtitle_tracks(path: &str) -> Vec<ffi::SubTrack> {
             title: t.title,
         })
         .collect()
+}
+
+fn read_embedded(
+    video: &str,
+    index: i32,
+    progress: &ffi::Progress,
+) -> Result<Box<EmbeddedSubs>, String> {
+    EmbeddedSubs::read(video, index, |d, t| progress.report(d, t)).map(Box::new)
 }
 
 fn open_video(path: &str, cache_dir: &str, progress: &ffi::Progress) -> Result<Box<Video>, String> {

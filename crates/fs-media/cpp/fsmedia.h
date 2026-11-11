@@ -58,7 +58,15 @@ struct SubPacket {
     int64_t duration_ms = 0;
     std::string text;
 };
-std::string subtitle_packets(const std::filesystem::path &file, int index, std::vector<SubPacket> &out);
+/// How the packets are found. A Matroska file has an index of its blocks (Cues), and a subtitle
+/// track read from there costs a seek and a few bytes per line; read as packets it costs the whole
+/// file, video and audio with it. Auto takes the index where it is known to name every block of
+/// the track and each block is what the index says, and reads the packets otherwise.
+enum class SubtitleRead { Auto, Packets, Index };
+/// `progress(done, total)` returns false to cancel, which throws. Index throws where Auto would
+/// read the packets.
+std::string subtitle_packets(const std::filesystem::path &file, int index, std::vector<SubPacket> &out,
+                             const Progress &progress = {}, SubtitleRead how = SubtitleRead::Auto);
 
 /// Colour matrix used to convert YUV to RGB.
 enum class Matrix { Auto, Bt601, Bt709, Fcc, Smpte240m, Bt2020 };

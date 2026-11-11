@@ -86,7 +86,13 @@ pub(crate) mod bridge {
         fn list_tracks(path: &str) -> Result<Vec<TrackInfo>>;
         fn attached_fonts(path: &str) -> Result<Vec<FontFile>>;
         fn chapters(path: &str) -> Result<Vec<Chapter>>;
-        fn subtitle_packets(path: &str, index: i32, out: &mut Vec<SubPacket>) -> Result<String>;
+        fn subtitle_packets(
+            path: &str,
+            index: i32,
+            how: i32,
+            progress: &mut ProgressSink<'_>,
+            out: &mut Vec<SubPacket>,
+        ) -> Result<String>;
 
         fn open_video(
             path: &str,

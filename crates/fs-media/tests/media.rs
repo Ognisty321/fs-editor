@@ -294,6 +294,18 @@ fn embedded_subtitles() {
         "{srt}"
     );
     assert!(fs_media::extract_subtitles(&media("cfr.mkv"), 0).is_err());
+
+    // read from the file's index and read as packets, the streams are the same text
+    use fs_media::SubtitleRead::{Index, Packets};
+    for (track, text) in [(0, &ass), (1, &srt)] {
+        for how in [Index, Packets] {
+            let (read, _) =
+                fs_media::extract_subtitles_with(&path, track, how, |_, _| true).unwrap();
+            assert_eq!(&read, text, "{how:?}");
+            let stopped = fs_media::extract_subtitles_with(&path, track, how, |_, _| false);
+            assert!(stopped.is_err(), "{how:?}");
+        }
+    }
 }
 
 /// How a track of a real file decodes and seeks: indexed, read front to back, then read at three
@@ -334,6 +346,77 @@ fn bench_audio() {
         assert!(same, "{line}: other samples at {at}");
     }
     eprintln!("{line}; seeks {}", a.seeks());
+}
+
+/// How long the subtitles inside a real file take to list and to read:
+/// FSED_BENCH_MEDIA=video.mkv cargo test --release -p fs-media --test media bench_subtitles -- --ignored --nocapture
+#[test]
+#[ignore]
+fn bench_subtitles() {
+    use std::time::Instant;
+    let Ok(path) = std::env::var("FSED_BENCH_MEDIA") else {
+        return;
+    };
+    let path = Path::new(&path);
+    let t0 = Instant::now();
+    let tracks = fs_media::subtitle_tracks(path).unwrap();
+    eprintln!("subtitle tracks: {:?} ({})", t0.elapsed(), tracks.len());
+    for t in &tracks {
+        let t0 = Instant::now();
+        let (text, ext) = fs_media::extract_subtitles(path, t.index).unwrap();
+        eprintln!(
+            "track {} ({}): {:?}, {} lines of {ext}, {} bytes",
+            t.index,
+            t.codec,
+            t0.elapsed(),
+            text.lines().count(),
+            text.len()
+        );
+        use fs_media::SubtitleRead::{Index, Packets};
+        let t0 = Instant::now();
+        match fs_media::extract_subtitles_with(path, t.index, Index, |_, _| true) {
+            Ok((indexed, _)) => {
+                eprintln!("  from the index: {:?}", t0.elapsed());
+                assert!(indexed == text, "the index gives another text");
+            }
+            Err(e) => eprintln!("  from the index: {e} ({:?})", t0.elapsed()),
+        }
+        if std::env::var_os("FSED_BENCH_PACKETS").is_some() {
+            // told how far it is all the way, and back within a moment of being told to stop
+            let (t0, mut told, mut last) = (Instant::now(), 0, 0);
+            let (packets, _) =
+                fs_media::extract_subtitles_with(path, t.index, Packets, |done, total| {
+                    told += 1;
+                    assert!(
+                        done >= last && done <= total,
+                        "{done} after {last} of {total}"
+                    );
+                    last = done;
+                    true
+                })
+                .unwrap();
+            eprintln!(
+                "  as packets: {:?}, progress told {told} times",
+                t0.elapsed()
+            );
+            assert!(packets == text, "the packets are another text");
+            let (t0, mut stopped) = (Instant::now(), None);
+            let r = fs_media::extract_subtitles_with(path, t.index, Packets, |done, total| {
+                if done * 2 >= total && stopped.is_none() {
+                    stopped = Some(Instant::now());
+                }
+                stopped.is_none()
+            });
+            assert!(r.is_err());
+            if let Some(s) = stopped {
+                eprintln!(
+                    "  stopped halfway after {:?}, back {:?} later",
+                    s - t0,
+                    s.elapsed()
+                );
+            }
+        }
+    }
 }
 
 /// How a real file opens, stage by stage:
