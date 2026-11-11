@@ -15,7 +15,7 @@ The project is licensed **BSD-3-Clause**, so the licence column matters. Every C
 | Qt | **6.12.0** (LTS, 5-year maintenance) | 2026-09-30 | LGPLv3 / GPL / commercial | `6.12.0` |
 | Qt (previous branch) | 6.11.3 (online repo only; source tarballs on `official_releases` stop at 6.11.2) | 2026-09-24 | same | — |
 | aqtinstall | 3.3.0 on PyPI (2025-06-02): **cannot install Qt ≥ 6.11 on Windows**. Use git `master` (3.3.1.dev166, commit `076e1659`) | — | MIT | git master |
-| BestSource | **R22** (release), master = v23-dev (`cf10da7567`, 2026-10-03) | R22: 2026-09-16 | MIT | `R22` |
+| BestSource | **R23** (release) | R23: 2026-10-28 | MIT | `R23` |
 | FFmpeg | **9.0.2 "Lei"** (libavcodec 63.1, libavformat 63, libavutil 61.1) | 2026-09-18 | LGPL-2.1+ (GPL with `--enable-gpl`) | 9.0.x |
 | FFmpeg (older maintained branch) | 8.1.3 "Hoare" | 2026-09-21 | same | — |
 | libass | **0.17.5** (`LIBASS_VERSION 0x01705000`) | 2026-06-24 | ISC | 0.17.5 |
@@ -165,11 +165,11 @@ Repository: https://github.com/vapoursynth/bestsource. Licence: **MIT** (Fredrik
 
 | Tag | Date | FFmpeg minimum (meson) | Note |
 |---|---|---|---|
-| **R22** (latest release) | 2026-09-16 | **FFmpeg 9.0**: libavcodec ≥ 63.1, libavformat ≥ 63.1, libavutil ≥ 61.1 | GPU support reworked (Vulkan only), **not source compatible with R21** (constructor changed) |
+| **R23** (latest release, the one pinned) | 2026-10-28 | FFmpeg 9.0 | (E-)AC-3 and Opus seek without decoding from the start of the file, a cancellation point in the seek loop, linear-decoding fallback fixes, audio preroll clean-up; source compatible with R22 as used here |
+| R22 | 2026-09-16 | **FFmpeg 9.0**: libavcodec ≥ 63.1, libavformat ≥ 63.1, libavutil ≥ 61.1 | GPU support reworked (Vulkan only), **not source compatible with R21** (constructor changed) |
 | R21 | 2026-08-18 | FFmpeg 8.0: libavcodec ≥ 62.11, libavformat ≥ 62.3, libavutil ≥ 60.8 | last version with the `HWDeviceName` string constructor |
-| master (v23-dev, `BEST_SOURCE_VERSION_MAJOR 23`) | `cf10da7567`, 2026-10-03 | FFmpeg 9.0 | linear-decoding fallback fixes, audio preroll clean-up |
 
-Recommendation: **pin R22** (or a master commit if fixes after R22 are needed) together with **FFmpeg 9.0.x**.
+Recommendation: **pin R23** together with **FFmpeg 9.0.x**.
 
 ### 2.2 Build system and dependencies
 

@@ -1,4 +1,4 @@
-# BestSource R22 plus its libp2p dependency (no releases upstream, pinned
+# BestSource R23 plus its libp2p dependency (no releases upstream, pinned
 # to a commit). Built with our own CMake script instead of meson so no
 # pkg-config is needed on Windows; produces one static library.
 vcpkg_check_linkage(ONLY_STATIC_LIBRARY)
@@ -6,8 +6,8 @@ vcpkg_check_linkage(ONLY_STATIC_LIBRARY)
 vcpkg_from_github(
     OUT_SOURCE_PATH SOURCE_PATH
     REPO vapoursynth/bestsource
-    REF a0fab5708b28920957679825797692f6e4a23674 # R22
-    SHA512 5510dd757393f0d61d7f0244b107b10b26eb0503207897f0cc32dc21c6968f471f7fedade9fac3d1a68a6a7187a08555d3541e0fd26c7ad5d3cc15f06f481182
+    REF bca32dac44794d93f3e580f9573c58c4a0e7671f # R23
+    SHA512 f5ce479032a3812121d69e117c1ff8894ddebf014ac3cee6875ac1cf823562dc9d88515cc26259e025e1315928d0e65d869b88dcb251a58dd00ce0433da5f580
     HEAD_REF master
 )
 

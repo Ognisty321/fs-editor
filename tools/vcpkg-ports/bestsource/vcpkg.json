@@ -1,6 +1,6 @@
 {
   "name": "bestsource",
-  "version": "22",
+  "version": "23",
   "description": "Frame/sample accurate audio and video source library built on FFmpeg (library only, no VapourSynth/AviSynth plugin, no GPU decoding)",
   "homepage": "https://github.com/vapoursynth/bestsource",
   "license": "MIT",

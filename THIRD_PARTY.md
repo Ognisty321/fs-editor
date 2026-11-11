@@ -39,7 +39,7 @@ Wersje pochodzą z [docs/research/dependencies.md](docs/research/dependencies.md
 |---|---|---|
 | Qt 6.12 | LGPLv3 | dynamicznie |
 | `qsb` (qtshadertools) | GPLv3 | tylko w czasie budowania, nie jest dystrybuowany |
-| BestSource R22 | MIT | statycznie |
+| BestSource R23 | MIT | statycznie |
 | FFmpeg 9.0 | LGPL-2.1+ | dynamicznie, bez `gpl` i `nonfree` |
 | xxHash | BSD-2-Clause | statycznie |
 | libp2p (sekrit-twc) | WTFPL | statycznie |
