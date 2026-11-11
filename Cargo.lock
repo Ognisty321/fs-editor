@@ -445,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "fs-audio"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cpal",
  "realfft",
@@ -454,7 +454,7 @@ dependencies = [
 
 [[package]]
 name = "fs-automation"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cc",
  "fontdb",
@@ -471,7 +471,7 @@ dependencies = [
 
 [[package]]
 name = "fs-bridge"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cxx",
  "cxx-build",
@@ -487,7 +487,7 @@ dependencies = [
 
 [[package]]
 name = "fs-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -503,7 +503,7 @@ dependencies = [
 
 [[package]]
 name = "fs-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fontdb",
  "regex",
@@ -512,7 +512,7 @@ dependencies = [
 
 [[package]]
 name = "fs-formats"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chardetng",
  "encoding_rs",
@@ -523,7 +523,7 @@ dependencies = [
 
 [[package]]
 name = "fs-media"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cxx",
  "cxx-build",
