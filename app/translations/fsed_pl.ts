@@ -1522,6 +1522,46 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Wczytać napisy „%1”?</translation>
     </message>
     <message>
+        <source>Join</source>
+        <translation>Łączenie</translation>
+    </message>
+    <message>
+        <source>Import and export</source>
+        <translation>Import i eksport</translation>
+    </message>
+    <message>
+        <source>Navigation</source>
+        <translation>Nawigacja</translation>
+    </message>
+    <message>
+        <source>Keyframes and timecodes</source>
+        <translation>Klatki kluczowe i kody czasowe</translation>
+    </message>
+    <message>
+        <source>Frame</source>
+        <translation>Klatka</translation>
+    </message>
+    <message>
+        <source>Zoom</source>
+        <translation>Powiększenie</translation>
+    </message>
+    <message>
+        <source>Video window</source>
+        <translation>Okno wideo</translation>
+    </message>
+    <message>
+        <source>Tags</source>
+        <translation>Tagi</translation>
+    </message>
+    <message>
+        <source>Timing</source>
+        <translation>Czasy</translation>
+    </message>
+    <message>
+        <source>Assistants</source>
+        <translation>Asystenci</translation>
+    </message>
+    <message>
         <source>The video contains subtitles. Load them?</source>
         <translation>Wideo zawiera napisy. Wczytać je?</translation>
     </message>

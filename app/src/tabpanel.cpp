@@ -63,10 +63,17 @@ TabPanel::TabPanel(MainWindow *main) : QWidget(main), m_main(main), m_session(fs
     m_vsplit->setSizes({st.value("layout/topHeight", 380).toInt(), 400});
     m_top->setSizes({st.value("layout/videoWidth", 560).toInt(), 700});
     connect(m_vsplit, &QSplitter::splitterMoved, this, [this] {
-        QSettings().setValue("layout/topHeight", m_vsplit->sizes()[0]);
+        QSettings st;
+        if (m_topRow == Video) st.setValue("layout/topHeight", m_vsplit->sizes()[0]);
+        else if (m_topRow == Editor) st.setValue("layout/editHeight", m_vsplit->sizes()[0]);
+        else if (m_topRow == AudioEditor) st.setValue("layout/editHeight", m_right->sizes()[1]);
         fitVideo();
     });
-    connect(m_right, &QSplitter::splitterMoved, this, [this] { QSettings().setValue("layout/audioHeight", m_right->sizes()[0]); });
+    connect(m_right, &QSplitter::splitterMoved, this, [this] {
+        QSettings st;
+        st.setValue("layout/audioHeight", m_right->sizes()[0]);
+        if (m_topRow == AudioEditor) st.setValue("layout/editHeight", m_right->sizes()[1]);
+    });
     connect(m_top, &QSplitter::splitterMoved, this, [this] {
         QSettings().setValue("layout/videoWidth", m_top->sizes()[0]);
         fitVideo(true);
@@ -888,12 +895,42 @@ void TabPanel::applyLayout() {
     m_bottom->setVisible(editor);
     m_top->setVisible(video || editor || audio);
     m_shift->setVisible(editor && QSettings().value("layout/shiftTimes", true).toBool());
+    fitTop();
     fitVideo();
 }
 
 void TabPanel::resizeEvent(QResizeEvent *e) {
     QWidget::resizeEvent(e);
     fitVideo();
+}
+
+void TabPanel::showEvent(QShowEvent *e) {
+    QWidget::showEvent(e);
+    fitTop(); // a tab made behind another one has no sizes to divide until now
+}
+
+void TabPanel::fitTop() {
+    QTimer::singleShot(0, this, [this] {
+        // alone in the window, either row has all of it
+        if (!isVisible() || !m_top->isVisible() || !m_bottom->isVisible()) return;
+        // a detached video is in a window of its own
+        const bool video = m_video->isVisible() && m_video->parentWidget() == m_top;
+        const TopRow row = video ? Video : m_audio->isVisible() ? AudioEditor : Editor;
+        if (row == m_topRow) return;
+        m_topRow = row;
+        const QSettings st;
+        int top = st.value("layout/topHeight", 380).toInt();
+        if (row != Video) {
+            top = st.value("layout/editHeight", 220).toInt();
+            if (row == AudioEditor) {
+                const int wave = st.value("layout/audioHeight", 170).toInt();
+                m_right->setSizes({wave, top});
+                top += wave + m_right->handleWidth();
+            }
+        }
+        const QList<int> v = m_vsplit->sizes();
+        m_vsplit->setSizes({top, v[0] + v[1] - top});
+    });
 }
 
 void TabPanel::fitVideo(bool byWidth) {

@@ -1381,7 +1381,8 @@ void MainWindow::buildMenus() {
         [this] { m_tabs->setCurrentIndex((m_tabs->currentIndex() + m_tabs->count() - 1) % m_tabs->count()); });
 
     // a panel's own keys, which work while it has the keyboard (Kainote's audio and video hotkeys):
-    // listed in its menu and in the hotkey editor, where they take other keys
+    // listed in the hotkey editor under their menu's name, where they take other keys; the menu
+    // itself is not on the bar, as in Kainote
     const auto panelKeys = [this](QMenu *m, std::span<const PanelKey> keys, const char *context,
                                   const std::function<void(const char *)> &run) {
         for (const auto &k : keys) {
@@ -1782,7 +1783,8 @@ void MainWindow::buildMenus() {
         modes->addAction(a);
     }
     view->addSeparator();
-    auto *split = add("splitView", tr("Show two tabs"), {}, view, [this] {
+    // Kainote's key for its preview of another tab's subtitles in the grid, which this is
+    auto *split = add("splitView", tr("Show two tabs"), QKeySequence("Ctrl+Q"), view, [this] {
         setSplit(m_second ? nullptr : panel((m_tabs->currentIndex() + 1) % m_tabs->count()));
     });
     split->setCheckable(true);
@@ -2157,6 +2159,95 @@ void MainWindow::buildMenus() {
                               "Layout modelled on Kainote, automation compatible with Aegisub Automation 4."));
     });
     add("aboutQt", tr("About Qt"), {}, help, [] { QApplication::aboutQt(); });
+
+    // The menus as Kainote lays them out: its entries first and in its order, and what Aegisub and
+    // this editor add to them after, under a few names instead of in one list of fifty. An entry is
+    // a command's id, "-" a separator, ">" with a title opens a submenu of the entries up to "<",
+    // "@" with its title is a submenu the menu had, and "!" one that stays off the bar: a panel's
+    // keys are commands of the hotkey window, which lists them under that menu's name. What a
+    // layout does not name is kept at the menu's end, so a command added later is not lost.
+    const auto lay = [this](QMenu *m, std::initializer_list<const char *> entries) {
+        const QList<QAction *> old = m->actions();
+        QHash<QString, QAction *> had; // by id; a submenu by its title
+        for (QAction *a : old) {
+            m->removeAction(a);
+            if (a->isSeparator()) a->deleteLater();
+            else had.insert(a->menu() ? a->menu()->title() : a->objectName(), a);
+        }
+        QSet<QAction *> placed;
+        QList<QMenu *> open{m};
+        for (auto e = entries.begin(); e != entries.end(); ++e) {
+            const QString s = QString::fromLatin1(*e);
+            if (s == "-") {
+                open.last()->addSeparator();
+            } else if (s == "<") {
+                if (open.size() > 1) open.removeLast();
+            } else if (s == ">" && e + 1 != entries.end()) {
+                auto *sub = open.last()->addMenu(tr(*++e));
+                sub->installEventFilter(this);
+                open << sub;
+            } else if ((s == "@" || s == "!") && e + 1 != entries.end()) {
+                if (QAction *a = had.value(tr(*++e))) {
+                    if (s == "@") open.last()->addAction(a);
+                    placed << a;
+                }
+            } else if (QAction *a = had.contains(s) ? had.value(s) : m_actions.value(s)) {
+                open.last()->addAction(a);
+                placed << a;
+            }
+        }
+        bool rest = false;
+        for (QAction *a : old) {
+            if (a->isSeparator() || placed.contains(a)) continue;
+            // another menu's layout took it
+            const auto objects = a->associatedObjects();
+            if (std::ranges::any_of(objects, [](QObject *o) { return qobject_cast<QMenu *>(o) != nullptr; })) continue;
+            if (!rest) m->addSeparator();
+            rest = true;
+            m->addAction(a);
+        }
+    };
+    lay(lines, {"duplicate", "@", "Insert lines", "-", "copyLines", "cutLines", "pasteLines", "pasteOver", "copyColumns", "-",
+                "swapLines", "moveLinesUp", "moveLinesDown", "-",
+                ">", QT_TR_NOOP("Join"), "joinLines", "joinKeepFirst", "joinKeepLast", "joinKaraoke", "-", "joinPrev", "joinNext",
+                "-", "recombine", "<",
+                "@", "Split lines", "splitKaraoke", "-", "continuousPrev", "continuousNext", "-",
+                "deleteText", "deleteTextKeepTags", "deleteLines", "-",
+                "prevLine", "nextLine", "selectFromVideo", "selectOnVideo"});
+    lay(flt, {"filterInvert", "@", "Hide lines with styles", "filterComments", "filterDoubtful", "filterUntranslated", "-",
+              "filterAfterLoad", "filterKeep", "filterIgnoreInActions", "-", "filter", "filterOff", "hideSelected"});
+    lay(file, {"openSubs", "save", "saveAll", "saveAs", "saveTranslation", "@", "Recently opened subtitles", "removeSubs",
+               "saveWithVideoName", "openAutosave", "removeTemp", "showLog", "@", "Last session", "-",
+               ">", QT_TR_NOOP("Import and export"), "openSubsCharset", "subsFromVideo", "exportAs", "<", "-",
+               "settings", "hotkeys", "exit"});
+    lay(edit, {"undo", "undoToSave", "redo", "history", "-", "findReplace", "find", "findNext", "-",
+               "@", "Sort all lines", "@", "Sort selected lines", "correctErrors", "selectLines", "-",
+               "@", "Lines", "!", "Edit box keys"});
+    lay(video, {"openVideo", "@", "Recently opened videos", "closeVideo", "openKeyframes", "@", "Recently opened keyframes",
+                "openDummy", "-",
+                "startFromVideo", "endFromVideo", "prevFrame", "nextFrame", "goStart", "goEnd", "playPause", "prevKeyframe",
+                "nextKeyframe", "audioToVideo", "markToVideo", "-",
+                "zoomVideo", "resetZoom", "-",
+                ">", QT_TR_NOOP("Navigation"), "playVideoLine", "prevFrames", "nextFrames", "-", "snapStart", "snapEnd", "-",
+                "prevChapter", "nextChapter", "prevBoundary", "nextBoundary", "-", "jumpTo", "focusSeek", "<",
+                ">", QT_TR_NOOP("Keyframes and timecodes"), "saveKeyframes", "closeKeyframes", "-", "openTimecodes",
+                "@", "Recently opened timecodes", "saveTimecodes", "closeTimecodes", "<",
+                ">", QT_TR_NOOP("Frame"), "saveFrameSubs", "copyFrameSubs", "-", "saveFrame", "copyFrame", "-",
+                "saveFrameSubsOnly", "copyFrameSubsOnly", "<",
+                ">", QT_TR_NOOP("Zoom"), "zoomIn", "zoomOut", "-", "zoom50", "zoom100", "zoom200", "-", "resetPan", "<",
+                "@", "Visual tools",
+                ">", QT_TR_NOOP("Video window"), "detachVideo", "showOverscan", "videoDetails", "<",
+                "!", "Video keys"});
+    lay(audio, {"openAudio", "@", "Recently opened audio", "audioFromVideo", "blankAudio", "noiseAudio", "closeAudio", "-",
+                "audioSpectrum", "audioWaveform", "-", "saveAudioClip", "medusaMode", "!", "Timing keys"});
+    lay(view, {"viewAll", "viewVideoSubs", "viewAudioSubs", "viewOnlyVideo", "viewOnlySubs", "-",
+               "toggleToolbar", "splitView", "compareTabs", "-", "@", "Hide columns", "@", "Filtering"});
+    lay(subs, {"editor", "properties", "styleManager", "@", "Conversion", "shiftTimes", "fontCollector", "resample",
+               "spellChecker", ">", QT_TR_NOOP("Tags"), "tagsShow", "tagsSimplify", "tagsHide", "-", "hideTags", "<", "-",
+               ">", QT_TR_NOOP("Timing"), "runShift", "fpsFromVideo", "changeFps", "-", "snapScene", "shiftToFrame", "kanjiTimer",
+               "<",
+               ">", QT_TR_NOOP("Assistants"), "stylingAssistant", "translationAssistant", "translationMatching", "<",
+               "attachments", "cleanStyles", "spellCheck", "!", "Styling assistant keys", "!", "Translation assistant keys"});
 }
 
 QMenu *MainWindow::recentMenu(const QString &kind) {
@@ -2369,6 +2460,9 @@ void MainWindow::buildStatusBar() {
         m_statusFields[i]->setContentsMargins(6, 0, 6, 0);
         if (i == 0) statusBar()->addWidget(m_statusFields[i], 1);
         else statusBar()->addPermanentWidget(m_statusFields[i]);
+        // a field with nothing to say is not there: without a video seven of them were frames
+        // around nothing
+        if (i) m_statusFields[i]->hide();
     }
     m_statusFields[1]->setToolTip(tr("Video scale"));
     m_statusFields[2]->setToolTip(tr("Video zoom"));
@@ -2405,7 +2499,10 @@ void MainWindow::updateStatus() {
     }
     fields[7] = QString("%1x%2").arg(fi.play_res_x).arg(fi.play_res_y);
     for (int i = 1; i < 9; ++i)
-        if (m_statusFields[i]->text() != fields[i]) m_statusFields[i]->setText(fields[i]);
+        if (m_statusFields[i]->text() != fields[i]) {
+            m_statusFields[i]->setText(fields[i]);
+            m_statusFields[i]->setVisible(!fields[i].isEmpty());
+        }
     if (m_statusFields[5]->styleSheet() != resolutionStyle) m_statusFields[5]->setStyleSheet(resolutionStyle);
 }
 

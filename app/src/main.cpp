@@ -21,6 +21,7 @@
 #include <QTreeWidget>
 #include <QLockFile>
 #include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QMouseEvent>
@@ -574,6 +575,33 @@ int main(int argc, char **argv) {
             time("select all", 3, [tab, &all, n](int) { tab->setSelection(all, n / 2); });
             time("grid repaint, all selected", 15, repaint);
             time("change shown, all selected", 5, [tab](int) { tab->changed(); });
+        });
+    // FSED_SMOKE_MENUS=out.txt writes the menu bar as a tree, a line per entry: its text, the
+    // command's id, its keys, "[x]" or "[ ]" where it is a check. What a menu holds, without a
+    // shot of each.
+    if (const QString out = qEnvironmentVariable("FSED_SMOKE_MENUS"); !out.isEmpty())
+        QTimer::singleShot(std::max(600, qEnvironmentVariableIntValue("FSED_SMOKE_MS") / 2), &w, [&w, out] {
+            QFile f(out);
+            if (!f.open(QIODevice::WriteOnly)) return;
+            const std::function<void(const QMenu *, int)> entries = [&](const QMenu *m, int depth) {
+                for (const QAction *a : m->actions()) {
+                    QString line = QString(depth * 2, ' ');
+                    if (a->isSeparator()) {
+                        line += "----";
+                    } else {
+                        line += a->text().remove('&');
+                        if (!a->objectName().isEmpty()) line += "  <" + a->objectName() + ">";
+                        if (const QString k = QKeySequence::listToString(a->shortcuts()); !k.isEmpty()) line += "  " + k;
+                        if (a->isCheckable()) line += a->isChecked() ? "  [x]" : "  [ ]";
+                    }
+                    f.write((line + QChar(10)).toUtf8());
+                    if (a->menu()) entries(a->menu(), depth + 1);
+                }
+            };
+            for (const QAction *top : w.menuBar()->actions()) {
+                f.write((top->text().remove('&') + QChar(10)).toUtf8());
+                if (top->menu()) entries(top->menu(), 1);
+            }
         });
     // FSED_SMOKE_STALLS=out.txt notes every time the window's thread stayed away from its event
     // loop for over 50 ms (a 10 ms timer that came late), and when since the start: what freezes

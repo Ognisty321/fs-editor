@@ -114,6 +114,10 @@ public:
     // height, or the height the width (after the panel's side is dragged); an axis held at its
     // limit leaves the rest to the other one. Runs from the event loop, once layouts are done.
     void fitVideo(bool byWidth = false);
+    // Kainote: the row over the grid is as high as its video, and without one as the edit box
+    // alone (200 px there), the audio over it when there is one, so the grid has the window. Each
+    // of the two heights is the one the row was dragged to last. Runs from the event loop.
+    void fitTop();
 
 signals:
     void docChanged(int source);
@@ -123,6 +127,7 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent *e) override;
+    void showEvent(QShowEvent *e) override;
 
 private:
     void applyLayout();
@@ -144,6 +149,7 @@ private:
     int m_active = 0;
     int m_viewMode = All;
     bool m_playerMode = false;
+    enum TopRow { Unset, Video, Editor, AudioEditor } m_topRow = Unset; // what fitTop sized the row for
     bool m_hideOriginal = false;
     std::vector<std::int64_t> m_keyframes;
     QString m_keyframesPath, m_timecodesPath; // loaded from files, kept over the video's own
