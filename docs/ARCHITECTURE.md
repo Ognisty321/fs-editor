@@ -66,7 +66,16 @@ fs-editor/
 │  ├─ src/
 │  │  ├─ main.cpp             # start, smoke test (FSED_SMOKE*), raport awarii na Windows
 │  │  ├─ bridge.h             # konwersje Qt ↔ cxx (QString ↔ rust::Str/String)
-│  │  ├─ mainwindow.*         # menu, pasek narzędzi, karty na dole, pasek stanu, skróty, automatyzacja
+│  │  ├─ mainwindow.h         # MainWindow: jedyny nagłówek okna dla reszty programu; klasa ma kilka jednostek translacji:
+│  │  ├─ mainwindow.cpp       #   okno, karty na dole, widok dwóch kart i porównanie, rejestr komend (add), zamykanie
+│  │  ├─ mainwindow_menus.cpp #   pasek menu: kolejność budowania, menu Audio, Widok i Pomoc, układ menu Kainote (tabela layOutMenus)
+│  │  ├─ mainwindow_filemenu.cpp, _editmenu.cpp, _videomenu.cpp, _subsmenu.cpp  #   komendy menu Plik (z eksportem i sesjami), Edycja, Wideo, Napisy
+│  │  ├─ mainwindow_files.cpp #   otwieranie wg rodzaju pliku i parowanie, zapis, konwersja, sesje, ostatnie pliki, zmiany na dysku, autozapis
+│  │  ├─ mainwindow_hotkeys.cpp  #   skróty komend, okno skrótów, filtr zdarzeń oddający panelom ich klawisze
+│  │  ├─ mainwindow_bars.cpp  #   pasek narzędzi i pasek stanu
+│  │  ├─ mainwindow_automation.cpp  #   autoload, menu Automatyzacja i menedżer skryptów, uruchamianie makr
+│  │  ├─ mainwindow_corrector.cpp   #   korektor drobnych błędów (reguły multireplacera)
+│  │  ├─ mainwindow_p.h       #   wspólne tylko dla tych jednostek: struct Menus, rozszerzenia plików, domyślny pasek, barwy ikon
 │  │  ├─ tabpanel.*           # jedna karta = dokument + wideo + audio + editbox + grid + panel czasów
 │  │  ├─ grid.*               # własny grid (QAbstractScrollArea), filtrowanie, przesuwanie czasów myszą
 │  │  ├─ editbox.*            # pola linii, przyciski tagów, tryb tłumaczenia (2 pola)

@@ -79,7 +79,23 @@ protected:
 private:
     QAction *add(const QString &id, const QString &text, const QKeySequence &key, QMenu *menu,
                  std::function<void()> fn);
+    // the menu bar: its menus one after another in the bar's order, each by its own builder
+    // (mainwindow_menus.cpp and the files beside it), then laid out as Kainote has them
+    struct Menus;
     void buildMenus();
+    void buildFileMenu(Menus &menus);
+    void buildEditMenu(Menus &menus);
+    void buildVideoMenu(Menus &menus);
+    void buildAudioMenu(Menus &menus);
+    void buildViewMenu(Menus &menus);
+    void buildSubtitlesMenu(Menus &menus);
+    void buildAutomationCommands(); // the Automation menu and its fixed commands; the macros: buildAutomationMenu
+    void buildHelpMenu();
+    void layOutMenus(const Menus &menus);
+    QMenu *barMenu(const QString &title); // a menu of the bar, its commands validated as it opens
+    QMenu *subMenu(QMenu *parent, const QString &title);
+    void addPanelKeys(QMenu *m, std::span<const PanelKey> keys, const char *context,
+                      const std::function<void(const char *)> &run);
     void buildToolbar();
     void buildStatusBar();
     void buildAutomationMenu();

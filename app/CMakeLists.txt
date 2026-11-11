@@ -35,7 +35,11 @@ endif()
 qt_add_executable(fsed WIN32 MACOSX_BUNDLE
     src/main.cpp
     src/bridge.h
-    src/mainwindow.h src/mainwindow.cpp
+    src/mainwindow.h src/mainwindow_p.h src/mainwindow.cpp
+    src/mainwindow_menus.cpp src/mainwindow_filemenu.cpp src/mainwindow_editmenu.cpp
+    src/mainwindow_videomenu.cpp src/mainwindow_subsmenu.cpp
+    src/mainwindow_files.cpp src/mainwindow_hotkeys.cpp src/mainwindow_bars.cpp
+    src/mainwindow_automation.cpp src/mainwindow_corrector.cpp
     src/tabpanel.h src/tabpanel.cpp
     src/grid.h src/grid.cpp
     src/editbox.h src/editbox.cpp
