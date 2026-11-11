@@ -2,7 +2,8 @@
 #include "audiobox.h"
 #include "colorpicker.h"
 
-#include "dialogs.h"
+#include "dialogutil.h"
+#include "tagbuttondialog.h"
 #include "grid.h"
 #include "mainwindow.h"
 #include "tabpanel.h"

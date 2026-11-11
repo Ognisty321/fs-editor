@@ -1,7 +1,7 @@
 #include "videobox.h"
 
 #include "audiobox.h"
-#include "dialogs.h"
+#include "dialogutil.h"
 #include "icons.h"
 #include "editbox.h"
 #include "grid.h"

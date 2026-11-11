@@ -1,5 +1,5 @@
 #include "audiobox.h"
-#include "dialogs.h"
+#include "dialogutil.h"
 #include "editbox.h"
 #include "associations.h"
 #include "grid.h"

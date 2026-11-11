@@ -44,7 +44,23 @@ qt_add_executable(fsed WIN32 MACOSX_BUNDLE
     src/videobox.h src/videobox.cpp
     src/visualtools.h src/visualtools.cpp
     src/audiobox.h src/audiobox.cpp
-    src/dialogs.h src/dialogs.cpp
+    src/dialogutil.h src/dialogutil.cpp
+    src/findreplace.h src/findreplace.cpp
+    src/selectlines.h src/selectlines.cpp
+    src/styleeditor.h src/styleeditor.cpp
+    src/stylemanager.h src/stylemanager.cpp
+    src/propertiesdialog.h src/propertiesdialog.cpp
+    src/historydialog.h src/historydialog.cpp
+    src/resampledialog.h src/resampledialog.cpp
+    src/fontcollector.h src/fontcollector.cpp
+    src/settingsdialog.h src/settingsdialog.cpp
+    src/autosavedialog.h src/autosavedialog.cpp
+    src/spellcheckdialog.h src/spellcheckdialog.cpp
+    src/pasteover.h src/pasteover.cpp
+    src/attachmentsdialog.h src/attachmentsdialog.cpp
+    src/kanjitimer.h src/kanjitimer.cpp
+    src/assistants.h src/assistants.cpp
+    src/tagbuttondialog.h src/tagbuttondialog.cpp
     src/automationhost.h src/automationhost.cpp
     src/colorpicker.h src/colorpicker.cpp
     src/theme.h src/theme.cpp

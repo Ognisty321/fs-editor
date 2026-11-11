@@ -79,7 +79,23 @@ fs-editor/
 │  │  ├─ associations.*       # skojarzenia typów plików napisów (rejestr użytkownika w Windows)
 │  │  ├─ audiobox.*           # AudioView (QRhiWidget): waveform/spektrogram, karaoke, przyciski
 │  │  ├─ rhiquad.*            # jeden teksturowany prostokąt QRhi używany przez wideo i audio
-│  │  ├─ dialogs.*            # style, właściwości, szukaj/zamień, zaznacz linie, historia, ustawienia
+│  │  ├─ findreplace.*        # FindDialog: szukaj/zamień, „znajdź wszystko”, szukanie i zamiana w plikach, okno wyników
+│  │  ├─ selectlines.*        # SelectLinesDialog: „Zaznacz linie” Aegisuba
+│  │  ├─ styleeditor.*        # StyleEditor: edytor stylu z podglądem, katalogi czcionek Kainote
+│  │  ├─ stylemanager.*       # StyleManager: style pliku obok stylów katalogu, edytor w oknie lub zadokowany
+│  │  ├─ propertiesdialog.*   # PropertiesDialog: właściwości skryptu ([Script Info])
+│  │  ├─ historydialog.*      # HistoryDialog i nazwy kroków undo (undoStepName)
+│  │  ├─ resampledialog.*     # ResampleDialog: zmiana rozdzielczości
+│  │  ├─ fontcollector.*      # FontCollectorDialog: sprawdzenie, kopiowanie, pakowanie do zip, załączanie czcionek
+│  │  ├─ settingsdialog.*     # SettingsDialog: ustawienia, motywy, strony konwersji i domyślnych właściwości skryptu
+│  │  ├─ autosavedialog.*     # AutosaveDialog: „Otwórz plik autozapisu”
+│  │  ├─ spellcheckdialog.*   # SpellCheckDialog: okno sprawdzania pisowni
+│  │  ├─ attachmentsdialog.*  # AttachmentsDialog: załączniki
+│  │  ├─ kanjitimer.*         # KanjiTimerDialog: kanji timer Aegisuba
+│  │  ├─ assistants.*         # TranslationAssistant i StylingAssistant
+│  │  ├─ pasteover.*          # chooseFields: pola dla „Wklej na linie” i kopiowania kolumn
+│  │  ├─ tagbuttondialog.*    # TagButtonDialog: ustawienie przycisku tagu editboxa
+│  │  ├─ dialogutil.*         # wspólne dla okien i reszty programu: folder autozapisu, katalogi stylów, kolor ASS, ustawienia mediów, cache indeksów
 │  │  └─ automationhost.*     # dialogi aegisub.dialog, wybór plików, postęp
 │  └─ shaders/                # .vert/.frag → .qsb (qt_add_shaders)
 ├─ tests/

@@ -1,6 +1,6 @@
 #include "audiobox.h"
 
-#include "dialogs.h"
+#include "dialogutil.h"
 #include "editbox.h"
 #include "grid.h"
 #include "icons.h"
