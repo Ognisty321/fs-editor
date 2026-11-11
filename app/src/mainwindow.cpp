@@ -2666,7 +2666,9 @@ void MainWindow::updateActions() {
     action("subsFromVideo")->setEnabled(!tab->video()->path().isEmpty());
     action("closeVideo")->setEnabled(tab->video()->hasVideo());
     action("videoDetails")->setEnabled(tab->video()->hasVideo());
-    for (const char *id : {"closeAudio", "saveAudioClip"}) action(id)->setEnabled(tab->audio()->hasAudio());
+    action("saveAudioClip")->setEnabled(tab->audio()->hasAudio());
+    // closing a file still being indexed stops its index
+    action("closeAudio")->setEnabled(tab->audio()->hasAudio() || tab->audio()->opening());
     for (const char *id : {"saveKeyframes", "closeKeyframes"}) action(id)->setEnabled(!tab->keyframes().empty());
     action("saveTimecodes")->setEnabled(tab->video()->timecodes().size() >= 2);
     action("closeTimecodes")->setEnabled(!tab->timecodesPath().isEmpty());

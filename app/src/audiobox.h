@@ -45,6 +45,8 @@ protected:
 
 private:
     void paintOverlay(QPainter &p);
+    void paintIndexing(QPainter &p);
+    void paintDecoding(QPainter &p, int pct);
     QFont labelFont() const;
     int karaH() const;
     AudioBox *m_box;
@@ -86,6 +88,8 @@ public:
     QString path() const { return m_path; }
     // the file open, or the one still being decoded that replaces it
     QString wanted() const { return m_opening.isEmpty() ? m_path : m_opening; }
+    // a file being indexed: the panel is shown for it, empty, with how far the index got
+    bool opening() const { return !m_opening.isEmpty(); }
 
     void play(qint64 from, qint64 to, bool withVideo = false); // without: the video stops (Aegisub)
     void setSpectrum(bool on); // the spectrum or the waveform, as its toggle sets it
@@ -108,10 +112,12 @@ public:
     void commitAndNext(bool resetNext = false, bool next = false); // next: whatever the toggle says
 
 signals:
-    void opened();
+    void opened(); // the audio open changed, or a file began or stopped being indexed
 
 protected:
     void keyPressEvent(QKeyEvent *) override;
+    void showEvent(QShowEvent *) override;
+    void hideEvent(QHideEvent *) override;
 
 private:
     // coordinates
@@ -126,8 +132,13 @@ private:
     void ensureVisible(qint64 a, qint64 b);
     void updateScroll();
     void setSelection(qint64 start, qint64 end, bool fromDrag);
+    void reset(); // close() without telling anyone, for an open that follows at once
     void loaded();
     void pollLoading();
+    // how far the file is read, in percent, -1 once it is: its index while it opens (indexing),
+    // then its decoding behind the waveform
+    int loadingPct(bool &indexing) const;
+    void showProgress(); // drawn on the panel, or in the status bar while a view hides the panel
     void tick();
     void playSelection();
     bool stepLine(int dir, bool playIt = true); // false at the first or last line
@@ -144,6 +155,10 @@ private:
     std::optional<rust::Box<fsb::Audio>> m_audio;
     QString m_path;
     QString m_opening; // being loaded
+    int m_openPct = 0; // of its index
+    // the progress last drawn, and whether the status bar tells it
+    int m_shownPct = -1;
+    bool m_shownIndexing = false, m_progressInStatus = false;
     int m_track = -1;
     // set to stop a file still being indexed (close, a newer open, destruction)
     std::shared_ptr<std::atomic_bool> m_openCancel = std::make_shared<std::atomic_bool>(false);

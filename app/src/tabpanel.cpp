@@ -886,7 +886,9 @@ void TabPanel::setHideOriginal(bool on) {
 
 void TabPanel::applyLayout() {
     const bool video = m_video->hasVideo() && m_viewMode != AudioSubs && m_viewMode != OnlySubs;
-    const bool audio = m_audio->hasAudio() && m_viewMode != VideoSubs && m_viewMode != OnlyVideo && !m_playerMode;
+    // a file still being indexed shows the panel too, empty, with the index's progress
+    const bool audio = (m_audio->hasAudio() || m_audio->opening()) && m_viewMode != VideoSubs &&
+                       m_viewMode != OnlyVideo && !m_playerMode;
     const bool editor = !m_playerMode && m_viewMode != OnlyVideo;
     m_video->setVisible(video || m_playerMode);
     m_audio->setVisible(audio);

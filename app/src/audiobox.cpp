@@ -10,6 +10,7 @@
 #include "videobox.h"
 
 #include <QApplication>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QPointer>
 #include <QKeyEvent>
@@ -167,7 +168,8 @@ void AudioView::paintOverlay(QPainter &p) {
         p.drawText(x + 2, RulerH - 7, fs::fmtTime(t).mid(2, 5));
     }
     if (!b.m_audio) {
-        p.drawText(QRect(0, 0, w, h), Qt::AlignCenter, tr("No audio"));
+        if (b.opening()) paintIndexing(p);
+        else p.drawText(QRect(0, 0, w, h), Qt::AlignCenter, tr("No audio"));
         return;
     }
     // what is drawn: Aegisub's Audio/Display/Draw options, Kainote's too
@@ -269,6 +271,47 @@ void AudioView::paintOverlay(QPainter &p) {
         p.setPen(QPen(col(theme::AudioCursor), 1));
         p.drawLine(b.xOf(cur), 0, b.xOf(cur), h);
     }
+    bool indexing = false;
+    if (const int pct = b.loadingPct(indexing); pct >= 0) paintDecoding(p, pct);
+}
+
+// The file being indexed: the panel empty under its ruler, the percent large in its middle over a
+// bar, and the file's name under it where the panel is tall enough.
+void AudioView::paintIndexing(QPainter &p) {
+    const int w = width(), h = height(), pct = m_box->m_openPct;
+    const QFont big(font().family(), 20, QFont::DemiBold), small(font().family(), 9);
+    const QFontMetrics fb(big), fsm(small);
+    constexpr int Gap = 6, BarH = 4;
+    const int areaH = h - RulerH, barW = std::clamp(w - 40, 40, 280);
+    const bool named = areaH >= fb.height() + BarH + fsm.height() + 2 * Gap + 8;
+    int y = RulerH + (areaH - (fb.height() + Gap + BarH + (named ? Gap + fsm.height() : 0))) / 2;
+    p.setFont(big);
+    p.setPen(QColor(230, 230, 230));
+    p.drawText(QRect(0, y, w, fb.height()), Qt::AlignCenter, QString("%1%").arg(pct));
+    y += fb.height() + Gap;
+    const QRect bar((w - barW) / 2, y, barW, BarH);
+    p.fillRect(bar, QColor(255, 255, 255, 40));
+    p.fillRect(QRect(bar.topLeft(), QSize(barW * pct / 100, BarH)), col(theme::AudioWaveform));
+    if (!named) return;
+    y += BarH + Gap;
+    p.setFont(small);
+    p.setPen(QColor(170, 170, 170));
+    const QString text = tr("Indexing audio: %1").arg(QFileInfo(m_box->m_opening).fileName());
+    p.drawText(QRect(8, y, w - 16, fsm.height()), Qt::AlignCenter, fsm.elidedText(text, Qt::ElideMiddle, w - 16));
+}
+
+// The rest of the track still decoding behind the waveform: how far, in the corner under the ruler
+// (and the karaoke strip), with a bar along the label's foot.
+void AudioView::paintDecoding(QPainter &p, int pct) {
+    const auto &b = *m_box;
+    p.setFont(QFont(font().family(), 8));
+    const QString text = tr("Decoding audio… %1%").arg(pct);
+    const int tw = p.fontMetrics().horizontalAdvance(text) + 12, th = p.fontMetrics().height() + 4;
+    const QRect r(width() - tw - 4, RulerH + (b.m_karaoke && !b.m_syl.empty() ? karaH() : 0) + 4, tw, th);
+    p.fillRect(r, QColor(0, 0, 0, 170));
+    p.fillRect(QRect(r.left(), r.bottom() - 1, tw * pct / 100, 2), col(theme::AudioWaveform));
+    p.setPen(QColor(230, 230, 230));
+    p.drawText(r, Qt::AlignCenter, text);
 }
 
 void AudioView::mousePressEvent(QMouseEvent *e) {
@@ -667,10 +710,12 @@ void AudioBox::open(const QString &path, bool withVideo, int track) {
                                              tr("Audio tracks"));
         if (track < 0) return;
     }
-    close(); // also stops a file still being indexed or decoded
+    reset(); // also stops a file still being indexed or decoded
     m_openCancel = std::make_shared<std::atomic_bool>(false);
     m_opening = path;
-    m_tab->main()->status(tr("Loading audio %1…").arg(path));
+    m_openPct = 0;
+    emit opened(); // the panel shows, empty, while the index is read
+    showProgress();
     const QString cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/bsindex";
     QPointer<AudioBox> self(this);
     auto cancel = m_openCancel;
@@ -678,9 +723,11 @@ void AudioBox::open(const QString &path, bool withVideo, int track) {
         std::optional<rust::Box<fsb::Audio>> a;
         QString err;
         try {
-            const fs::PercentProgress progress([self, path, cancel](int pct) {
-                QMetaObject::invokeMethod(qApp, [self, path, pct, cancel] {
-                    if (self && !*cancel) self->m_tab->main()->status(tr("Loading audio %1… %2%").arg(path).arg(pct));
+            const fs::PercentProgress progress([self, cancel](int pct) {
+                QMetaObject::invokeMethod(qApp, [self, pct, cancel] {
+                    if (!self || *cancel) return;
+                    self->m_openPct = pct;
+                    self->showProgress();
                 });
                 return !*cancel;
             });
@@ -690,13 +737,11 @@ void AudioBox::open(const QString &path, bool withVideo, int track) {
         }
         auto holder = std::make_shared<std::optional<rust::Box<fsb::Audio>>>(std::move(a));
         QMetaObject::invokeMethod(qApp, [self, holder, err, path, cancel, track] {
-            if (!self) return;
-            if (*cancel) { // closed, or replaced by a newer open (which has its own status)
-                if (cancel == self->m_openCancel) self->m_tab->main()->status(QString());
-                return;
-            }
+            if (!self || *cancel) return; // closed, or replaced by a newer open
             self->m_opening.clear();
             if (!err.isEmpty()) {
+                self->showProgress();
+                emit self->opened(); // the empty panel goes again
                 self->m_tab->main()->error(err);
                 return;
             }
@@ -709,9 +754,8 @@ void AudioBox::open(const QString &path, bool withVideo, int track) {
 }
 
 void AudioBox::openBlank(qint64 ms, bool noise) {
-    close();
+    reset();
     m_audio.emplace(fsb::blank_audio(ms, noise));
-    m_path.clear();
     loaded();
 }
 
@@ -722,7 +766,6 @@ void AudioBox::loaded() {
     setVolume(m_volume->value() / 100.0f);
     updateScroll();
     lineChanged();
-    m_tab->main()->status(QString());
     cleanIndexCache(m_path);
     emit opened();
     pollLoading();
@@ -736,12 +779,47 @@ void AudioBox::pollLoading() {
     m_loadedMs = (*m_audio)->loaded_ms();
     if (m_loadedMs != was && m_left < m_loadedMs && m_left + qint64(m_view->width() * m_msPerPx) > was)
         m_view->dataChanged();
-    if (m_loadedMs >= m_duration) {
-        if (m_loadTimer->isActive()) m_tab->main()->status(QString());
-        return m_loadTimer->stop();
+    if (m_loadedMs >= m_duration) m_loadTimer->stop();
+    else if (!m_loadTimer->isActive()) m_loadTimer->start();
+    showProgress();
+}
+
+int AudioBox::loadingPct(bool &indexing) const {
+    indexing = !m_opening.isEmpty();
+    if (indexing) return m_openPct;
+    if (m_audio && m_loadedMs < m_duration) return int(m_loadedMs * 100 / std::max<qint64>(1, m_duration));
+    return -1;
+}
+
+// The panel shows how far the audio is read: empty with the index's percent while the file opens,
+// then the decoding's in its corner. A view without the audio hides the panel, and the status bar
+// tells it then instead.
+void AudioBox::showProgress() {
+    bool indexing = false;
+    const int pct = loadingPct(indexing);
+    const bool changed = pct != m_shownPct || indexing != m_shownIndexing;
+    const bool inStatus = pct >= 0 && !isVisibleTo(m_tab);
+    if (inStatus && (changed || !m_progressInStatus)) {
+        const QString name = QFileInfo(wanted()).fileName();
+        m_tab->main()->status((indexing ? tr("Indexing audio %1… %2%") : tr("Decoding audio %1… %2%")).arg(name).arg(pct));
+    } else if (!inStatus && m_progressInStatus) {
+        m_tab->main()->status(QString());
     }
-    m_tab->main()->status(tr("Loading audio %1… %2%").arg(m_path).arg(m_loadedMs * 100 / std::max<qint64>(1, m_duration)));
-    if (!m_loadTimer->isActive()) m_loadTimer->start();
+    m_progressInStatus = inStatus;
+    if (!changed) return;
+    m_shownPct = pct;
+    m_shownIndexing = indexing;
+    m_view->overlayChanged();
+}
+
+void AudioBox::showEvent(QShowEvent *e) {
+    QWidget::showEvent(e);
+    showProgress();
+}
+
+void AudioBox::hideEvent(QHideEvent *e) {
+    QWidget::hideEvent(e);
+    showProgress();
 }
 
 void AudioBox::settingsChanged() {
@@ -752,7 +830,7 @@ void AudioBox::settingsChanged() {
     m_view->dataChanged();
 }
 
-void AudioBox::close() {
+void AudioBox::reset() {
     *m_openCancel = true;
     m_opening.clear();
     stop();
@@ -762,6 +840,11 @@ void AudioBox::close() {
     m_duration = 0;
     m_loadedMs = 0;
     m_view->dataChanged();
+    showProgress();
+}
+
+void AudioBox::close() {
+    reset();
     emit opened();
 }
 

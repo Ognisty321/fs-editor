@@ -187,12 +187,12 @@
         <translation>Ścieżki audio</translation>
     </message>
     <message>
-        <source>Loading audio %1…</source>
-        <translation>Wczytywanie audio %1…</translation>
+        <source>Indexing audio %1… %2%</source>
+        <translation>Indeksowanie audio %1… %2%</translation>
     </message>
     <message>
-        <source>Loading audio %1… %2%</source>
-        <translation>Wczytywanie audio %1… %2%</translation>
+        <source>Decoding audio %1… %2%</source>
+        <translation>Dekodowanie audio %1… %2%</translation>
     </message>
     <message>
         <source>Commit</source>
@@ -348,6 +348,14 @@
     <message>
         <source>No audio</source>
         <translation>Brak audio</translation>
+    </message>
+    <message>
+        <source>Indexing audio: %1</source>
+        <translation>Indeksowanie audio: %1</translation>
+    </message>
+    <message>
+        <source>Decoding audio… %1%</source>
+        <translation>Dekodowanie audio… %1%</translation>
     </message>
     <message>
         <source>Change karaoke tag to \%1</source>
