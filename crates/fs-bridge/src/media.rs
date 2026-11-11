@@ -40,8 +40,8 @@ pub fn set_audio_delay(ms: i64) {
 }
 
 use fs_audio::{
-    AudioSource, FreqScale, PcmBuffer, Peak, PeakCache, Player, Spectrogram, SpectrumConfig,
-    SpectrumView,
+    AudioSource, FreqScale, Loading, PcmBuffer, Peak, PeakCache, Player, Spectrogram,
+    SpectrumConfig, SpectrumView,
 };
 use fs_core::Document;
 use fs_core::ass::Section;
@@ -330,59 +330,55 @@ pub struct Audio {
     spectrum: Spectrogram,
     /// None when no output device is available (the graph still works).
     player: Option<Player>,
+    /// The decoders filling the track in; they stop when it is dropped.
+    loading: Option<Loading>,
 }
 
 impl Audio {
-    fn from_pcm(pcm: PcmBuffer) -> Self {
-        // opening the output device takes ~200 ms (WASAPI): meanwhile build the peaks
-        std::thread::scope(|sc| {
-            let player = sc.spawn(|| Player::new(pcm.clone(), get(&AUDIO_DEVICE).as_deref()).ok());
-            Audio {
-                peaks: PeakCache::new(pcm.clone()),
-                spectrum: Spectrogram::new(pcm.clone(), SpectrumConfig::default()),
-                player: player.join().ok().flatten(),
-            }
-        })
+    fn from_pcm(pcm: PcmBuffer, loading: Option<Loading>) -> Self {
+        Audio {
+            peaks: PeakCache::new(pcm.clone()),
+            spectrum: Spectrogram::new(pcm.clone(), SpectrumConfig::default()),
+            // ~200 ms (WASAPI), on the thread that opens the audio
+            player: Player::new(pcm, get(&AUDIO_DEVICE).as_deref()).ok(),
+            loading,
+        }
     }
 
-    /// `progress(done, total)` while indexing (first open only) and again while decoding;
-    /// false cancels. `track`: a stream index, -1 the first audio track.
+    /// The track as soon as its index is read, to be decoded in the background as Aegisub's
+    /// RAM cache is ([`loaded_ms`](Self::loaded_ms) says how far it is; the rest is silence).
+    /// `progress(done, total)` while a file is indexed, on its first open; false cancels.
+    /// `track`: a stream index, -1 the first audio track.
     pub fn open(
         path: &str,
         track: i32,
         cache_dir: &str,
-        mut progress: impl FnMut(i64, i64) -> bool,
+        progress: impl FnMut(i64, i64) -> bool,
     ) -> Result<Self, String> {
-        let open = |progress: &mut dyn FnMut(i64, i64) -> bool| {
-            fs_media::Audio::open(Path::new(path), track, Some(&cache(cache_dir)), progress)
-                .map_err(|e| format!("{path}: {e}"))
+        let (file, dir) = (PathBuf::from(path), cache(cache_dir));
+        let first = fs_media::Audio::open(&file, track, Some(&dir), progress)
+            .map_err(|e| format!("{path}: {e}"))?;
+        // one more decoder of the track, for a part of it (BestSource seeks to the sample)
+        let another = move || {
+            let a = fs_media::Audio::open(&file, track, Some(&dir), |_, _| true).ok()?;
+            Some(Box::new(a) as Box<dyn AudioSource>)
         };
-        // the first one indexes the file (once, cached) for the others
-        let first = open(&mut progress)?;
-        let p = first.props();
-        // A track over a minute decodes in parts, each with its own decoder; BestSource
-        // seeks sample-exactly, so this gives the same samples (checked by bench_media).
-        let n = if p.num_samples > i64::from(p.sample_rate) * 60 {
-            std::thread::available_parallelism()
-                .map_or(1, |n| n.get())
-                .min(4)
+        let delay = AUDIO_DELAY.load(std::sync::atomic::Ordering::Relaxed);
+        let (pcm, loading) = PcmBuffer::load_in_background(Box::new(first), another, delay);
+        Ok(Self::from_pcm(pcm, Some(loading)))
+    }
+
+    /// Takes in what was decoded since the last call, for the waveform to show, and says how
+    /// much of the track is there from its start, in ms: its duration once all of it is.
+    pub fn loaded_ms(&mut self) -> i64 {
+        self.peaks.refresh();
+        let pcm = self.peaks.pcm();
+        if pcm.is_complete() {
+            self.loading = None;
+            pcm.duration_ms()
         } else {
-            1
-        };
-        let more: Vec<fs_media::Audio> = std::thread::scope(|sc| {
-            let h: Vec<_> = (1..n)
-                .map(|_| sc.spawn(|| open(&mut |_, _| true)))
-                .collect();
-            h.into_iter().filter_map(|h| h.join().ok()?.ok()).collect()
-        });
-        let srcs: Vec<&dyn AudioSource> = std::iter::once(&first)
-            .chain(&more)
-            .map(|s| s as &dyn AudioSource)
-            .collect();
-        let pcm = PcmBuffer::load_parts(&srcs, progress).map_err(|_| "cancelled".to_string())?;
-        Ok(Self::from_pcm(pcm.delayed(
-            AUDIO_DELAY.load(std::sync::atomic::Ordering::Relaxed),
-        )))
+            pcm.sample_to_ms(pcm.ready()).min(pcm.duration_ms() - 1)
+        }
     }
 
     /// Silent audio for timing without a sound track (Kainote "dummy audio"). At 1 kHz every
@@ -400,7 +396,7 @@ impl Audio {
                 *s = ((x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 32) % 10001) as i16 - 5000;
             }
         }
-        Self::from_pcm(PcmBuffer::new(1000, pcm))
+        Self::from_pcm(PcmBuffer::new(1000, pcm), None)
     }
 
     pub fn duration_ms(&self) -> i64 {
@@ -414,6 +410,9 @@ impl Audio {
     /// Aegisub's "Save audio clip": `[start_ms, end_ms)` as a mono 16-bit WAV.
     pub fn save_clip(&self, path: &str, start_ms: i64, end_ms: i64) -> Result<(), String> {
         let pcm = self.peaks.pcm();
+        if pcm.ms_to_sample(end_ms).min(pcm.len()) > pcm.ready() {
+            return Err("the audio is still loading".to_string());
+        }
         let clip = pcm.slice(pcm.ms_to_sample(start_ms), pcm.ms_to_sample(end_ms));
         let mut f = std::io::BufWriter::new(
             std::fs::File::create(path).map_err(|e| format!("{path}: {e}"))?,
@@ -595,6 +594,13 @@ mod tests {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/media/cfr.mkv");
         let cache = std::env::temp_dir().join("fs-bridge-test-cache");
         let mut a = Audio::open(path, -1, cache.to_str().unwrap(), |_, _| true).unwrap();
+        // there at once, decoded in the background
+        assert_eq!(a.duration_ms(), 10_010);
+        let since = std::time::Instant::now();
+        while a.loaded_ms() < a.duration_ms() {
+            assert!(since.elapsed().as_secs() < 60, "{} ms", a.loaded_ms());
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
 
         let (w, h) = (8usize, 200usize);
         let mut out = vec![0f32; w * h];
@@ -633,6 +639,25 @@ mod tests {
         assert!(!a.playing() && (550..=800).contains(&seen), "{seen}");
     }
 
+    /// A decoder read through its interleaved samples alone, as every decoder was before the
+    /// track's own mono reader.
+    struct Channels<'a>(&'a fs_media::Audio);
+
+    impl fs_audio::AudioSource for Channels<'_> {
+        fn sample_rate(&self) -> u32 {
+            fs_audio::AudioSource::sample_rate(self.0)
+        }
+        fn channels(&self) -> u16 {
+            fs_audio::AudioSource::channels(self.0)
+        }
+        fn num_frames(&self) -> i64 {
+            fs_audio::AudioSource::num_frames(self.0)
+        }
+        fn fill(&self, start: i64, out: &mut [f32]) {
+            fs_audio::AudioSource::fill(self.0, start, out);
+        }
+    }
+
     /// FSED_BENCH_MEDIA=video.mkv cargo test --release -p fs-bridge bench_media -- --ignored --nocapture
     #[test]
     #[ignore]
@@ -643,6 +668,26 @@ mod tests {
         };
         let cache = std::env::temp_dir().join("fsb-bench-cache");
         let cache = cache.to_str().unwrap();
+        // the window's way: there after the index, decoded in the background by as many
+        // decoders as get to their parts by seeking
+        let loaded = |what: &str| {
+            let t0 = Instant::now();
+            let mut a = Audio::open(&path, -1, cache, |_, _| true).unwrap();
+            let open = t0.elapsed();
+            while a.loaded_ms() < a.duration_ms() {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            eprintln!(
+                "audio {what}: there after {open:?}, all {} s of it after {:?}",
+                a.duration_ms() / 1000,
+                t0.elapsed()
+            );
+            a
+        };
+        let a = loaded("open");
+        drop(a);
+        let a = loaded("open again");
+        // one decoder front to back, through the samples of every channel: the same track
         let t0 = Instant::now();
         let src = fs_media::Audio::open(
             std::path::Path::new(&path),
@@ -651,64 +696,13 @@ mod tests {
             |_, _| true,
         )
         .unwrap();
-        eprintln!("audio source open: {:?}", t0.elapsed());
-        let t0 = Instant::now();
-        let pcm = fs_audio::PcmBuffer::load(&src, |_, _| true).unwrap();
-        eprintln!("audio decode: {:?}", t0.elapsed());
-        let t0 = Instant::now();
-        let srcs: Vec<fs_media::Audio> = std::thread::scope(|sc| {
-            let h: Vec<_> = (0..4)
-                .map(|_| {
-                    sc.spawn(|| {
-                        fs_media::Audio::open(
-                            std::path::Path::new(&path),
-                            -1,
-                            Some(&super::cache(cache)),
-                            |_, _| true,
-                        )
-                        .unwrap()
-                    })
-                })
-                .collect();
-            h.into_iter().map(|h| h.join().unwrap()).collect()
-        });
-        let refs: Vec<&dyn fs_audio::AudioSource> = srcs
-            .iter()
-            .map(|s| s as &dyn fs_audio::AudioSource)
-            .collect();
-        let par = fs_audio::PcmBuffer::load_parts(&refs, |_, _| true).unwrap();
-        eprintln!("audio open+decode x4: {:?}", t0.elapsed());
-        let diff: Vec<usize> = (pcm.samples().iter().zip(par.samples()))
-            .enumerate()
-            .filter(|(_, (a, b))| a != b)
-            .map(|(i, _)| i)
-            .collect();
-        eprintln!(
-            "parallel differs in {} samples (first {:?}, last {:?}) of {}",
-            diff.len(),
-            diff.first(),
-            diff.last(),
-            pcm.len()
-        );
-        let t0 = Instant::now();
-        drop(fs_audio::peaks::PeakCache::new(pcm.clone()));
-        eprintln!("peak cache: {:?}", t0.elapsed());
-        let t0 = Instant::now();
-        drop(fs_audio::spectrum::Spectrogram::new(
-            pcm.clone(),
-            Default::default(),
-        ));
-        eprintln!("spectrogram: {:?}", t0.elapsed());
-        let t0 = Instant::now();
-        drop(fs_audio::player::Player::new(pcm, None));
-        eprintln!("player: {:?}", t0.elapsed());
-        let t0 = Instant::now();
-        let a = Audio::open(&path, -1, cache, |_, _| true).unwrap();
-        eprintln!(
-            "audio open: {:?} ({} ms of audio)",
-            t0.elapsed(),
-            a.duration_ms()
-        );
+        let one = fs_audio::PcmBuffer::load(&Channels(&src), |_, _| true).unwrap();
+        eprintln!("one decoder through every channel: {:?}", t0.elapsed());
+        let diff = (one.samples().iter().zip(a.peaks.pcm().samples()))
+            .filter(|(a, b)| a != b)
+            .count();
+        eprintln!("differs in {diff} samples of {}", one.len());
+        assert_eq!((diff, one.len()), (0, a.peaks.pcm().len()));
         let (w, h) = (1600usize, 300usize);
         let mut peaks = vec![0f32; w * 3];
         let t0 = Instant::now();

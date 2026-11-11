@@ -17,6 +17,7 @@
 
 class BestVideoSource;
 class BestAudioSource;
+class BestAudioFrame;
 struct SwsContext;
 struct AVFrame;
 struct ass_library;
@@ -150,11 +151,26 @@ public:
     /// Interleaved samples in [-1, 1] from sample `start`; `out.size()` must
     /// be a multiple of the channel count. Outside the stream is silence.
     void fill_f32(int64_t start, std::span<float> out);
+    /// The same samples averaged over the channels, as 16-bit: what the editor keeps of a track.
+    /// Straight from the decoder's frames, each decoded once, so reading a track front to back in
+    /// pieces costs no more than decoding it.
+    void fill_mono(int64_t start, std::span<int16_t> out);
+    /// False once BestSource gave up on seeking in this track (AC-3, DTS-HD MA: what it decodes
+    /// after a seek is not what the index has): every read away from the last one then decodes
+    /// from the start of the file.
+    bool seeks() const;
+    /// Set from any thread, it makes a read under way throw at the next frame (a seek BestSource
+    /// retries for seconds); the source is of no use afterwards.
+    std::shared_ptr<std::atomic_bool> canceller() const { return cancel_; }
 
 private:
     std::unique_ptr<BestAudioSource> bs_;
+    std::shared_ptr<std::atomic_bool> cancel_ = std::make_shared<std::atomic_bool>(false);
     AudioInfo info_;
     int bytes_per_sample_ = 0;
+    int64_t delay_ = 0;                    // samples of silence before the track (it starts after the video)
+    std::unique_ptr<BestAudioFrame> held_; // the frame fill_mono read last: the next read starts in it
+    int64_t held_n_ = -1;
     std::vector<uint8_t> buf_;
 };
 

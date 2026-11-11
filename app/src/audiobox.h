@@ -127,6 +127,7 @@ private:
     void updateScroll();
     void setSelection(qint64 start, qint64 end, bool fromDrag);
     void loaded();
+    void pollLoading();
     void tick();
     void playSelection();
     bool stepLine(int dir, bool playIt = true); // false at the first or last line
@@ -144,9 +145,11 @@ private:
     QString m_path;
     QString m_opening; // being loaded
     int m_track = -1;
-    // set to stop a load still decoding (close, a newer open, destruction)
+    // set to stop a file still being indexed (close, a newer open, destruction)
     std::shared_ptr<std::atomic_bool> m_openCancel = std::make_shared<std::atomic_bool>(false);
     qint64 m_duration = 0;
+    // how much of it is decoded, from its start: the audio is there at once and fills in (Aegisub's RAM cache)
+    qint64 m_loadedMs = 0;
     qint64 m_left = 0;
     double m_msPerPx = 10;
     float m_vzoom = 1;
@@ -173,6 +176,7 @@ private:
     QSlider *m_hzoom, *m_vzoomSlider, *m_volume;
     QToolButton *m_link, *m_spectrumToggle;
     QTimer *m_timer;
+    QTimer *m_loadTimer; // while the audio is decoded
     // toggles
     bool m_karaoke = false, m_autoSplit = false, m_autoCommit = true, m_nextOnCommit = false, m_autoScroll = true,
          m_spectrum = false, m_enhance = false;

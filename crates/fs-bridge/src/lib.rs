@@ -1066,6 +1066,11 @@ pub mod ffi {
         /// Silent audio, or Aegisub's white noise.
         fn blank_audio(ms: i64, noise: bool) -> Box<Audio>;
         fn duration_ms(self: &Audio) -> i64;
+        /// The audio is there as soon as it is open and decoded in the background: this takes in
+        /// what was decoded since the last call, for `peaks` to show, and returns how much of the
+        /// track is there from its start in ms (the duration once all of it is). What is not is
+        /// silence.
+        fn loaded_ms(self: &mut Audio) -> i64;
         fn save_clip(self: &Audio, path: &str, start_ms: i64, end_ms: i64) -> Result<()>;
         fn rate(self: &Audio) -> u32;
         /// `(min, max, avg)` per column for samples from `start` at `spp` samples per column.

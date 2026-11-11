@@ -104,6 +104,16 @@ void audio_fill(AudioSource &a, int64_t start, rust::Slice<float> out) {
     a.fill_f32(start, std::span<float>(out.data(), out.size()));
 }
 
+void audio_fill_mono(AudioSource &a, int64_t start, rust::Slice<int16_t> out) {
+    a.fill_mono(start, std::span<int16_t>(out.data(), out.size()));
+}
+
+bool audio_seeks(const AudioSource &a) { return a.seeks(); }
+
+std::shared_ptr<AudioCancel> audio_canceller(const AudioSource &a) { return a.canceller(); }
+
+void audio_cancel(const AudioCancel &c) { const_cast<AudioCancel &>(c).store(true); }
+
 std::unique_ptr<SubtitleRenderer> new_subtitle_renderer() { return std::make_unique<SubtitleRenderer>(); }
 
 void subs_set_fonts(SubtitleRenderer &r, rust::Str family, rust::Str dir) {

@@ -110,6 +110,11 @@ pub(crate) mod bridge {
         ) -> Result<UniquePtr<AudioSource>>;
         fn audio_props(a: &AudioSource) -> AudioProps;
         fn audio_fill(a: Pin<&mut AudioSource>, start: i64, out: &mut [f32]) -> Result<()>;
+        fn audio_fill_mono(a: Pin<&mut AudioSource>, start: i64, out: &mut [i16]) -> Result<()>;
+        fn audio_seeks(a: &AudioSource) -> bool;
+        type AudioCancel;
+        fn audio_canceller(a: &AudioSource) -> SharedPtr<AudioCancel>;
+        fn audio_cancel(c: &AudioCancel);
 
         fn new_subtitle_renderer() -> Result<UniquePtr<SubtitleRenderer>>;
         fn subs_set_fonts(r: Pin<&mut SubtitleRenderer>, family: &str, dir: &str);
@@ -149,3 +154,6 @@ pub(crate) mod bridge {
 unsafe impl Send for bridge::VideoSource {}
 unsafe impl Send for bridge::AudioSource {}
 unsafe impl Send for bridge::SubtitleRenderer {}
+// an atomic flag
+unsafe impl Send for bridge::AudioCancel {}
+unsafe impl Sync for bridge::AudioCancel {}

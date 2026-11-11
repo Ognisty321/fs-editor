@@ -580,6 +580,9 @@ AudioBox::AudioBox(TabPanel *tab) : QWidget(tab), m_tab(tab) {
     m_timer = new QTimer(this);
     m_timer->setInterval(16);
     connect(m_timer, &QTimer::timeout, this, &AudioBox::tick);
+    m_loadTimer = new QTimer(this);
+    m_loadTimer->setInterval(100);
+    connect(m_loadTimer, &QTimer::timeout, this, &AudioBox::pollLoading);
 }
 
 AudioBox::~AudioBox() {
@@ -664,7 +667,7 @@ void AudioBox::open(const QString &path, bool withVideo, int track) {
                                              tr("Audio tracks"));
         if (track < 0) return;
     }
-    close(); // also stops a load still decoding
+    close(); // also stops a file still being indexed or decoded
     m_openCancel = std::make_shared<std::atomic_bool>(false);
     m_opening = path;
     m_tab->main()->status(tr("Loading audio %1…").arg(path));
@@ -714,6 +717,7 @@ void AudioBox::openBlank(qint64 ms, bool noise) {
 
 void AudioBox::loaded() {
     m_duration = (*m_audio)->duration_ms();
+    m_loadedMs = 0;
     settingsChanged();
     setVolume(m_volume->value() / 100.0f);
     updateScroll();
@@ -721,6 +725,23 @@ void AudioBox::loaded() {
     m_tab->main()->status(QString());
     cleanIndexCache(m_path);
     emit opened();
+    pollLoading();
+}
+
+// The audio is there as soon as its index is read and decoded in the background, as Aegisub's RAM
+// cache is: what the view shows of it is drawn again as it comes, the rest is silence until then.
+void AudioBox::pollLoading() {
+    if (!m_audio) return m_loadTimer->stop();
+    const qint64 was = m_loadedMs;
+    m_loadedMs = (*m_audio)->loaded_ms();
+    if (m_loadedMs != was && m_left < m_loadedMs && m_left + qint64(m_view->width() * m_msPerPx) > was)
+        m_view->dataChanged();
+    if (m_loadedMs >= m_duration) {
+        if (m_loadTimer->isActive()) m_tab->main()->status(QString());
+        return m_loadTimer->stop();
+    }
+    m_tab->main()->status(tr("Loading audio %1… %2%").arg(m_path).arg(m_loadedMs * 100 / std::max<qint64>(1, m_duration)));
+    if (!m_loadTimer->isActive()) m_loadTimer->start();
 }
 
 void AudioBox::settingsChanged() {
@@ -735,9 +756,11 @@ void AudioBox::close() {
     *m_openCancel = true;
     m_opening.clear();
     stop();
+    m_loadTimer->stop();
     m_audio.reset();
     m_path.clear();
     m_duration = 0;
+    m_loadedMs = 0;
     m_view->dataChanged();
     emit opened();
 }

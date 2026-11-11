@@ -179,6 +179,8 @@ impl Spectrogram {
             }
         }
         if !missing.is_empty() {
+            // read before the samples are: a column is kept only when all of its window was decoded
+            let ready = self.pcm.ready();
             let threads = std::thread::available_parallelism()
                 .map_or(1, |n| n.get())
                 .min(missing.len().div_ceil(32));
@@ -205,7 +207,12 @@ impl Spectrogram {
             let mut cache = self.cache.lock().unwrap();
             let tick = cache.tick;
             for (&k, c) in missing.iter().zip(computed) {
-                cache.columns.insert(indices[k], (c.clone(), tick));
+                // one that reaches into what is still being decoded is computed again next time
+                if indices[k] * self.hop as i64 + self.size as i64 / 2 <= ready
+                    || self.pcm.len() == ready
+                {
+                    cache.columns.insert(indices[k], (c.clone(), tick));
+                }
                 out[k] = Some(c);
             }
             cache.evict(

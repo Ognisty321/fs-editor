@@ -7,6 +7,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <map>
 #include <set>
 
@@ -277,8 +278,39 @@ struct VideoSource::Packets {
     int64_t at = -1;           // the frame `frame` holds, -1 none; decoding on gives the ones after it
     int64_t shown = INT64_MIN; // its timestamp
     bool draining = false;
+    // The frames decoded last, by number, as BestSource keeps them once it takes over: a step back
+    // is then no seek to the keyframe and all its frames again (190 ms a step in an episode).
+    struct Held {
+        AVFrame *frame;
+        size_t bytes;
+    };
+    std::map<int64_t, Held> held;
+    std::deque<int64_t> held_order; // oldest first
+    size_t held_bytes = 0;
+    static constexpr size_t held_max = 256u << 20; // BestSource's cache here (open_bs)
+
+    void hold() {
+        if (at < 0 || held.contains(at))
+            return;
+        AVFrame *f = av_frame_clone(frame); // a reference: the decoder takes another buffer
+        if (!f)
+            return;
+        const int size = av_image_get_buffer_size(static_cast<AVPixelFormat>(f->format), f->width, f->height, 1);
+        held.emplace(at, Held{f, size_t(std::max(size, 1))});
+        held_order.push_back(at);
+        held_bytes += held[at].bytes;
+        while (held_bytes > held_max && held_order.size() > 1) {
+            const auto old = held.find(held_order.front());
+            held_bytes -= old->second.bytes;
+            av_frame_free(&old->second.frame);
+            held.erase(old);
+            held_order.pop_front();
+        }
+    }
 
     ~Packets() {
+        for (auto &[n, h] : held)
+            av_frame_free(&h.frame);
         av_frame_free(&frame);
         av_packet_free(&pkt);
         avcodec_free_context(&dec);
@@ -367,6 +399,7 @@ struct VideoSource::Packets {
                 shown = frame->pts != AV_NOPTS_VALUE ? frame->pts : frame->best_effort_timestamp;
                 const auto it = std::ranges::lower_bound(pts, shown);
                 at = it != pts.end() && *it == shown ? it - pts.begin() : -1;
+                hold();
                 return true;
             }
             if (r != AVERROR(EAGAIN) || draining) { // the frame is unreferenced now
@@ -388,6 +421,8 @@ struct VideoSource::Packets {
     const AVFrame *get(int64_t n) {
         if (at == n)
             return frame;
+        if (const auto it = held.find(n); it != held.end())
+            return it->second.frame; // the decoder stays where it is, for the frames after its own
         const auto key_of = [&](int64_t back) { // the keyframe at or before n, `back` keyframes earlier
             const auto it = std::ranges::upper_bound(keys, n) - keys.begin() - 1 - back;
             return it < 0 || keys.empty() ? int64_t(0) : keys[size_t(it)];
@@ -622,10 +657,20 @@ AudioSource::AudioSource(const std::filesystem::path &file, int track, const std
         bs_ = std::make_unique<BestAudioSource>(file, track, has_video ? -1 : -2, 0,
                                                 cache.empty() ? bcmDisable : bcmAutoAbsolutePath, cache, nullptr, 0,
                                                 wrap(progress));
-        // we read each track once, front to back, into our own PCM buffer: BestSource's
-        // default 1 GB frame cache would only copy the whole track a second time
-        bs_->SetMaxCacheSize(16ull << 20);
+        bs_->SetCancellationCallback([stop = cancel_] { return stop->load(); });
         const auto &ap = bs_->GetAudioProperties();
+        // We read each track once, front to back, into our own buffer, so BestSource's frame cache
+        // (1 GB by default) only has to hold the frame a read ended in. It is a list searched from
+        // its head for every frame: with TrueHD's 40-sample frames a 16 MB one held 40,000 of them
+        // and ten minutes took two to decode. Two of the longest frames, and a little for short ones.
+        int64_t longest = 0;
+        for (int64_t n = 0; n < ap.NumFrames; ++n)
+            longest = std::max(longest, bs_->GetFrameInfo(n).Length);
+        bs_->SetMaxCacheSize(std::max<size_t>(64u << 10, size_t(2 * longest) * size_t(std::max(1, ap.Channels)) *
+                                                              size_t(std::max(1, ap.AF.BytesPerSample)) +
+                                                             8192));
+        // BestSource's own sum: where the track starts after the first video track does
+        delay_ = has_video && ap.SampleRate > 0 ? static_cast<int64_t>(bs_->GetRelativeStartTime(-1) * ap.SampleRate) : 0;
         info_.sample_rate = ap.SampleRate;
         info_.channels = ap.Channels;
         info_.num_samples = ap.NumSamples;
@@ -640,6 +685,92 @@ AudioSource::AudioSource(const std::filesystem::path &file, int track, const std
 }
 
 AudioSource::~AudioSource() = default;
+
+bool AudioSource::seeks() const { return !bs_->GetLinearDecodingState(); }
+
+namespace {
+
+// The editor's sample of a frame's channels: their mean as fill_f32 gives them, to 16 bits.
+int16_t mono16(float sum, int channels) {
+    const float v = std::round(sum / float(channels) * 32767.f);
+    return v != v ? int16_t{0} : static_cast<int16_t>(std::clamp(v, -32768.f, 32767.f));
+}
+
+template <class T, class F>
+void mix(const AVFrame *f, int64_t from, int64_t count, int16_t *out, F to_float) {
+    const int ch = f->ch_layout.nb_channels;
+    if (av_sample_fmt_is_planar(static_cast<AVSampleFormat>(f->format))) {
+        for (int64_t i = 0; i < count; ++i) {
+            float sum = 0;
+            for (int c = 0; c < ch; ++c) {
+                T v;
+                std::memcpy(&v, f->extended_data[c] + (from + i) * sizeof(T), sizeof(T));
+                sum += to_float(v);
+            }
+            out[i] = mono16(sum, ch);
+        }
+    } else {
+        const uint8_t *p = f->extended_data[0] + from * ch * sizeof(T);
+        for (int64_t i = 0; i < count; ++i) {
+            float sum = 0;
+            for (int c = 0; c < ch; ++c, p += sizeof(T)) {
+                T v;
+                std::memcpy(&v, p, sizeof(T));
+                sum += to_float(v);
+            }
+            out[i] = mono16(sum, ch);
+        }
+    }
+}
+
+} // namespace
+
+void AudioSource::fill_mono(int64_t start, std::span<int16_t> out) {
+    std::ranges::fill(out, int16_t{0});
+    // in the track's own samples, as BestSource numbers its frames: without the delay
+    int64_t s = start - delay_, count = static_cast<int64_t>(out.size());
+    int16_t *o = out.data();
+    if (s < 0) {
+        const int64_t silent = std::min(count, -s);
+        o += silent;
+        count -= silent;
+        s = 0;
+    }
+    count = std::min(count, info_.num_samples - delay_ - s);
+    if (count <= 0)
+        return;
+    const auto range = bs_->GetFrameRangeBySamples(s, count);
+    if (range.First < 0)
+        return;
+    int64_t first = range.FirstSamplePos; // of frame n
+    for (int64_t n = range.First; n <= range.Last && count > 0; ++n) {
+        if (held_n_ != n) {
+            held_n_ = -1;
+            held_.reset(bs_->GetFrame(n));
+            if (!held_)
+                throw MediaError("cannot decode audio frame " + std::to_string(n));
+            held_n_ = n;
+        }
+        const AVFrame *f = held_->GetAVFrame();
+        const int64_t from = s - first, take = std::min<int64_t>(count, f->nb_samples - from);
+        first += f->nb_samples;
+        if (from < 0 || take <= 0 || f->ch_layout.nb_channels <= 0)
+            continue;
+        switch (av_get_packed_sample_fmt(static_cast<AVSampleFormat>(f->format))) {
+        case AV_SAMPLE_FMT_U8: mix<uint8_t>(f, from, take, o, [](uint8_t v) { return (int(v) - 128) / 128.f; }); break;
+        case AV_SAMPLE_FMT_S16: mix<int16_t>(f, from, take, o, [](int16_t v) { return v / 32768.f; }); break;
+        case AV_SAMPLE_FMT_S32:
+            mix<int32_t>(f, from, take, o, [](int32_t v) { return static_cast<float>(v / 2147483648.0); });
+            break;
+        case AV_SAMPLE_FMT_FLT: mix<float>(f, from, take, o, [](float v) { return v; }); break;
+        case AV_SAMPLE_FMT_DBL: mix<double>(f, from, take, o, [](double v) { return static_cast<float>(v); }); break;
+        default: throw MediaError("unsupported sample size");
+        }
+        o += take;
+        s += take;
+        count -= take;
+    }
+}
 
 void AudioSource::fill_f32(int64_t start, std::span<float> out) {
     const int ch = info_.channels;

@@ -34,6 +34,12 @@ void video_frame_rgba(VideoSource &v, int64_t n, rust::Slice<uint8_t> out);
 std::unique_ptr<AudioSource> open_audio(rust::Str path, int32_t track, rust::Str cache_dir, ProgressSink &progress);
 AudioProps audio_props(const AudioSource &a);
 void audio_fill(AudioSource &a, int64_t start, rust::Slice<float> out);
+void audio_fill_mono(AudioSource &a, int64_t start, rust::Slice<int16_t> out);
+bool audio_seeks(const AudioSource &a);
+/// The flag that stops the source's reads, to set from another thread.
+using AudioCancel = std::atomic_bool;
+std::shared_ptr<AudioCancel> audio_canceller(const AudioSource &a);
+void audio_cancel(const AudioCancel &c);
 
 std::unique_ptr<SubtitleRenderer> new_subtitle_renderer();
 void subs_set_fonts(SubtitleRenderer &r, rust::Str family, rust::Str dir);

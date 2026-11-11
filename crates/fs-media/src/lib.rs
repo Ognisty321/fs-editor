@@ -333,6 +333,7 @@ impl Video {
 /// loaded into a `PcmBuffer` for the waveform, spectrogram and player.
 pub struct Audio {
     inner: Mutex<UniquePtr<bridge::AudioSource>>,
+    cancel: cxx::SharedPtr<bridge::AudioCancel>,
     props: AudioProps,
 }
 
@@ -348,6 +349,7 @@ impl Audio {
         let inner = bridge::open_audio(path_str(path)?, track, cache, &mut sink)?;
         let props = bridge::audio_props(&inner);
         Ok(Self {
+            cancel: bridge::audio_canceller(&inner),
             inner: Mutex::new(inner),
             props,
         })
@@ -362,6 +364,27 @@ impl Audio {
     pub fn read(&self, start: i64, out: &mut [f32]) -> Result<()> {
         let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         Ok(bridge::audio_fill(g.pin_mut(), start, out)?)
+    }
+
+    /// The same samples averaged over the channels as 16-bit, what [`fs_audio::PcmBuffer`] keeps.
+    pub fn read_mono(&self, start: i64, out: &mut [i16]) -> Result<()> {
+        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(bridge::audio_fill_mono(g.pin_mut(), start, out)?)
+    }
+
+    /// False once BestSource gave up on seeking in this track (AC-3, DTS-HD MA): a read away
+    /// from the last one then decodes from the start of the file.
+    pub fn seeks(&self) -> bool {
+        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        bridge::audio_seeks(&g)
+    }
+
+    /// From any thread: the read under way fails at its next frame, as do the ones after it. For
+    /// a seek BestSource retries for seconds in a track it cannot seek in.
+    pub fn cancel(&self) {
+        if let Some(c) = self.cancel.as_ref() {
+            bridge::audio_cancel(c);
+        }
     }
 }
 
@@ -379,6 +402,17 @@ impl fs_audio::AudioSource for Audio {
         if self.read(start, out).is_err() {
             out.fill(0.0);
         }
+    }
+    fn fill_mono(&self, start: i64, out: &mut [i16]) {
+        if self.read_mono(start, out).is_err() {
+            out.fill(0);
+        }
+    }
+    fn seeks(&self) -> bool {
+        Audio::seeks(self)
+    }
+    fn cancel(&self) {
+        Audio::cancel(self);
     }
 }
 

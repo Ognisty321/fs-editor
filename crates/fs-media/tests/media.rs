@@ -172,6 +172,34 @@ fn audio_is_sample_exact() {
     // left 1 kHz + right 500 Hz, downmixed: both tones in the spectrum
     let pcm = PcmBuffer::load(&a, |_, _| true).unwrap();
     assert_eq!(pcm.len(), 480_480);
+    // the track's own mono reader gives what the mean of the channels' samples does, read whole,
+    // across the frames' ends and after a seek back
+    let mut mean = vec![0f32; 2 * 480_480];
+    a.read(0, &mut mean).unwrap();
+    let mean: Vec<i16> = mean
+        .chunks(2)
+        .map(|f| ((f[0] + f[1]) / 2.0 * 32767.0).round() as i16)
+        .collect();
+    assert!(pcm.samples() == mean.as_slice());
+    for (start, len) in [
+        (470_000, 20_000),
+        (1000, 5),
+        (1005, 3000),
+        (-10, 20),
+        (250_000, 1),
+    ] {
+        let mut part = vec![1i16; len];
+        a.read_mono(start, &mut part).unwrap();
+        for (i, &s) in part.iter().enumerate() {
+            let at = start + i as i64;
+            let want = if (0..480_480).contains(&at) {
+                mean[at as usize]
+            } else {
+                0
+            };
+            assert_eq!(s, want, "sample {at} read from {start}");
+        }
+    }
     let sp = Spectrogram::new(
         pcm,
         SpectrumConfig {
@@ -266,4 +294,137 @@ fn embedded_subtitles() {
         "{srt}"
     );
     assert!(fs_media::extract_subtitles(&media("cfr.mkv"), 0).is_err());
+}
+
+/// How a track of a real file decodes and seeks: indexed, read front to back, then read at three
+/// places away from the last one, each checked against the same samples of the whole track.
+/// FSED_BENCH_MEDIA=audio.mka cargo test --release -p fs-media --test media bench_audio -- --ignored --nocapture
+#[test]
+#[ignore]
+fn bench_audio() {
+    use std::time::Instant;
+    let Ok(path) = std::env::var("FSED_BENCH_MEDIA") else {
+        return;
+    };
+    let path = Path::new(&path);
+    let cache = tempfile::tempdir().unwrap();
+    let t0 = Instant::now();
+    let a = Audio::open(path, -1, Some(cache.path()), |_, _| true).unwrap();
+    let index = t0.elapsed();
+    let t0 = Instant::now();
+    let whole = PcmBuffer::load(&a, |_, _| true).unwrap();
+    let linear = t0.elapsed();
+    let t0 = Instant::now();
+    let a = Audio::open(path, -1, Some(cache.path()), |_, _| true).unwrap();
+    let mut line = format!(
+        "{}: index {index:?}, decode {linear:?}, open {:?}, reads",
+        path.file_name().unwrap().to_string_lossy(),
+        t0.elapsed()
+    );
+    let n = a.props().num_samples;
+    let mut buf = vec![0i16; 65536];
+    for at in [n / 4 * 3, n / 2, n / 4, n / 4 * 3 + 65536] {
+        let t0 = Instant::now();
+        a.read_mono(at, &mut buf).unwrap();
+        let same = buf
+            .iter()
+            .zip(&whole.samples()[at as usize..])
+            .all(|(a, b)| a == b);
+        line += &format!(" {:?}", t0.elapsed());
+        assert!(same, "{line}: other samples at {at}");
+    }
+    eprintln!("{line}; seeks {}", a.seeks());
+}
+
+/// How a real file opens, stage by stage:
+/// FSED_BENCH_MEDIA=video.mkv cargo test --release -p fs-media --test media bench_open -- --ignored --nocapture
+#[test]
+#[ignore]
+fn bench_open() {
+    use std::time::Instant;
+    let Ok(path) = std::env::var("FSED_BENCH_MEDIA") else {
+        return;
+    };
+    let path = Path::new(&path);
+    let cache = tempfile::tempdir().unwrap();
+    let seeks = |v: &mut Video, what: &str| {
+        let (n, mut px) = (v.num_frames(), vec![0u8; v.width() * v.height() * 4]);
+        let t0 = Instant::now();
+        for f in n / 3..n / 3 + 100 {
+            v.frame_into(f, &mut px).unwrap();
+        }
+        let seq = t0.elapsed() / 100;
+        let t0 = Instant::now();
+        for k in 0..20 {
+            v.frame_into((n / 7 + k * 1777) % n, &mut px).unwrap();
+        }
+        let far = t0.elapsed() / 20;
+        let t0 = Instant::now();
+        for k in 0..20 {
+            v.frame_into(n / 2 - k * 3, &mut px).unwrap();
+        }
+        eprintln!(
+            "{what}: next frame {seq:?}, far seek {far:?}, three frames back {:?}",
+            t0.elapsed() / 20
+        );
+    };
+
+    let t0 = Instant::now();
+    let mut v = Video::open(path, -1, Some(cache.path()), |_, _| true).unwrap();
+    eprintln!(
+        "video open, no index: {:?} ({}x{}, {} frames, exact {})",
+        t0.elapsed(),
+        v.width(),
+        v.height(),
+        v.num_frames(),
+        v.is_exact()
+    );
+    let t1 = Instant::now();
+    let mut px = vec![0u8; v.width() * v.height() * 4];
+    v.frame_into(0, &mut px).unwrap();
+    eprintln!("first frame: {:?}", t1.elapsed());
+    let t1 = Instant::now();
+    for _ in 0..20 {
+        v.frame_into(0, &mut px).unwrap();
+    }
+    eprintln!(
+        "the same frame again (to RGBA alone): {:?}",
+        t1.elapsed() / 20
+    );
+    seeks(&mut v, "while indexing");
+    while !v.is_exact() {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    eprintln!("exact index after: {:?}", t0.elapsed());
+    seeks(&mut v, "exact");
+    drop(v);
+    let t0 = Instant::now();
+    let mut v = Video::open(path, -1, Some(cache.path()), |_, _| true).unwrap();
+    eprintln!("video open, indexed: {:?}", t0.elapsed());
+    let t1 = Instant::now();
+    v.frame_into(0, &mut px).unwrap();
+    eprintln!("first frame: {:?}", t1.elapsed());
+    seeks(&mut v, "indexed");
+    drop(v);
+
+    let t0 = Instant::now();
+    let a = Audio::open(path, -1, Some(cache.path()), |_, _| true).unwrap();
+    eprintln!("audio open, no index: {:?}", t0.elapsed());
+    let t1 = Instant::now();
+    let pcm = PcmBuffer::load(&a, |_, _| true).unwrap();
+    eprintln!(
+        "audio decode, one decoder: {:?} ({} s of audio)",
+        t1.elapsed(),
+        pcm.duration_ms() / 1000
+    );
+    let t0 = Instant::now();
+    drop(Audio::open(path, -1, Some(cache.path()), |_, _| true).unwrap());
+    eprintln!("audio open, indexed: {:?}", t0.elapsed());
+    let size: u64 = std::fs::read_dir(cache.path())
+        .unwrap()
+        .flatten()
+        .filter_map(|e| e.metadata().ok())
+        .map(|m| m.len())
+        .sum();
+    eprintln!("index files: {} KiB", size / 1024);
 }

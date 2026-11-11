@@ -7,7 +7,7 @@ pub mod player;
 pub mod spectrum;
 pub mod wav;
 
-pub use pcm::{AudioSource, Cancelled, MemorySource, PcmBuffer};
+pub use pcm::{AudioSource, Cancelled, Loading, MemorySource, PcmBuffer};
 pub use peaks::{Peak, PeakCache};
 pub use player::{Player, PlayerError, output_devices};
 pub use spectrum::{FreqScale, Spectrogram, SpectrumConfig, SpectrumView};
