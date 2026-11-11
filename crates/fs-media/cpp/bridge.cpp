@@ -93,6 +93,14 @@ void video_frame_rgba(VideoSource &v, int64_t n, rust::Slice<uint8_t> out) {
     v.frame_rgba(n, std::span<uint8_t>(out.data(), out.size()));
 }
 
+PlaneLayout video_frame_planes(VideoSource &v, int64_t n, rust::Slice<uint8_t> y, rust::Slice<uint8_t> u,
+                               rust::Slice<uint8_t> v_plane) {
+    const FramePlanes p = v.frame_planes(n, std::span<uint8_t>(y.data(), y.size()), std::span<uint8_t>(u.data(), u.size()),
+                                         std::span<uint8_t>(v_plane.data(), v_plane.size()));
+    return PlaneLayout{p.planar, p.copied, p.width,    p.height,   p.chroma_width, p.chroma_height,
+                       p.bytes,  p.to_rgb, p.chroma_x, p.chroma_y, p.chroma_top};
+}
+
 std::unique_ptr<AudioSource> open_audio(rust::Str path, int32_t track, rust::Str cache_dir, ProgressSink &progress) {
     return std::make_unique<AudioSource>(to_path(path), track, to_path(cache_dir), progress_of(progress));
 }
@@ -142,6 +150,12 @@ bool subs_blend(SubtitleRenderer &r, int64_t ms, int32_t w, int32_t h, int32_t v
 bool subs_overlay(SubtitleRenderer &r, int64_t ms, int32_t w, int32_t h, int32_t vw, int32_t vh,
                   rust::Slice<uint8_t> rgba) {
     return r.overlay(ms, w, h, vw, vh, std::span<uint8_t>(rgba.data(), rgba.size()));
+}
+
+int32_t subs_overlay_box(SubtitleRenderer &r, int64_t ms, int32_t w, int32_t h, int32_t vw, int32_t vh,
+                         rust::Slice<uint8_t> rgba, rust::Slice<int32_t> bounds) {
+    return r.overlay_box(ms, w, h, vw, vh, std::span<uint8_t>(rgba.data(), rgba.size()),
+                         std::span<int32_t>(bounds.data(), bounds.size()));
 }
 
 }  // namespace fsmedia::ffi

@@ -1,20 +1,25 @@
 // Video box (Kainote layout): GPU video view (QRhi) with libass subtitles,
 // seek slider, playback buttons, time field, volume and the visual-tools row.
-// Frames are decoded and composited on a worker thread.
+// Frames are decoded and the subtitles drawn on a worker thread; the view's
+// shader makes RGB of the decoder's planes and lays the subtitles over them.
 #pragma once
 
 #include "bridge.h"
 #include "mainwindow.h"
 #include "rhiquad.h"
 
+#include <QByteArray>
 #include <QElapsedTimer>
 #include <QImage>
 #include <QRhiWidget>
 #include <QThread>
 #include <QWidget>
+#include <array>
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <vector>
 
 class TabPanel;
 class VisualTools;
@@ -25,6 +30,26 @@ class QToolButton;
 class QTimer;
 class QStackedWidget;
 class QScreen;
+
+// A frame's picture as the view draws it: the decoder's planes, which its shader converts (the
+// frames of a video while it plays: no conversion on the CPU), or a finished RGBA picture where
+// there are none (a dummy video, a pixel format the planes are not given for).
+struct VideoPicture {
+    quint64 serial = 0; // another picture has another one: the view uploads a picture once
+    QImage rgba;
+    QByteArray y, u, v; // row after row, as `planes` says
+    fsb::FramePlanes planes{};
+    bool isNull() const { return rgba.isNull() && y.isEmpty(); }
+    bool deep() const { return !y.isEmpty() && planes.bytes == 2; } // 16-bit samples
+};
+
+// The subtitles on a frame, drawn over its picture: the part of the frame they cover.
+struct SubsPicture {
+    quint64 serial = 0;
+    QImage image; // premultiplied; null when none show
+    QPoint at;    // its top left in the frame
+    QSize frame;  // the frame it was drawn for
+};
 
 // Decoder state shared with the worker thread.
 struct VideoMedia {
@@ -40,10 +65,28 @@ struct VideoMedia {
         std::lock_guard g(subsM);
         return std::exchange(subs, std::nullopt);
     }
-    // the last frame decoded, without the subtitles: a visual tool's drag or a typed letter renders
-    // the same frame again (Aegisub's frame cache); -1 after the video changed
+    // the last frame decoded to RGBA, without the subtitles: what a saved or copied frame is made
+    // of, and the view's picture where there are no planes; -1 after the video changed
     qint64 cachedFrame = -1;
     QImage cached;
+    // the last frame's picture for the view: a visual tool's drag or a typed letter renders the
+    // same frame again (Aegisub's frame cache); -1 after the video changed, -2 a dummy's picture
+    qint64 shownFrame = -1;
+    VideoPicture shown;
+    void forget() { cachedFrame = shownFrame = -1; }
+    // The planes handed to the view lately. A set nothing else holds any more is written again:
+    // a new one that large is new pages from the system on every frame.
+    std::vector<std::array<QByteArray, 3>> planePool;
+    // what the renderer drew at its last overlay_box, which it answers "the same" by, and the
+    // frame of RGBA it draws into
+    SubsPicture subsShown;
+    std::unique_ptr<uint8_t[]> subsBuf;
+    size_t subsBufSize = 0;
+    // Whether the view shows planes at all (video/planes in the settings, on unless turned off to
+    // compare with the conversion on the CPU; off where the graphics API has no texture to
+    // convert them in), and planes of 16-bit samples (not where it has no such texture). The
+    // view's thread sets them, the worker reads them.
+    std::atomic_bool planes{true}, deepPlanes{true};
     QColor dummyColor{0x30, 0x30, 0x30}; // the dummy video's picture, plain or a checkerboard
     bool dummyPattern = false;
 };
@@ -56,7 +99,7 @@ public:
 public slots:
     void render(quint64 id, qint64 frame, qint64 ms, bool subs);
 signals:
-    void ready(quint64 id, qint64 frame, QImage image);
+    void ready(quint64 id, qint64 frame, VideoPicture picture, SubsPicture subs);
     void failed(QString error);
 private:
     std::shared_ptr<VideoMedia> m_media;
@@ -66,7 +109,7 @@ class VideoView : public QRhiWidget {
     Q_OBJECT
 public:
     explicit VideoView(class VideoBox *box);
-    void setFrame(const QImage &img);
+    void setFrame(const VideoPicture &picture, const SubsPicture &subs);
     void updateOverlay() { m_overlayDirty = true; update(); }
     void paintOverscan(QPainter &p) const;
     // video frame area in widget coordinates
@@ -85,7 +128,6 @@ public:
     void zoomBy(double f, QPointF at);
     // the video's own pixels at that scale (Aegisub's 50/100/200%), around the view's centre
     void zoomScale(double scale);
-    const QImage &frame() const { return m_frame; }
 
 protected:
     void initialize(QRhiCommandBuffer *cb) override;
@@ -102,8 +144,13 @@ protected:
 
 private:
     VideoBox *m_box;
-    QImage m_frame;
-    bool m_frameDirty = false, m_overlayDirty = true;
+    VideoPicture m_frame;
+    SubsPicture m_subs;
+    bool m_frameDirty = false, m_subsDirty = false, m_overlayDirty = true;
+    // what the graphics API has here: textures to make a frame of its planes in, and textures of
+    // 16-bit samples for the planes of a video of more than 8 bits
+    bool m_stages = true, m_deep = true;
+    bool showable(const VideoPicture &p) const { return p.y.isEmpty() || (m_stages && (m_deep || !p.deep())); }
     QRectF m_zoom{0, 0, 1, 1};
     double m_shrink = 1; // 0.1..1 of the fitted size, below 1 only with the whole frame shown
     QPointF m_zoomDragStart;
@@ -111,8 +158,14 @@ private:
     QPointF m_panFrom; // a zoomed frame dragged (Kainote moves its zoom rectangle)
     QRectF m_panZoom;
     bool m_panning = false;
-    RhiQuad m_frameQuad, m_overlayQuad;
-    std::unique_ptr<QRhiTexture> m_frameTex, m_overlayTex;
+    // The frame with its subtitles, in a texture of the frame's size (m_whole), made when either
+    // changes: a frame that came as planes is made RGB there in two steps, the chroma rows as
+    // wide as the luma (chroma.frag into m_rows) and then the frame (yuv.frag); one that came as
+    // RGBA is put there as it is; the subtitles go over it. The view draws that texture at its
+    // zoom, then the tools and marks.
+    RhiQuad m_rowsQuad, m_planesQuad, m_rgbaQuad, m_subsQuad, m_frameQuad, m_overlayQuad;
+    RhiStage m_rows, m_whole;
+    std::unique_ptr<QRhiTexture> m_planeTex[3], m_frameTex, m_subsTex, m_overlayTex;
     QRhiResourceUpdateBatch *m_pendingInit = nullptr;
 };
 

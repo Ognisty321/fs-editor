@@ -3,6 +3,7 @@
 // directly; crates/fs-media/src/ffi.rs exposes it to Rust through cxx.
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
@@ -87,6 +88,32 @@ struct VideoInfo {
     bool hdr = false; // PQ or HLG transfer, or BT.2020 / P3 primaries (Aegisub's IsHDRFrame)
 };
 
+/// A frame as its decoder gives it, for a shader to make RGB of: three planes of 8-bit or 16-bit
+/// (native-endian) samples, and the numbers that take them to what frame_rgba makes of the frame.
+struct FramePlanes {
+    /// False for a frame that has no such planes here: a pixel format that is not planar YUV of 8 to
+    /// 16 bits with 4:4:4, 4:2:2 or 4:2:0 chroma (packed, with alpha, RGB, grey, big-endian), a
+    /// matrix swscale has no table for, an interlaced frame (swscale converts its fields apart), one
+    /// with mastering display metadata (swscale maps its colours) or one of another size than the
+    /// video. frame_rgba is the way for those; the rest is unset.
+    bool planar = false;
+    /// False when a buffer was too small for its plane, and nothing was copied.
+    bool copied = false;
+    int width = 0, height = 0;               // of the luma plane
+    int chroma_width = 0, chroma_height = 0; // of each chroma plane
+    int bytes = 1;                           // of a sample
+    /// R, G and B in 0..1 (to be clamped), each the sum of its four factors times Y, U, V and 1,
+    /// with a sample as 0..1 of the 8 or 16 bits it is stored in: swscale's coefficients for the
+    /// frame's matrix and range, as set_matrix overrides them and guessed where the frame has none.
+    std::array<float, 12> to_rgb{};
+    /// Where the first chroma sample lies, in luma samples right of and below the first luma sample
+    /// (0.5: halfway to the next one), as swscale places it for the frame's chroma location.
+    float chroma_x = 0, chroma_y = 0;
+    /// The most a chroma value interpolated along a row can be, as a sample is 0..1: swscale keeps
+    /// the row it has scaled across in 15 bits, which cuts what a cubic overshoots past the top.
+    float chroma_top = 1;
+};
+
 class VideoSource {
 public:
     /// Open (and index, or read the cached index of) a video track.
@@ -116,10 +143,16 @@ public:
     /// Decode frame `n` and convert it to RGBA8 (width*height*4 bytes,
     /// opaque alpha) into `out`.
     void frame_rgba(int64_t n, std::span<uint8_t> out);
+    /// Decode frame `n` and copy its planes, each row after row without padding, into `y`, `u` and
+    /// `v`. The sizes they need are in the answer, which says too when the planes were not copied.
+    FramePlanes frame_planes(int64_t n, std::span<uint8_t> y, std::span<uint8_t> u, std::span<uint8_t> v);
 
 private:
     struct Packets; // the packet index and its decoder (fsmedia.cpp)
     void convert(const AVFrame *frame, std::span<uint8_t> out, int64_t n);
+    FramePlanes planes(const AVFrame *frame, std::span<uint8_t> y, std::span<uint8_t> u, std::span<uint8_t> v) const;
+    /// The AVColorSpace and AVColorRange a frame is converted with.
+    void colour(const AVFrame *frame, int &colorspace, int &range) const;
     void index_in_background(const std::filesystem::path &file, int track, const std::filesystem::path &cache);
 
     std::unique_ptr<BestVideoSource> bs_;
@@ -206,6 +239,15 @@ public:
     bool blend(int64_t ms, int width, int height, int video_w, int video_h, std::span<uint8_t> rgba);
     /// Same, but into a transparent premultiplied RGBA8 overlay (cleared first).
     bool overlay(int64_t ms, int width, int height, int video_w, int video_h, std::span<uint8_t> rgba_premul);
+    /// The overlay again, but only the part of the frame the subtitles cover, for a view that draws
+    /// them over the picture itself: `box` gets its left, top, right and bottom (exclusive; a
+    /// transparent pixel wider than the subtitles on each side the frame has one), and `rgba_premul`
+    /// its pixels, row after row from the buffer's start. The buffer must hold a whole frame; what
+    /// lies past the box's pixels is left as it was.
+    /// 0: nothing shows. 1: drawn. 2: what the call before this one drew or found, with nothing
+    /// written: libass saw no change, and no other call of this renderer came between.
+    int overlay_box(int64_t ms, int width, int height, int video_w, int video_h, std::span<uint8_t> rgba_premul,
+                    std::span<int32_t> box);
     /// The pixels the subtitles cover at `ms` in a `width x height` frame (storage the same):
     /// `box` gets left, top, right, bottom (exclusive) of the text with its borders, no shadows,
     /// then the same of the text alone (the first again when only borders show). False when
@@ -219,6 +261,9 @@ private:
     ass_renderer *renderer_ = nullptr;
     ass_track *track_ = nullptr;
     std::string default_family_ = "Arial";
+    // the sizes of the last overlay_box, while libass's "no change" still speaks of what it drew
+    std::array<int, 4> boxed_{};
+    bool boxed_valid_ = false;
 };
 
 }  // namespace fsmedia

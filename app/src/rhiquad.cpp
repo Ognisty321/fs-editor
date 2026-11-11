@@ -12,7 +12,7 @@ static QShader loadShader(const QString &path) {
 }
 
 void RhiQuad::init(QRhi *rhi, QRhiRenderPassDescriptor *rp, int samples, const QString &fragQsb,
-                   bool blend, bool linear, QRhiTexture *initial, QRhiResourceUpdateBatch *u) {
+                   bool blend, bool linear, QRhiTexture *initial, QRhiResourceUpdateBatch *u, int textures) {
     release();
     m_rhi = rhi;
     static const float quad[] = {0, 0, 1, 0, 0, 1, 1, 1};
@@ -25,8 +25,12 @@ void RhiQuad::init(QRhi *rhi, QRhiRenderPassDescriptor *rp, int samples, const Q
     m_sampler.reset(rhi->newSampler(f, f, QRhiSampler::None, QRhiSampler::ClampToEdge,
                                     QRhiSampler::ClampToEdge));
     m_sampler->create();
+    m_nearest.reset(rhi->newSampler(QRhiSampler::Nearest, QRhiSampler::Nearest, QRhiSampler::None,
+                                    QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge));
+    m_nearest->create();
     m_srb.reset(rhi->newShaderResourceBindings());
-    setTexture(initial);
+    m_tex.assign(size_t(textures), initial);
+    bind();
 
     pipe.reset(rhi->newGraphicsPipeline());
     pipe->setTopology(QRhiGraphicsPipeline::TriangleStrip);
@@ -51,13 +55,20 @@ void RhiQuad::init(QRhi *rhi, QRhiRenderPassDescriptor *rp, int samples, const Q
     pipe->create();
 }
 
-void RhiQuad::setTexture(QRhiTexture *t) {
-    if (t == m_tex) return;
-    m_tex = t;
+void RhiQuad::setTextures(std::initializer_list<QRhiTexture *> t) {
+    if (t.size() != m_tex.size()) qFatal("a quad of %d textures given %d", int(m_tex.size()), int(t.size()));
+    if (std::equal(t.begin(), t.end(), m_tex.begin())) return;
+    m_tex.assign(t);
+    bind();
+}
+
+void RhiQuad::bind() {
     const auto stages = QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage;
-    m_srb->setBindings({QRhiShaderResourceBinding::uniformBuffer(0, stages, m_ubuf.get()),
-                        QRhiShaderResourceBinding::sampledTexture(
-                            1, QRhiShaderResourceBinding::FragmentStage, t, m_sampler.get())});
+    QList<QRhiShaderResourceBinding> b{QRhiShaderResourceBinding::uniformBuffer(0, stages, m_ubuf.get())};
+    for (int i = 0; i < int(m_tex.size()); ++i)
+        b.append(QRhiShaderResourceBinding::sampledTexture(1 + i, QRhiShaderResourceBinding::FragmentStage,
+                                                           m_tex[size_t(i)], i ? m_nearest.get() : m_sampler.get()));
+    m_srb->setBindings(b.cbegin(), b.cend());
     m_srb->create();
 }
 
@@ -85,9 +96,46 @@ void RhiQuad::release() {
     pipe.reset();
     m_srb.reset();
     m_sampler.reset();
+    m_nearest.reset();
     m_ubuf.reset();
     m_vbuf.reset();
-    m_tex = nullptr;
+    m_tex.clear();
+}
+
+QRhiRenderPassDescriptor *RhiStage::init(QRhi *rhi, QRhiTexture::Format format) {
+    release();
+    m_rhi = rhi;
+    m_format = format;
+    make(QSize(16, 16));
+    m_rp.reset(m_rt->newCompatibleRenderPassDescriptor());
+    m_rt->setRenderPassDescriptor(m_rp.get());
+    m_rt->create();
+    return m_rp.get();
+}
+
+void RhiStage::make(QSize size) {
+    std::unique_ptr<QRhiTexture> tex(m_rhi->newTexture(m_format, size, 1, QRhiTexture::RenderTarget));
+    tex->create();
+    m_rt.reset(m_rhi->newTextureRenderTarget({QRhiColorAttachment(tex.get())}));
+    m_tex = std::move(tex); // the old one goes after the new one is made: never the same address
+}
+
+bool RhiStage::resize(QSize size) {
+    if (m_tex->pixelSize() == size) return false;
+    make(size);
+    m_rt->setRenderPassDescriptor(m_rp.get()); // the same format: the one of init fits
+    m_rt->create();
+    return true;
+}
+
+QRectF RhiStage::part(const QRectF &r) const {
+    return m_rhi->isYUpInFramebuffer() ? QRectF(r.left(), size().height() - r.top(), r.width(), -r.height()) : r;
+}
+
+void RhiStage::release() {
+    m_rt.reset();
+    m_rp.reset();
+    m_tex.reset();
 }
 
 void RhiQuad::setColor(float out[4], const QColor &c) {
@@ -106,5 +154,19 @@ bool uploadImage(QRhi *rhi, std::unique_ptr<QRhiTexture> &tex, const QImage &img
         recreated = true;
     }
     u->uploadTexture(tex.get(), img);
+    return recreated;
+}
+
+bool uploadPlane(QRhi *rhi, std::unique_ptr<QRhiTexture> &tex, const QByteArray &samples, QSize size, int bytes,
+                 QRhiResourceUpdateBatch *u) {
+    const auto format = bytes == 2 ? QRhiTexture::R16 : QRhiTexture::R8;
+    bool recreated = false;
+    if (!tex || tex->pixelSize() != size || tex->format() != format) {
+        tex.reset(rhi->newTexture(format, size));
+        tex->create();
+        recreated = true;
+    }
+    if (samples.size() < qsizetype(size.width()) * size.height() * bytes) return recreated; // not a whole plane
+    u->uploadTexture(tex.get(), QRhiTextureUploadDescription({0, 0, QRhiTextureSubresourceUploadDescription(samples)}));
     return recreated;
 }

@@ -387,6 +387,33 @@ pub mod ffi {
         best_matrix: String,
     }
 
+    /// A frame's planes as its decoder gives them, for the video view's shader to make RGB of
+    /// (`fs_media::PlaneLayout`).
+    #[derive(Debug, Clone, Copy, Default)]
+    struct FramePlanes {
+        /// False for a frame without such planes (a packed, RGB or interlaced one): `frame` is
+        /// the way then.
+        planar: bool,
+        /// False when a buffer was too small for its plane and nothing was copied; the sizes
+        /// below say what they need.
+        copied: bool,
+        width: i32,
+        height: i32,
+        chroma_width: i32,
+        chroma_height: i32,
+        /// Of a sample: 1, or 2 (16 bits, native-endian).
+        bytes: i32,
+        /// R, G and B in 0..1 (to be clamped), each the sum of its four factors times Y, U, V
+        /// and 1, with a sample as 0..1 of the bits it is stored in: the matrix and range of
+        /// the script's header, as `frame` converts with.
+        to_rgb: [f32; 12],
+        /// Where the first chroma sample lies, in luma samples from the first luma sample.
+        chroma_x: f32,
+        chroma_y: f32,
+        /// The most a chroma value interpolated along a row can be, as a sample is 0..1.
+        chroma_top: f32,
+    }
+
     #[derive(Debug, Clone, Default)]
     struct MacroItem {
         id: usize,
@@ -967,6 +994,15 @@ pub mod ffi {
         fn chapters(path: &str) -> Vec<Chapter>;
         fn info(self: &Video) -> VideoInfo;
         fn frame(self: &mut Video, n: i64, out: &mut [u8]) -> Result<()>;
+        /// The frame's planes, each row after row, for a shader to convert: what playback
+        /// shows, where `frame` is what a saved picture is made of.
+        fn frame_planes(
+            self: &mut Video,
+            n: i64,
+            y: &mut [u8],
+            u: &mut [u8],
+            v: &mut [u8],
+        ) -> Result<FramePlanes>;
         fn timecodes(self: &Video) -> Vec<i64>;
         fn keyframes(self: &Video) -> Vec<i64>;
         fn frame_at_ms(self: &Video, ms: i64) -> i64;
@@ -1021,6 +1057,21 @@ pub mod ffi {
             video_h: usize,
             rgba: &mut [u8],
         ) -> Result<bool>;
+        /// The same, but only the part of the frame the subtitles cover: its pixels row after
+        /// row from the start of `rgba` (which must hold a whole frame), and its left, top,
+        /// right and bottom in `bounds`. 0: nothing shows; 1: drawn; 2: what the call before
+        /// found, nothing written (libass saw no change, no other call came between).
+        #[allow(clippy::too_many_arguments)]
+        fn overlay_box(
+            self: &mut Renderer,
+            ms: i64,
+            width: usize,
+            height: usize,
+            video_w: usize,
+            video_h: usize,
+            rgba: &mut [u8],
+            bounds: &mut [i32],
+        ) -> Result<i32>;
 
         type Speller;
         fn new_speller(aff_path: &str, dic_path: &str) -> Result<Box<Speller>>;

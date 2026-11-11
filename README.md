@@ -211,7 +211,7 @@ GUI czyta zmienne środowiskowe, które pozwalają sprawdzić aplikację bez kli
 | `FSED_SMOKE_CLICK=tekst` | klika przycisk o tym napisie w otwartym dialogu |
 | `FSED_SMOKE_EDITDBL=N` | dwuklik na znaku N tekstu linii w polu edycji |
 | `FSED_SMOKE_DROP=plik` | upuszcza plik na pole edycji linii |
-| `FSED_SMOKE_SET="klucz=wartość;..."` | ustawia opcje przed startem, np. `spell/lang=pl_PL` |
+| `FSED_SMOKE_SET="klucz=wartość;..."` | ustawia opcje przed startem, np. `spell/lang=pl_PL`; `video/planes=false` pokazuje klatki konwertowane na CPU zamiast w shaderze |
 | `FSED_UPDATE_URL=adres` | miejsce, które pyta „Sprawdź aktualizacje” zamiast GitHuba, np. `file:///.../latest.json`; bez niej smoke test nie pyta sieci |
 | `FSED_SMOKE_BENCH=plik.txt` | mierzy okno na otwartym pliku (pokazanie zmiany, odrysowanie siatki, zmiana linii, wpisany znak, cofnij/ponów, przewinięcie strony, zaznacz wszystko) i zapisuje mediany oraz najgorsze czasy; ustaw `FSED_SMOKE_MS` na kilka sekund |
 

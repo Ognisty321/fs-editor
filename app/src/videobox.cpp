@@ -38,12 +38,17 @@
 #include <QWheelEvent>
 
 #include <climits>
+#include <cstring>
+#include <tuple>
+#include <utility>
 
 // ---- worker -------------------------------------------------------------------
 
 namespace {
-// The frame's picture, without the subtitles; called with the media locked. Drawing on it detaches
-// it from the cached one.
+std::atomic<quint64> pictures{0}; // the serial of the last picture made
+
+// The frame's picture as RGBA, without the subtitles; called with the media locked. Drawing on it
+// detaches it from the cached one.
 QImage decode(VideoMedia &m, qint64 frame) {
     if (m.video && frame == m.cachedFrame) return m.cached;
     if (!m.video) { // a dummy: one picture for every frame
@@ -67,24 +72,105 @@ QImage decode(VideoMedia &m, qint64 frame) {
     m.cached = img;
     return img;
 }
+
+// Three buffers of these sizes for a frame's planes: a set of the pool that only the pool holds
+// (the view shows a later frame, its graphics queue is done with it), else a new one.
+std::array<QByteArray, 3> &planeBuffers(VideoMedia &m, qsizetype luma, qsizetype chroma) {
+    const auto fits = [&](const std::array<QByteArray, 3> &s) {
+        return s[0].size() == luma && s[1].size() == chroma && s[2].size() == chroma;
+    };
+    std::erase_if(m.planePool, [&](const auto &s) { return !fits(s); }); // another video's
+    for (auto &s : m.planePool)
+        if (s[0].isDetached() && s[1].isDetached() && s[2].isDetached()) return s;
+    if (m.planePool.size() >= 4) m.planePool.erase(m.planePool.begin()); // all held: let the oldest go
+    return m.planePool.emplace_back(std::array<QByteArray, 3>{QByteArray(luma, Qt::Uninitialized),
+                                                              QByteArray(chroma, Qt::Uninitialized),
+                                                              QByteArray(chroma, Qt::Uninitialized)});
+}
+
+// The frame's picture for the view, without the subtitles; called with the media locked.
+VideoPicture picture(VideoMedia &m, qint64 frame) {
+    if (!m.video) { // a dummy: one picture for every frame
+        if (m.shownFrame != -2) {
+            m.shown = {};
+            m.shown.rgba = decode(m, frame);
+            m.shown.serial = ++pictures;
+            m.shownFrame = -2;
+        }
+        return m.shown;
+    }
+    // again when the view found that it cannot show samples of 16 bits, or was told not to show planes
+    const bool usable = m.shown.y.isEmpty() || (m.planes && (m.deepPlanes || !m.shown.deep()));
+    if (frame == m.shownFrame && usable) return m.shown;
+    VideoPicture p;
+    if (m.planes) {
+        // as large as the last frame's, which only a video's first frame has to ask for
+        const auto size = [](const fsb::FramePlanes &l) {
+            return std::pair(qsizetype(l.width) * l.height * l.bytes, qsizetype(l.chroma_width) * l.chroma_height * l.bytes);
+        };
+        const auto slice = [](QByteArray &b) { return rust::Slice<uint8_t>(reinterpret_cast<uint8_t *>(b.data()), size_t(b.size())); };
+        auto [luma, chroma] = size(m.shown.planes);
+        for (int tries = 0; tries < 2; ++tries) {
+            auto &b = planeBuffers(m, luma, chroma);
+            p.planes = (*m.video)->frame_planes(frame, slice(b[0]), slice(b[1]), slice(b[2]));
+            if (!p.planes.planar || (p.planes.bytes == 2 && !m.deepPlanes)) break;
+            if (p.planes.copied) {
+                p.y = b[0];
+                p.u = b[1];
+                p.v = b[2];
+                break;
+            }
+            std::tie(luma, chroma) = size(p.planes);
+        }
+    }
+    if (p.y.isEmpty()) p.rgba = decode(m, frame);
+    p.serial = ++pictures;
+    m.shownFrame = frame;
+    m.shown = p;
+    return p;
+}
+
+// The subtitles at `ms` for the view to lay over the frame's picture; called with the media locked
+// and a renderer in it.
+SubsPicture subtitles(VideoMedia &m, qint64 ms) {
+    const size_t w = size_t(m.width), h = size_t(m.height);
+    if (m.subsBufSize != w * h * 4) {
+        m.subsBuf = std::make_unique_for_overwrite<uint8_t[]>(w * h * 4);
+        m.subsBufSize = w * h * 4;
+    }
+    std::array<int32_t, 4> box{};
+    const int found = (*m.renderer)->overlay_box(ms, w, h, w, h, rust::Slice<uint8_t>(m.subsBuf.get(), m.subsBufSize),
+                                                 rust::Slice<int32_t>(box.data(), box.size()));
+    if (found == 2) return m.subsShown; // libass drew what it drew for the frame before
+    SubsPicture s;
+    s.frame = QSize(m.width, m.height);
+    if (found == 1) {
+        QImage img(box[2] - box[0], box[3] - box[1], QImage::Format_RGBA8888_Premultiplied);
+        std::memcpy(img.bits(), m.subsBuf.get(), size_t(img.sizeInBytes())); // four bytes a pixel: no padding in a row
+        s.image = img;
+        s.at = QPoint(box[0], box[1]);
+        s.serial = ++pictures;
+    }
+    m.subsShown = s;
+    return s;
+}
 } // namespace
 
 void FrameWorker::render(quint64 id, qint64 frame, qint64 ms, bool subs) {
     if (id < latest.load()) return; // a newer request is queued
     std::lock_guard g(m_media->m);
-    QImage img;
+    VideoPicture pic;
+    SubsPicture over;
     try {
-        img = decode(*m_media, frame);
+        pic = picture(*m_media, frame);
         if (subs && m_media->renderer) {
-            const rust::Slice<uint8_t> px(img.bits(), size_t(img.sizeInBytes()));
             if (auto s = m_media->takeSubs()) (*m_media->renderer)->load_subs(**s);
-            (*m_media->renderer)->blend(ms, size_t(img.width()), size_t(img.height()), size_t(img.width()),
-                                        size_t(img.height()), px);
+            over = subtitles(*m_media, ms);
         }
     } catch (const rust::Error &e) {
         emit failed(QString::fromUtf8(e.what()));
     }
-    emit ready(id, frame, img);
+    emit ready(id, frame, pic, over);
 }
 
 // ---- view ---------------------------------------------------------------------
@@ -95,9 +181,14 @@ VideoView::VideoView(VideoBox *box) : QRhiWidget(box), m_box(box) {
     setMinimumSize(160, 90);
 }
 
-void VideoView::setFrame(const QImage &img) {
-    m_frame = img;
-    m_frameDirty = true;
+void VideoView::setFrame(const VideoPicture &picture, const SubsPicture &subs) {
+    // the picture a tool's drag or a typed letter renders again is on the graphics card already
+    m_frameDirty |= picture.serial != m_frame.serial;
+    m_subsDirty |= subs.serial != m_subs.serial;
+    m_frame = picture;
+    m_subs = subs;
+    // a picture of planes made before this view found that it has no textures for them
+    if (!showable(m_frame)) QMetaObject::invokeMethod(m_box, [b = m_box] { b->request(); }, Qt::QueuedConnection);
     update();
 }
 
@@ -140,15 +231,41 @@ void VideoView::setZoom(QRectF uv, double shrink) {
 void VideoView::initialize(QRhiCommandBuffer *) {
     if (m_frameQuad.ready()) return;
     auto *u = rhi()->nextResourceUpdateBatch();
-    QImage blank(16, 16, QImage::Format_RGBA8888_Premultiplied);
-    blank.fill(Qt::transparent);
-    uploadImage(rhi(), m_frameTex, m_frame.isNull() ? blank : m_frame, u);
-    uploadImage(rhi(), m_overlayTex, blank, u);
+    // Textures for the quads to be made with, and nothing in them: each gets its picture, at the
+    // picture's size, before it is first drawn. A picture put in here would wait in `u` for the
+    // first render, which replaces the texture when a frame is there already, and be written to
+    // a deleted one.
+    const auto empty = [this](std::unique_ptr<QRhiTexture> &t, QRhiTexture::Format format) {
+        t.reset(rhi()->newTexture(format, QSize(16, 16)));
+        t->create();
+    };
+    for (auto *t : {&m_frameTex, &m_subsTex, &m_overlayTex}) empty(*t, QRhiTexture::RGBA8);
+    for (auto &t : m_planeTex) empty(t, QRhiTexture::R8);
+    const QString texture = ":/shaders/texture.frag.qsb";
+    // into the frame's own texture, sample for sample
+    auto *whole = m_whole.init(rhi(), QRhiTexture::RGBA8);
+    m_rgbaQuad.init(rhi(), whole, 1, texture, false, false, m_frameTex.get(), u);
+    m_subsQuad.init(rhi(), whole, 1, texture, true, false, m_subsTex.get(), u);
+    // The chroma rows between the two steps keep more than a sample's bits, hence a texture of
+    // floats; ten-bit video is planes of 16-bit samples. Without such textures the frames come as
+    // RGBA.
+    m_stages = rhi()->isTextureFormatSupported(QRhiTexture::RGBA16F, QRhiTexture::RenderTarget);
+    m_deep = rhi()->isTextureFormatSupported(QRhiTexture::R16);
+    if (m_stages) {
+        m_rowsQuad.init(rhi(), m_rows.init(rhi(), QRhiTexture::RGBA16F), 1, ":/shaders/chroma.frag.qsb", false, false,
+                        m_planeTex[1].get(), u, 2);
+        m_planesQuad.init(rhi(), whole, 1, ":/shaders/yuv.frag.qsb", false, false, m_planeTex[0].get(), u, 2);
+    } else {
+        m_box->m_media->planes = false;
+    }
+    m_box->m_media->deepPlanes = m_deep;
+    // onto the widget
     auto *rp = renderTarget()->renderPassDescriptor();
-    m_frameQuad.init(rhi(), rp, sampleCount(), ":/shaders/texture.frag.qsb", false, true, m_frameTex.get(), u);
-    m_overlayQuad.init(rhi(), rp, sampleCount(), ":/shaders/texture.frag.qsb", true, false, m_overlayTex.get(), u);
+    m_frameQuad.init(rhi(), rp, sampleCount(), texture, false, true, m_whole.texture(), u);
+    m_overlayQuad.init(rhi(), rp, sampleCount(), texture, true, false, m_overlayTex.get(), u);
     m_pendingInit = u;
-    m_frameDirty = m_overlayDirty = true;
+    m_frameDirty = m_subsDirty = m_overlayDirty = true;
+    if (!showable(m_frame)) QMetaObject::invokeMethod(m_box, [b = m_box] { b->request(); }, Qt::QueuedConnection);
 }
 
 void VideoView::render(QRhiCommandBuffer *cb) {
@@ -156,9 +273,51 @@ void VideoView::render(QRhiCommandBuffer *cb) {
     m_pendingInit = nullptr;
     const QSize out = renderTarget()->pixelSize();
     const double dpr = devicePixelRatioF();
-    if (m_frameDirty && !m_frame.isNull()) {
-        if (uploadImage(rhi(), m_frameTex, m_frame, u)) m_frameQuad.setTexture(m_frameTex.get());
-        m_frameDirty = false;
+    const bool planes = !m_frame.y.isEmpty();
+    const bool shown = !m_frame.isNull() && showable(m_frame);
+    // The frame with its subtitles is put together in a texture of its own size, as it was on the
+    // CPU before, and only when either is another one: its planes made RGB in two steps or its
+    // RGBA as it came, then the subtitles over that.
+    const bool compose = shown && (m_frameDirty || m_subsDirty);
+    const bool rows = compose && planes && m_frameDirty;
+    bool subs = false;
+    if (compose) {
+        const auto &l = m_frame.planes;
+        const QSize size = planes ? QSize(l.width, l.height) : m_frame.rgba.size();
+        m_whole.resize(size);
+        if (rows) {
+            const QSize chroma(l.chroma_width, l.chroma_height);
+            uploadPlane(rhi(), m_planeTex[0], m_frame.y, size, l.bytes, u);
+            uploadPlane(rhi(), m_planeTex[1], m_frame.u, chroma, l.bytes, u);
+            uploadPlane(rhi(), m_planeTex[2], m_frame.v, chroma, l.bytes, u);
+            m_rows.resize(QSize(l.width, l.chroma_height));
+            RhiQuad::Uniforms cu; // what chroma.frag and yuv.frag make the RGB from
+            const float p[] = {float(l.width),          float(l.height),         float(l.chroma_width),
+                               float(l.chroma_height),  l.chroma_x,              l.chroma_y,
+                               l.chroma_width < l.width ? 0.5f : 1.0f, l.chroma_height < l.height ? 0.5f : 1.0f};
+            std::copy(p, p + 4, cu.p0);
+            std::copy(p + 4, p + 8, cu.p1);
+            std::copy(l.to_rgb.begin(), l.to_rgb.begin() + 4, cu.c0);
+            std::copy(l.to_rgb.begin() + 4, l.to_rgb.begin() + 8, cu.c1);
+            std::copy(l.to_rgb.begin() + 8, l.to_rgb.end(), cu.c2);
+            cu.c3[0] = l.chroma_top;
+            m_rowsQuad.setTextures({m_planeTex[1].get(), m_planeTex[2].get()});
+            m_rowsQuad.setUniforms(u, cu, m_rows.whole(), m_rows.size());
+            m_planesQuad.setTextures({m_planeTex[0].get(), m_rows.texture()});
+            m_planesQuad.setUniforms(u, cu, m_whole.whole(), size);
+        } else if (!planes) {
+            if (m_frameDirty) uploadImage(rhi(), m_frameTex, m_frame.rgba, u);
+            m_rgbaQuad.setTexture(m_frameTex.get());
+            m_rgbaQuad.setUniforms(u, RhiQuad::Uniforms{}, m_whole.whole(), size);
+        }
+        if (!m_subs.image.isNull() && m_subs.frame == size) {
+            if (m_subsDirty) uploadImage(rhi(), m_subsTex, m_subs.image, u);
+            m_subsQuad.setTexture(m_subsTex.get());
+            m_subsQuad.setUniforms(u, RhiQuad::Uniforms{}, m_whole.part(QRectF(m_subs.at, m_subs.image.size())), size);
+            subs = true;
+        }
+        m_frameQuad.setTexture(m_whole.texture());
+        m_frameDirty = m_subsDirty = false;
     }
     // after a resize the old overlay would be stretched over the new size
     if (m_overlayDirty || !m_overlayTex || m_overlayTex->pixelSize() != out) {
@@ -187,8 +346,20 @@ void VideoView::render(QRhiCommandBuffer *cb) {
     fu.uvRect[3] = float(m_zoom.bottom());
     m_frameQuad.setUniforms(u, fu, QRectF(d.topLeft() * dpr, d.size() * dpr), out);
     m_overlayQuad.setUniforms(u, RhiQuad::Uniforms{}, QRectF(QPointF(0, 0), QSizeF(out)), out);
+    // every upload and number above goes with the first pass there is
+    if (rows) {
+        cb->beginPass(m_rows.target(), Qt::black, {1.0f, 0}, std::exchange(u, nullptr));
+        m_rowsQuad.draw(cb, m_rows.size());
+        cb->endPass();
+    }
+    if (compose) {
+        cb->beginPass(m_whole.target(), Qt::black, {1.0f, 0}, std::exchange(u, nullptr));
+        (planes ? m_planesQuad : m_rgbaQuad).draw(cb, m_whole.size());
+        if (subs) m_subsQuad.draw(cb, m_whole.size());
+        cb->endPass();
+    }
     cb->beginPass(renderTarget(), QColor(0x10, 0x10, 0x10), {1.0f, 0}, u);
-    if (!m_frame.isNull()) m_frameQuad.draw(cb, out);
+    if (shown) m_frameQuad.draw(cb, out);
     m_overlayQuad.draw(cb, out);
     cb->endPass();
 }
@@ -218,10 +389,19 @@ void VideoView::paintOverscan(QPainter &p) const {
 }
 
 void VideoView::releaseResources() {
+    m_rowsQuad.release();
+    m_planesQuad.release();
+    m_rgbaQuad.release();
+    m_rows.release();
+    m_whole.release();
     m_frameQuad.release();
+    m_subsQuad.release();
     m_overlayQuad.release();
+    for (auto &t : m_planeTex) t.reset();
     m_frameTex.reset();
+    m_subsTex.reset();
     m_overlayTex.reset();
+    if (m_pendingInit) m_pendingInit->release(); // never sent: its buffers are gone now
     m_pendingInit = nullptr;
 }
 
@@ -626,12 +806,14 @@ QToolButton *button(QWidget *parent, const char *name, const QString &tip) {
 } // namespace
 
 VideoBox::VideoBox(TabPanel *tab) : QWidget(tab), m_tab(tab), m_media(std::make_shared<VideoMedia>()) {
+    // off: every frame is converted to RGBA on the CPU as a saved frame is, to compare the two
+    m_media->planes = QSettings().value("video/planes", true).toBool();
     m_worker = new FrameWorker(m_media);
     m_worker->moveToThread(&m_thread);
     connect(&m_thread, &QThread::finished, m_worker, &QObject::deleteLater);
     m_thread.start();
-    connect(m_worker, &FrameWorker::ready, this, [this](quint64, qint64, QImage img) {
-        if (hasVideo()) m_view->setFrame(img); // not a frame that was on its way as the video closed
+    connect(m_worker, &FrameWorker::ready, this, [this](quint64, qint64, const VideoPicture &pic, const SubsPicture &subs) {
+        if (hasVideo()) m_view->setFrame(pic, subs); // not a frame that was on its way as the video closed
         // a tool's handles come and go with the line's frames (Aegisub redraws them on each frame);
         // the move tool marks where the line is on each, the position tool the other selected lines on it
         const int tool = m_tools->tool();
@@ -800,7 +982,7 @@ void VideoBox::open(const QString &path, qint64 frame, double ar) {
                 media->height = info.height;
                 media->video.emplace(std::move(v));
                 media->renderer.emplace(std::move(r));
-                media->cachedFrame = -1;
+                media->forget();
             }
         } catch (const rust::Error &e) {
             err = QString::fromUtf8(e.what());
@@ -900,8 +1082,10 @@ bool VideoBox::openDummy(const QString &spec) {
     {
         std::lock_guard g(m_media->m);
         m_media->video.reset();
-        m_media->cachedFrame = -1;
+        m_media->forget();
         m_media->cached = QImage();
+        m_media->shown = {};
+        m_media->planePool.clear();
         m_media->dummyColor = QColor(rgb[0], rgb[1], rgb[2]);
         m_media->dummyPattern = t[7] == "c";
         m_media->width = w;
@@ -939,8 +1123,10 @@ void VideoBox::close() {
     {
         std::lock_guard g(m_media->m);
         m_media->video.reset();
-        m_media->cachedFrame = -1;
+        m_media->forget();
         m_media->cached = QImage();
+        m_media->shown = {};
+        m_media->planePool.clear();
     }
     m_videoTimecodes.clear();
     m_videoSarNum = m_videoSarDen = 0;
@@ -949,7 +1135,7 @@ void VideoBox::close() {
     m_path.clear();
     m_dummySpec.clear();
     m_info = {};
-    m_view->setFrame(QImage());
+    m_view->setFrame({}, {});
     emit opened();
 }
 
@@ -1046,7 +1232,7 @@ void VideoBox::syncMatrix() {
         std::lock_guard g(m_media->m);
         if (!m_media->video) return;
         (*m_media->video)->set_ycbcr_header(fs::Utf8(h));
-        m_media->cachedFrame = -1;
+        m_media->forget();
     }
     request();
 }
