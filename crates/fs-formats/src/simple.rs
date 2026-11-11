@@ -6,7 +6,9 @@
 use fs_core::Time;
 use fs_core::vfr::{Framerate, TimeType};
 
-use crate::markup::{Fmt, Run, ass_to_runs, html_to_runs, runs_to_ass, runs_to_html};
+use crate::markup::{
+    Fmt, Run, ass_to_runs, html_to_runs, runs_to_ass, runs_to_html, runs_to_vtt, vtt_unescape,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Sub {
@@ -97,6 +99,132 @@ pub fn write_srt(subs: &[Sub]) -> String {
             s.push_str("\r\n");
         }
         s.push_str("\r\n");
+    }
+    s
+}
+
+// ---------------------------------------------------------------------------
+// WebVTT: "WEBVTT", then blocks parted by blank lines; a cue is an optional name, its timing
+// with settings after it, and its text
+// ---------------------------------------------------------------------------
+
+/// Whether the text is WebVTT: it starts with `WEBVTT`, alone on its line or with a space or
+/// tab after it.
+pub fn is_vtt(text: &str) -> bool {
+    text.trim_start_matches('\u{feff}')
+        .strip_prefix("WEBVTT")
+        .is_some_and(|r| r.is_empty() || r.starts_with([' ', '\t', '\r', '\n']))
+}
+
+/// The alignment a cue's settings ask for, as `\an`: `line` gives the row (a percentage, or a
+/// line number counted from the top, from the bottom when negative) and `align` the column.
+fn vtt_alignment(settings: &str) -> Option<u8> {
+    let (mut row, mut col) = (0u8, 2u8); // bottom, centre
+    for (key, value) in settings
+        .split_whitespace()
+        .filter_map(|s| s.split_once(':'))
+    {
+        let value = value.split(',').next().unwrap_or("");
+        match key {
+            "line" => {
+                row = match value.strip_suffix('%') {
+                    Some(p) => match p.parse::<f64>().ok()? {
+                        p if p < 100.0 / 3.0 => 6,
+                        p if p < 200.0 / 3.0 => 3,
+                        _ => 0,
+                    },
+                    None if value.parse::<f64>().ok()? < 0.0 => 0,
+                    None => 6,
+                }
+            }
+            "align" => {
+                col = match value {
+                    "start" | "left" => 1,
+                    "end" | "right" => 3,
+                    _ => 2,
+                }
+            }
+            _ => {}
+        }
+    }
+    Some(row + col).filter(|an| *an != 2)
+}
+
+/// Parse WebVTT. The header, `NOTE`, `STYLE` and `REGION` blocks hold no line; a cue's name is
+/// dropped, its `line` and `align` settings become `\an`, and its tags are read as SRT's are.
+pub fn parse_vtt(text: &str) -> Vec<Sub> {
+    let mut out = Vec::new();
+    let lines: Vec<&str> = lines_of(text.trim_start_matches('\u{feff}')).collect();
+    for block in lines.split(|l| l.trim().is_empty()) {
+        // the timing is the block's first line, or its second under a name
+        let Some(at) = block.iter().take(2).position(|l| l.contains("-->")) else {
+            continue;
+        };
+        let Some((a, b)) = block[at].split_once("-->") else {
+            continue;
+        };
+        let b = b.trim_start();
+        let (end, settings) = b.split_once(char::is_whitespace).unwrap_or((b, ""));
+        let (Some(start), Some(end)) = (Time::parse_srt(a.trim()), Time::parse_srt(end)) else {
+            continue;
+        };
+        let mut runs = html_to_runs(&block[at + 1..].join("\n"));
+        for r in &mut runs {
+            r.text = vtt_unescape(&r.text);
+        }
+        out.push(Sub {
+            start,
+            end,
+            text: runs_to_ass(&runs, vtt_alignment(settings)),
+        });
+    }
+    out
+}
+
+/// Write WebVTT: italics, bold and underline are its tags, the rest of the formatting it has no
+/// tag for, and an alignment other than bottom centre is told by the cue's settings.
+pub fn write_vtt(subs: &[Sub]) -> String {
+    use std::fmt::Write;
+    let mut s =
+        String::with_capacity(subs.iter().map(|sub| sub.text.len() + 40).sum::<usize>() + 8);
+    s.push_str("WEBVTT\n");
+    let clock = |s: &mut String, t: Time| {
+        let t = t.0.max(0);
+        let _ = write!(
+            s,
+            "{:02}:{:02}:{:02}.{:03}",
+            t / 3_600_000,
+            (t / 60_000) % 60,
+            (t / 1000) % 60,
+            t % 1000
+        );
+    };
+    for sub in subs {
+        let (runs, an) = ass_to_runs(&sub.text);
+        s.push('\n');
+        clock(&mut s, sub.start);
+        s.push_str(" --> ");
+        clock(&mut s, sub.end);
+        let an = an.filter(|a| (1..=9).contains(a)).unwrap_or(2);
+        match (an - 1) / 3 {
+            1 => s.push_str(" line:50%"),
+            2 => s.push_str(" line:0"),
+            _ => {}
+        }
+        match an % 3 {
+            1 => s.push_str(" align:left"),
+            0 => s.push_str(" align:right"),
+            _ => {}
+        }
+        s.push('\n');
+        // a blank line would end the cue: drop empty lines inside the text
+        for l in runs_to_vtt(&runs)
+            .split('\n')
+            .filter(|l| !l.trim().is_empty())
+        {
+            s.push_str(l);
+            s.push('\n');
+        }
     }
     s
 }
@@ -431,6 +559,51 @@ pub fn write_tmp(subs: &[Sub]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vtt_reads_cues_only() {
+        let text = concat!(
+            "\u{feff}WEBVTT - a title\nKind: captions\n\nNOTE\nnot a cue --> at all\n\n",
+            "STYLE\n::cue { color: red }\n\n",
+            "intro\n00:01.000 --> 00:02.500 line:0 align:left\n<v Bob>Hi &amp; <i>bye</i>\nsecond line\n\n",
+            "01:00:00.000 --> 01:00:01.000\n<c.yellow>x</c> &lt;3\n\n",
+            "00:00:05.000 --> 00:00:06.000 line:50% align:end\nmid\n"
+        );
+        assert!(is_vtt(text));
+        assert!(!is_vtt("WEBVTTX\n"));
+        let subs = parse_vtt(text);
+        assert_eq!(subs.len(), 3);
+        assert_eq!((subs[0].start, subs[0].end), (Time(1000), Time(2500)));
+        assert_eq!(subs[0].text, r"{\an7}Hi & {\i1}bye{\i0}\Nsecond line");
+        assert_eq!(
+            (subs[1].start, subs[1].text.as_str()),
+            (Time(3_600_000), "x <3")
+        );
+        assert_eq!(subs[2].text, r"{\an6}mid");
+    }
+
+    #[test]
+    fn vtt_roundtrip() {
+        let sub = |start: i64, end: i64, text: &str| Sub {
+            start: Time(start),
+            end: Time(end),
+            text: text.into(),
+        };
+        let subs = vec![
+            sub(1000, 2500, r"{\an8}Top {\i1}it{\i0} & <b>\Nnext"),
+            sub(3_723_004, 3_724_000, "plain"),
+            sub(5000, 6000, r"{\an1}left"),
+        ];
+        let text = write_vtt(&subs);
+        assert_eq!(
+            text,
+            concat!(
+                "WEBVTT\n\n00:00:01.000 --> 00:00:02.500 line:0\nTop <i>it</i> &amp; &lt;b&gt;\nnext\n\n",
+                "01:02:03.004 --> 01:02:04.000\nplain\n\n00:00:05.000 --> 00:00:06.000 align:left\nleft\n"
+            )
+        );
+        assert_eq!(parse_vtt(&text), subs);
+    }
 
     #[test]
     fn srt() {

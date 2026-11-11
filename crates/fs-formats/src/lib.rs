@@ -26,10 +26,12 @@ pub enum Format {
     Tmp,
     /// MPEG-4 Timed Text (`.ttxt`).
     Ttxt,
+    /// WebVTT (`.vtt`).
+    Vtt,
 }
 
 impl Format {
-    pub const ALL: [Format; 7] = [
+    pub const ALL: [Format; 8] = [
         Format::Ass,
         Format::Ssa,
         Format::Srt,
@@ -37,6 +39,7 @@ impl Format {
         Format::MicroDvd,
         Format::Tmp,
         Format::Ttxt,
+        Format::Vtt,
     ];
 
     pub fn name(self) -> &'static str {
@@ -48,6 +51,7 @@ impl Format {
             Format::MicroDvd => "MicroDVD",
             Format::Tmp => "TMP",
             Format::Ttxt => "TTXT",
+            Format::Vtt => "WebVTT",
         }
     }
 
@@ -59,6 +63,7 @@ impl Format {
             Format::Mpl2 | Format::Tmp => "txt",
             Format::MicroDvd => "sub",
             Format::Ttxt => "ttxt",
+            Format::Vtt => "vtt",
         }
     }
 
@@ -71,6 +76,7 @@ impl Format {
             "microdvd" | "mdvd" | "sub" => Format::MicroDvd,
             "tmp" | "tmplayer" => Format::Tmp,
             "ttxt" => Format::Ttxt,
+            "vtt" | "webvtt" => Format::Vtt,
             _ => return None,
         })
     }
@@ -116,6 +122,10 @@ pub fn detect_format(text: &str, ext: Option<&str>) -> Option<Format> {
     if sample.iter().take(3).any(|l| l.starts_with("<TextStream")) {
         return Some(Format::Ttxt);
     }
+    // before SRT, whose timing line WebVTT shares
+    if simple::is_vtt(text) {
+        return Some(Format::Vtt);
+    }
     if sample.iter().any(|l| l.contains("-->")) {
         return Some(Format::Srt);
     }
@@ -149,6 +159,7 @@ pub fn detect_format(text: &str, ext: Option<&str>) -> Option<Format> {
         Some("ass") => Some(Format::Ass),
         Some("ssa") => Some(Format::Ssa),
         Some("srt") => Some(Format::Srt),
+        Some("vtt") => Some(Format::Vtt),
         _ => None,
     }
 }
@@ -229,6 +240,7 @@ pub fn load_bytes(bytes: &[u8], ext: Option<&str>, opts: &LoadOptions) -> Result
             (d, w)
         }
         Format::Srt => (from_subs(simple::parse_srt(&text)), Vec::new()),
+        Format::Vtt => (from_subs(simple::parse_vtt(&text)), Vec::new()),
         Format::Mpl2 => (from_subs(simple::parse_mpl2(&text)), Vec::new()),
         Format::MicroDvd => {
             let (subs, fps) = simple::parse_microdvd(&text, &opts.fps);
@@ -456,6 +468,7 @@ fn save_text(doc: &Document, format: Format, opts: &SaveOptions) -> String {
         }
         Format::Ass | Format::Ssa => doc.to_ass_string(),
         Format::Srt => simple::write_srt(&to_subs(doc)),
+        Format::Vtt => simple::write_vtt(&to_subs(doc)),
         Format::Mpl2 => simple::write_mpl2(&to_subs(doc)),
         Format::MicroDvd => {
             simple::write_microdvd(&to_subs(doc), &opts.fps, opts.microdvd_fps_header)
@@ -513,6 +526,7 @@ fn read_back(doc: &Document, format: Format, opts: &SaveOptions) -> Vec<Sub> {
     let text = save_text(doc, format, opts);
     match format {
         Format::Srt => simple::parse_srt(&text),
+        Format::Vtt => simple::parse_vtt(&text),
         Format::Mpl2 => simple::parse_mpl2(&text),
         Format::MicroDvd => simple::parse_microdvd(&text, &opts.fps).0,
         Format::Ttxt => export::parse_ttxt(&text).unwrap_or_default(),

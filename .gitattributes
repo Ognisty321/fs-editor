@@ -1,3 +1,5 @@
 # Test corpus must be kept byte-exact (line endings, BOMs).
 tests/corpus/** -text
 * text=auto
+# Shell scripts run under Git Bash on Windows too, which does not take CRLF.
+*.sh text eol=lf

@@ -375,6 +375,83 @@ pub fn runs_to_html(runs: &[Run], an: Option<u8>) -> String {
     out
 }
 
+/// WebVTT's cue text: `<i>`, `<b>` and `<u>` are its tags (it has none for a colour, a font or a
+/// strikeout), and `&`, `<`, `>` and the hard space are written as its entities.
+pub fn runs_to_vtt(runs: &[Run]) -> String {
+    let mut out = String::new();
+    // the tags open, outermost first: one that ends takes those opened inside it along, and
+    // what stays on of them opens again
+    let mut open: Vec<char> = Vec::new();
+    let shut = |out: &mut String, open: &mut Vec<char>, keep: usize| {
+        while open.len() > keep {
+            out.push_str("</");
+            out.extend(open.pop());
+            out.push('>');
+        }
+    };
+    for r in runs {
+        let want = |c: char| match c {
+            'i' => r.fmt.i,
+            'b' => r.fmt.b,
+            _ => r.fmt.u,
+        };
+        let keep = open.iter().position(|c| !want(*c)).unwrap_or(open.len());
+        shut(&mut out, &mut open, keep);
+        for c in ['i', 'b', 'u'] {
+            if want(c) && !open.contains(&c) {
+                out.push('<');
+                out.push(c);
+                out.push('>');
+                open.push(c);
+            }
+        }
+        for c in r.text.chars() {
+            match c {
+                '&' => out.push_str("&amp;"),
+                '<' => out.push_str("&lt;"),
+                '>' => out.push_str("&gt;"),
+                '\u{a0}' => out.push_str("&nbsp;"),
+                c => out.push(c),
+            }
+        }
+    }
+    shut(&mut out, &mut open, 0);
+    out
+}
+
+/// WebVTT's entities as the characters they stand for.
+pub fn vtt_unescape(text: &str) -> String {
+    if !text.contains('&') {
+        return text.to_string();
+    }
+    const ENTITIES: [(&str, &str); 6] = [
+        ("&lt;", "<"),
+        ("&gt;", ">"),
+        ("&nbsp;", "\u{a0}"),
+        ("&lrm;", "\u{200e}"),
+        ("&rlm;", "\u{200f}"),
+        ("&amp;", "&"),
+    ];
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(p) = rest.find('&') {
+        out.push_str(&rest[..p]);
+        rest = &rest[p..];
+        match ENTITIES.iter().find(|(e, _)| rest.starts_with(e)) {
+            Some((e, c)) => {
+                out.push_str(c);
+                rest = &rest[e.len()..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,6 +474,23 @@ mod tests {
             "a <font face=\"Comic Sans\" size=\"30\" color=\"#ff0000\">b</font> c"
         );
         assert_eq!(runs_to_ass(&html_to_runs(&html), None), ass);
+    }
+
+    #[test]
+    fn vtt_tags_and_entities() {
+        let vtt = |ass: &str| runs_to_vtt(&ass_to_runs(ass).0);
+        assert_eq!(
+            vtt(r"{\i1}a{\b1}b{\i0}c{\b0}d"),
+            "<i>a<b>b</b></i><b>c</b>d"
+        );
+        assert_eq!(vtt(r"{\u1\b1}x{\u0}y"), "<b><u>x</u>y</b>");
+        // a colour, a font and a strikeout have no tag there
+        assert_eq!(vtt(r"{\c&H0000FF&\s1\fnArial}red{\c} x"), "red x");
+        assert_eq!(vtt(r"a < b & c > d\he"), "a &lt; b &amp; c &gt; d&nbsp;e");
+        assert_eq!(
+            vtt_unescape("a &lt; b &amp; c &gt; d&nbsp;e &amp;lt; &x; &"),
+            "a < b & c > d\u{a0}e &lt; &x; &"
+        );
     }
 
     #[test]

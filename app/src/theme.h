@@ -51,6 +51,7 @@ enum Role : int {
     SyntaxErrorBackground,
     SyntaxMisspelled,
     SyntaxBraces, // Kainote's matching brackets' background
+    SyntaxSameWord, // Kainote's background of the other places a double-clicked word stands
     AudioBackground,
     AudioSelection,
     AudioSelectionModified,

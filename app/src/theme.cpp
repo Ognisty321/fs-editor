@@ -71,6 +71,8 @@ const Entry kEntries[RoleCount] = {
      0xffff0000},
     {SyntaxBraces, "syntax/braces", QT_TRANSLATE_NOOP("theme", "Matching brackets background"), 1, 0xff4a5568,
      0xffc8d8ff},
+    {SyntaxSameWord, "syntax/sameWord", QT_TRANSLATE_NOOP("theme", "Other places of the double-clicked word"), 1,
+     0xff3f5a36, 0xffcdeeb8},
     {AudioBackground, "audio/background", QT_TRANSLATE_NOOP("theme", "Background"), 2, 0xff101418, 0xff000000},
     {AudioSelection, "audio/selection", QT_TRANSLATE_NOOP("theme", "Selection"), 2, 0xff26344e, 0xff005000},
     {AudioSelectionModified, "audio/selectionModified", QT_TRANSLATE_NOOP("theme", "Modified selection"), 2,

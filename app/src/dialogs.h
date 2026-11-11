@@ -136,9 +136,15 @@ private:
     // checks the name like Aegisub, then stores the style; index -1 = new, set to where it landed
     bool applyToFile(int &index, const fsb::StyleData &s);
     bool applyToStorage(int &index, const fsb::StyleData &s);
-    // Kainote's editing of several styles: the rows selected besides the current one, and whether
-    // they take the changes from `before` to `after` (asked)
-    static std::vector<size_t> otherSelected(QListWidget *list);
+    // the style editor, in its own window or docked in this one (styles/dockEditor)
+    void openEditor(const fsb::StyleData &style, std::function<bool(const fsb::StyleData &)> apply);
+    void closeEditor(); // the docked one, unapplied; the window goes back to its size without it
+    void removeEditor();
+    std::function<bool(const fsb::StyleData &)> fileApply(QString name, QStringList others);
+    std::function<bool(const fsb::StyleData &)> storageApply(QString name, QStringList others);
+    // Kainote's editing of several styles: the names selected besides the current one, and whether
+    // their rows take the changes from `before` to `after` (asked)
+    static QStringList otherSelected(QListWidget *list);
     bool changeSelected(const std::vector<size_t> &others, const fsb::StyleData &before, const fsb::StyleData &after);
     // Aegisub: the block from the first to the last selected style goes to the top (0), up (1),
     // down (2) or to the bottom (3)
@@ -161,6 +167,8 @@ private:
     QList<QWidget *> m_forOne[2], m_forAny[2];
     QWidget *m_moves[2][4];
     QPushButton *m_delCat;
+    StyleEditor *m_editor = nullptr; // docked in this window
+    QSize m_undocked; // this window's size without it
 };
 
 class PropertiesDialog : public QDialog {

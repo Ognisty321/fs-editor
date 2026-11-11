@@ -6,6 +6,7 @@
 #include "mainwindow.h"
 #include "tabpanel.h"
 #include "theme.h"
+#include "updates.h"
 #include "videobox.h"
 #include "visualtools.h"
 
@@ -156,7 +157,7 @@ static QWidget *smokeDialog(QWidget &w) {
     QWidget *top = QApplication::activeModalWidget();
     if (!top)
         for (auto *d : w.findChildren<QDialog *>())
-            if (d->isVisible()) top = d;
+            if (d->isVisible() && d->isWindow()) top = d; // not one docked in another (the style editor)
     if (!top)
         for (auto *t : QApplication::topLevelWidgets())
             if (t != &w && t->isVisible() && t->windowType() == Qt::Window) top = t;
@@ -194,6 +195,7 @@ int main(int argc, char **argv) {
     QApplication::setOrganizationName("FS Editor");
     QApplication::setApplicationName("FS Editor");
     QApplication::setApplicationDisplayName("FS Editor");
+    QApplication::setApplicationVersion(FS_VERSION);
     const bool smoke = qEnvironmentVariableIsSet("FSED_SMOKE");
     if (smoke) {
         // separate, fresh settings so smoke runs never touch the user's own
@@ -240,6 +242,7 @@ int main(int argc, char **argv) {
             QSettings().value("video/fullscreenOnStart", false).toBool())
             w.current()->video()->setFullscreen(true);
         if (files.isEmpty() && QSettings().value("main/askSession", true).toBool()) w.action("loadSession")->trigger();
+        updates::checkAtStart(&w);
     });
     // Smoke test: FSED_SMOKE=out.png grabs the window after loading and quits;
     // FSED_SMOKE_ROW selects a line first (seeks the video like a click).
@@ -277,6 +280,19 @@ int main(int argc, char **argv) {
                     QWheelEvent e(at, text->viewport()->mapToGlobal(at), {}, QPoint(0, 120 * wh[1].toInt()),
                                   Qt::NoButton, Qt::ShiftModifier, Qt::NoScrollPhase, false);
                     QApplication::sendEvent(text->viewport(), &e);
+                }
+                // FSED_SMOKE_EDITDBL=n: a left double-click on character n of the line's text
+                if (qEnvironmentVariableIsSet("FSED_SMOKE_EDITDBL") && text) {
+                    QTextCursor c(text->document());
+                    c.setPosition(qEnvironmentVariableIntValue("FSED_SMOKE_EDITDBL"));
+                    const QPointF at = text->cursorRect(c).center() + QPointF(2, 0);
+                    for (const auto type : {QEvent::MouseButtonPress, QEvent::MouseButtonRelease,
+                                            QEvent::MouseButtonDblClick, QEvent::MouseButtonRelease}) {
+                        const bool up = type == QEvent::MouseButtonRelease;
+                        QMouseEvent e(type, at, text->viewport()->mapToGlobal(at), Qt::LeftButton,
+                                      up ? Qt::NoButton : Qt::LeftButton, Qt::NoModifier);
+                        QApplication::sendEvent(text->viewport(), &e);
+                    }
                 }
                 // FSED_SMOKE_AUDIO="x1,x2,b[,m]": a press at x1 dragged to x2 in the audio, in view
                 // fractions; b: l, r or m button; m: a (Alt) or c (Ctrl)

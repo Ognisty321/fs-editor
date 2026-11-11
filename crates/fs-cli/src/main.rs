@@ -362,6 +362,7 @@ enum FormatArg {
     Microdvd,
     Tmp,
     Ttxt,
+    Vtt,
 }
 
 impl From<FormatArg> for Format {
@@ -374,6 +375,7 @@ impl From<FormatArg> for Format {
             FormatArg::Microdvd => Format::MicroDvd,
             FormatArg::Tmp => Format::Tmp,
             FormatArg::Ttxt => Format::Ttxt,
+            FormatArg::Vtt => Format::Vtt,
         }
     }
 }
@@ -445,6 +447,7 @@ fn format_of_extension(ext: &str) -> Option<Format> {
         "srt" => Format::Srt,
         "sub" => Format::MicroDvd,
         "ttxt" => Format::Ttxt,
+        "vtt" => Format::Vtt,
         _ => return None,
     })
 }

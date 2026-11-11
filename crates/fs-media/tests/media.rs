@@ -511,3 +511,39 @@ fn bench_open() {
         .sum();
     eprintln!("index files: {} KiB", size / 1024);
 }
+
+/// The ceiling of playback: frames a second of decoding in order to RGBA, the way the window
+/// takes them. `FS_BENCH_VIDEO=<file> cargo test -p fs-media --release decode_speed -- --ignored
+/// --nocapture`; `FS_BENCH_FRAMES` is how many frames are timed (240).
+#[test]
+#[ignore = "a measurement, needs FS_BENCH_VIDEO"]
+fn decode_speed() {
+    let Some(path) = std::env::var_os("FS_BENCH_VIDEO") else {
+        return;
+    };
+    let frames: i64 = std::env::var("FS_BENCH_FRAMES")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(240);
+    let opened = std::time::Instant::now();
+    let mut v = Video::open(Path::new(&path), -1, None, |_, _| true).unwrap();
+    let open_ms = opened.elapsed().as_millis();
+    let mut px = vec![0u8; v.width() * v.height() * 4];
+    v.frame_into(0, &mut px).unwrap();
+    let n = frames.min(v.num_frames() - 1);
+    let t = std::time::Instant::now();
+    let mut worst = 0.0f64;
+    for i in 1..=n {
+        let f = std::time::Instant::now();
+        v.frame_into(i, &mut px).unwrap();
+        worst = worst.max(f.elapsed().as_secs_f64() * 1000.0);
+    }
+    let s = t.elapsed().as_secs_f64();
+    println!(
+        "{}x{}, open {open_ms} ms, {n} frames in {s:.2} s: {:.1} fps, {:.1} ms a frame, worst {worst:.1} ms",
+        v.width(),
+        v.height(),
+        n as f64 / s,
+        s * 1000.0 / n as f64
+    );
+}

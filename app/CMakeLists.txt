@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui GuiPrivate Widgets Concurrent ShaderTools Svg LinguistTools)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui GuiPrivate Widgets Concurrent Network ShaderTools Svg LinguistTools)
 qt_standard_project_setup()
 
 # Rust core + cxx bridge, built by cargo through Corrosion.
@@ -51,6 +51,7 @@ qt_add_executable(fsed WIN32 MACOSX_BUNDLE
     src/hydra.h src/hydra.cpp
     src/associations.h src/associations.cpp
     src/icons.h src/icons.cpp
+    src/updates.h src/updates.cpp
 )
 qt_add_shaders(fsed "shaders"
     PREFIX "/"
@@ -79,7 +80,9 @@ elseif(APPLE)
     # shortcut: framework list from cpal's coreaudio backend, not yet linked on a real Mac.
     target_link_libraries(fs_bridge INTERFACE "-framework CoreAudio" "-framework AudioToolbox" "-framework CoreFoundation")
 endif()
-target_link_libraries(fsed PRIVATE fs_bridge Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::Concurrent Qt6::Svg)
+target_link_libraries(fsed PRIVATE fs_bridge Qt6::Core Qt6::Gui Qt6::GuiPrivate Qt6::Widgets Qt6::Concurrent Qt6::Network Qt6::Svg)
+# the version the About window shows and the update check compares
+target_compile_definitions(fsed PRIVATE FS_VERSION="${PROJECT_VERSION}")
 if(MSVC)
     target_compile_options(fsed PRIVATE /utf-8 /W4 /permissive-)
     # LuaJIT's msvcbuild objects ask for the static CRT; the app uses /MD everywhere else.
@@ -143,4 +146,14 @@ set(CPACK_PACKAGE_NAME "FS-Editor")
 set(CPACK_PACKAGE_VENDOR "FS Editor contributors")
 set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE)
 set(CPACK_GENERATOR ZIP)
+# The Windows installer, `cpack -C Release -G NSIS` where NSIS is installed: the same tree as the
+# ZIP under Program Files, a Start menu entry and an uninstaller. Settings stay the user's.
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "FS Editor")
+set(CPACK_PACKAGE_EXECUTABLES "fsed;FS Editor")
+set(CPACK_NSIS_DISPLAY_NAME "FS Editor ${PROJECT_VERSION}")
+set(CPACK_NSIS_PACKAGE_NAME "FS Editor")
+set(CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\fsed.exe")
+set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/Ognisty321/fs-editor")
+set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+set(CPACK_NSIS_MANIFEST_DPI_AWARE ON)
 include(CPack)

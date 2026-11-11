@@ -173,7 +173,43 @@ jobs:
           print("missing:", missing or "none")
           sys.exit(bool(missing))
           ' app/build-${{ matrix.preset }}/*.zip
+      # The packaged program started through its smoke hooks (tools/smoke.sh): the window with a
+      # file, a dummy video with audio, every dialog a menu command opens, the update offer.
+      - name: Unpack package
+        shell: bash
+        run: |
+          python -I -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' app/build-${{ matrix.preset }}/*.zip "$RUNNER_TEMP/smoke-pkg"
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          tmp=$(cygpath -u "$RUNNER_TEMP")
+          tools/smoke.sh "$(ls "$tmp"/smoke-pkg/*/bin/fsed.exe)" "$tmp/smoke"
+      # shortcut: not yet seen on a runner (Xvfb with Mesa's software OpenGL), so a failure is
+      # reported without failing the job; drop continue-on-error once it has run green.
+      - name: Smoke test (Linux)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y xvfb libgl1-mesa-dri libegl1 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0
+          chmod +x "$RUNNER_TEMP"/smoke-pkg/*/bin/fsed
+          xvfb-run -a tools/smoke.sh "$(ls "$RUNNER_TEMP"/smoke-pkg/*/bin/fsed)" "$RUNNER_TEMP/smoke"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: smoke-${{ matrix.os }}
+          path: ${{ runner.temp }}/smoke
+          if-no-files-found: ignore
+      # shortcut: the installer is built where the runner has NSIS and has not been run on one
+      # yet, so its failure does not fail the job; the ZIP stays the package the checks cover.
+      - name: Installer (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: bash
+        run: cd app/build-${{ matrix.preset }} && cpack -C Release -G NSIS
       - uses: actions/upload-artifact@v7
         with:
           name: fs-editor-${{ matrix.os }}
-          path: app/build-${{ matrix.preset }}/*.zip
+          path: |
+            app/build-${{ matrix.preset }}/*.zip
+            app/build-${{ matrix.preset }}/*.exe

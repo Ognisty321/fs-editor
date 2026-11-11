@@ -523,6 +523,7 @@ fn exercise(bytes: &[u8], ext: Option<&str>) {
         Some(Format::MicroDvd),
         Some(Format::Tmp),
         Some(Format::Ttxt),
+        Some(Format::Vtt),
     ];
     for format in forced {
         let opts = LoadOptions {
@@ -540,6 +541,7 @@ fn exercise(bytes: &[u8], ext: Option<&str>) {
             Format::MicroDvd,
             Format::Tmp,
             Format::Ttxt,
+            Format::Vtt,
         ] {
             let _ = save_bytes(&l.doc, f, &SaveOptions::default());
         }

@@ -31,7 +31,8 @@
 #include <QScrollBar>
 #include <QSettings>
 #include <QSpinBox>
-#include <QStringListModel>
+#include <QStandardItemModel>
+#include <QStyledItemDelegate>
 #include <QSyntaxHighlighter>
 #include <QTextBlock>
 #include <QToolButton>
@@ -131,11 +132,100 @@ QString g_spellLang; // the dictionary actually loaded
 std::optional<rust::Box<fsb::Thesaurus>> g_thes;
 QString g_thesLang = "?"; // the language g_thes was loaded for; none tried yet
 
-const QStringList kTags = {
-    "an", "b", "i", "u", "s", "bord", "xbord", "ybord", "shad", "xshad", "yshad", "be", "blur", "fn", "fs",
-    "fscx", "fscy", "fsp", "frx", "fry", "frz", "fax", "fay", "fe", "c", "1c", "2c", "3c", "4c", "alpha",
-    "1a", "2a", "3a", "4a", "k", "K", "kf", "ko", "q", "r", "pos", "move", "org", "fad", "fade", "clip",
-    "iclip", "p", "pbo", "t"};
+// The tags the edit box completes after a backslash, each with what it does (Kainote's tag list
+// tells that next to the name).
+struct TagHelp {
+    const char *name, *what;
+};
+const TagHelp kTags[] = {
+    {"an", QT_TRANSLATE_NOOP("SubsTextEdit", "Alignment (numpad layout)")},
+    {"a", QT_TRANSLATE_NOOP("SubsTextEdit", "Alignment (SSA numbering)")},
+    {"b", QT_TRANSLATE_NOOP("SubsTextEdit", "Bold (0, 1 or a font weight)")},
+    {"i", QT_TRANSLATE_NOOP("SubsTextEdit", "Italic")},
+    {"u", QT_TRANSLATE_NOOP("SubsTextEdit", "Underline")},
+    {"s", QT_TRANSLATE_NOOP("SubsTextEdit", "Strikeout")},
+    {"bord", QT_TRANSLATE_NOOP("SubsTextEdit", "Border width")},
+    {"xbord", QT_TRANSLATE_NOOP("SubsTextEdit", "Border width along X")},
+    {"ybord", QT_TRANSLATE_NOOP("SubsTextEdit", "Border width along Y")},
+    {"shad", QT_TRANSLATE_NOOP("SubsTextEdit", "Shadow distance")},
+    {"xshad", QT_TRANSLATE_NOOP("SubsTextEdit", "Shadow distance along X")},
+    {"yshad", QT_TRANSLATE_NOOP("SubsTextEdit", "Shadow distance along Y")},
+    {"be", QT_TRANSLATE_NOOP("SubsTextEdit", "Edge blur (passes)")},
+    {"blur", QT_TRANSLATE_NOOP("SubsTextEdit", "Gaussian blur of the edges")},
+    {"fn", QT_TRANSLATE_NOOP("SubsTextEdit", "Font name")},
+    {"fs", QT_TRANSLATE_NOOP("SubsTextEdit", "Font size")},
+    {"fscx", QT_TRANSLATE_NOOP("SubsTextEdit", "Horizontal scale in percent")},
+    {"fscy", QT_TRANSLATE_NOOP("SubsTextEdit", "Vertical scale in percent")},
+    {"fsp", QT_TRANSLATE_NOOP("SubsTextEdit", "Letter spacing")},
+    {"frx", QT_TRANSLATE_NOOP("SubsTextEdit", "Rotation around the X axis")},
+    {"fry", QT_TRANSLATE_NOOP("SubsTextEdit", "Rotation around the Y axis")},
+    {"frz", QT_TRANSLATE_NOOP("SubsTextEdit", "Rotation around the Z axis")},
+    {"fr", QT_TRANSLATE_NOOP("SubsTextEdit", "Rotation around the Z axis (short form)")},
+    {"fax", QT_TRANSLATE_NOOP("SubsTextEdit", "Shear along X")},
+    {"fay", QT_TRANSLATE_NOOP("SubsTextEdit", "Shear along Y")},
+    {"fe", QT_TRANSLATE_NOOP("SubsTextEdit", "Font encoding (charset)")},
+    {"c", QT_TRANSLATE_NOOP("SubsTextEdit", "Primary color")},
+    {"1c", QT_TRANSLATE_NOOP("SubsTextEdit", "Primary color")},
+    {"2c", QT_TRANSLATE_NOOP("SubsTextEdit", "Secondary color (karaoke)")},
+    {"3c", QT_TRANSLATE_NOOP("SubsTextEdit", "Border color")},
+    {"4c", QT_TRANSLATE_NOOP("SubsTextEdit", "Shadow color")},
+    {"alpha", QT_TRANSLATE_NOOP("SubsTextEdit", "Transparency of everything")},
+    {"1a", QT_TRANSLATE_NOOP("SubsTextEdit", "Transparency of the primary color")},
+    {"2a", QT_TRANSLATE_NOOP("SubsTextEdit", "Transparency of the secondary color")},
+    {"3a", QT_TRANSLATE_NOOP("SubsTextEdit", "Transparency of the border")},
+    {"4a", QT_TRANSLATE_NOOP("SubsTextEdit", "Transparency of the shadow")},
+    {"k", QT_TRANSLATE_NOOP("SubsTextEdit", "Karaoke syllable, in centiseconds")},
+    {"K", QT_TRANSLATE_NOOP("SubsTextEdit", "Karaoke syllable filled from left to right")},
+    {"kf", QT_TRANSLATE_NOOP("SubsTextEdit", "Karaoke syllable filled from left to right")},
+    {"ko", QT_TRANSLATE_NOOP("SubsTextEdit", "Karaoke syllable, border shown when sung")},
+    {"kt", QT_TRANSLATE_NOOP("SubsTextEdit", "Karaoke: start time of the next syllable")},
+    {"q", QT_TRANSLATE_NOOP("SubsTextEdit", "Wrapping style (0-3)")},
+    {"r", QT_TRANSLATE_NOOP("SubsTextEdit", "Reset to the line's style, or to a named one")},
+    {"pos", QT_TRANSLATE_NOOP("SubsTextEdit", "Position (x, y)")},
+    {"move", QT_TRANSLATE_NOOP("SubsTextEdit", "Movement (x1, y1, x2, y2[, t1, t2])")},
+    {"org", QT_TRANSLATE_NOOP("SubsTextEdit", "Rotation origin (x, y)")},
+    {"fad", QT_TRANSLATE_NOOP("SubsTextEdit", "Fade in and out (ms, ms)")},
+    {"fade", QT_TRANSLATE_NOOP("SubsTextEdit", "Fade with three alphas and four times")},
+    {"clip", QT_TRANSLATE_NOOP("SubsTextEdit", "Show only inside a rectangle or a drawing")},
+    {"iclip", QT_TRANSLATE_NOOP("SubsTextEdit", "Hide inside a rectangle or a drawing")},
+    {"p", QT_TRANSLATE_NOOP("SubsTextEdit", "Drawing mode and its scale (0 ends it)")},
+    {"pbo", QT_TRANSLATE_NOOP("SubsTextEdit", "Baseline offset of a drawing")},
+    {"t", QT_TRANSLATE_NOOP("SubsTextEdit", "Animate the tags inside ([t1, t2,] [accel,] tags)")},
+};
+
+// A row of the tag list: the name, and after it what the tag does, dimmed.
+class TagListDelegate : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    void paint(QPainter *p, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
+        QStyleOptionViewItem o = option;
+        initStyleOption(&o, index);
+        const QString name = o.text;
+        o.text.clear();
+        (o.widget ? o.widget->style() : QApplication::style())->drawControl(QStyle::CE_ItemViewItem, &o, p, o.widget);
+        const bool selected = o.state & QStyle::State_Selected;
+        const QColor text = o.palette.color(selected ? QPalette::HighlightedText : QPalette::Text);
+        const QRect r = o.rect.adjusted(4, 0, -4, 0);
+        p->save();
+        p->setFont(o.font);
+        p->setPen(text);
+        p->drawText(r, Qt::AlignVCenter | Qt::AlignLeft, name);
+        QColor dim = text;
+        dim.setAlphaF(0.6f);
+        p->setPen(dim);
+        p->drawText(r.adjusted(nameWidth(o.fontMetrics), 0, 0, 0), Qt::AlignVCenter | Qt::AlignLeft,
+                    o.fontMetrics.elidedText(index.data(Qt::UserRole).toString(), Qt::ElideRight,
+                                             r.width() - nameWidth(o.fontMetrics)));
+        p->restore();
+    }
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
+        const QFontMetrics fm(option.font);
+        return {8 + nameWidth(fm) + fm.horizontalAdvance(index.data(Qt::UserRole).toString()), fm.height() + 4};
+    }
+private:
+    // the descriptions start in one column, past the longest name
+    static int nameWidth(const QFontMetrics &fm) { return fm.horizontalAdvance("xshad") + 14; }
+};
 
 // UTF-8 byte offset of a QString index (the core splits at byte positions).
 size_t bytePos(const QString &s, int index) { return size_t(s.left(index).toUtf8().size()); }
@@ -346,7 +436,9 @@ bool SubsTextEdit::addSpellActions(QMenu *m, QAction *first, const QTextCursor &
 // Kainote's suggestions on a double click on a misspelled word (the word is selected as usual)
 void SubsTextEdit::mouseDoubleClickEvent(QMouseEvent *e) {
     QPlainTextEdit::mouseDoubleClickEvent(e);
-    if (e->button() != Qt::LeftButton || !QSettings().value("edit/spellDoubleClick", false).toBool()) return;
+    if (e->button() != Qt::LeftButton) return;
+    markSameWord();
+    if (!QSettings().value("edit/spellDoubleClick", false).toBool()) return;
     QMenu m;
     if (addSpellActions(&m, nullptr, cursorForPosition(e->position().toPoint())))
         m.exec(e->globalPosition().toPoint());
@@ -502,7 +594,14 @@ SubsTextEdit::SubsTextEdit(QWidget *parent) : QPlainTextEdit(parent) {
     colors();
     connect(theme::notifier(), &theme::Notifier::changed, this, colors);
     setTabChangesFocus(true);
-    m_completer = new QCompleter(new QStringListModel(kTags, this), this);
+    auto *tags = new QStandardItemModel(this);
+    for (const TagHelp &t : kTags) {
+        auto *item = new QStandardItem(QString::fromLatin1(t.name));
+        item->setData(tr(t.what), Qt::UserRole);
+        tags->appendRow(item);
+    }
+    m_completer = new QCompleter(tags, this);
+    m_completer->popup()->setItemDelegate(new TagListDelegate(m_completer->popup()));
     m_completer->setWidget(this);
     m_completer->setCaseSensitivity(Qt::CaseSensitive);
     connect(m_completer, qOverload<const QString &>(&QCompleter::activated), this, [this](const QString &c) {
@@ -513,6 +612,45 @@ SubsTextEdit::SubsTextEdit(QWidget *parent) : QPlainTextEdit(parent) {
     });
     connect(this, &QPlainTextEdit::cursorPositionChanged, this, &SubsTextEdit::updateCalltip);
     connect(this, &QPlainTextEdit::cursorPositionChanged, this, &SubsTextEdit::matchBraces);
+    // the marks of a double-clicked word last as long as that word stays selected
+    const auto dropSameWord = [this] {
+        if (m_sameWord.isEmpty() || (textCursor().selectedText() == m_sameWordOf && !m_sameWordOf.isEmpty())) return;
+        m_sameWord.clear();
+        m_sameWordOf.clear();
+        setExtraSelections(m_braceMarks);
+    };
+    connect(this, &QPlainTextEdit::selectionChanged, this, dropSameWord);
+    connect(this, &QPlainTextEdit::textChanged, this, [this, dropSameWord] {
+        m_sameWordOf.clear();
+        dropSameWord();
+    });
+}
+
+// Kainote's marks on a double-clicked word: every other place the line has it as a whole word,
+// whatever its case, also right after a \N or \h, which is no part of the word.
+void SubsTextEdit::markSameWord() {
+    m_sameWord.clear();
+    const QTextCursor sel = textCursor();
+    m_sameWordOf = sel.selectedText();
+    const QString &word = m_sameWordOf;
+    if (!word.isEmpty() && word[0].isLetterOrNumber()) {
+        const QString t = toPlainText();
+        const auto inWord = [](QChar c) { return c.isLetterOrNumber() || c == '_'; };
+        for (qsizetype p = 0; (p = t.indexOf(word, p, Qt::CaseInsensitive)) >= 0; p += word.size()) {
+            const qsizetype end = p + word.size();
+            const bool escape = p >= 2 && t[p - 2] == '\\' && (t[p - 1] == 'N' || t[p - 1] == 'n' || t[p - 1] == 'h');
+            if (p > 0 && inWord(t[p - 1]) && !escape) continue;
+            if (end < t.size() && inWord(t[end])) continue;
+            if (p == sel.selectionStart()) continue; // the selection shows that one
+            QTextEdit::ExtraSelection s;
+            s.cursor = QTextCursor(document());
+            s.cursor.setPosition(int(p));
+            s.cursor.setPosition(int(end), QTextCursor::KeepAnchor);
+            s.format.setBackground(theme::color(theme::SyntaxSameWord));
+            m_sameWord << s;
+        }
+    }
+    setExtraSelections(m_braceMarks + m_sameWord);
 }
 
 // Kainote's brace matching: the bracket at the cursor, else the one just before it, and its pair
@@ -542,7 +680,8 @@ void SubsTextEdit::matchBraces() {
             }
         break;
     }
-    setExtraSelections(marks);
+    m_braceMarks = marks;
+    setExtraSelections(m_braceMarks + m_sameWord);
 }
 
 // Aegisub's call tips: the tag's parameters under it, the one at the cursor in bold

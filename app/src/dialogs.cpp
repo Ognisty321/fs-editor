@@ -1558,6 +1558,15 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     auto *close = new QPushButton(tr("Close"), this);
     g->addWidget(close, 6, 1);
     connect(close, &QPushButton::clicked, this, &QDialog::close);
+    // Kainote keeps the style editor in this window, beside the lists; Aegisub opens a window
+    auto *dock = new QCheckBox(tr("Edit styles in this window"), this);
+    dock->setToolTip(tr("The style editor stands beside the lists and stays open while you pick other styles"));
+    dock->setChecked(QSettings().value("styles/dockEditor", false).toBool());
+    g->addWidget(dock, 6, 0);
+    connect(dock, &QCheckBox::toggled, this, [this](bool on) {
+        QSettings().setValue("styles/dockEditor", on);
+        if (!on) closeEditor();
+    });
 
     auto session = [this]() -> fsb::Session & { return m_main->current()->s(); };
     auto edited = [this] {
@@ -1583,12 +1592,9 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         return d;
     };
     connect(fNew, &QPushButton::clicked, this, [=, this] {
-        int idx = -1;
         auto d = defaultStyle();
         d.name = fs::rs(uniqueName("Default", namesOf(session().styles())));
-        StyleEditor e(d, this);
-        e.onApply = [&](const fsb::StyleData &s) { return applyToFile(idx, s); };
-        e.exec();
+        openEditor(d, fileApply({}, {}));
     });
     // Copy opens the editor on the copy, which OK adds (Aegisub)
     connect(fCopy, &QPushButton::clicked, this, [=, this] {
@@ -1597,27 +1603,13 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         const auto styles = session().styles();
         auto s = styles[size_t(i)];
         s.name = fs::rs(uniqueName(fs::q(s.name) + tr(" - copy"), namesOf(styles)));
-        int idx = -1;
-        StyleEditor e(s, this);
-        e.onApply = [&](const fsb::StyleData &st) { return applyToFile(idx, st); };
-        e.exec();
+        openEditor(s, fileApply({}, {}));
     });
     auto editFile = [=, this] {
         const int i = m_file->currentRow();
         if (i < 0) return;
-        int idx = i;
-        const std::vector<size_t> others = otherSelected(m_file);
-        StyleEditor e(session().styles()[size_t(i)], this);
-        e.onApply = [&](const fsb::StyleData &s) {
-            const auto before = session().styles()[size_t(idx)];
-            if (!applyToFile(idx, s)) return false;
-            if (changeSelected(others, before, s) && session().change_styles(before, s, fs::slice(others))) {
-                m_main->current()->changed();
-                reload();
-            }
-            return true;
-        };
-        e.exec();
+        const auto style = session().styles()[size_t(i)];
+        openEditor(style, fileApply(fs::q(style.name), otherSelected(m_file)));
     };
     connect(fEdit, &QPushButton::clicked, this, editFile);
     connect(m_file, &QListWidget::itemActivated, this, editFile); // a double click or Enter
@@ -1725,31 +1717,15 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         addToStorage(picked);
     });
     connect(sNew, &QPushButton::clicked, this, [=, this] {
-        int idx = -1;
         auto d = defaultStyle();
         d.name = fs::rs(uniqueName("Default", namesOf(m_stored)));
-        StyleEditor e(d, this);
-        e.onApply = [&](const fsb::StyleData &s) { return applyToStorage(idx, s); };
-        e.exec();
+        openEditor(d, storageApply({}, {}));
     });
     auto editStored = [this] {
         const int i = m_storage->currentRow();
         if (i < 0) return;
-        int idx = i;
-        const std::vector<size_t> others = otherSelected(m_storage);
-        StyleEditor e(m_stored[size_t(i)], this);
-        e.onApply = [&](const fsb::StyleData &s) {
-            const auto before = m_stored[size_t(idx)];
-            if (!applyToStorage(idx, s)) return false;
-            if (changeSelected(others, before, s)) {
-                for (size_t k : others)
-                    if (k < m_stored.size()) m_stored[k] = fsb::style_with_changes(before, s, m_stored[k]);
-                saveCatalog();
-                reload();
-            }
-            return true;
-        };
-        e.exec();
+        const auto style = m_stored[size_t(i)];
+        openEditor(style, storageApply(fs::q(style.name), otherSelected(m_storage)));
     };
     connect(sEdit, &QPushButton::clicked, this, editStored);
     connect(m_storage, &QListWidget::itemActivated, this, editStored);
@@ -1758,10 +1734,7 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         if (i < 0) return;
         auto s = m_stored[size_t(i)];
         s.name = fs::rs(uniqueName(fs::q(s.name) + tr(" - copy"), namesOf(m_stored)));
-        int idx = -1;
-        StyleEditor e(s, this);
-        e.onApply = [&](const fsb::StyleData &st) { return applyToStorage(idx, st); };
-        e.exec();
+        openEditor(s, storageApply({}, {}));
     });
     connect(sDel, &QPushButton::clicked, this, [this] {
         auto rows = m_storage->selectionModel()->selectedRows();
@@ -1794,6 +1767,7 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
         m_catalog->removeItem(m_catalog->currentIndex());
     });
     connect(m_catalog, &QComboBox::currentTextChanged, this, [this] {
+        closeEditor(); // it may hold a style of the catalog left
         loadCatalog();
         reload();
         // with the file's project settings, as Aegisub keeps it: not an edit to undo
@@ -1827,7 +1801,108 @@ StyleManager::StyleManager(MainWindow *main) : QDialog(main), m_main(main) {
     resize(560, 640);
 }
 
+// The editor on `style`: a window of its own that is waited for (Aegisub), or, with
+// styles/dockEditor, a part of this window that the next style edited takes over (Kainote).
+void StyleManager::openEditor(const fsb::StyleData &style, std::function<bool(const fsb::StyleData &)> apply) {
+    const bool replaces = m_editor; // a docked one: the window keeps the size it has with it
+    if (!replaces) m_undocked = size();
+    removeEditor();
+    if (!QSettings().value("styles/dockEditor", false).toBool()) {
+        StyleEditor e(style, this);
+        e.onApply = std::move(apply);
+        e.exec();
+        return;
+    }
+    auto *e = new StyleEditor(style, this);
+    e->setWindowFlags(Qt::Widget);
+    e->onApply = std::move(apply);
+    m_editor = e;
+    static_cast<QGridLayout *>(layout())->addWidget(e, 0, 2, 7, 1);
+    connect(e, &QDialog::finished, this, [this, e] {
+        if (m_editor == e) closeEditor(); // OK, Cancel or Esc in it
+    });
+    e->show();
+    if (!replaces)
+        resize(m_undocked.width() + e->sizeHint().width(), std::max(m_undocked.height(), e->sizeHint().height()));
+    e->setFocus();
+}
+
+// The docked editor taken out of the window, which keeps its size.
+void StyleManager::removeEditor() {
+    if (!m_editor) return;
+    StyleEditor *const e = m_editor;
+    m_editor = nullptr;
+    layout()->removeWidget(e);
+    e->hide();
+    e->deleteLater();
+}
+
+void StyleManager::closeEditor() {
+    if (!m_editor) return;
+    removeEditor();
+    // once the layout has let go of the editor's width
+    QTimer::singleShot(0, this, [this] {
+        if (!m_editor) resize(m_undocked);
+    });
+}
+
+namespace {
+template <class List> int rowOfStyle(const List &styles, const QString &name) {
+    for (size_t k = 0; k < styles.size(); ++k)
+        if (fs::q(styles[k].name) == name) return int(k);
+    return -1;
+}
+} // namespace
+
+// What the editor's Apply and OK do with a style of the file: `name` is the style edited (none
+// for a new one) and `others` the styles that take the same changes (Kainote's edit of several).
+// Both are found again by name each time, since a docked editor stays open while the list
+// changes; a style deleted meanwhile is added back.
+std::function<bool(const fsb::StyleData &)> StyleManager::fileApply(QString name, QStringList others) {
+    return [this, name, others](const fsb::StyleData &s) mutable {
+        auto &session = m_main->current()->s();
+        const auto styles = session.styles();
+        int idx = name.isEmpty() ? -1 : rowOfStyle(styles, name);
+        const bool had = idx >= 0;
+        const fsb::StyleData before = had ? styles[size_t(idx)] : s;
+        if (!applyToFile(idx, s)) return false;
+        name = fs::q(s.name);
+        if (!had || others.isEmpty()) return true;
+        std::vector<size_t> rows;
+        const auto now = session.styles();
+        for (const QString &o : others)
+            if (const int r = rowOfStyle(now, o); r >= 0 && r != idx) rows.push_back(size_t(r));
+        if (changeSelected(rows, before, s) && session.change_styles(before, s, fs::slice(rows))) {
+            m_main->current()->changed();
+            reload();
+        }
+        return true;
+    };
+}
+
+// The same for a style of the catalog shown.
+std::function<bool(const fsb::StyleData &)> StyleManager::storageApply(QString name, QStringList others) {
+    return [this, name, others](const fsb::StyleData &s) mutable {
+        int idx = name.isEmpty() ? -1 : rowOfStyle(m_stored, name);
+        const bool had = idx >= 0;
+        const fsb::StyleData before = had ? m_stored[size_t(idx)] : s;
+        if (!applyToStorage(idx, s)) return false;
+        name = fs::q(s.name);
+        if (!had || others.isEmpty()) return true;
+        std::vector<size_t> rows;
+        for (const QString &o : others)
+            if (const int r = rowOfStyle(m_stored, o); r >= 0 && r != idx) rows.push_back(size_t(r));
+        if (changeSelected(rows, before, s)) {
+            for (size_t k : rows) m_stored[k] = fsb::style_with_changes(before, s, m_stored[k]);
+            saveCatalog();
+            reload();
+        }
+        return true;
+    };
+}
+
 void StyleManager::tabChanged() {
+    closeEditor(); // it may hold a style of the file left
     disconnect(m_docConn);
     if (auto *tab = m_main->current())
         m_docConn = connect(tab, &TabPanel::docChanged, this, [this] {
@@ -2184,10 +2259,7 @@ void StyleManager::editStyle(const QString &name) {
     const auto items = m_file->findItems(name, Qt::MatchExactly);
     if (items.isEmpty()) return;
     m_file->setCurrentItem(items.first());
-    int idx = m_file->currentRow();
-    StyleEditor e(m_main->current()->s().styles()[size_t(idx)], this);
-    e.onApply = [&](const fsb::StyleData &s) { return applyToFile(idx, s); };
-    e.exec();
+    openEditor(m_main->current()->s().styles()[size_t(m_file->currentRow())], fileApply(name, {}));
 }
 
 bool StyleManager::applyToFile(int &index, const fsb::StyleData &s) {
@@ -2216,11 +2288,11 @@ bool StyleManager::applyToFile(int &index, const fsb::StyleData &s) {
     return true;
 }
 
-std::vector<size_t> StyleManager::otherSelected(QListWidget *list) {
-    std::vector<size_t> rows;
+QStringList StyleManager::otherSelected(QListWidget *list) {
+    QStringList names;
     for (auto *it : list->selectedItems())
-        if (const int r = list->row(it); r != list->currentRow()) rows.push_back(size_t(r));
-    return rows;
+        if (list->row(it) != list->currentRow()) names << it->text();
+    return names;
 }
 
 bool StyleManager::changeSelected(const std::vector<size_t> &others, const fsb::StyleData &before,
@@ -2824,6 +2896,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"main/backupOriginal", QT_TR_NOOP("Keep a copy of each opened file (.ORIGINAL) in the autosave folder"), true,
          editor},
         {"main/saveOnChange", QT_TR_NOOP("Save the file after every change"), false, editor},
+        {"main/checkUpdates", QT_TR_NOOP("Check for a newer version at startup (once a day, asks github.com)"), false,
+         editor},
         {"edit/syntax", QT_TR_NOOP("Syntax highlighting in the edit box"), true, editor},
         {"edit/callTips", QT_TR_NOOP("Call tips: the parameters of the tag at the cursor"), false, editor},
         {"video/sliderKeyframes", QT_TR_NOOP("Show keyframes in the seek bar"), true, video},
@@ -3056,6 +3130,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         {"styles/importCatalog/MPL2", QT_TR_NOOP("Style catalog of imported MPL2")},
         {"styles/importCatalog/TMP", QT_TR_NOOP("Style catalog of imported TMPlayer")},
         {"styles/importCatalog/TTXT", QT_TR_NOOP("Style catalog of imported TTXT")},
+        {"styles/importCatalog/WEBVTT", QT_TR_NOOP("Style catalog of imported WebVTT")},
         {"styles/importCatalog/TXT", QT_TR_NOOP("Style catalog of imported plain text")}};
     for (auto [key, label] : catalogKeys) {
         auto *c = new QComboBox(this);

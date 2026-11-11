@@ -26,7 +26,7 @@ bool supported() {
 }
 
 const QStringList &types() {
-    static const QStringList t{"ass", "ssa", "srt", "sub", "mpl", "txt", "tmp", "ttxt"};
+    static const QStringList t{"ass", "ssa", "srt", "sub", "mpl", "txt", "tmp", "ttxt", "vtt"};
     return t;
 }
 

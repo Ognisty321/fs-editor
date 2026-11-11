@@ -98,6 +98,9 @@ private:
     std::pair<int, int> blockAt(int pos) const;
     void updateCalltip();
     void matchBraces();
+    void markSameWord();
+    QList<QTextEdit::ExtraSelection> m_braceMarks, m_sameWord; // shown together
+    QString m_sameWordOf; // the double-clicked word m_sameWord marks
     QLabel *m_calltip = nullptr;
     QCompleter *m_completer;
     QSyntaxHighlighter *m_highlighter;

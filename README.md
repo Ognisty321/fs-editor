@@ -24,12 +24,12 @@ FS Editor to edytor napisów do typesettingu, timingu i tłumaczenia. Rdzeń jes
 | Automatyzacja | LuaJIT przez `mlua`, zgodność z Aegisub Automation 4 |
 
 > [!NOTE]
-> Projekt jest we wczesnej wersji (0.1.1). Gotowe paczki ZIP dla Windows i Linuksa, zbudowane w CI, są na stronie [wydań](https://github.com/Ognisty321/fs-editor/releases): wystarczy rozpakować i uruchomić `bin/fsed`. Kod przewiduje macOS, ale nie był jeszcze budowany ani testowany na Macu.
+> Projekt jest we wczesnej wersji (0.1.1). Gotowe paczki ZIP dla Windows i Linuksa, zbudowane w CI, są na stronie [wydań](https://github.com/Ognisty321/fs-editor/releases): wystarczy rozpakować i uruchomić `bin/fsed`. Nowszą wersję program sprawdza na żądanie (Pomoc → Sprawdź aktualizacje) albo, po włączeniu w ustawieniach, raz dziennie przy starcie. Kod przewiduje macOS, ale nie był jeszcze budowany ani testowany na Macu.
 
 ## Funkcje
 
 - **Bezstratny ASS.** BOM, końce linii, komentarze, nieznane sekcje, `[Fonts]`, `[Graphics]` i dane projektu Aegisuba zostają nietknięte. Linia, której nikt nie zmienił, jest zapisywana z oryginalnego tekstu.
-- **Formaty:** ASS, SSA, SRT, MPL2, MicroDVD i TMP, z wykrywaniem kodowania (UTF-8, UTF-16, Windows-1250 i inne).
+- **Formaty:** ASS, SSA, SRT, WebVTT, MPL2, MicroDVD i TMP, z wykrywaniem kodowania (UTF-8, UTF-16, Windows-1250 i inne).
 - **Wideo co do klatki:** BestSource, VFR (timecody v1 i v2), keyframe'y, rozdziały, podgląd libass, zoom, tryb odtwarzacza i wideo zastępcze.
 - **Audio:** waveform i spektrogram na GPU, tryb karaoke, odtwarzanie i zapis wycinka do WAV.
 - **Narzędzia wizualne:** `\pos`, `\move`, `\org`, `\clip`/`\iclip`, rysunki `\p`, skalowanie i obroty bezpośrednio na wideo.
@@ -209,12 +209,26 @@ GUI czyta zmienne środowiskowe, które pozwalają sprawdzić aplikację bez kli
 | `FSED_SMOKE_ACTION=id` | uruchamia polecenie menu, np. `styleManager`, `fontCollector`, `macro:Strip tags/Strip tags` |
 | `FSED_SMOKE_TOOL=N` | włącza narzędzie wizualne nr N (kolejność jak na pasku pod wideo) |
 | `FSED_SMOKE_CLICK=tekst` | klika przycisk o tym napisie w otwartym dialogu |
+| `FSED_SMOKE_EDITDBL=N` | dwuklik na znaku N tekstu linii w polu edycji |
 | `FSED_SMOKE_DROP=plik` | upuszcza plik na pole edycji linii |
 | `FSED_SMOKE_SET="klucz=wartość;..."` | ustawia opcje przed startem, np. `spell/lang=pl_PL` |
+| `FSED_UPDATE_URL=adres` | miejsce, które pyta „Sprawdź aktualizacje” zamiast GitHuba, np. `file:///.../latest.json`; bez niej smoke test nie pyta sieci |
 | `FSED_SMOKE_BENCH=plik.txt` | mierzy okno na otwartym pliku (pokazanie zmiany, odrysowanie siatki, zmiana linii, wpisany znak, cofnij/ponów, przewinięcie strony, zaznacz wszystko) i zapisuje mediany oraz najgorsze czasy; ustaw `FSED_SMOKE_MS` na kilka sekund |
 
 ```bash
 FSED_SMOKE=out.png FSED_SMOKE_MS=8000 FSED_SMOKE_ROW=1 fsed napisy.ass wideo.mkv
+```
+
+`tools/smoke.sh` przechodzi tak przez całe okno: plik z korpusu, wideo zastępcze z audio, każde okno otwierane z menu i propozycję aktualizacji. Kończy się błędem, gdy program padnie, zawiśnie albo nie odda zrzutu. CI uruchamia go na rozpakowanej paczce.
+
+```bash
+tools/smoke.sh app/build-windows/Release/fsed.exe
+```
+
+Szybkość dekodowania wideo (klatki na sekundę do RGBA, tak jak bierze je okno) mierzy test `decode_speed`:
+
+```bash
+FS_BENCH_VIDEO=film.mkv cargo test -p fs-media --release decode_speed -- --ignored --nocapture
 ```
 
 </details>

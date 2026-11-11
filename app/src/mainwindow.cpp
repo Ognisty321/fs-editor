@@ -9,6 +9,7 @@
 #include "grid.h"
 #include "shiftpanel.h"
 #include "tabpanel.h"
+#include "updates.h"
 #include "videobox.h"
 #include "visualtools.h"
 
@@ -81,16 +82,18 @@
 #include <QVBoxLayout>
 
 namespace {
-const QStringList kSubsExt = {"ass", "ssa", "srt", "sub", "mpl", "tmp", "txt", "ttxt"};
+const QStringList kSubsExt = {"ass", "ssa", "srt", "sub", "mpl", "tmp", "txt", "ttxt", "vtt"};
 const QStringList kVideoExt = {"mkv", "mp4", "avi", "webm", "mov", "m2ts", "ts", "wmv", "flv", "m4v", "mpg", "mpeg", "ogv"};
 const QStringList kAudioExt = {"wav", "mp3", "flac", "aac", "ac3", "eac3", "dts", "ogg", "opus", "m4a", "mka", "wma"};
-const QString kSubsFilter = QObject::tr("Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt);;All files (*)");
+const QString kSubsFilter =
+    QObject::tr("Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt *.vtt);;All files (*)");
 // Export also writes Aegisub's write-only formats, which the end of the name picks
 struct ExportType {
     const char *filter, *suffix; // suffix: what a name chosen with the filter must end with
 };
 const ExportType kExportTypes[] = {
-    {QT_TRANSLATE_NOOP("MainWindow", "Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt)"), ""},
+    {QT_TRANSLATE_NOOP("MainWindow", "Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt *.vtt)"), ""},
+    {QT_TRANSLATE_NOOP("MainWindow", "WebVTT (*.vtt)"), ".vtt"},
     {QT_TRANSLATE_NOOP("MainWindow", "MPEG-4 Streaming Text (*.ttxt)"), ".ttxt"},
     {QT_TRANSLATE_NOOP("MainWindow", "Adobe Encore (*.encore.txt)"), ".encore.txt"},
     {QT_TRANSLATE_NOOP("MainWindow", "TranStation (*.transtation.txt)"), ".transtation.txt"},
@@ -2153,10 +2156,13 @@ void MainWindow::buildMenus() {
     add("help", tr("Help"), QKeySequence("F1"), help, [] {
         QDesktopServices::openUrl(QUrl::fromLocalFile(QCoreApplication::applicationDirPath() + "/README.md"));
     });
+    // Aegisub's and Kainote's check for a newer version, here against the project's releases
+    add("checkUpdates", tr("Check for updates..."), {}, help, [this] { updates::check(this, true); });
     add("about", tr("About"), {}, help, [this] {
         QMessageBox::about(this, tr("About FS Editor"),
-                           tr("<b>FS Editor</b><br>ASS/SSA subtitle editor.<br>Licensed under BSD-3-Clause.<br>"
-                              "Layout modelled on Kainote, automation compatible with Aegisub Automation 4."));
+                           tr("<b>FS Editor %1</b><br>ASS/SSA subtitle editor.<br>Licensed under BSD-3-Clause.<br>"
+                              "Layout modelled on Kainote, automation compatible with Aegisub Automation 4.")
+                               .arg(QCoreApplication::applicationVersion()));
     });
     add("aboutQt", tr("About Qt"), {}, help, [] { QApplication::aboutQt(); });
 

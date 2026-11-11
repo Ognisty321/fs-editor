@@ -1734,6 +1734,14 @@ Backspace: rozłącz ostatnią grupę</translation>
         <translation>Usuń pliki tymczasowe</translation>
     </message>
     <message>
+        <source>Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt *.vtt)</source>
+        <translation>Napisy (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt *.vtt)</translation>
+    </message>
+    <message>
+        <source>WebVTT (*.vtt)</source>
+        <translation>WebVTT (*.vtt)</translation>
+    </message>
+    <message>
         <source>Log</source>
         <translation>Log</translation>
     </message>
@@ -2284,6 +2292,14 @@ Macierz kolorów: %12</translation>
         <translation>Klawisze asystenta tłumaczenia</translation>
     </message>
     <message>
+        <source>Check for updates...</source>
+        <translation>Sprawdź aktualizacje...</translation>
+    </message>
+    <message>
+        <source>&lt;b&gt;FS Editor %1&lt;/b&gt;&lt;br&gt;ASS/SSA subtitle editor.&lt;br&gt;Licensed under BSD-3-Clause.&lt;br&gt;Layout modelled on Kainote, automation compatible with Aegisub Automation 4.</source>
+        <translation>&lt;b&gt;FS Editor %1&lt;/b&gt;&lt;br&gt;Edytor napisów ASS/SSA.&lt;br&gt;Licencja BSD-3-Clause.&lt;br&gt;Układ wzorowany na Kainote, automatyzacja zgodna z Aegisub Automation 4.</translation>
+    </message>
+    <message>
         <source>Nothing to undo</source>
         <translation>Nic do cofnięcia</translation>
     </message>
@@ -2588,10 +2604,6 @@ Pełna ścieżka: %3</translation>
     <message>
         <source>FPS</source>
         <translation>FPS</translation>
-    </message>
-    <message>
-        <source>Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt)</source>
-        <translation>Napisy (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt)</translation>
     </message>
     <message>
         <source>MPEG-4 Streaming Text (*.ttxt)</source>
@@ -3190,10 +3202,6 @@ Tłumaczenie: wklejony tekst, który przejmuje timing oryginału.</translation>
         <translation>O FS Editor</translation>
     </message>
     <message>
-        <source>&lt;b&gt;FS Editor&lt;/b&gt;&lt;br&gt;ASS/SSA subtitle editor.&lt;br&gt;Licensed under BSD-3-Clause.&lt;br&gt;Layout modelled on Kainote, automation compatible with Aegisub Automation 4.</source>
-        <translation>&lt;b&gt;FS Editor&lt;/b&gt;&lt;br&gt;Edytor napisów ASS/SSA.&lt;br&gt;Licencja BSD-3-Clause.&lt;br&gt;Układ wzorowany na Kainote, automatyzacja zgodna z Aegisub Automation 4.</translation>
-    </message>
-    <message>
         <source>About Qt</source>
         <translation>O Qt</translation>
     </message>
@@ -3781,8 +3789,8 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Zatrzymaj skrypt</translation>
     </message>
     <message>
-        <source>Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt);;All files (*)</source>
-        <translation>Napisy (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt);;Wszystkie pliki (*)</translation>
+        <source>Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt *.vtt);;All files (*)</source>
+        <translation>Napisy (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt *.vtt);;Wszystkie pliki (*)</translation>
     </message>
 </context>
 <context>
@@ -4132,6 +4140,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Save the file after every change</source>
         <translation>Zapisuj plik po każdej zmianie</translation>
+    </message>
+    <message>
+        <source>Check for a newer version at startup (once a day, asks github.com)</source>
+        <translation>Sprawdzaj przy starcie, czy jest nowsza wersja (raz dziennie, pyta github.com)</translation>
     </message>
     <message>
         <source>Syntax highlighting in the edit box</source>
@@ -4504,6 +4516,10 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
     <message>
         <source>Style catalog of new files</source>
         <translation>Katalog stylów nowych plików</translation>
+    </message>
+    <message>
+        <source>Style catalog of imported WebVTT</source>
+        <translation>Katalog stylów dla importowanych WebVTT</translation>
     </message>
     <message>
         <source>0: Fatal</source>
@@ -5506,6 +5522,14 @@ do czasu audio</translation>
         <translation>Zamknij</translation>
     </message>
     <message>
+        <source>Edit styles in this window</source>
+        <translation>Edytuj style w tym oknie</translation>
+    </message>
+    <message>
+        <source>The style editor stands beside the lists and stays open while you pick other styles</source>
+        <translation>Edytor stylu stoi obok list i zostaje otwarty, gdy wybierasz kolejne style</translation>
+    </message>
+    <message>
         <source> - copy</source>
         <translation> - kopia</translation>
     </message>
@@ -5676,6 +5700,210 @@ do czasu audio</translation>
     <message>
         <source>Disable</source>
         <translation>Wyłącz</translation>
+    </message>
+    <message>
+        <source>Alignment (numpad layout)</source>
+        <translation>Wyrównanie (układ klawiatury numerycznej)</translation>
+    </message>
+    <message>
+        <source>Alignment (SSA numbering)</source>
+        <translation>Wyrównanie (numeracja SSA)</translation>
+    </message>
+    <message>
+        <source>Bold (0, 1 or a font weight)</source>
+        <translation>Pogrubienie (0, 1 albo grubość czcionki)</translation>
+    </message>
+    <message>
+        <source>Italic</source>
+        <translation>Kursywa</translation>
+    </message>
+    <message>
+        <source>Underline</source>
+        <translation>Podkreślenie</translation>
+    </message>
+    <message>
+        <source>Strikeout</source>
+        <translation>Przekreślenie</translation>
+    </message>
+    <message>
+        <source>Border width</source>
+        <translation>Grubość obwódki</translation>
+    </message>
+    <message>
+        <source>Border width along X</source>
+        <translation>Grubość obwódki w osi X</translation>
+    </message>
+    <message>
+        <source>Border width along Y</source>
+        <translation>Grubość obwódki w osi Y</translation>
+    </message>
+    <message>
+        <source>Shadow distance</source>
+        <translation>Odległość cienia</translation>
+    </message>
+    <message>
+        <source>Shadow distance along X</source>
+        <translation>Odległość cienia w osi X</translation>
+    </message>
+    <message>
+        <source>Shadow distance along Y</source>
+        <translation>Odległość cienia w osi Y</translation>
+    </message>
+    <message>
+        <source>Edge blur (passes)</source>
+        <translation>Rozmycie krawędzi (liczba przejść)</translation>
+    </message>
+    <message>
+        <source>Gaussian blur of the edges</source>
+        <translation>Rozmycie gaussowskie krawędzi</translation>
+    </message>
+    <message>
+        <source>Font name</source>
+        <translation>Nazwa czcionki</translation>
+    </message>
+    <message>
+        <source>Font size</source>
+        <translation>Rozmiar czcionki</translation>
+    </message>
+    <message>
+        <source>Horizontal scale in percent</source>
+        <translation>Skala pozioma w procentach</translation>
+    </message>
+    <message>
+        <source>Vertical scale in percent</source>
+        <translation>Skala pionowa w procentach</translation>
+    </message>
+    <message>
+        <source>Letter spacing</source>
+        <translation>Odstępy między literami</translation>
+    </message>
+    <message>
+        <source>Rotation around the X axis</source>
+        <translation>Obrót wokół osi X</translation>
+    </message>
+    <message>
+        <source>Rotation around the Y axis</source>
+        <translation>Obrót wokół osi Y</translation>
+    </message>
+    <message>
+        <source>Rotation around the Z axis</source>
+        <translation>Obrót wokół osi Z</translation>
+    </message>
+    <message>
+        <source>Rotation around the Z axis (short form)</source>
+        <translation>Obrót wokół osi Z (krótka postać)</translation>
+    </message>
+    <message>
+        <source>Shear along X</source>
+        <translation>Pochylenie w osi X</translation>
+    </message>
+    <message>
+        <source>Shear along Y</source>
+        <translation>Pochylenie w osi Y</translation>
+    </message>
+    <message>
+        <source>Font encoding (charset)</source>
+        <translation>Kodowanie czcionki</translation>
+    </message>
+    <message>
+        <source>Primary color</source>
+        <translation>Kolor podstawowy</translation>
+    </message>
+    <message>
+        <source>Secondary color (karaoke)</source>
+        <translation>Kolor zastępczy (karaoke)</translation>
+    </message>
+    <message>
+        <source>Border color</source>
+        <translation>Kolor obwódki</translation>
+    </message>
+    <message>
+        <source>Shadow color</source>
+        <translation>Kolor cienia</translation>
+    </message>
+    <message>
+        <source>Transparency of everything</source>
+        <translation>Przezroczystość wszystkiego</translation>
+    </message>
+    <message>
+        <source>Transparency of the primary color</source>
+        <translation>Przezroczystość koloru podstawowego</translation>
+    </message>
+    <message>
+        <source>Transparency of the secondary color</source>
+        <translation>Przezroczystość koloru zastępczego</translation>
+    </message>
+    <message>
+        <source>Transparency of the border</source>
+        <translation>Przezroczystość obwódki</translation>
+    </message>
+    <message>
+        <source>Transparency of the shadow</source>
+        <translation>Przezroczystość cienia</translation>
+    </message>
+    <message>
+        <source>Karaoke syllable, in centiseconds</source>
+        <translation>Sylaba karaoke, w setnych sekundy</translation>
+    </message>
+    <message>
+        <source>Karaoke syllable filled from left to right</source>
+        <translation>Sylaba karaoke wypełniana od lewej do prawej</translation>
+    </message>
+    <message>
+        <source>Karaoke syllable, border shown when sung</source>
+        <translation>Sylaba karaoke, obwódka pojawia się przy śpiewaniu</translation>
+    </message>
+    <message>
+        <source>Karaoke: start time of the next syllable</source>
+        <translation>Karaoke: czas początku następnej sylaby</translation>
+    </message>
+    <message>
+        <source>Wrapping style (0-3)</source>
+        <translation>Sposób łamania tekstu (0-3)</translation>
+    </message>
+    <message>
+        <source>Reset to the line&apos;s style, or to a named one</source>
+        <translation>Powrót do stylu linijki albo do stylu o podanej nazwie</translation>
+    </message>
+    <message>
+        <source>Position (x, y)</source>
+        <translation>Pozycja (x, y)</translation>
+    </message>
+    <message>
+        <source>Movement (x1, y1, x2, y2[, t1, t2])</source>
+        <translation>Ruch (x1, y1, x2, y2[, t1, t2])</translation>
+    </message>
+    <message>
+        <source>Rotation origin (x, y)</source>
+        <translation>Punkt obrotu (x, y)</translation>
+    </message>
+    <message>
+        <source>Fade in and out (ms, ms)</source>
+        <translation>Pojawianie się i zanikanie (ms, ms)</translation>
+    </message>
+    <message>
+        <source>Fade with three alphas and four times</source>
+        <translation>Zanikanie z trzema przezroczystościami i czterema czasami</translation>
+    </message>
+    <message>
+        <source>Show only inside a rectangle or a drawing</source>
+        <translation>Pokaż tylko wewnątrz prostokąta albo rysunku</translation>
+    </message>
+    <message>
+        <source>Hide inside a rectangle or a drawing</source>
+        <translation>Ukryj wewnątrz prostokąta albo rysunku</translation>
+    </message>
+    <message>
+        <source>Drawing mode and its scale (0 ends it)</source>
+        <translation>Tryb rysunku i jego skala (0 go kończy)</translation>
+    </message>
+    <message>
+        <source>Baseline offset of a drawing</source>
+        <translation>Przesunięcie linii bazowej rysunku</translation>
+    </message>
+    <message>
+        <source>Animate the tags inside ([t1, t2,] [accel,] tags)</source>
+        <translation>Animacja tagów w środku ([t1, t2,] [przyspieszenie,] tagi)</translation>
     </message>
     <message>
         <source>Remove &quot;%1&quot; from dictionary</source>
@@ -7241,6 +7469,10 @@ albo nie trwa wcale</translation>
         <translation>Tło pasujących nawiasów</translation>
     </message>
     <message>
+        <source>Other places of the double-clicked word</source>
+        <translation>Pozostałe wystąpienia słowa klikniętego dwukrotnie</translation>
+    </message>
+    <message>
         <source>Modified selection</source>
         <translation>Zmienione zaznaczenie</translation>
     </message>
@@ -7315,6 +7547,43 @@ albo nie trwa wcale</translation>
     <message>
         <source>Visual tools</source>
         <translation>Narzędzia wizualne</translation>
+    </message>
+</context>
+<context>
+    <name>updates</name>
+    <message>
+        <source>Check for updates</source>
+        <translation>Sprawdzanie aktualizacji</translation>
+    </message>
+    <message>
+        <source>The newest version could not be read.
+%1</source>
+        <translation>Nie udało się odczytać najnowszej wersji.
+%1</translation>
+    </message>
+    <message>
+        <source>The answer names no version.</source>
+        <translation>Odpowiedź nie podaje wersji.</translation>
+    </message>
+    <message>
+        <source>You have the newest version (%1).</source>
+        <translation>Masz najnowszą wersję (%1).</translation>
+    </message>
+    <message>
+        <source>FS Editor %1 is available. You have %2.</source>
+        <translation>Dostępny jest FS Editor %1. Masz wersję %2.</translation>
+    </message>
+    <message>
+        <source>Open the download page</source>
+        <translation>Otwórz stronę pobierania</translation>
+    </message>
+    <message>
+        <source>Skip this version</source>
+        <translation>Pomiń tę wersję</translation>
+    </message>
+    <message>
+        <source>Remind me later</source>
+        <translation>Przypomnij później</translation>
     </message>
 </context>
 </TS>
