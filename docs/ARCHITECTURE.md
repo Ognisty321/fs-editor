@@ -39,6 +39,28 @@ fs-editor/
 │  ├─ fs-media/               # FFI do BestSource (wideo/audio) i libass (render) — C++ w crates/fs-media/cpp
 │  ├─ fs-automation/          # LuaJIT (mlua): API `aegisub`, obiekt subtitles, dialogi, include'y, MoonScript, lfs, FFI exports
 │  └─ fs-bridge/              # most cxx: staticlib + nagłówki dla Qt
+│     └─ src/
+│        ├─ lib.rs            # #[cxx::bridge]: typy i funkcje widziane z C++
+│        ├─ session/          # jedna karta: dokument z historią undo; każdy plik to `impl Session` jednego obszaru i jego testy
+│        │  ├─ mod.rs         # Session: otwieranie, zapis, autozapis, dane projektu, undo/redo, zaznaczenie, mapowanie wierszy
+│        │  ├─ rows.rs        # wiersze gridu: odczyt i zapis pól, wstawianie, usuwanie, przenoszenie, sortowanie, schowek, porównanie plików
+│        │  ├─ joinsplit.rs   # łączenie, dzielenie i rekombinacja linii (pary tłumaczenia połówkami)
+│        │  ├─ trees.rs       # drzewka Kainote
+│        │  ├─ timing.rs      # przesuwanie czasów, ciągłość, dociąganie do wideo, postprocesor, zmiana FPS
+│        │  ├─ search.rs      # filtr gridu, szukaj/zamień, zamiana zaznaczonych wyników, reguły multireplacera
+│        │  ├─ convert.rs     # konwersja formatów (Kainote), eksport (Aegisub), zmiana rozdzielczości
+│        │  ├─ styles.rs      # style skryptu, zmiana nazwy idąca za liniami, pliki katalogów
+│        │  ├─ attachments.rs # załączniki i kolektor czcionek
+│        │  ├─ render.rs      # skrypt dla libass: cały, linie jednej klatki, jedna linia do pomiaru
+│        │  ├─ translation.rs # tryb tłumaczenia
+│        │  ├─ overrides.rs   # tagi pisane przez narzędzia wizualne, „wszystkie tagi” i Hydrę
+│        │  ├─ karaoke.rs     # sylaby paska karaoke
+│        │  └─ fixtures.rs    # skrypt i sesja, od których zaczynają testy modułów
+│        ├─ automation.rs     # uruchamianie skryptów Lua na sesji, eksport przez filtry
+│        ├─ media.rs          # wideo, audio i renderer napisów dla okna
+│        ├─ visual.rs         # wartości linii, które edytują narzędzia wizualne (\pos, \move, \clip, \p, skala, obroty)
+│        ├─ split.rs          # podziały Kainote zachowujące wygląd (znaki, słowa, klatki \move)
+│        └─ kanji.rs, spell.rs  # kanji timer, pisownia i tezaurus
 ├─ app/                       # GUI Qt 6 Widgets (C++23, CMake + Corrosion)
 │  ├─ CMakeLists.txt, CMakePresets.json
 │  ├─ src/
