@@ -107,7 +107,7 @@ Shift by 3 frames for a VFR video:
 fsed shift ep01.ass --frames 3 --timecodes tc.txt -o out.ass
 ```
 
-Convert to SRT in CP1250:
+Convert to SRT in Windows-1250:
 
 ```bash
 fsed convert ep01.ass -o ep01.srt --out-encoding windows-1250 --no-bom
@@ -137,9 +137,9 @@ fsed lua crates/fs-automation/automation/autoload/kara-templater.lua kara.ass --
 
 ## `media` commands
 
-The `media` commands need a build with the `media` feature: `cargo build -p fs-cli --features media` (dependencies from `tools/deps`). BestSource does the decoding and libass renders the subtitles. Each file's index is stored in `%LOCALAPPDATA%\fs-editor\bsindex` or `~/.cache/fs-editor/bsindex`, so later opens are instant.
+The `media` commands need a build with the `media` feature: `cargo build -p fs-cli --features media` (dependencies from `tools/deps.ps1` / `tools/deps.sh`). BestSource does the decoding and libass renders the subtitles. Each file's index is stored in `%LOCALAPPDATA%\fs-editor\bsindex` or `~/.cache/fs-editor/bsindex`, so later opens are instant.
 
-Instead of a video or audio file you can pass an Avisynth (`.avs`) or VapourSynth (`.vpy`) script: it is run by the AviSynth+ or VapourSynth installed on the computer, with no index. `media info` then shows the video and audio tracks according to what the script returns. When the library is missing, the command fails with the name of what to install. The `VSSCRIPT_PATH` variable points to a different VapourSynth installation (the path of the VSScript library).
+Instead of a video or audio file you can pass an AviSynth (`.avs`) or VapourSynth (`.vpy`) script: it is run by the AviSynth+ or VapourSynth installed on the computer, with no index. `media info` then shows the video and audio tracks according to what the script returns. When the library is missing, the command fails with the name of what to install. The `VSSCRIPT_PATH` variable points to a different VapourSynth installation (the path of the VSScript library).
 
 | Command | Description |
 |---|---|

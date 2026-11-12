@@ -12,6 +12,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QTextDocument>
 #include <QUrl>
 
 namespace {
@@ -52,8 +53,12 @@ void answer(QWidget *parent, bool manual, const QByteArray &body, const QString 
                     QCoreApplication::translate("updates", "FS Editor %1 is available. You have %2.")
                         .arg(latest.startsWith('v') ? latest.mid(1) : latest, current),
                     QMessageBox::NoButton, parent);
-    // the release's own notes, as its page shows them
-    if (const QString notes = release.value("body").toString().trimmed(); !notes.isEmpty()) box.setDetailedText(notes);
+    // the release's own notes, their Markdown read as GitHub does and shown as plain text
+    if (const QString notes = release.value("body").toString().trimmed(); !notes.isEmpty()) {
+        QTextDocument doc;
+        doc.setMarkdown(notes);
+        box.setDetailedText(doc.toPlainText().trimmed());
+    }
     auto *open = box.addButton(QCoreApplication::translate("updates", "Open the download page"), QMessageBox::AcceptRole);
     auto *skip = box.addButton(QCoreApplication::translate("updates", "Skip this version"), QMessageBox::DestructiveRole);
     box.addButton(QCoreApplication::translate("updates", "Remind me later"), QMessageBox::RejectRole);

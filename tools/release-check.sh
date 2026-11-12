@@ -37,8 +37,10 @@ else
     for pkg in "FS-Editor-$version-windows-x64.zip" "FS-Editor-$version-linux-x64.zip"; do
         grep -qF "$pkg" "$root/$notes" || fail "$notes does not name $pkg in its Downloads table"
     done
-    if grep -qE '<(version|summary)[:>]|^<!--' "$root/$notes"; then
-        fail "$notes still has template placeholders or comments"
+    # TEMPLATE.md writes every placeholder as <Capitalised text>; HTML-like tags in real notes
+    # (`<i>`, `<b>`) are lower case
+    if grep -nE '<[A-Z][^<>]*>|<version>|^-{20,}$|^<!--' "$root/$notes"; then
+        fail "$notes still has template placeholders, instructions or comments (lines above)"
     fi
 fi
 

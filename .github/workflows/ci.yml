@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     # a version tag builds and smoke-tests the packages as usual, then drafts its release
-    tags: ['v*']
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
   pull_request:
   workflow_dispatch:
 
@@ -44,6 +44,9 @@ jobs:
             rustup toolchain install
           }
       - uses: Swatinem/rust-cache@v2
+        with:
+          # not from a tag: a cache saved there is visible to that tag alone
+          save-if: ${{ !startsWith(github.ref, 'refs/tags/') }}
       - run: cargo fmt --all --check
       - run: cargo clippy --locked -- -D warnings
       - run: cargo test --locked
@@ -106,6 +109,9 @@ jobs:
             rustup toolchain install
           }
       - uses: Swatinem/rust-cache@v2
+        with:
+          # not from a tag: a cache saved there is visible to that tag alone
+          save-if: ${{ !startsWith(github.ref, 'refs/tags/') }}
       - name: vcpkg
         shell: bash
         run: |
@@ -139,8 +145,9 @@ jobs:
           fi
           echo "kept $(find "$RUNNER_TEMP/vcpkg-bin" -name '*.zip' | wc -l) of $(wc -l <<<"$all") archives"
       # saved right after the deps build, so a later failing step does not throw it away
+      # not from a tag: a cache saved there is visible to that tag alone
       - uses: actions/cache/save@v6
-        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true' && !startsWith(github.ref, 'refs/tags/')
         with:
           path: ${{ runner.temp }}/vcpkg-bin
           key: vcpkg-${{ matrix.triplet }}-${{ steps.image.outputs.version }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'tools/vcpkg-ports/**') }}
@@ -191,11 +198,12 @@ jobs:
         run: |
           tmp=$(cygpath -u "$RUNNER_TEMP")
           tools/smoke.sh "$(ls "$tmp"/smoke-pkg/*/bin/fsed.exe)" "$tmp/smoke"
-      # shortcut: not yet seen on a runner (Xvfb with Mesa's software OpenGL), so a failure is
-      # reported without failing the job; drop continue-on-error once it has run green.
+      # shortcut: Xvfb with Mesa's software OpenGL is new on the runners, so on branches and PRs a
+      # failure is reported without failing the job; drop continue-on-error once it has stayed green.
+      # A release tag always requires it: no package ships with a failed smoke test.
       - name: Smoke test (Linux)
         if: runner.os == 'Linux'
-        continue-on-error: true
+        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: |
           sudo apt-get install -y xvfb libgl1-mesa-dri libegl1 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0
           chmod +x "$RUNNER_TEMP"/smoke-pkg/*/bin/fsed
@@ -256,14 +264,18 @@ jobs:
           v=${GITHUB_REF_NAME#v}
           notes="docs/releases/$GITHUB_REF_NAME.md"
           files=(dist/FS-Editor-$v-windows-x64.zip dist/FS-Editor-$v-linux-x64.zip dist/SHA256SUMS.txt)
-          if draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft -q .isDraft 2>/dev/null); then
+          # only "release not found" means there is none yet; any other error (auth, rate limit) stops here
+          if draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft -q .isDraft 2>view.err); then
             if [ "$draft" != true ]; then
               echo "::error::release $GITHUB_REF_NAME is already published; not changing it"
               exit 1
             fi
             gh release edit "$GITHUB_REF_NAME" --title "FS Editor $v" --notes-file "$notes"
             gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
-          else
+          elif grep -qi 'release not found' view.err; then
             gh release create "$GITHUB_REF_NAME" "${files[@]}" --draft --verify-tag --title "FS Editor $v" --notes-file "$notes"
+          else
+            cat view.err >&2
+            exit 1
           fi
           echo "draft: $(gh release view "$GITHUB_REF_NAME" --json url -q .url)" >> "$GITHUB_STEP_SUMMARY"

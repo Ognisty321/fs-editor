@@ -4,7 +4,8 @@ line too). Rules:
 
 - English only. Plain, concrete sentences: say what changed for the user, then why if it matters.
 - The body is shown on GitHub as Markdown and in the program's update dialog as plain text, so the
-  summary line and Highlights must make sense without formatting. No emoji, no badges, no HTML.
+  summary line and Highlights come first and must make sense without formatting. Downloads and
+  Install stay at the end. No emoji, no badges, no HTML.
 - Section order is fixed. Drop a section that has nothing in it instead of writing "None".
 - Inside New / Improved / Fixed / Under the hood, group related items under a bold lead-in
   (`- **Area.** ...`) or a `###` heading when a change needs several bullets or a table.
@@ -12,11 +13,40 @@ line too). Rules:
   units in every cell. Say how the result was checked to be the same where that matters.
 - Use the program's English UI names for menus, dialogs and settings, in quotes ("Check for updates...").
 - Keep the Install section word for word; only the version in the file names changes.
-- tools/release-check.sh refuses notes that still contain `<version>` or `<summary>`.
+- Every placeholder is written as `<Capitalised text>`; replace them all. tools/release-check.sh refuses
+  notes that still contain one, `<version>`, or this paragraph's dashed line.
 
 ----------------------------------------------------------------------------------------------------
 
-<summary: one sentence, what this release is about, readable as plain text.>
+<Summary: one sentence, what this release is about, readable as plain text.>
+
+## Highlights
+
+- <Highlight: three to five bullets, the changes a user would want to hear about first.>
+
+## New
+
+- **<Feature>.** <What it does and where to find it.>
+
+## Improved
+
+- **<Area>.** <What works better than before.>
+
+| <Test material> | Before | After |
+|---|---|---|
+| <Operation measured> | <Before, with unit> | <After, with unit> |
+
+## Fixed
+
+- <What went wrong, in which situation, and that it no longer does.>
+
+## Under the hood
+
+- <Build, CI, packaging and code-structure changes that do not change behaviour.>
+
+## Known limitations
+
+- macOS is not built or tested yet.
 
 ## Downloads
 
@@ -25,34 +55,6 @@ line too). Rules:
 | `FS-Editor-<version>-windows-x64.zip` | Windows 10/11, 64-bit | |
 | `FS-Editor-<version>-linux-x64.zip` | Linux x86-64 | built on Ubuntu 24.04 |
 | `SHA256SUMS.txt` | | SHA-256 checksums of both packages |
-
-## Highlights
-
-- Three to five bullets, the changes a user would want to hear about first.
-
-## New
-
-- **Feature.** What it does and where to find it.
-
-## Improved
-
-- **Area.** What works better than before.
-
-| Test material | Before | After |
-|---|---|---|
-| operation measured | 0.0 ms | 0.0 ms |
-
-## Fixed
-
-- What went wrong, in which situation, and that it no longer does.
-
-## Under the hood
-
-- Build, CI, packaging and code-structure changes that do not change behaviour.
-
-## Known limitations
-
-- macOS is not built or tested yet.
 
 ## Install
 

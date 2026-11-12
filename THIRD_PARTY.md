@@ -31,7 +31,7 @@ Versions are pinned in `Cargo.lock`. `cargo metadata` prints the full list, incl
 | spellbook (spell checking, Hunspell dictionaries) | MPL-2.0 (file-level copyleft; the crate is used unmodified) |
 | cc (build only) | MIT OR Apache-2.0 |
 
-## Dependencies of later stages
+## Native, GUI and automation dependencies
 
 Versions come from [docs/research/dependencies.md](docs/research/dependencies.md).
 
@@ -43,13 +43,13 @@ Versions come from [docs/research/dependencies.md](docs/research/dependencies.md
 | FFmpeg 9.0 | LGPL-2.1+ | dynamically, without `gpl` and `nonfree` |
 | xxHash | BSD-2-Clause | statically |
 | VapourSynth API headers (`VapourSynth4.h`, `VSScript4.h`, R79) | LGPL-2.1+ | headers only, in `crates/fs-media/cpp/vapoursynth/`; VapourSynth itself is neither linked nor bundled, it is loaded at run time from the user's installation |
-| Avisynth (AviSynth+) | GPL-2+ with an exception for the interface | nothing is bundled: the user's `avisynth.dll` is loaded at run time and called through the C interface, with our own declarations |
+| AviSynth (AviSynth+) | GPL-2+ with an exception for the interface | nothing is bundled: the user's `avisynth.dll` is loaded at run time and called through the C interface, with our own declarations |
 | libp2p (sekrit-twc) | WTFPL | statically |
 | libass 0.17.5 | ISC | statically or dynamically |
-| FreeType | FTL | FTL variant |
+| FreeType | FTL | as a libass dependency |
 | HarfBuzz, Fontconfig | MIT | — |
 | FriBidi | LGPL-2.1+ | dynamically |
-| cxx, cpal, realfft, mlua | MIT / Apache-2.0 | crates |
+| cxx, cpal, realfft | MIT / Apache-2.0 | crates |
 | LuaJIT | MIT | through `mlua` (vendored) |
 | LPeg 1.1.0 | MIT | C sources built by `cc` |
 | luabins 0.3 (from the Aegisub subproject) | MIT | C sources built by `cc`, `crates/fs-automation/vendor/luabins` (licence in `COPYRIGHT`) |
