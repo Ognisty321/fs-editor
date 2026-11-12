@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "fs-editor",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "C/C++ dependencies of FS Editor (media decoding and subtitle rendering)",
   "license": "BSD-3-Clause",
   "dependencies": [

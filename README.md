@@ -24,7 +24,7 @@ FS Editor to edytor napisów do typesettingu, timingu i tłumaczenia. Rdzeń jes
 | Automatyzacja | LuaJIT przez `mlua`, zgodność z Aegisub Automation 4 |
 
 > [!NOTE]
-> Projekt jest we wczesnej wersji (0.1.1). Gotowe paczki ZIP dla Windows i Linuksa, zbudowane w CI, są na stronie [wydań](https://github.com/Ognisty321/fs-editor/releases): wystarczy rozpakować i uruchomić `bin/fsed`. Nowszą wersję program sprawdza na żądanie (Pomoc → Sprawdź aktualizacje) albo, po włączeniu w ustawieniach, raz dziennie przy starcie. Kod przewiduje macOS, ale nie był jeszcze budowany ani testowany na Macu.
+> Projekt jest we wczesnej wersji (0.1.2). Gotowe paczki ZIP dla Windows i Linuksa, zbudowane w CI, są na stronie [wydań](https://github.com/Ognisty321/fs-editor/releases): wystarczy rozpakować i uruchomić `bin/fsed`. Nowszą wersję program sprawdza na żądanie (Pomoc → Sprawdź aktualizacje) albo, po włączeniu w ustawieniach, raz dziennie przy starcie. Kod przewiduje macOS, ale nie był jeszcze budowany ani testowany na Macu.
 
 ## Funkcje
 
