@@ -1,324 +1,330 @@
-# FS Editor — plan architektury
+# FS Editor — architecture plan
 
-FS Editor to wieloplatformowy (Windows, Linux, macOS) edytor napisów ASS/SSA.
+FS Editor is a cross-platform (Windows, Linux, macOS) ASS/SSA subtitle editor.
 
-* **Rdzeń** jest napisany w Rust (edycja 2024): model dokumentu, bezstratny parser i zapis ASS, formaty, undo, timecody VFR, operacje.
-* **Interfejs** jest w Qt 6 Widgets (C++23, Qt ≥ 6.8). Wideo i wykresy audio rysuje GPU przez QRhi (`QRhiWidget`).
-* **Most** Rust ↔ C++ jest zrobiony przez `cxx`. Rust buduje bibliotekę statyczną, a CMake łączy ją przez Corrosion.
-* **Media**: BestSource dekoduje wideo i audio z dokładnością co do klatki, libass renderuje napisy, `cpal` odtwarza dźwięk, a `realfft` liczy spektrogram.
-* **Automatyzacja** to LuaJIT przez `mlua`, z API zgodnym z Aegisub Automation 4 (karaskel, DependencyControl, MoonScript).
-* **Układ UI** odwzorowuje Kainote, a **API i funkcje** wzorują się na Aegisub.
-* **Licencja**: BSD-3-Clause.
+* **The core** is written in Rust (2024 edition): the document model, the lossless ASS parser and writer, formats, undo, VFR timecodes and operations.
+* **The interface** is Qt 6 Widgets (C++23, Qt ≥ 6.8). Video and audio graphs are drawn on the GPU through QRhi (`QRhiWidget`).
+* **The bridge** between Rust and C++ uses `cxx`. Rust builds a static library, and CMake links it through Corrosion.
+* **Media**: BestSource decodes video and audio frame-accurately, libass renders subtitles, `cpal` plays audio, and `realfft` computes the spectrogram.
+* **Automation** is LuaJIT through `mlua`, with an API compatible with Aegisub Automation 4 (karaskel, DependencyControl, MoonScript).
+* **The UI layout** follows Kainote, while **the API and features** are modelled on Aegisub.
+* **License**: BSD-3-Clause.
 
-## 1. Zasady
+## 1. Principles
 
-1. **Rdzeń nie zna GUI.** Cała logika edycji (operacje na liniach, przesuwanie czasów, filtrowanie, undo) żyje w Rust i jest testowalna z CLI oraz testów. GUI tylko wyświetla stan i wysyła komendy.
-2. **Bezstratność.** Otwarcie i zapis pliku bez zmian daje identyczne bajty: BOM, końce linii, komentarze `;`, nieznane sekcje, `[Fonts]`/`[Graphics]`, `[Aegisub Project Garbage]`, `[Aegisub Extradata]`, kolejność kluczy i pól `Format:` oraz białe znaki zostają zachowane. Linia, której nikt nie dotknął, jest zapisywana z oryginalnego tekstu.
-3. **Czas jest liczbą całkowitą.** Czas to `i64` w milisekundach, a ASS przechowuje centysekundy. Wideo VFR jest obsługiwane przez tablicę znaczników czasu klatek z semantyką Aegisub (`frame_at_time`, `time_at_frame` z trybami Start/End/Exact).
-4. **Granice FFI są wąskie.** `cxx` eksportuje kilka nieprzezroczystych typów (`Project`, `Document`, `AudioEngine`, `VideoSource`, `Automation`) i proste struktury DTO, a nie cały model.
-5. **Zależności są przypięte.** Rust używa `Cargo.lock` (commitowany), C++ używa `vcpkg.json` z `builtin-baseline` oraz `overrides`, a Qt ma wersję zapisaną w `CMakePresets.json` i `tools/qt-version.txt`.
+1. **The core knows nothing about the GUI.** All editing logic (line operations, time shifting, filtering, undo) lives in Rust and is testable from the CLI and from tests. The GUI only displays state and sends commands.
+2. **Losslessness.** Opening a file and saving it unchanged produces identical bytes: the BOM, line endings, `;` comments, unknown sections, `[Fonts]`/`[Graphics]`, `[Aegisub Project Garbage]`, `[Aegisub Extradata]`, the order of keys and of `Format:` fields, and whitespace are all preserved. A line nobody touched is written from its original text.
+3. **Time is an integer.** Time is an `i64` in milliseconds; ASS stores centiseconds. VFR video is handled through a table of frame timestamps with Aegisub semantics (`frame_at_time`, `time_at_frame` with Start/End/Exact modes).
+4. **FFI boundaries are narrow.** `cxx` exports a few opaque types (`Project`, `Document`, `AudioEngine`, `VideoSource`, `Automation`) and plain DTO structs, not the whole model.
+5. **Dependencies are pinned.** Rust uses `Cargo.lock` (committed), C++ uses `vcpkg.json` with the registry baseline and overlay ports in `vcpkg-configuration.json`, and the Qt version used for releases is pinned in `.github/workflows/ci.yml` (`app/CMakeLists.txt` requires at least 6.8).
 
-## 2. Struktura repozytorium
+## 2. Repository layout
 
 ```
 fs-editor/
 ├─ Cargo.toml                 # workspace (edition 2024, resolver 3)
-├─ Cargo.lock                 # przypięte wersje crate'ów
-├─ rust-toolchain.toml        # stable, przypięta wersja
+├─ Cargo.lock                 # pinned crate versions
+├─ rust-toolchain.toml        # stable, pinned version
 ├─ LICENSE                    # BSD-3-Clause
-├─ THIRD_PARTY.md             # licencje zależności i plików dołączonych (karaskel itd.)
+├─ THIRD_PARTY.md             # licenses of dependencies and bundled files (karaskel etc.)
 ├─ docs/
-│  ├─ ARCHITECTURE.md         # ten dokument
-│  ├─ CLI.md                  # instrukcja `fsed`
-│  └─ research/               # notatki: układ Kainote, Automation 4, wersje zależności
+│  ├─ ARCHITECTURE.md         # this document
+│  ├─ CLI.md                  # `fsed` manual
+│  ├─ images/                 # README screenshot
+│  ├─ releases/               # release notes (one file per version), template and release procedure
+│  └─ research/               # notes: Kainote layout, Automation 4, dependency versions
 ├─ crates/
-│  ├─ fs-core/                # model dokumentu, parser/zapis ASS, tagi, czas, kolory, undo, VFR, operacje
-│  ├─ fs-formats/             # SRT, MPL2, MicroDVD, TMP, (SSA przez fs-core) + wykrywanie kodowania
-│  ├─ fs-cli/                 # binarka `fsed` (info, check, roundtrip, convert, shift, sort, filter, …)
-│  ├─ fs-audio/               # dekodowane PCM → cache szczytów (waveform), spektrogram (realfft), odtwarzanie (cpal)
-│  ├─ fs-media/               # FFI do BestSource (wideo/audio) i libass (render) — C++ w crates/fs-media/cpp
-│  ├─ fs-automation/          # LuaJIT (mlua): API `aegisub`, obiekt subtitles, dialogi, include'y, MoonScript, lfs, FFI exports
-│  └─ fs-bridge/              # most cxx: staticlib + nagłówki dla Qt
+│  ├─ fs-core/                # document model, ASS parser/writer, tags, time, colours, undo, VFR, operations
+│  ├─ fs-formats/             # SRT, WebVTT, MPL2, MicroDVD, TMP, export formats (EBU STL, Encore, TranStation, TTXT), encoding detection
+│  ├─ fs-cli/                 # the `fsed` binary (info, check, roundtrip, convert, shift, sort, filter, …)
+│  ├─ fs-audio/               # decoded PCM → peak cache (waveform), spectrogram (realfft), playback (cpal)
+│  ├─ fs-media/               # FFI to BestSource (video/audio) and libass (rendering) — C++ in crates/fs-media/cpp
+│  ├─ fs-automation/          # LuaJIT (mlua): `aegisub` API, subtitles object, dialogs, includes, MoonScript, lfs, FFI exports
+│  └─ fs-bridge/              # cxx bridge: staticlib + headers for Qt
 │     └─ src/
-│        ├─ lib.rs            # #[cxx::bridge]: typy i funkcje widziane z C++
-│        ├─ session/          # jedna karta: dokument z historią undo; każdy plik to `impl Session` jednego obszaru i jego testy
-│        │  ├─ mod.rs         # Session: otwieranie, zapis, autozapis, dane projektu, undo/redo, zaznaczenie, mapowanie wierszy
-│        │  ├─ rows.rs        # wiersze gridu: odczyt i zapis pól, wstawianie, usuwanie, przenoszenie, sortowanie, schowek, porównanie plików
-│        │  ├─ joinsplit.rs   # łączenie, dzielenie i rekombinacja linii (pary tłumaczenia połówkami)
-│        │  ├─ trees.rs       # drzewka Kainote
-│        │  ├─ timing.rs      # przesuwanie czasów, ciągłość, dociąganie do wideo, postprocesor, zmiana FPS
-│        │  ├─ search.rs      # filtr gridu, szukaj/zamień, zamiana zaznaczonych wyników, reguły multireplacera
-│        │  ├─ convert.rs     # konwersja formatów (Kainote), eksport (Aegisub), zmiana rozdzielczości
-│        │  ├─ styles.rs      # style skryptu, zmiana nazwy idąca za liniami, pliki katalogów
-│        │  ├─ attachments.rs # załączniki i kolektor czcionek
-│        │  ├─ render.rs      # skrypt dla libass: cały, linie jednej klatki, jedna linia do pomiaru
-│        │  ├─ translation.rs # tryb tłumaczenia
-│        │  ├─ overrides.rs   # tagi pisane przez narzędzia wizualne, „wszystkie tagi” i Hydrę
-│        │  ├─ karaoke.rs     # sylaby paska karaoke
-│        │  └─ fixtures.rs    # skrypt i sesja, od których zaczynają testy modułów
-│        ├─ automation.rs     # uruchamianie skryptów Lua na sesji, eksport przez filtry
-│        ├─ media.rs          # wideo, audio i renderer napisów dla okna
-│        ├─ visual.rs         # wartości linii, które edytują narzędzia wizualne (\pos, \move, \clip, \p, skala, obroty)
-│        ├─ split.rs          # podziały Kainote zachowujące wygląd (znaki, słowa, klatki \move)
-│        └─ kanji.rs, spell.rs  # kanji timer, pisownia i tezaurus
-├─ app/                       # GUI Qt 6 Widgets (C++23, CMake + Corrosion)
+│        ├─ lib.rs            # #[cxx::bridge]: types and functions visible from C++
+│        ├─ session/          # one tab: a document with its undo history; each file is the `impl Session` of one area plus its tests
+│        │  ├─ mod.rs         # Session: open, save, autosave, project data, undo/redo, selection, row mapping
+│        │  ├─ rows.rs        # grid rows: reading and writing fields, insert, delete, move, sort, clipboard, file comparison
+│        │  ├─ joinsplit.rs   # joining, splitting and recombining lines (translation pairs by halves)
+│        │  ├─ trees.rs       # Kainote trees
+│        │  ├─ timing.rs      # time shifting, continuity, snapping to video, post-processor, FPS change
+│        │  ├─ search.rs      # grid filter, find/replace, replacing selected results, multireplacer rules
+│        │  ├─ convert.rs     # format conversion (Kainote), export (Aegisub), resampling
+│        │  ├─ styles.rs      # script styles, renames that follow the lines, storage files
+│        │  ├─ attachments.rs # attachments and the font collector
+│        │  ├─ render.rs      # script for libass: whole, lines of one frame, a single line for measuring
+│        │  ├─ translation.rs # translation mode
+│        │  ├─ overrides.rs   # tags written by visual tools, "all tags" and Hydra
+│        │  ├─ karaoke.rs     # karaoke bar syllables
+│        │  └─ fixtures.rs    # script and session the module tests start from
+│        ├─ automation.rs     # running Lua scripts on a session, export through filters
+│        ├─ media.rs          # video, audio and subtitle renderer for the window
+│        ├─ visual.rs         # line values edited by visual tools (\pos, \move, \clip, \p, scale, rotation)
+│        ├─ split.rs          # Kainote splits that preserve appearance (characters, words, \move frames)
+│        └─ kanji.rs, spell.rs  # kanji timer, spelling and thesaurus
+├─ app/                       # Qt 6 Widgets GUI (C++23, CMake + Corrosion)
 │  ├─ CMakeLists.txt, CMakePresets.json
 │  ├─ src/
-│  │  ├─ main.cpp             # start, smoke test (FSED_SMOKE*), raport awarii na Windows
-│  │  ├─ bridge.h             # konwersje Qt ↔ cxx (QString ↔ rust::Str/String)
-│  │  ├─ mainwindow.h         # MainWindow: jedyny nagłówek okna dla reszty programu; klasa ma kilka jednostek translacji:
-│  │  ├─ mainwindow.cpp       #   okno, karty na dole, widok dwóch kart i porównanie, rejestr komend (add), zamykanie
-│  │  ├─ mainwindow_menus.cpp #   pasek menu: kolejność budowania, menu Audio, Widok i Pomoc, układ menu Kainote (tabela layOutMenus)
-│  │  ├─ mainwindow_filemenu.cpp, _editmenu.cpp, _videomenu.cpp, _subsmenu.cpp  #   komendy menu Plik (z eksportem i sesjami), Edycja, Wideo, Napisy
-│  │  ├─ mainwindow_files.cpp #   otwieranie wg rodzaju pliku i parowanie, zapis, konwersja, sesje, ostatnie pliki, zmiany na dysku, autozapis
-│  │  ├─ mainwindow_hotkeys.cpp  #   skróty komend, okno skrótów, filtr zdarzeń oddający panelom ich klawisze
-│  │  ├─ mainwindow_bars.cpp  #   pasek narzędzi i pasek stanu
-│  │  ├─ mainwindow_automation.cpp  #   autoload, menu Automatyzacja i menedżer skryptów, uruchamianie makr
-│  │  ├─ mainwindow_corrector.cpp   #   korektor drobnych błędów (reguły multireplacera)
-│  │  ├─ mainwindow_p.h       #   wspólne tylko dla tych jednostek: struct Menus, rozszerzenia plików, domyślny pasek, barwy ikon
-│  │  ├─ tabpanel.*           # jedna karta = dokument + wideo + audio + editbox + grid + panel czasów
-│  │  ├─ grid.*               # własny grid (QAbstractScrollArea), filtrowanie, przesuwanie czasów myszą
-│  │  ├─ editbox.*            # pola linii, przyciski tagów, tryb tłumaczenia (2 pola)
-│  │  ├─ shiftpanel.*         # panel „Zmiana czasów” i postprocesor
-│  │  ├─ videobox.*           # VideoView (QRhiWidget), wątek dekodowania, zoom, tryb odtwarzacza
-│  │  ├─ visualtools.*        # \pos \move \org \clip \iclip \p, skala, obroty
-│  │  ├─ colorpicker.*        # okno koloru Aegisuba: widmo w 5 trybach, RGB/HSL/HSV, ASS/HTML, alfa, ostatnie kolory, pipeta
-│  │  ├─ theme.*              # motywy kolorów: role kolorów, Ciemny/Jasny, motywy użytkownika (.ini), paleta okien
-│  │  ├─ hydra.*              # lista tagów narzędzia „wszystkie tagi” (Hydra Kainote) i jej edytor
-│  │  ├─ associations.*       # skojarzenia typów plików napisów (rejestr użytkownika w Windows)
-│  │  ├─ icons.*              # ikony SVG z zasobów rysowane w żądanym rozmiarze: barwione ikony paska (icon), ikona programu (appIcon)
-│  │  ├─ audiobox.*           # AudioView (QRhiWidget): waveform/spektrogram, karaoke, przyciski
-│  │  ├─ rhiquad.*            # jeden teksturowany prostokąt QRhi używany przez wideo i audio
-│  │  ├─ findreplace.*        # FindDialog: szukaj/zamień, „znajdź wszystko”, szukanie i zamiana w plikach, okno wyników
-│  │  ├─ selectlines.*        # SelectLinesDialog: „Zaznacz linie” Aegisuba
-│  │  ├─ styleeditor.*        # StyleEditor: edytor stylu z podglądem, katalogi czcionek Kainote
-│  │  ├─ stylemanager.*       # StyleManager: style pliku obok stylów katalogu, edytor w oknie lub zadokowany
-│  │  ├─ propertiesdialog.*   # PropertiesDialog: właściwości skryptu ([Script Info])
-│  │  ├─ historydialog.*      # HistoryDialog i nazwy kroków undo (undoStepName)
-│  │  ├─ resampledialog.*     # ResampleDialog: zmiana rozdzielczości
-│  │  ├─ fontcollector.*      # FontCollectorDialog: sprawdzenie, kopiowanie, pakowanie do zip, załączanie czcionek
-│  │  ├─ settingsdialog.*     # SettingsDialog: ustawienia, motywy, strony konwersji i domyślnych właściwości skryptu
-│  │  ├─ autosavedialog.*     # AutosaveDialog: „Otwórz plik autozapisu”
-│  │  ├─ spellcheckdialog.*   # SpellCheckDialog: okno sprawdzania pisowni
-│  │  ├─ attachmentsdialog.*  # AttachmentsDialog: załączniki
-│  │  ├─ kanjitimer.*         # KanjiTimerDialog: kanji timer Aegisuba
-│  │  ├─ assistants.*         # TranslationAssistant i StylingAssistant
-│  │  ├─ pasteover.*          # chooseFields: pola dla „Wklej na linie” i kopiowania kolumn
-│  │  ├─ tagbuttondialog.*    # TagButtonDialog: ustawienie przycisku tagu editboxa
-│  │  ├─ dialogutil.*         # wspólne dla okien i reszty programu: folder autozapisu, katalogi stylów, kolor ASS, ustawienia mediów, cache indeksów
-│  │  └─ automationhost.*     # dialogi aegisub.dialog, wybór plików, postęp
-│  ├─ icons/                  # ikony paska narzędzi i menu (Tabler Icons, SVG barwione w icons.cpp), zasoby Qt
-│  ├─ appicon/                # ikona programu, własna: fsed.svg i fsed-small.svg (poniżej 32 px) jako zasoby Qt dla okien;
-│  │                          #   tools/appicon.py robi z nich fsed.ico (zasób exe przez fsed.rc) i fsed.icns (pakiet macOS)
+│  │  ├─ main.cpp             # startup, smoke test (FSED_SMOKE*), crash report on Windows
+│  │  ├─ bridge.h             # Qt ↔ cxx conversions (QString ↔ rust::Str/String)
+│  │  ├─ mainwindow.h         # MainWindow: the only window header the rest of the program sees; the class spans several translation units:
+│  │  ├─ mainwindow.cpp       #   window, tabs at the bottom, two-tab view and comparison, command registry (add), closing
+│  │  ├─ mainwindow_menus.cpp #   menu bar: build order, Audio, View and Help menus, Kainote menu layout (layOutMenus table)
+│  │  ├─ mainwindow_filemenu.cpp, _editmenu.cpp, _videomenu.cpp, _subsmenu.cpp  #   File (with export and sessions), Edit, Video and Subtitles menu commands
+│  │  ├─ mainwindow_files.cpp #   opening by file type and pairing, saving, conversion, sessions, recent files, on-disk changes, autosave
+│  │  ├─ mainwindow_hotkeys.cpp  #   command shortcuts, hotkey dialog, event filter that hands panels their own keys
+│  │  ├─ mainwindow_bars.cpp  #   toolbar and status bar
+│  │  ├─ mainwindow_automation.cpp  #   autoload, Automation menu and script manager, running macros
+│  │  ├─ mainwindow_corrector.cpp   #   minor-error corrector (multireplacer rules)
+│  │  ├─ mainwindow_p.h       #   shared by these units only: struct Menus, file extensions, default toolbar, icon tints
+│  │  ├─ tabpanel.*           # one tab = document + video + audio + editbox + grid + timing panel
+│  │  ├─ grid.*               # custom grid (QAbstractScrollArea), filtering, shifting times with the mouse
+│  │  ├─ editbox.*            # line fields, tag buttons, translation mode (2 fields)
+│  │  ├─ shiftpanel.*         # "Shift times" panel and post-processor
+│  │  ├─ videobox.*           # VideoView (QRhiWidget), decoding thread, zoom, player mode
+│  │  ├─ visualtools.*        # \pos \move \org \clip \iclip \p, scale, rotation
+│  │  ├─ colorpicker.*        # Aegisub's colour dialog: spectrum in 5 modes, RGB/HSL/HSV, ASS/HTML, alpha, recent colours, eyedropper
+│  │  ├─ theme.*              # colour themes: colour roles, Dark/Light, user themes (.ini), window palette
+│  │  ├─ hydra.*              # tag list of the "all tags" tool (Kainote's Hydra) and its editor
+│  │  ├─ associations.*       # subtitle file type associations (per-user registry on Windows)
+│  │  ├─ icons.*              # SVG icons from resources drawn at the requested size: tinted toolbar icons (icon), program icon (appIcon)
+│  │  ├─ audiobox.*           # AudioView (QRhiWidget): waveform/spectrogram, karaoke, buttons
+│  │  ├─ rhiquad.*            # a single textured QRhi quad used by video and audio
+│  │  ├─ findreplace.*        # FindDialog: find/replace, "find all", find and replace in files, results window
+│  │  ├─ selectlines.*        # SelectLinesDialog: Aegisub's "Select Lines"
+│  │  ├─ styleeditor.*        # StyleEditor: style editor with preview, Kainote font catalogues
+│  │  ├─ stylemanager.*       # StyleManager: file styles next to storage styles, editor in the window or docked
+│  │  ├─ propertiesdialog.*   # PropertiesDialog: script properties ([Script Info])
+│  │  ├─ historydialog.*      # HistoryDialog and undo step names (undoStepName)
+│  │  ├─ resampledialog.*     # ResampleDialog: resolution resampling
+│  │  ├─ fontcollector.*      # FontCollectorDialog: checking, copying, zipping and attaching fonts
+│  │  ├─ settingsdialog.*     # SettingsDialog: settings, themes, conversion and default script properties pages
+│  │  ├─ autosavedialog.*     # AutosaveDialog: "Open autosave file"
+│  │  ├─ spellcheckdialog.*   # SpellCheckDialog: spell-check window
+│  │  ├─ attachmentsdialog.*  # AttachmentsDialog: attachments
+│  │  ├─ kanjitimer.*         # KanjiTimerDialog: Aegisub's kanji timer
+│  │  ├─ assistants.*         # TranslationAssistant and StylingAssistant
+│  │  ├─ pasteover.*          # chooseFields: fields for "Paste over" and column copy
+│  │  ├─ tagbuttondialog.*    # TagButtonDialog: editbox tag button setup
+│  │  ├─ dialogutil.*         # shared by dialogs and the rest of the program: autosave folder, style storages, ASS colour, media settings, index cache
+│  │  └─ automationhost.*     # aegisub.dialog dialogs, file pickers, progress
+│  ├─ icons/                  # toolbar and menu icons (Tabler Icons, SVGs tinted in icons.cpp), Qt resources
+│  ├─ appicon/                # the program's own icon: fsed.svg and fsed-small.svg (below 32 px) as Qt resources for windows;
+│  │                          #   tools/appicon.py turns them into fsed.ico (exe resource via fsed.rc) and fsed.icns (macOS bundle)
 │  └─ shaders/                # .vert/.frag → .qsb (qt_add_shaders)
 ├─ tests/
-│  └─ corpus/                 # prawdziwe pliki .ass/.srt/… (z licencją pozwalającą na redystrybucję)
-├─ vcpkg.json                 # ffmpeg, libass, bestsource (overlay port), xxhash — z baseline
-└─ .github/workflows/ci.yml  # testy 3× OS, budowa GUI i paczki ZIP
+│  ├─ corpus/                 # real .ass/.srt/… files (under licenses that allow redistribution)
+│  ├─ corpus-local/           # your own test files (git-ignored)
+│  └─ media/                  # generated test video and audio (tools/gen-test-media.sh)
+├─ tools/                     # deps.ps1/deps.sh (vcpkg media deps), smoke.sh, appicon.py, dictionaries.py, vcpkg-ports/
+├─ vcpkg.json                 # ffmpeg, libass, bestsource (overlay port), xxhash
+├─ vcpkg-configuration.json   # vcpkg registry baseline and overlay ports
+└─ .github/workflows/ci.yml  # tests (Windows, Linux), GUI build, smoke-tested ZIP packages, draft releases from v* tags
 ```
 
-## 3. Rdzeń (`fs-core`)
+## 3. Core (`fs-core`)
 
-### 3.1 Model dokumentu
+### 3.1 Document model
 
 ```text
 Document
-├─ source: SourceInfo        # BOM, kodowanie, dominujący koniec linii, czy plik kończył się newline
-├─ sections: Vec<Section>     # kolejność jak w pliku
-│   ├─ ScriptInfo  { header_raw, entries: Vec<InfoEntry> }      # klucz:wartość, komentarze ';', puste
+├─ source: SourceInfo        # BOM, encoding, dominant line ending, whether the file ended with a newline
+├─ sections: Vec<Section>     # in file order
+│   ├─ ScriptInfo  { header_raw, entries: Vec<InfoEntry> }      # key:value, ';' comments, blank lines
 │   ├─ Styles      { header_raw, format: FieldFormat, entries: Vec<StyleEntry> }
 │   ├─ Events      { header_raw, format: FieldFormat, entries: Vec<EventEntry> }
-│   └─ Other       { header_raw, lines: Vec<RawLine> }           # [Fonts], [Graphics], [Aegisub Project Garbage], nieznane
-└─ (indeksy pomocnicze: styl→pozycja, id linii)
+│   └─ Other       { header_raw, lines: Vec<RawLine> }           # [Fonts], [Graphics], [Aegisub Project Garbage], unknown
+└─ (auxiliary indexes: style→position, line id)
 ```
 
-Każdy wpis (`StyleEntry`, `EventEntry`, `InfoEntry`) przechowuje:
+Each entry (`StyleEntry`, `EventEntry`, `InfoEntry`) stores:
 
-* `raw: Option<RawLine>`, czyli oryginalny tekst linii i jej zakończenie (`\r\n`, `\n` lub brak), dopóki wpis jest „czysty”;
-* sparsowane pola, czyli `Style`, `Event` albo `(key, value)`.
+* `raw: Option<RawLine>`: the original text of the line and its terminator (`\r\n`, `\n` or none), for as long as the entry is "clean";
+* the parsed fields: `Style`, `Event` or `(key, value)`.
 
-Zmiana pola czyści `raw`, a zapis serializuje wtedy wpis kanonicznie, według `Format:` sekcji i dominującego końca linii. Pola nieznane z `Format:` są przechowywane w `extra_fields`, żeby nie ginęły.
+Changing a field clears `raw`, and the writer then serializes the entry canonically, following the section's `Format:` and the dominant line ending. Fields unknown to `Format:` are kept in `extra_fields` so they are not lost.
 
-`Event`: `kind (Dialogue|Comment|Picture|Sound|Movie|Command)`, `layer`, `marked` (SSA), `start`, `end`, `style`, `actor`, `margin_l/r/v` (+ `margin_t/b` dla v4++), `effect`, `text`, a także `id` (stabilne, do undo i selekcji w GUI).
+`Event`: `kind (Dialogue|Comment|Picture|Sound|Movie|Command)`, `layer`, `marked` (SSA), `start`, `end`, `style`, `actor`, `margin_l/r/v` (+ `margin_t/b` for v4++), `effect`, `text`, plus `id` (stable, used for undo and GUI selection).
 
-`Style`: wszystkie pola v4+ (nazwa, font, rozmiar, 4 kolory `&HAABBGGRR`, bold, italic, underline, strikeout, scale_x/y, spacing, angle, border_style, outline, shadow, alignment, marginesy, alpha_level, encoding) z konwersją v4 (SSA) ↔ v4+ (ASS), czyli wyrównanie numpad ↔ legacy.
+`Style`: all v4+ fields (name, font, size, 4 colours `&HAABBGGRR`, bold, italic, underline, strikeout, scale_x/y, spacing, angle, border_style, outline, shadow, alignment, margins, alpha_level, encoding), with v4 (SSA) ↔ v4+ (ASS) conversion, i.e. numpad ↔ legacy alignment.
 
-### 3.2 Parser ASS
+### 3.2 ASS parser
 
-* Linie są dzielone z zachowaniem zakończeń, a BOM jest wykrywany (UTF-8 i UTF-16 przez `fs-formats::encoding`).
-* Sekcje są rozpoznawane bez względu na wielkość liter. Linia `Format:` ustala kolejność pól, a domyślne formaty to v4+/v4/v4++.
-* Ostatnie pole (`Text`) zawiera przecinki, a liczba podziałów wynika z liczby pól w `Format:`.
-* Parser toleruje błędy tak jak libass/Aegisub: brakujące pola, spacje, ujemne czasy, `0:00:00.0`, godziny > 9. Nieparsowalne linie trafiają jako `RawLine` z ostrzeżeniem w `ParseReport`.
+* Lines are split with their terminators preserved, and the BOM is detected (UTF-8 and UTF-16 via `fs-formats::encoding`).
+* Section names are matched case-insensitively. The `Format:` line sets the field order; the default formats are v4+/v4/v4++.
+* The last field (`Text`) may contain commas; the number of splits follows from the number of fields in `Format:`.
+* The parser is as error-tolerant as libass/Aegisub: missing fields, spaces, negative times, `0:00:00.0`, hours > 9. Unparseable lines are kept as `RawLine` with a warning in `ParseReport`.
 
-### 3.3 Tagi override (`fs-core::tags`)
+### 3.3 Override tags (`fs-core::tags`)
 
-Tokenizer bloków `{…}` daje `Text | Override(Vec<Tag>) | Comment | Drawing`. Rozpoznaje pełną listę tagów libass/VSFilter (`\pos \move \org \clip \iclip \fad \fade \t \k \kf \K \ko \kt \p \pbo \an \a \fn \fs \fsc \fscx \fscy \fsp \frx \fry \frz \fr \fax \fay \bord \xbord \ybord \shad \xshad \yshad \be \blur \c \1c-\4c \alpha \1a-\4a \b \i \u \s \q \r …`) i argumenty z tolerancją (np. `\pos(1,2` bez nawiasu). Z tokenizera korzystają narzędzia wizualne, karaoke, czyszczenie tagów, liczenie CPS i podmiana wartości (np. przesunięcie `\pos`). Zapis tagów jest minimalnie inwazyjny: zmienia się tylko dotknięty fragment tekstu.
+The `{…}` block tokenizer produces `Text | Override(Vec<Tag>) | Comment | Drawing`. It recognizes the full libass/VSFilter tag list (`\pos \move \org \clip \iclip \fad \fade \t \k \kf \K \ko \kt \p \pbo \an \a \fn \fs \fsc \fscx \fscy \fsp \frx \fry \frz \fr \fax \fay \bord \xbord \ybord \shad \xshad \yshad \be \blur \c \1c-\4c \alpha \1a-\4a \b \i \u \s \q \r …`) and parses arguments leniently (e.g. `\pos(1,2` without the closing parenthesis). The tokenizer is used by the visual tools, karaoke, tag cleaning, CPS calculation and value substitution (e.g. shifting `\pos`). Tag writing is minimally invasive: only the affected part of the text changes.
 
-Podświetlanie składni (`fs-core::syntax`) to port lexera Aegisuba (`TokenizeDialogueBody`, `MarkDrawings`, `SyntaxHighlight`) jako ręcznie pisany automat z tą samą regułą najdłuższego dopasowania. Rozróżnia nawiasy, ukośniki i nawiasy okrągłe, nazwy tagów, parametry, komentarze, łamania linii, kod i zmienne szablonu karaoke (tylko w linijkach-szablonach). Rysunki (`\p` > 0 i wektorowy `\clip`) dzieli na polecenia, współrzędne X/Y i punkty końcowe krzywych, a błędy oznacza (brak `m` na początku, nieparzysta liczba współrzędnych, polecenie sklejone z liczbą). Wynikiem są przebiegi (styl, długość). Most zwraca je w jednostkach UTF-16 dla `QSyntaxHighlighter`. Testy Aegisuba są przeniesione 1:1.
+Syntax highlighting (`fs-core::syntax`) is a port of Aegisub's lexer (`TokenizeDialogueBody`, `MarkDrawings`, `SyntaxHighlight`) as a hand-written state machine with the same longest-match rule. It distinguishes braces, backslashes and parentheses, tag names, parameters, comments, line breaks, and karaoke template code and variables (only in template lines). Drawings (`\p` > 0 and vector `\clip`) are split into commands, X/Y coordinates and curve end points, and errors are flagged (no `m` at the start, an odd number of coordinates, a command glued to a number). The result is a list of runs (style, length). The bridge returns them in UTF-16 units for `QSyntaxHighlighter`. Aegisub's tests are ported 1:1.
 
-### 3.4 Czas i VFR
+### 3.4 Time and VFR
 
-* `Time(i64 ms)` z formatowaniem i parsowaniem ASS (`H:MM:SS.cc`), SRT (`HH:MM:SS,mmm`) i klatek.
+* `Time(i64 ms)` with formatting and parsing for ASS (`H:MM:SS.cc`), SRT (`HH:MM:SS,mmm`) and frames.
 * `FrameRate`:
   * `Cfr { num, den }`;
-  * `Vfr { timestamps: Vec<i64> }` z timecodów v1/v2 albo z BestSource.
-  * Operacje: `frame_at_time(ms, Start|End|Exact)` i `time_at_frame(frame, Start|End|Exact)` z semantyką Aegisub (czas startu linii = środek między klatkami), zapis timecodów v2 oraz ekstrapolacja za ostatnią klatką.
-* Pliki keyframes: Aegisub (`# keyframe format v1`), XviD pass, x264 stats, SCXviD/WWXD.
+  * `Vfr { timestamps: Vec<i64> }` from v1/v2 timecodes or from BestSource.
+  * Operations: `frame_at_time(ms, Start|End|Exact)` and `time_at_frame(frame, Start|End|Exact)` with Aegisub semantics (a line's start time is the midpoint between frames), writing v2 timecodes, and extrapolation past the last frame.
+* Keyframe files: Aegisub (`# keyframe format v1`), XviD pass, x264 stats, SCXviD/WWXD.
 
 ### 3.5 Undo
 
-Undo opiera się na transakcjach: `doc.edit("Opis", |tx| { … })`. Transakcja zbiera listę zmian odwracalnych (`InsertEvent`, `RemoveEvent`, `ModifyEvent{old,new}`, analogicznie dla stylów, `ScriptInfo` i całych sekcji). Historia ma dwa stosy, limit kroków i budżet pamięci (512 MB). Krok kosztuje tylko linie, których nie współdzieli ze stanem po nim (dokument to `Arc`-owane linie kopiowane przy zapisie), więc sortowanie 50 000 linii jest prawie darmowe, a zmiana każdej linii kosztuje cały plik. Najstarsze kroki odpadają ponad budżet, ale 20 ostatnich zostaje zawsze. „Amend” scala kolejne zmiany tego samego typu, np. pisanie w jednym polu. Każda transakcja zwraca `ChangeSet` (zakres dotkniętych wierszy), więc GUI odświeża tylko to, co trzeba. Undo stack jest per dokument (per karta).
+Undo is transaction-based: `doc.edit("Description", |tx| { … })`. A transaction collects a list of reversible changes (`InsertEvent`, `RemoveEvent`, `ModifyEvent{old,new}`, and the equivalents for styles, `ScriptInfo` and whole sections). The history has two stacks, a step limit and a memory budget (512 MB). A step costs only the lines it does not share with the state after it (the document is made of `Arc`-shared, copy-on-write lines), so sorting 50,000 lines is almost free, while changing every line costs the whole file. The oldest steps are dropped above the budget, but the last 20 are always kept. "Amend" merges consecutive changes of the same kind, such as typing in one field. Every transaction returns a `ChangeSet` (the range of affected rows), so the GUI refreshes only what it has to. The undo stack is per document (per tab).
 
-### 3.6 Operacje (`fs-core::ops`)
+### 3.6 Operations (`fs-core::ops`)
 
-Wszystkie operacje są wywoływalne z CLI, GUI i Lua:
+All operations can be called from the CLI, the GUI and Lua:
 
-* przesuwanie czasów (o czas lub o klatki, wszystkie/zaznaczone/od linii, start/koniec/oba, z ograniczeniem do stylów); w gridzie przesuwa się przeciągnięciem lub skrótami, jak w Kainote;
-* sortowanie (start, koniec, styl, aktor, efekt, warstwa);
-* filtrowanie (styl, aktor, efekt, tekst/regex, komentarze, zaznaczone, kolizje); filtr to widok, nie modyfikacja. Linijki ukryte ręcznie i te, które filtr zostawia ukryte („nie resetuj”), są zapamiętane po identyfikatorach, więc wstawienie lub usunięcie linijek przed nimi ich nie przesuwa;
-* szukaj/zamień (zwykły tekst/regex, pola, z/bez tagów). Zamiana z regex czyta odwołania jak Aegisub (format Perla z boost): `$1`, `${1}`, `\1`–`\9` i `\\` jako jeden backslash. Wyjątkiem są tagi koloru i alfy (`\1c`, `\3a`), które zostają tagami, oraz `\N`, który zostaje łamaniem linii (Aegisub zostawia z niego samo „N”);
-* konwersja formatu jest krokiem undo razem z formatem i nazwą pliku: cofnięcie przywraca linijki, format i ścieżkę;
-* post-processor timingu (lead-in/out, łączenie sąsiednich, snap do keyframes);
-* resample rozdzielczości (`PlayResX/Y`, `\pos`, `\clip`, rysunki, marginesy, rozmiary, obrys);
-* zmiana FPS (CFR→CFR, VFR→CFR);
-* kolizje i nakładanie, CPS/długość linii (komórka CPS w gridzie czerwienieje stopniowo od progu ostrzeżenia do progu błędu, jak w Aegisub), czyszczenie tagów, łączenie i dzielenie linii;
-* karaoke: podział `\k` na sylaby i ich zapis;
-* zmiana jednego tagu w wielu linijkach (`tag_adjust`, Hydra Kainote i „zmiana wszystkich tagów” narzędzi skali i obrotu): dodanie, ustawienie, mnożenie przez numer linijki, gradienty, wstawienie (w miejscu kursora albo na początku linijki; dla `\t` wokół zaznaczonych tagów), krok od aktywnej linijki oraz skalowanie wszystkich wystąpień. Tag ma 1–4 wartości: alfa jedną, kolor trzy (R, G, B), `\pos`, `\fad` i `\t` swoje początkowe liczby. Zmiany względne obejmują też tagi wewnątrz `\t`, a linijka bez tagu na początku dostaje go tam (od wartości stylu), żeby zmieniła się cała. Liczone są zawsze od tekstu sprzed przeciągania, więc nic się nie kumuluje;
-* „utrzymanie proporcji” (`transform_place`): pozycje, oba punkty `\move`, `\org` i clipy przekształcone tą samą skalą lub obrotem wokół jednego punktu. Przy obrocie linijka z `\org` przesuwa tylko `\org`, bo libass już obraca ją wokół niego;
-* tryb tłumaczenia: para (oryginał, tłumaczenie) per linia, odczyt/zapis w formacie zgodnym z Kainote (szczegóły w `docs/research/kainote-ui.md`). Łączenie scala oryginały z oryginałami i tłumaczenia z tłumaczeniami (wiersz bez tłumaczenia wnosi pusty tekst), a czasy bierze z tłumaczeń. Dzielenie tnie połówkę, w której stoi kursor, a druga zostaje w całości w pierwszej części. Drzewa wstawiają opis przed oryginałem pary, a znacznik dostają obie połówki, więc zostaje po wyłączeniu trybu. „Rekombinacja” i podział karaoke działają tylko poza trybem, bo zależą od wspólnego tekstu linijek, którego oryginał i tłumaczenie nie mają.
+* time shifting (by time or by frames; all/selected/from a line onwards; start/end/both; optionally restricted to styles); in the grid, times are shifted by dragging or with shortcuts, as in Kainote;
+* sorting (start, end, style, actor, effect, layer);
+* filtering (style, actor, effect, text/regex, comments, selected, collisions); a filter is a view, not a modification. Lines hidden manually and lines the filter keeps hidden ("do not reset") are remembered by their identifiers, so inserting or deleting lines before them does not shift them;
+* find/replace (plain text/regex, fields, with/without tags). Regex replacement reads back-references the way Aegisub does (Perl format from boost): `$1`, `${1}`, `\1`–`\9`, and `\\` as a single backslash. The exceptions are colour and alpha tags (`\1c`, `\3a`), which stay tags, and `\N`, which stays a line break (Aegisub reduces it to a bare "N");
+* format conversion is an undo step together with the format and the file name: undoing it restores the lines, the format and the path;
+* timing post-processor (lead-in/out, linking adjacent lines, snapping to keyframes);
+* resolution resampling (`PlayResX/Y`, `\pos`, `\clip`, drawings, margins, sizes, outline);
+* FPS change (CFR→CFR, VFR→CFR);
+* collisions and overlaps, CPS/line length (the CPS cell in the grid turns gradually redder from the warning threshold to the error threshold, as in Aegisub), tag cleaning, joining and splitting lines;
+* karaoke: splitting `\k` into syllables and writing them back;
+* changing one tag across many lines (`tag_adjust`, Kainote's Hydra and the "change all tags" mode of the scale and rotation tools): add, set, multiply by the line number, gradients, insert (at the cursor or at the start of the line; for `\t`, around the selected tags), a step from the active line, and scaling every occurrence. A tag has 1–4 values: alpha one, a colour three (R, G, B), `\pos`, `\fad` and `\t` their leading numbers. Relative changes also cover tags inside `\t`, and a line with no tag at its start gets one there (from the style value) so that the whole line changes. Changes are always computed from the text as it was before the drag, so nothing accumulates;
+* "keep proportions" (`transform_place`): positions, both `\move` points, `\org` and clips transformed by the same scale or rotation around one point. When rotating, a line with `\org` moves only `\org`, because libass already rotates the line around it;
+* translation mode: a (original, translation) pair per line, read and written in a Kainote-compatible format (details in `docs/research/kainote-ui.md`). Joining merges originals with originals and translations with translations (a row with no translation contributes empty text) and takes the times from the translations. Splitting cuts the half the cursor is in, while the other half stays whole in the first part. Trees insert the description before the pair's original, and both halves get the marker, so it survives switching the mode off. "Recombine" and karaoke splitting work only outside the mode, because they depend on text shared between lines, which the original and the translation do not have.
 
-### 3.7 Czcionki i pisownia
+### 3.7 Fonts and spelling
 
-* `fs-core::fonts` zbiera kroje użyte w liniach (`\fn`, `\b`, `\i`, `\r`) razem ze znakami. Z funkcją `fontdb` szuka plików czcionek, także po nazwach GDI (ID 1/4/6), i wykrywa brakujące glify. Korzystają z tego `fsed fonts` i kolekcjoner czcionek w GUI, który przeszukuje też załączniki MKV.
-* folder czcionek zewnętrznych (Kainote): czcionki z niego renderuje libass (`ass_set_fonts_dir`, dla wideo otwartego po ustawieniu), widać je na listach czcionek (Qt), a kolektor szuka w nim jak w systemowych;
-* `fs-bridge::spell` opakowuje `spellbook` (słowniki Hunspell, także w kodowaniach typu ISO8859-2). Skaner słów pomija bloki `{…}`, `\N`/`\h` i rysunki `\p` i zwraca pozycje UTF-16 dla Qt.
+* `fs-core::fonts` collects the faces used in lines (`\fn`, `\b`, `\i`, `\r`) together with their characters. With the `fontdb` feature it finds font files, including by GDI names (IDs 1/4/6), and detects missing glyphs. This is used by `fsed fonts` and by the GUI font collector, which also searches MKV attachments.
+* external font folder (Kainote): libass renders fonts from it (`ass_set_fonts_dir`, for video opened after the folder is set), they appear in the font lists (Qt), and the collector searches it like the system fonts;
+* `fs-bridge::spell` wraps `spellbook` (Hunspell dictionaries, including encodings such as ISO8859-2). The word scanner skips `{…}` blocks, `\N`/`\h` and `\p` drawings, and returns UTF-16 positions for Qt.
 
-## 4. Formaty (`fs-formats`)
+## 4. Formats (`fs-formats`)
 
-| Format | Odczyt | Zapis | Uwagi |
+| Format | Read | Write | Notes |
 |---|---|---|---|
-| ASS (v4+, v4++) | ✔ | ✔ | bezstratnie (fs-core) |
-| SSA (v4) | ✔ | ✔ | konwersja stylów/wyrównania |
-| SRT | ✔ | ✔ | tagi `<i> <b> <u> <s> <font color>` ↔ override |
-| WebVTT | ✔ | ✔ | bloki `NOTE`/`STYLE`/`REGION` pomijane; `<i> <b> <u>` ↔ override, encje, `line`/`align` ↔ `\an` |
-| MPL2 | ✔ | ✔ | `[ds][ds]tekst`, `/` = kursywa, `|` = nowa linia |
-| MicroDVD | ✔ | ✔ | `{start}{end}`, `{1}{1}fps`, `{y:i}` itd., wymaga FPS |
-| TMP | ✔ | ✔ | `hh:mm:ss:tekst` (czas końca liczony) |
-| MPEG-4 Timed Text (TTXT) | ✔ | ✔ | XML GPAC, jak w Aegisub |
-| Adobe Encore | – | ✔ | eksport, czasy SMPTE przy wybranym FPS |
-| TranStation | – | ✔ | eksport, czasy SMPTE przy wybranym FPS |
-| EBU STL (tech 3264) | – | ✔ | eksport binarny z ustawieniami Aegisub (standard TV, kodowanie, zawijanie, przesunięcie TC) |
+| ASS (v4+, v4++) | ✔ | ✔ | lossless (fs-core) |
+| SSA (v4) | ✔ | ✔ | style/alignment conversion |
+| SRT | ✔ | ✔ | `<i> <b> <u> <s> <font color>` tags ↔ overrides |
+| WebVTT | ✔ | ✔ | `NOTE`/`STYLE`/`REGION` blocks skipped; `<i> <b> <u>` ↔ overrides, entities, `line`/`align` ↔ `\an` |
+| MPL2 | ✔ | ✔ | `[ds][ds]text`, `/` = italics, `|` = new line |
+| MicroDVD | ✔ | ✔ | `{start}{end}`, `{1}{1}fps`, `{y:i}` etc., requires FPS |
+| TMP | ✔ | ✔ | `hh:mm:ss:text` (end time computed) |
+| MPEG-4 Timed Text (TTXT) | ✔ | ✔ | GPAC XML, as in Aegisub |
+| Adobe Encore | – | ✔ | export, SMPTE times at the chosen FPS |
+| TranStation | – | ✔ | export, SMPTE times at the chosen FPS |
+| EBU STL (tech 3264) | – | ✔ | binary export with Aegisub's settings (TV standard, encoding, wrapping, TC offset) |
 
-Każdy importowany format (SRT, MicroDVD, MPL2, TMP, TTXT, zwykły tekst, też ścieżka z MKV) ma w ustawieniach własny katalog stylów menedżera, jak w Aegisub: wczytane napisy dostają jego style (domyślnie katalog „Default”), więc tak wyglądają na wideo i po konwersji do ASS. Media zapisane w skrypcie otwierają się z nim zawsze, nigdy albo po pytaniu z listą plików (Aegisub App/Auto/Load Linked Files); to, co już jest otwarte, zostaje.
+Each imported format (SRT, MicroDVD, MPL2, TMP, TTXT, plain text, and also an MKV track) has its own style manager storage in the settings, as in Aegisub: loaded subtitles get its styles (the "Default" storage by default), so that is how they look on video and after conversion to ASS. Media referenced in the script open with it always, never, or after a prompt listing the files (Aegisub's App/Auto/Load Linked Files); whatever is already open stays open.
 
-Kodowanie: UTF-8/UTF-16 z BOM jest rozpoznawane deterministycznie, w pozostałych przypadkach używany jest `chardetng` z preferencją Windows-1250 dla polskich plików. Zapis domyślnie UTF-8 z BOM, jak w Aegisub, albo w kodowaniu źródłowym.
+Encoding: UTF-8/UTF-16 with a BOM is detected deterministically; otherwise `chardetng` is used, with a preference for Windows-1250 for Polish files. Files are saved as UTF-8 with a BOM by default, as in Aegisub, or in the source encoding.
 
-## 5. Media i audio
+## 5. Media and audio
 
 * **`fs-media` (C++ + cxx)**
-  * `VideoSource`: BestSource `BestVideoSource`, z klatką RGBA dla dokładnego numeru klatki, tablicą timestampów (VFR), keyframes i rozdzielczością/SAR. Plik Matroska lub MP4 bez indeksu otwiera się z samych pakietów, jak FFMS2 w Aegisubie; BestSource indeksuje go w tle na połowie rdzeni i przejmuje klatki, gdy jego indeks ma te same. Do tego czasu ostatnio zdekodowane klatki zostają w pamięci (256 MB, tyle co cache BestSource), więc krok wstecz nie dekoduje wszystkiego od klatki kluczowej. Klatka wychodzi na dwa sposoby. `frame_rgba` konwertuje ją w swscale na CPU (bicubic, pełna interpolacja chromy w poziomie) macierzą i zakresem z nagłówka `YCbCr Matrix` skryptu, jak w Aegisubie (None: te z wideo, brak nagłówka: TV.601, wideo bez oznaczenia: zgadywane), bez konwersji gamutu i krzywej. Z niej jest zapis i kopia klatki, `blend` libass, pomiary narzędzi wizualnych i `fsed media frame`. `frame_planes` oddaje same płaszczyzny dekodera (planarne YUV 4:2:0, 4:2:2 i 4:4:4, od 8 do 16 bitów) i ich opis (`FramePlanes`): rozmiary, bajty na próbkę, macierz 3×4 na RGB z tych samych współczynników, których używa swscale (`sws_getCoefficients`, skalowanie zakresu, `yuvj*` jako pełny zakres), położenie pierwszej próbki chromy i sufit 15-bitowego wiersza swscale. Odtwarzanie bierze płaszczyzny, a RGB robi z nich karta graficzna (niżej, przy GUI). Klatka bez takich płaszczyzn idzie ścieżką RGBA: format spakowany, RGB, z alfą lub paletą, przeplot, macierz spoza obsługiwanych, a także klatka z metadanymi mastering display (HDR10), której kolory swscale mapuje po swojemu i która ma wyglądać jak dotąd. Pomiar (`decode_speed`, 4K HEVC 10 bitów, 60 kl./s, 61 Mbit/s): 14,3 ms na klatkę do RGBA, 6,3 ms do płaszczyzn (70 i 160 klatek na sekundę).
-  * `AudioSource`: `BestAudioSource`, z próbkami PCM `f32` dla zakresu próbek i gotowym mono `i16` wprost z ramek dekodera (`fill_mono`), każda ramka dekodowana raz. Cache ramek BestSource to lista przeszukiwana od początku przy każdej ramce, więc ma tu rozmiar dwóch najdłuższych ramek ścieżki, a nie stały: przy 40-próbkowych ramkach TrueHD cache 16 MB trzymał ich 40 000 i dziesięć minut dekodowało się dwie. `seeks()` mówi, czy BestSource umie przeskakiwać w ścieżce (w AC-3 i DTS-HD MA nie umie i każdy skok dekoduje od początku pliku), a `canceller()` przerywa odczyt z innego wątku. Plik z kilkoma ścieżkami audio wczytuje pierwszą pasującą do preferowanych języków lub nazw z ustawień (Kainote, `fs-bridge::media::preferred_track`), a bez dopasowania pyta, którą wczytać, jak Aegisub.
-  * skrypty Avisynth (`.avs`) i VapourSynth (`.vpy`) jako wideo i audio (`cpp/script.cpp`), za tymi samymi `VideoSource` i `AudioSource`, więc okno i `fsed media` otwierają je jak plik. Żadna z bibliotek nie jest linkowana: każda ładuje się przy pierwszym skrypcie swojego rodzaju, a gdy jej nie ma, otwarcie kończy się błędem, który mówi, co zainstalować.
-    * Avisynth: `avisynth.dll` z folderu programu albo systemowego (tam, gdzie szuka go Aegisub), poza Windows `libavisynth`, przez interfejs C (`avs_invoke` i pozostałe funkcje szukane po nazwie; struktury i stałe zadeklarowane u nas, bez nagłówka Avisynth). Skrypt wczytuje `Import`, jak w Aegisubie. Każde źródło ma własne środowisko, a wywołania idą pojedynczo, pod jednym muteksem.
-    * VapourSynth: biblioteka VSScript wskazana w ustawieniach, a bez tego ta z `VSSCRIPT_PATH`, z rejestru (`SOFTWARE\VapourSynth`, `VSScriptDLL`), ze ścieżki bibliotek i na końcu ta, którą poda `python -m vapoursynth get-vsscript` (instalacja z pip bez rejestracji; wpisy po starej instalacji, które wskazują nieistniejący plik, są pomijane). Nagłówki API (`cpp/vapoursynth/`, LGPL) opisują tylko struktury wskaźników, które VSScript oddaje. Wideo to pierwszy węzeł wideo wśród wyjść skryptu, audio pierwszy węzeł audio.
-    * Klatka zostaje w formacie klipu: jej płaszczyzny trafiają do `AVFrame` i przez ten sam `convert` co klatki z pliku, więc macierz, zakres i nagłówek `YCbCr Matrix` działają tak samo. Kolor klatki pochodzi z jej właściwości (`_Matrix`, `_ColorRange`, `_Transfer`, `_Primaries`, `_SARNum`/`_SARDen`; AviSynth+ ma te same nazwy), a bez nich macierz jest zgadywana z rozmiaru, jak w Aegisubie. Formatu, którego swscale nie czyta (YUV float, half float), rdzeń skryptu zamienia na 16 bitów tej samej rodziny, bez zmiany macierzy. Tylko Avisynth starszy niż 2.6 (opcja z Aegisuba, domyślnie wyłączona) sam robi RGB32 przez `ConvertToRGB32` z macierzą, o którą prosi edytor.
-    * Liczba klatek i FPS są z klipu, znaczniki czasu stałe. Skrypt VapourSynth może podać własne w `__aegi_timecodes` i klatki kluczowe w `__aegi_keyframes` (tablice liczb, jak w Aegisubie z VapourSynth); klip bez FPS bierze czas trwania pierwszej klatki. Avisynth klatek kluczowych nie podaje.
-    * Audio Avisynth idzie drogą Aegisuba: down-mixer z ustawień, `ConvertAudioTo16bit`, potem `ResampleAudio` do wymuszonej częstotliwości albo do 44100 Hz, gdy skrypt ma mniej niż 32000. Audio VapourSynth to próbki 16, 24, 32 bit albo float z klatek po 3072 próbki. Skrypt jest ewaluowany raz na źródło, więc ścieżkę dekoduje jeden dekoder, bez podziału na części. `list_tracks` podaje ścieżkę wideo i audio według tego, co skrypt oddaje, z ostatniej ewaluacji pliku w tej wersji.
-  * `SubtitleRenderer`: libass (`ass_read_memory` z aktualnego dokumentu), `render(time) → Vec<AssImage>`. Dla widoku rysuje same napisy jako RGBA z premultiplikowaną alfą, przycięte do prostokąta, który zajmują (`overlay_box`), i odpowiada „to samo co poprzednio”, gdy libass nie widzi zmiany, więc napisy stojące w miejscu nic nie kosztują; na klatkę nakłada je karta graficzna. `blend` nakłada je na klatkę RGBA na CPU (klatka zapisywana z napisami). GUI przekazuje wątkowi renderu kopię dokumentu w O(1) (`RenderSubs`). Zapis skryptu dla libass i rejestracja czcionek z `[Fonts]` odbywają się w tym wątku, nie w GUI.
-  * napisy zaszyte w pliku (`extract_subtitles`): Matroska ma indeks bloków (Cues), a FFmpeg i mkvmerge wpisują tam każdy blok ścieżki napisów razem z jego miejscem w klastrze, więc ścieżkę czyta się skokami, kilka bajtów na linijkę (`MatroskaIndex`: 0,6 s zamiast 21 s dla 124 kB napisów w filmie 23 GB). Indeksowi ufa się tylko wtedy, gdy wiadomo, że jest pełny (muxer Lavf albo tag `NUMBER_OF_FRAMES` mkvmerge równy liczbie wpisów), a każdy blok musi być tam, gdzie indeks mówi, należeć do ścieżki i mieć czas z indeksu; FFmpeg liczy miejsce bloku od identyfikatora klastra, a nie od jego zawartości, więc pierwszy blok rozstrzyga, która z dwóch konwencji obowiązuje. Wszystko inne (brak indeksu, kompresja, lacing, WebVTT, inny kontener) czyta się pakietami przez FFmpeg, czyli cały plik: postęp i anulowanie idą wtedy z samych odczytów pliku (`interrupt_callback`), bo FFmpeg odrzuca pozostałe ścieżki u siebie i oddaje sterowanie dopiero przy następnym napisie. Okno robi jedno i drugie poza swoim wątkiem (`read_embedded`), z oknem postępu po 300 ms, jak Aegisub przy Matrosce.
+  * `VideoSource`: BestSource's `BestVideoSource`, with an RGBA frame for an exact frame number, a timestamp table (VFR), keyframes and resolution/SAR. A Matroska or MP4 file without an index opens from its packets alone, like FFMS2 in Aegisub; BestSource indexes it in the background on half the cores and takes over the frames once its index has the same ones. Until then, recently decoded frames stay in memory (256 MB, the same as the BestSource cache), so stepping back does not decode everything from the keyframe. A frame comes out in two ways. `frame_rgba` converts it with swscale on the CPU (bicubic, full horizontal chroma interpolation) using the matrix and range from the script's `YCbCr Matrix` header, as Aegisub does (None: those of the video; no header: TV.601; untagged video: guessed), without gamut or transfer-curve conversion. It feeds frame saving and copying, libass `blend`, the visual tools' measurements and `fsed media frame`. `frame_planes` hands over the decoder's planes as they are (planar YUV 4:2:0, 4:2:2 and 4:4:4, 8 to 16 bits) along with their description (`FramePlanes`): sizes, bytes per sample, a 3×4 matrix to RGB built from the same coefficients swscale uses (`sws_getCoefficients`, range scaling, `yuvj*` as full range), the position of the first chroma sample, and the ceiling of swscale's 15-bit row. Playback takes the planes, and the graphics card turns them into RGB (see the GUI below). A frame without such planes goes the RGBA path: a packed format, RGB, alpha or palette, interlaced, an unsupported matrix, and also a frame with mastering display metadata (HDR10), whose colours swscale maps its own way and which should look as it did before. Measurement (`decode_speed`, 4K HEVC 10-bit, 60 fps, 61 Mbit/s): 14.3 ms per frame to RGBA, 6.3 ms to planes (70 and 160 frames per second).
+  * `AudioSource`: `BestAudioSource`, with `f32` PCM samples for a sample range and ready-made `i16` mono straight from the decoder's frames (`fill_mono`), each frame decoded once. BestSource's frame cache is a list searched from the start for every frame, so here it is sized to the track's two longest frames rather than a fixed amount: with TrueHD's 40-sample frames, a 16 MB cache held 40,000 of them and ten minutes took two to decode. `seeks()` reports whether BestSource can seek within the track (in AC-3 and DTS-HD MA it cannot, and every seek decodes from the start of the file), and `canceller()` aborts a read from another thread. A file with several audio tracks loads the first one matching the preferred languages or names from the settings (Kainote, `fs-bridge::media::preferred_track`), and with no match asks which one to load, as Aegisub does.
+  * Avisynth (`.avs`) and VapourSynth (`.vpy`) scripts as video and audio (`cpp/script.cpp`), behind the same `VideoSource` and `AudioSource`, so the window and `fsed media` open them like any file. Neither library is linked: each is loaded on the first script of its kind, and if it is missing, opening fails with an error saying what to install.
+    * Avisynth: `avisynth.dll` from the program folder or the system one (where Aegisub looks for it), `libavisynth` outside Windows, through the C interface (`avs_invoke` and the other functions looked up by name; structs and constants declared on our side, without the Avisynth header). The script is loaded with `Import`, as in Aegisub. Each source has its own environment, and calls are made one at a time under a single mutex.
+    * VapourSynth: the VSScript library set in the settings, otherwise the one from `VSSCRIPT_PATH`, from the registry (`SOFTWARE\VapourSynth`, `VSScriptDLL`), from the library path, and finally the one reported by `python -m vapoursynth get-vsscript` (a pip install without registration; entries left by an old installation that point to a missing file are skipped). The API headers (`cpp/vapoursynth/`, LGPL) describe only the pointer structs VSScript hands out. Video is the first video node among the script's outputs, audio the first audio node.
+    * The frame stays in the clip's format: its planes go into an `AVFrame` and through the same `convert` as frames from a file, so the matrix, range and `YCbCr Matrix` header work the same way. The frame's colour comes from its properties (`_Matrix`, `_ColorRange`, `_Transfer`, `_Primaries`, `_SARNum`/`_SARDen`; AviSynth+ uses the same names); without them the matrix is guessed from the size, as in Aegisub. A format swscale cannot read (float YUV, half float) is converted by the script core to 16 bits of the same family, without changing the matrix. Only Avisynth older than 2.6 (an Aegisub option, off by default) produces RGB32 itself through `ConvertToRGB32` with the matrix the editor asks for.
+    * The frame count and FPS come from the clip, with constant timestamps. A VapourSynth script can supply its own in `__aegi_timecodes` and keyframes in `__aegi_keyframes` (arrays of numbers, as in Aegisub with VapourSynth); a clip without FPS takes the duration of its first frame. Avisynth does not provide keyframes.
+    * Avisynth audio follows Aegisub's path: the down-mixer from the settings, `ConvertAudioTo16bit`, then `ResampleAudio` to the forced sample rate, or to 44100 Hz when the script has less than 32000. VapourSynth audio is 16-, 24- or 32-bit or float samples from frames of 3072 samples. The script is evaluated once per source, so the track is decoded by a single decoder, without splitting into parts. `list_tracks` reports the video and audio track according to what the script outputs, from the file's last evaluation at this version.
+  * `SubtitleRenderer`: libass (`ass_read_memory` from the current document), `render(time) → Vec<AssImage>`. For the view it draws only the subtitles, as premultiplied-alpha RGBA cropped to the rectangle they occupy (`overlay_box`), and answers "same as before" when libass sees no change, so stationary subtitles cost nothing; the graphics card composites them onto the frame. `blend` composites them onto an RGBA frame on the CPU (frame saved with subtitles). The GUI hands the render thread an O(1) copy of the document (`RenderSubs`). Writing the script for libass and registering fonts from `[Fonts]` happen on that thread, not on the GUI thread.
+  * embedded subtitles (`extract_subtitles`): Matroska has a block index (Cues), and FFmpeg and mkvmerge record every block of a subtitle track there together with its position in the cluster, so the track is read by seeking, a few bytes per line (`MatroskaIndex`: 0.6 s instead of 21 s for 124 kB of subtitles in a 23 GB film). The index is trusted only when it is known to be complete (the Lavf muxer, or mkvmerge's `NUMBER_OF_FRAMES` tag equal to the number of entries), and every block must be where the index says, belong to the track and have the time from the index; FFmpeg counts a block's position from the cluster ID rather than from its content, so the first block decides which of the two conventions applies. Everything else (no index, compression, lacing, WebVTT, another container) is read packet by packet through FFmpeg, i.e. the whole file: progress and cancellation then come from the file reads alone (`interrupt_callback`), because FFmpeg discards the other tracks internally and only returns control at the next subtitle. The window does both off its own thread (`read_embedded`), with a progress dialog after 300 ms, as Aegisub does with Matroska.
 * **`fs-audio` (Rust)**
-  * cache szczytów min/max per piksel w kilku poziomach zoomu (waveform). Sumy |x| poziomu są dzielone przez 4^poziom, więc mieszczą się w `u32` na każdym poziomie. Dekodowane PCM trafia od razu do współdzielonego bufora, bez drugiej kopii ścieżki. Audio jest dostępne zaraz po odczytaniu indeksu i dekoduje się w tle, jak cache RAM w Aegisubie (`PcmBuffer::load_in_background`): bufor ma od razu pełną długość, `ready()` mówi, ile próbek od początku jest zdekodowanych, a reszta to cisza. Szczyty dochodzą przyrostowo (`PeakCache::refresh`), kolumny widma sięgające w niezdekodowaną część nie trafiają do cache, a okno pyta o postęp co 100 ms i odrysowuje widok, gdy doszło coś, co pokazuje. Ścieżka dłuższa niż minuta dekoduje się w częściach (do czterech): każda dalsza część ma swój dekoder, który najpierw dekoduje jej początek na boku i bierze część dopiero wtedy, gdy doszedł tam skokiem w dwie sekundy. Dekoder, który nie umie przeskoczyć, jest przerywany, a jego część dekoduje poprzedni, po kolei. Puste audio (2h30m jak w Aegisub) ma 1 kHz: 18 MB zamiast 800;
-  * spektrogram: STFT przez `realfft` (okno Hanna, rozmiar 2^n zależny od zoomu), wynik w dB jako tekstury kolumnowe. Próbkowane kolumny leżą na wielokrotnościach jednego kroku dla całego widoku, więc przewinięty widok czyta kolumny z cache. Brakujące liczą się na wszystkich rdzeniach, a cache (64 MB) usuwa najdawniej czytane;
-  * odtwarzanie: `cpal` (WASAPI, ALSA/Pulse/PipeWire, CoreAudio), ring buffer, pozycja playheadu raportowana do GUI, resampling do częstotliwości urządzenia; urządzenie wyjścia można wybrać w ustawieniach (brakujące wraca do domyślnego). Opóźnienie audio (Kainote) przesuwa próbki raz przy wczytaniu (bufor zaczyna się o tyle wcześniej lub później niż ścieżka): cisza na początku albo obcięty początek, więc fala, widmo i odtwarzanie zgadzają się bez dalszych przeliczeń.
-* **GUI**: `VideoWidget` i `AudioWidget` dziedziczą po `QRhiWidget`. Działa to na D3D11/D3D12, Vulkan i Metal, a OpenGL jest fallbackiem.
-  * Widok wideo składa klatkę z napisami w teksturze o rozmiarze klatki i tylko wtedy, gdy zmieni się klatka albo napisy; narzędzia, zoom i przesuwanie rysują tę samą teksturę. Płaszczyzny (tekstury R8 lub R16, bufory z puli, wgrywane bez kopii) przechodzą dwa kroki, w tej samej kolejności co w swscale: `chroma.frag` rozciąga wiersze chromy do szerokości lumy (bicubic swscale: B = 0, C = 0,6, próbka brzegowa powtórzona, wiersz obcięty tak jak 15-bitowy wiersz swscale) do tekstury RGBA16F, a `yuv.frag` interpoluje je w pionie, dokłada lumę i mnoży przez macierz z `FramePlanes`. Klatka, która przyszła jako RGBA, jest do tej tekstury przepisywana. Na to idą napisy. Dopiero całość jest skalowana do widoku filtrem liniowym, tak jak wcześniej klatka z CPU, więc obraz zgadza się z poprzednim przy każdym powiększeniu: test `planes_shade_to_the_frame_swscale_makes` trzyma tę arytmetykę przy klatce swscale (szarości bez różnicy, kolor do 1 poziomu; 601 i 709, zakres ograniczony i pełny, 8 i 10 bitów), a zrzuty okna sprzed zmiany i po niej różnią się najwyżej o 2 poziomy. Jedno odstępstwo: przy chromie wyrównanej do środka swscale gubi jedną próbkę filtra w wierszu i kolumnie 2 lumy, a shader tego nie powtarza (tam do 6 poziomów).
-  * Bez tekstur R16 klatki głębsze niż 8 bitów, a bez renderowalnej RGBA16F wszystkie, przychodzą jako RGBA. `video/planes=false` w ustawieniach wymusza RGBA (do porównań).
-  * Tekstur tworzonych w `initialize` nie wypełnia się tam obrazem: wgranie czekałoby w partii na pierwszy `render`, który przy gotowej już klatce podmienia teksturę na inną, i trafiłoby do usuniętej.
+  * a per-pixel min/max peak cache at several zoom levels (waveform). A level's sums of |x| are divided by 4^level, so they fit in a `u32` at every level. Decoded PCM goes straight into a shared buffer, without a second copy of the track. Audio is available as soon as the index has been read and decodes in the background, like Aegisub's RAM cache (`PcmBuffer::load_in_background`): the buffer has its full length from the start, `ready()` reports how many samples from the beginning are decoded, and the rest is silence. Peaks are added incrementally (`PeakCache::refresh`), spectrum columns that reach into the undecoded part are not cached, and the window polls progress every 100 ms and redraws the view when something it shows has arrived. A track longer than a minute decodes in parts (up to four): each subsequent part has its own decoder, which first decodes the part's beginning on the side and takes over the part only once it got there with a two-second seek. A decoder that cannot seek is stopped, and its part is decoded by the previous one, in sequence. Dummy audio (2h30m, as in Aegisub) is 1 kHz: 18 MB instead of 800;
+  * spectrogram: STFT via `realfft` (Hann window, size 2^n depending on zoom), with the result in dB as column textures. Sampled columns lie on multiples of a single step for the whole view, so a scrolled view reads columns from the cache. Missing ones are computed on all cores, and the cache (64 MB) evicts the least recently read;
+  * playback: `cpal` (WASAPI, ALSA/Pulse/PipeWire, CoreAudio), ring buffer, playhead position reported to the GUI, resampling to the device rate; the output device can be chosen in the settings (a missing one falls back to the default). Audio delay (Kainote) shifts the samples once on load (the buffer starts that much earlier or later than the track): silence at the start or a trimmed beginning, so the waveform, spectrum and playback agree without further recalculation.
+* **GUI**: `VideoWidget` and `AudioWidget` derive from `QRhiWidget`. This works on D3D11/D3D12, Vulkan and Metal, with OpenGL as the fallback.
+  * The video view composes the frame and subtitles in a frame-sized texture, and only when the frame or the subtitles change; tools, zoom and panning draw that same texture. The planes (R8 or R16 textures, pooled buffers, uploaded without a copy) go through two passes, in the same order as in swscale: `chroma.frag` stretches chroma rows to luma width (swscale bicubic: B = 0, C = 0.6, edge sample repeated, row truncated like swscale's 15-bit row) into an RGBA16F texture, and `yuv.frag` interpolates vertically, adds luma and multiplies by the matrix from `FramePlanes`. A frame that arrived as RGBA is copied into that texture. The subtitles go on top. Only the result is scaled to the view with a linear filter, as the CPU frame was before, so the image matches the previous one at every zoom level: the test `planes_shade_to_the_frame_swscale_makes` holds this arithmetic to the swscale frame (greys identical, colour within 1 level; 601 and 709, limited and full range, 8 and 10 bits), and window screenshots from before and after the change differ by at most 2 levels. One deviation: with centre-sited chroma, swscale drops one filter tap in luma row and column 2, and the shader does not reproduce that (up to 6 levels there).
+  * Without R16 textures, frames deeper than 8 bits arrive as RGBA, and without a renderable RGBA16F, all of them do. `video/planes=false` in the settings forces RGBA (for comparisons).
+  * Textures created in `initialize` are not filled with an image there: the upload would wait in the batch for the first `render`, which, with a frame already available, swaps the texture for another one, and the upload would land in a deleted texture.
 
-## 6. Automatyzacja (`fs-automation`)
+## 6. Automation (`fs-automation`)
 
-* `mlua` z funkcjami `luajit` i `vendored`; lpeg kompilowany przez `cc` i rejestrowany jako `lpeg`. luabins (C, z podprojektu Aegisub) też jest kompilowany przez `cc`; `require "luabins"` najpierw pokazuje ostrzeżenie Aegisub o przestarzałej bibliotece, a potem zwraca prawdziwy moduł.
-* Globalna tablica `aegisub` z pełnym API Automation 4: `register_macro`, `register_filter`, `progress`, `debug`, `log`, `dialog`, `cancel`, `text_extents`, `frame_from_ms`, `ms_from_frame`, `video_size`, `keyframes`, `decode_path`, `file_name`, `project_properties`, `get_audio_selection`, `set_undo_point`, `gettext`, `lua_automation_version = 4`.
-* Obiekt `subtitles` jako userdata z indeksowaniem 1..n po wszystkich liniach (info, style, eventy, format), `insert`, `append`, `delete`, `deleterange` i `[0]=`. Mapowanie na transakcję undo dokumentu.
-* Pliki include z Aegisub (karaskel, utils, unicode, cleantags, `aegisub.re`/`aegisub.unicode`/`aegisub.util` itd.), redystrybuowane zgodnie z ich licencjami (BSD/ISC), opisane w `THIRD_PARTY.md`.
-* Eksport symboli C wymaganych przez moduły FFI (regex, clipboard) i moduł `lfs`.
-* Okno postępu działa jak `DialogProgress` z Aegisub: `aegisub.debug.out` i błędy skryptu pojawiają się w nim na bieżąco, a jeśli skrypt coś napisał, okno zostaje otwarte z przyciskiem „Zamknij”. Tekst spoza uruchomienia (np. błąd funkcji `validate`) trafia od razu do okna logu.
-* Menu Automatyzacji przy otwarciu pobiera stan wszystkich makr jednym wywołaniem: zaznaczenie i kontekst projektu liczą się raz. `validate` może zastąpić opis w pasku stanu, a makro z `is_active` jest pozycją z zaznaczeniem (COMMAND_TOGGLE z Aegisub).
-* `aegisub.video_size` zwraca proporcje i ich tryb jak Aegisub (Video AR Mode/Value projektu; wideo z niekwadratowymi pikselami to tryb własny). `text_extents` trzyma DC i czcionki w wątku zamiast tworzyć je przy każdym wywołaniu.
-* Makra i filtry eksportu działają w wątku roboczym; okno postępu przenosi dialogi do GUI. Pierwsze „Anuluj” ustawia `is_cancelled` (jak w Aegisub), drugie („Zatrzymaj skrypt”) przerywa skrypt hookiem LuaJIT nawet wtedy, gdy nie sprawdza anulowania. Pętli w całości skompilowanej przez JIT, bez wywołań, hook nie przerwie.
-* Eksport jak `DialogExport` z Aegisub. Łańcuch filtrów tworzą wbudowane „Transform Framerate” (priorytet 1000) i „Fix Styles” (−5000) oraz filtry skryptów w kolejności wczytania, posortowane malejąco po priorytecie; powtórzona nazwa dostaje „ (N)”. Okno dostaje panele konfiguracji wszystkich filtrów od razu (w wątku roboczym). Lista zaznaczonych filtrów (w kolejności z listy) trafia do pliku jako „Export Filters”, nawet po anulowaniu, a kodowanie jako „Export Encoding”. Wartości paneli skryptów są pamiętane w sesji dokumentu w formacie Aegisub (`nazwa:wartość|…`, zakodowane jak `inline_string_encode`), nie w pliku. Filtry działają na kopii dokumentu w wybranej kolejności.
-* Skrypty lokalne pliku („Automation Scripts”, `LocalScriptManager` z Aegisub): znaczniki `~` (folder pliku), `$` (folder automatyzacji) i `/` (ścieżka bezwzględna). Przy otwarciu pliku program pyta, czy ufasz autorom. Nieznany znacznik i brakujący plik dają ostrzeżenia Aegisub. Skrypt dodany ręcznie trafia na listę pliku pod najkrótszą z tych postaci, a usunięty w menedżerze z niej znika.
-* Skrypty per plik, jak okna Aegisuba: skrypty z autoload służą wszystkim kartom, a pozostałe tylko plikom, które mają je na liście „Automation Scripts”. Menu, eksport i menedżer karty pokazują tylko jej skrypty. Makra skryptu innego pliku nie da się uruchomić. Zamknięcie karty usuwa skrypty, których nie ma już żaden otwarty plik.
-* Autoload wczytuje skrypty równolegle, jak Aegisub (`std::async`): jeden stan Lua na skrypt, pula wątków o rozmiarze `available_parallelism`. Kolejność menu zostaje kolejnością plików, a skrypt, który spowoduje panikę, jest zgłaszany i pomijany.
-* `Automation/Trace Level` (Ustawienia → Automatyzacja) to wspólny atomik czytany przy każdym `aegisub.debug.out`, więc zmiana działa też w skryptach już wczytanych.
-* MoonScript: dołączony kompilator `moonscript` (Lua), który wymaga `lpeg`.
-* DependencyControl: ścieżki `?user/automation/include`, `?user/automation/autoload`, `lfs`, `ffi`, `json`.
-* Specyfikacja: `docs/research/automation4.md`.
+* `mlua` with the `luajit` and `vendored` features; lpeg is compiled through `cc` and registered as `lpeg`. luabins (C, from the Aegisub subproject) is also compiled through `cc`; `require "luabins"` first shows Aegisub's deprecated-library warning and then returns the real module.
+* A global `aegisub` table with the full Automation 4 API: `register_macro`, `register_filter`, `progress`, `debug`, `log`, `dialog`, `cancel`, `text_extents`, `frame_from_ms`, `ms_from_frame`, `video_size`, `keyframes`, `decode_path`, `file_name`, `project_properties`, `get_audio_selection`, `set_undo_point`, `gettext`, `lua_automation_version = 4`.
+* The `subtitles` object as userdata indexed 1..n over all lines (info, styles, events, format), `insert`, `append`, `delete`, `deleterange` and `[0]=`. Mapped onto a document undo transaction.
+* Include files from Aegisub (karaskel, utils, unicode, cleantags, `aegisub.re`/`aegisub.unicode`/`aegisub.util` etc.), redistributed under their licenses (BSD/ISC) and listed in `THIRD_PARTY.md`.
+* Export of the C symbols required by FFI modules (regex, clipboard) and the `lfs` module.
+* The progress dialog behaves like Aegisub's `DialogProgress`: `aegisub.debug.out` and script errors appear in it as they happen, and if the script wrote anything, the dialog stays open with a "Close" button. Text produced outside a run (e.g. an error in a `validate` function) goes straight to the log window.
+* When opened, the Automation menu fetches the state of all macros in a single call: the selection and the project context are computed once. `validate` can replace the description in the status bar, and a macro with `is_active` is a checkable item (Aegisub's COMMAND_TOGGLE).
+* `aegisub.video_size` returns the aspect ratio and its mode as Aegisub does (the project's Video AR Mode/Value; video with non-square pixels is a custom mode). `text_extents` keeps the DC and fonts per thread instead of creating them on every call.
+* Macros and export filters run on a worker thread; the progress dialog marshals dialogs to the GUI. The first "Cancel" sets `is_cancelled` (as in Aegisub); the second ("Stop script") aborts the script through a LuaJIT hook even if it does not check for cancellation. A loop compiled entirely by the JIT, with no calls, cannot be interrupted by the hook.
+* Export works like Aegisub's `DialogExport`. The filter chain consists of the built-in "Transform Framerate" (priority 1000) and "Fix Styles" (−5000) plus script filters in load order, sorted by descending priority; a repeated name gets " (N)". The dialog receives the configuration panels of all filters at once (built on the worker thread). The list of checked filters (in list order) is written to the file as "Export Filters", even after cancelling, and the encoding as "Export Encoding". Script panel values are remembered in the document session in Aegisub's format (`name:value|…`, encoded like `inline_string_encode`), not in the file. Filters run on a copy of the document in the chosen order.
+* File-local scripts ("Automation Scripts", Aegisub's `LocalScriptManager`): the `~` (file folder), `$` (automation folder) and `/` (absolute path) prefixes. When a file is opened, the program asks whether you trust its authors. An unknown prefix and a missing file produce Aegisub's warnings. A manually added script goes onto the file's list under the shortest of these forms, and one removed in the manager disappears from it.
+* Per-file scripts, like Aegisub's windows: autoload scripts serve all tabs, and the others only the files that have them on their "Automation Scripts" list. A tab's menu, export and manager show only its scripts. A macro from another file's script cannot be run. Closing a tab unloads the scripts no open file uses any more.
+* Autoload loads scripts in parallel, as Aegisub does (`std::async`): one Lua state per script, a thread pool sized to `available_parallelism`. Menu order stays file order, and a script that panics is reported and skipped.
+* `Automation/Trace Level` (Settings → Automation) is a shared atomic read on every `aegisub.debug.out`, so changing it also affects scripts that are already loaded.
+* MoonScript: the bundled `moonscript` compiler (Lua), which requires `lpeg`.
+* DependencyControl: the `?user/automation/include` and `?user/automation/autoload` paths, `lfs`, `ffi`, `json`.
+* Specification: `docs/research/automation4.md`.
 
-## 7. GUI (Qt 6 Widgets) — układ Kainote
+## 7. GUI (Qt 6 Widgets) — Kainote layout
 
-Szczegóły są w `docs/research/kainote-ui.md`. W skrócie:
+Details are in `docs/research/kainote-ui.md`. In short:
 
-* menu, pasek narzędzi i pasek kart (wiele plików naraz, każda karta ma własny dokument, wideo, audio i undo). Kilka plików otwartych naraz (upuszczonych, z wiersza poleceń albo z okna otwierania) łączy się jak w Kainote: napisy i wideo w kolejności nazw („ep2” przed „ep10”) tworzą pary, każda w osobnej karcie, a audio i klatki kluczowe trafiają do ostatniej;
-* karta zawiera wideo (lewa góra) i obok edytor linii; audio jest nad edytorem, a grid na dole;
-* Kainote w polu edycji: dwuklik na słowie zaznacza tłem pozostałe jego wystąpienia w linijce (całe słowo, bez względu na wielkość liter, także zaraz po `\N` i `\h`; kolor w motywie), dopóki to słowo jest zaznaczone; lista tagów podpowiadanych po `\` mówi przy każdym, co robi (`TagListDelegate`);
-* edytor stylu w oknie menedżera stylów (Kainote, pole wyboru „Edytuj style w tym oknie”, domyślnie osobne okno jak w Aegisubie): stoi obok list i zostaje otwarty przy wybieraniu kolejnych stylów; edytowany styl i pozostałe zaznaczone są przy każdym „Zastosuj” szukane po nazwie (`fileApply` / `storageApply`), więc zmiana list pod otwartym edytorem niczego nie myli, a zmiana karty lub katalogu go zamyka;
-* sprawdzanie aktualizacji (Aegisub, Kainote; `updates.*`): Pomoc → „Sprawdź aktualizacje” pyta GitHuba o najnowsze wydanie i porównuje numery wersji; nowszą proponuje z opisem wydania i przyciskami strony pobierania, pominięcia tej wersji i przypomnienia. Sprawdzanie przy starcie (raz dziennie) jest wyłączone, dopóki użytkownik nie włączy go w ustawieniach, bo to jedyne miejsce, w którym program sam łączy się z siecią. Otwierana jest tylko strona wydań projektu, cokolwiek przyszło w odpowiedzi;
-* Kainote: Shift+klik na przyciskach audio, pola edycji i wideo przypisuje skrót komendy przycisku, a podpowiedź pokazuje jej klawisz. Multireplacer (Popraw drobne błędy) jest niemodalny: reguły mają „tylko w tagach” i wielkość liter (jak w znalezionym, jak wpisano, małe, wielkie), linie to wszystkie, zaznaczone, od zaznaczonej albo ze stylów; Znajdź błędy (w karcie lub we wszystkich) daje listę wyników do odznaczenia i zamiany w miejscu (rdzeń: `replace_rule_matches`, jeden krok cofania na kartę; każdy wynik zamieniany tak, jak go znaleziono w tekście linii, wynik nachodzący na inny już zamieniony jest pomijany, a linie ukryte filtrem siatki nie wchodzą do wyszukiwania), a Zamień działa też we wszystkich kartach. Menu wideo ma strumienie audio (przy kilku ścieżkach, z zaznaczoną wczytaną; wybór przeładowuje audio) i napisów z pliku (wczytywane do karty po pytaniu o zapis, z zaznaczoną ścieżką w karcie, póki nie zastąpi jej inny plik). Nazwy z danych (pliki, style, ścieżki, rozdziały, makra, karty) zachowują „&” w menu i na kartach (`fs::menuText`/`fs::plainText`), a pytanie o zapis bez odpowiedzi niczego nie zapisuje. Opcje: liczenie spacji i interpunkcji w łamaniach, aktywna linia po Ctrl+klik, łączenie „n” w auto-podziale karaoke, przesuwanie granicy sylaby kliknięciem, początkowe powiększenie wideo, czcionka programu, pasek stanu pola tekstu w menu, filtr słów w autozapisach, usuwanie wielu słów słownika, porównanie według wybranych stylów, połączone rozdzielczości we właściwościach, okno usuwania plików tymczasowych (wybrane, wszystkie, starsze od daty), a skrót „ukryj oryginał” bierze oryginał linii w nawiasy klamrowe;
-* Kainote: podział linii na znaki, słowa i łamania daje każdemu kawałkowi pełne czasy linii i własny \pos albo \move w miejscu, gdzie był (z rozmiarów tekstu w stylu po tagach, \an linii, tagi sprzed kawałka zachowane, \org przy obrocie); podział na klatki zamienia \move na \pos z danej klatki. Do przypisania: przycisk czcionki, wklejanie całości i zaznaczenia do tłumaczenia, ukrycie oryginału, przyciski tagów 1–20, Stop, pasek postępu, proporcje i usunięcie wideo, usunięcie nieużywanych stylów. Edytor stylu ma filtr czcionek po znakach (domyślnie polskie litery, do zmiany w ustawieniach);
-* Kainote: otwarcie wideo proponuje napisy o tej samej nazwie (do bieżącej karty, z pytaniem o zapis), a otwarcie napisów bez wideo, które nie wskazują żadnego, proponuje wideo o tej samej nazwie z folderu; pliki otwierane razem paruje dalej openFiles bez pytań. „Otwórz wideo” z menu idzie tą samą drogą. W ustawieniach wideo są przesunięcia (ms) czasów wstawianych z wideo, nigdy przed zerem;
-* Aegisub: przy włączonej pozycji wideo audio cieniuje zakres poprzedniej i bieżącej klatki (kolory w motywie). „Pokaż oryginał” w polu edycji pokazuje tekst linii z chwili jej zaznaczenia (tylko do odczytu), z przyciskami Przywróć, Wyczyść, Wyczyść tekst (zostawia tagi, komentarze i rysunki) i Wstaw oryginał; dwie nowe komendy dostają skróty. Asystent stylów ma własne klawisze do przypisania (Enter zatwierdza, F8 podgląd, PgUp/PgDown linie, Home wideo, End audio) i ramkę „Klawisze”, otwiera się raz. Krzyżyk z Shiftem podaje współrzędne od prawej i dolnej krawędzi, z trzema miejscami po przecinku, gdy wideo jest większe niż rozdzielczość skryptu; dwuklik przenosi tam aktywną linię, a pozostałe zaznaczone o tyle samo (\pos, \move, \org). Na pełnym ekranie dwuklik dalej z niego wychodzi, a bez linii przełącza pełny ekran;
-* Aegisub: prawy klik na pasku sylab zmienia tag karaoke całej linijki na \k, \kf albo \ko (jeden krok cofania; obecny jest zaznaczony). Cofnij i Ponów nazywają krok, który wezmą („Cofnij: Edycja linii”, „Nic do cofnięcia”), a nazwy kroków są tłumaczone także w Historii. Komendy, które nie mają na czym działać, są wyszarzone, jak w Aegisubie: zamknięcie i zapis fragmentu audio, zapis i zamknięcie klatek kluczowych i timecodów, szczegóły wideo, cofnięcie do zapisu. Stan jest sprawdzany przy otwarciu menu i po każdej zmianie;
-* próbnik koloru z Kainote: prawy klik na przycisku koloru w polu edycji otwiera małe okno w miejscu myszy (pipeta, lupa ekranu, kod koloru), kolor od razu widać w linijce, Anuluj cofa; ustawienie zamienia kliknięcia z oknem wyboru koloru;
-* katalogi czcionek z Kainote: nazwane listy rodzin czcionek w ustawieniach (czcionka może być w kilku); w edytorze stylu lista czcionek zawężona do katalogu (lub do czcionek bez katalogu), „+” dodaje lub zabiera bieżącą czcionkę z katalogu, okno katalogów (dodaj / zmień nazwę / usuń, czcionki z podglądem do zaznaczania, filtr);
-* edycja wielu stylów naraz (Kainote): Edytuj przy kilku zaznaczonych stylach — po pytaniu pozostałe dostają to, co zmieniło się w edytowanym (bez nazwy), w pliku jednym krokiem cofania (`style_with_changes` / `change_styles`), w magazynie z zapisem katalogu;
-* wyszukiwanie zaznaczonej frazy w sieci z menu pola edycji (Kainote): ling.pl, bab.la, Google, synonim.net;
-* pasek narzędzi wizualnych na pełnym ekranie (Kainote): przełącznik „Pokaż pasek narzędzi” w panelu pełnego ekranu, domyślnie włączony przy edycji napisów, zapamiętywany;
-* zamiana zaznaczonych wyników wyszukiwania (Kainote): pola wyboru przy dopasowaniach i plikach, Zaznacz / Odznacz wszystko, własny tekst zamiany; każde zaznaczone dopasowanie zamieniane tam, gdzie je znaleziono, jednym krokiem cofania na plik (`replace_matches`), linijki zmienione od wyszukania pomijane; pliki z folderu najpierw kopiowane do ReplaceBackup, potem zapisywane w swoim formacie; po zamianie przycisk czeka na nowe wyszukanie;
-* domyślne właściwości skryptu z Kainote (Tytuł, Autor, Tłumaczenie, Korekta, Timing, Edycja): strona ustawień z wartością i zaznaczeniem każdej; przy zapisie do ASS zaznaczone różne od pliku są ustawiane jednym krokiem cofania, po potwierdzeniu (Zmień / Zostaw obecne / Zmień i wyłącz potwierdzenie / Anuluj zapis), gdy włączone;
-* sposób wczytywania skryptów autoload z Kainote: przy starcie (domyślnie, jak w Aegisubie) lub w tle, albo przy pierwszym otwarciu menu Automatyzacja (w tle lub od razu); wczytywanie w tle to osobny wątek (`start_autoload` / `finish_autoload`), menu otwarte w trakcie pokazuje wiersz o wczytywaniu i przebudowuje się po jego końcu; menedżer, eksport i skróty makr jeszcze niewczytanych skryptów najpierw kończą wczytywanie;
-* sesje w plikach (Kainote'owe zapisywanie i wczytywanie sesji): własny format `.fses` (JSON: pliki zakładek — napisy, a bez nich wideo — i indeks zakładki z przodu), otwierany też z linii poleceń i przeciąganiem; przed zapisem pytanie o niezapisane zmiany, brakujące pliki pomijane przy wczytaniu; bez importu `.kls`;
-* limit plików indeksów BestSource (Aegisubowy CleanCache indeksów FFMS2, 20 plików / 42 MB; limit plików cache Kainote): po każdym otwarciu wideo lub audio, w osobnym wątku; indeksy otwartego pliku dostają bieżącą datę, więc znikają najdawniej używane, a nie te w użyciu (`fs_media::clean_cache`);
-* ustawienia konwersji z Kainote (`Session::convert_with`, jeden krok cofania): do ASS rozdzielczość wideo albo nowych plików (u Kainote stałe 1280×720), styl z katalogu w miejsce Default, tagi na początku linii; nowe czasy końca według liczby znaków bez tagów (min. 1 s, przycięte do następnej linii; TMP zawsze); FPS MicroDVD bez wideo; okno ustawień przed konwersją;
-* dalsze opcje Kainote: pełny ekran dla samego wideo przy starcie, bez ostrzeżeń narzędzi wizualnych, linia widziana na pełnym ekranie i linia z czasem poprzedniej karty jako aktywne (linia z tym czasem albo najbliższy początek), sortowanie przy otwieraniu (krok cofania tylko przy zmianie kolejności; posortowane nie dostaje pustego kroku), wartości przesuwania czasów przechodzące między kartami;
-* zachowania z Kainote (opcje, domyślnie jak w Aegisubie): napisy w bieżącej karcie, Enter w czasach bez przejścia do następnej linii, podpowiedzi pisowni po dwukliku, wyśrodkowana aktywna linia przy skokach (nie przy klikach i strzałkach), oryginały zaznaczone po duplikowaniu, pauza lewym przyciskiem, wideo od aktywnej linii, własny znak uproszczonych tagów, długość tytułu karty i liczba plików autozapisu;
-* zachowanie z Aegisuba: narzędzia wizualne rysowane tylko z myszą nad wideo, klatki kluczowe w audio osobno w trybie karaoke, kliknięcie w siatce bez zabierania fokusu polu edycji;
-* limity z Aegisuba: poziomy cofania (na sesję, zostają po otwarciu innego pliku; nadal obok budżetu pamięci) i liczba wpisów historii wyszukiwania i zamiany;
-* opcje wyświetlania z Aegisuba: styl fali (samo maksimum albo maksimum ze średnią), czcionka sylab karaoke (pasek sylab rośnie z nią), klatki kluczowe na pasku przewijania do wyłączenia, akcje kółka na wideo osobno dla zwykłego, z Ctrl i z Shift (rozmiar okna, zoom, przesuwanie, każde też odwrotnie, albo nic) i miejsce zapisu klatek (obok wideo, obok napisów albo pytanie o folder);
-* automatyzacja: foldery autoload i include do ustawienia jak w Aegisub (lista rozdzielona `|`, tokeny `?user`/`?data`; pusta to standardowy układ), automatyczne przeładowanie zmienionych skryptów (żadne / lokalne / globalne / wszystkie; `QFileSystemWatcher` odświeżany z menu automatyzacji) i przycisk „Edytuj” w menedżerze jak w Kainote (edytor z ustawień albo program systemu);
-* pole edycji: podpowiedzi parametrów tagu jak w Aegisub (`fs_core::calltip` na tokenach z `syntax`; jego błąd o jeden, gubiący przecinek zaraz za kursorem przy wyborze przeciążenia, poprawiony; dymek pogrubia parametr pod kursorem) i dopasowanie nawiasów `{}`/`()` jak w Kainote (kolor tła w motywie); zrzut testu dymnego dorysowuje widoczne dymki i popupy;
-* spektrum jak w Aegisub: jakość (cztery poziomy, rozmiar FFT i krok jak w wersji z FFTW), skala częstotliwości (pięć krzywych między liniową a logarytmiczną, z 1 kHz na zadanej wysokości; przycisk wzmocnienia mowy dalej daje własną skalę logarytmiczną), schematy kolorów Icy Blue i Green (HSL liczone w shaderze) i limit pamięci podręcznej kolumn;
-* okno ustawień z „Zastosuj” i „Przywróć domyślne” jak w Aegisub (przywraca opcje swoich stron i otwiera się na nowo; motywy, skróty i skojarzenia plików mają własne przywracanie), zbieracz czcionek kopiuje też do folderu napisów;
-* kopie zapasowe jak w Aegisub: folder autozapisu do wyboru, kopia .ORIGINAL otwieranego pliku do wyłączenia i zapis samego pliku po każdej zmianie (zmiany w odstępie do 300 ms zapisują się raz; tylko plik, który zapisuje się bez pytań);
-* drobne opcje Aegisuba: zapis stanu interfejsu w pliku (aktywna linijka, przewinięcie, pozycja wideo; wyłączony usuwa je z pliku), podświetlanie składni w polu edycji, Shift+Enter jako `\n` zamiast `\N`, rozdzielczość nowych plików (z pierwszego wideo albo stała) i rozmiar ikon paska narzędzi;
-* opcje audio z Aegisuba i Kainote: co jest rysowane (klatki kluczowe, czas pod kursorem, pozycja wideo, tło zaznaczenia, granice sekund), grubość granic linijki, odległość przyciągania, czułość przeciągania i czas odtwarzany wokół znacznika;
-* tryb tłumaczenia z dwoma polami tekstu w edytorze (oryginał i tłumaczenie) oraz kolumną oryginału w gridzie;
-* przesuwanie czasów w gridzie, panel przesuwania czasów i filtrowanie linii;
-* zoom wideo (kółko, prostokąt, komendy Aegisub: powiększ/pomniejsz Ctrl+Num+/−, 50/100/200% pikseli wideo, „Ctrl+Spacja” na suwak) i tryb odtwarzacza (samo wideo bez edycji, pełny ekran). Oddalenie poniżej dopasowania rysuje całą klatkę mniejszą (do 10%) na środku widoku, a „Wyśrodkuj powiększone wideo” (Aegisub video/reset_pan) przesuwa powiększony fragment na środek klatki bez zmiany zoomu. Krok szybkiego skoku (Alt+←/→) jest w ustawieniach wideo, domyślnie 10 klatek;
-* kolory wideo jak w Aegisub: klatki są dekodowane macierzą z nagłówka `YCbCr Matrix` skryptu (None to macierz samego wideo, brak lub błędna wartość to TV.601 VSFiltera). Przy otwarciu wideo program ostrzega o wideo bez oznaczonej macierzy i o wideo HDR/WCG, a potem ustawia albo proponuje macierz i rozdzielczość układu (`LayoutResX/Y`) skryptu według ustawień wideo, z zapamiętanym ostatnim wyborem. Nowy, nietknięty plik dostaje je bez pytania;
-* komendy Aegisub z własnymi klawiszami w edytorze skrótów: przesuwanie linii (Alt+↑/↓; w polu tekstu Alt+↓ nadal oznacza linię jako niepotwierdzoną), widok widma lub fali audio, Ctrl+Enter w polu tekstu (zatwierdza czasy z audio i zamyka krok undo bez zmiany linii), kopiowanie, wycinanie i wklejanie linijek, pokazanie lub ukrycie paska narzędzi i każdy tryb wycinka wektorowego. Komenda może mieć dowolnie wiele klawiszy (jak w Aegisub); klawisz przejęty od innej komendy znika tylko z jej listy;
-* tryb Medusa (Aegisub app/toggle/global_hotkeys, menu Audio): klawisze timingu, które nic nie wpisują (klawiatura numeryczna, z Ctrl lub Alt, klawisze F), działają w całym oknie, poza wideo i audio, które mają własne;
-* rysunek odręczny wygładzony (Aegisub): punkt co 60 pikseli, a po puszczeniu przycisku figura zamienia się w krzywe Béziera (`fs-bridge::visual::smooth_figure`, algorytm Shemanareva z `Spline::Smooth`, figura zamknięta);
-* asystent tłumaczenia (Aegisub, menu Napisy): bloki zwykłego tekstu linijek po kolei od aktywnej (bez tagów, komentarzy, rysunków i samych spacji, `fs-core::tags::translatable_ranges`), oryginał z wyróżnionym blokiem u góry, a wpisane tłumaczenie zastępuje blok. Enter zatwierdza i idzie dalej, F8 zatwierdza i zostaje, PgUp/PgDown przechodzą między blokami, Insert wstawia oryginał, Home i End odtwarzają wideo i audio, a Shift+Enter wstawia `\N`. Klawisze można zmienić w edytorze skrótów. Linijka wybrana gdzie indziej albo zmieniona poza asystentem zaczyna się od pierwszego bloku;
-* okno koloru Aegisuba (`colorpicker.*`) dla tagów koloru, stylów, dialogów Lua i atrapy wideo. Ma widmo w trybach RGB/R, G, B, HSL/L i HSV/H, pola RGB/HSL/HSV, ASS i HTML, alfę, 32 ostatnie kolory i pipetę: przeciągnięcie albo dwa kliknięcia, powiększenie 7×7, a puszczenie bierze piksel. W polu tekstu kolor jest podglądany na żywo w osobnym kroku undo, który Anuluj cofa;
-* motywy kolorów (`theme.*`, strona „Kolory” w ustawieniach). Każdy kolor rysowany przez program (siatka, pole tekstu ze stylami Aegisuba i ich pogrubieniem, audio, narzędzia wizualne) to rola. Są wbudowane motywy Ciemny i Jasny (domyślne kolory Aegisuba), motywy użytkownika w plikach `.ini` (zapisz jako, usuń, przywróć) i paleta okien (systemowa, jasna, ciemna). Zmiana jest widoczna od razu, a Anuluj przywraca poprzedni motyw;
-* obroty 3D w narzędziach wizualnych tak, jak liczy je libass (`fs-bridge::visual::projection`): pochylenie `\fax`/`\fay` (skalowane przez `\fscx`/`\fscy`) od punktu (0,0) rysunku, obrót Z, X i Y wokół `\org`, a potem rzut perspektywiczny z kamerą w odległości 312,5 · PlayResY / wysokość klatki. Uchwyty rysowania leżą na wyrenderowanym kształcie, a przeciąganie odwraca rzut. Osie skali, okrąg obrotu Z i siatka obrotu X/Y są rysowane w płaszczyźnie linijki. Test porównuje rzut z ramkami libass dla dziewięciu przypadków;
-* opcje narzędzi wizualnych z Kainote, zapamiętywane w ustawieniach. Skala: zmiana wszystkich tagów skali i utrzymanie proporcji. Obrót Z: zmiana wszystkich `\frz` i utrzymanie proporcji. Obrót X/Y: zmiana wszystkich `\frx`/`\fry`. Ruch: `\move` z dwóch punktów i czasu wideo. Kotwicą jest czas pierwszego punktu, a nie początek linijki jak w Kainote. Każda linijka idzie od miejsca, w którym była w tym czasie, w swoich czasach `\move`;
-* pozycja i skala według prostokąta (Kainote). Linijka jest mierzona tak, jak rysuje ją libass (`fs-media::bounds`): w skrypcie 3× większym, z linijką przesuniętą o rozmiar klatki, więc część poza ekranem też się liczy, a wynik to ramka całości i samego tekstu (bez obwódki i cienia). Pozycja ustawia linijkę w prostokącie na jeden z 21 sposobów (9 wyrównań, pod, nad, przed i za), skala wypełnia go tekstem na wybranych osiach, a obwódka zostaje bez zmian. Drugi, własny prostokąt (prawy przycisk) zastępuje zmierzony;
-* Hydra (narzędzie „wszystkie tagi”): lista tagów użytkownika z zakresem, krokiem, liczbą cyfr, wartościami domyślnymi, miejscem wstawiania i trybem. Suwaki nad wideo pokazują wartości aktywnej linijki, kółko zmienia wartość o krok, Shift+kółko wybiera tag, a prawy przycisk przesuwa suwaki. Dla `\fad` i `\t` klawisze odległości od początku i końca linijki (Ctrl+, i Ctrl+.) biorą czas wideo;
-* strona „Skojarzenia plików” w ustawieniach (Windows): ProgID `FSEditor.<rozszerzenie>` w `HKCU\Software\Classes`, więc nie trzeba administratora. Typ dostaje go jako domyślny i na liście „Otwórz za pomocą”, a wyłączenie przywraca poprzedni program. Wybór dokonany w Eksploratorze (UserChoice) ma pierwszeństwo, bo tylko Eksplorator może go zapisać;
-* menu kontekstowe pola tekstu: podpowiedzi pisowni, dodanie słowa do słownika i usunięcie go stamtąd, język sprawdzania pisowni (albo jego wyłączenie) i tezaurus;
-* autozapis co N sekund (Aegisub): kopia dokumentu w O(1) w GUI, a zapis ASS na dysk w wątku roboczym. Przy awarii i wylogowaniu zapis odbywa się synchronicznie. Obok kopii leży plik `.from` ze ścieżką oryginału, więc „Zapisz” po odzyskaniu zaczyna w tym miejscu;
-* przeciąganie w gridzie i w audio poza krawędź przewija dalej na timerze, także gdy mysz stoi, tym szybciej, im dalej jest. Linijki zabierane przez Ctrl+przeciąganie znacznika rysują się razem z nim;
-* czcionki dołączone do wideo dla prostokątów pozycji i skali wczytują się w tle, gdy tylko wybierzesz narzędzie. Menedżer stylów nie oznacza jako brakujących czcionek dołączonych do pliku. Czcionka usunięta z `[Fonts]` znika też z ekranu: renderer zaczyna od nowa, bo libass umie usunąć tylko wszystkie naraz.
+* menu, toolbar and tab bar (many files at once; each tab has its own document, video, audio and undo). Several files opened together (dropped, from the command line or from the open dialog) are combined as in Kainote: subtitles and videos in name order ("ep2" before "ep10") form pairs, each in its own tab, while audio and keyframes go to the last one;
+* a tab contains the video (top left) with the line editor beside it; audio sits above the editor and the grid at the bottom;
+* Kainote in the edit field: double-clicking a word highlights its other occurrences in the line with a background (whole word, case-insensitive, also right after `\N` and `\h`; colour set in the theme) while that word stays selected; the tag list suggested after `\` says what each tag does (`TagListDelegate`);
+* style editor inside the style manager window (Kainote, the "Edit styles in this window" checkbox; a separate window by default, as in Aegisub): it sits next to the lists and stays open while further styles are selected; on every "Apply", the edited style and the other selected ones are looked up by name (`fileApply` / `storageApply`), so changes to the lists under an open editor confuse nothing, and switching tab or storage closes it;
+* update check (Aegisub, Kainote; `updates.*`): Help → "Check for updates" asks GitHub for the latest release and compares version numbers; a newer one is offered with its release notes and buttons for the download page, skipping this version, and reminding later. The startup check (once a day) is off until the user enables it in the settings, because it is the only place where the program connects to the network on its own. Only the project's releases page is ever opened, whatever the response contained;
+* Kainote: Shift+click on the audio, edit field and video buttons assigns a shortcut to the button's command, and the tooltip shows its key. The multireplacer (Fix minor errors) is modeless: rules have "only in tags" and case handling (as found, as typed, lower, upper); the lines are all, selected, from the selected one, or from given styles. Find errors (in the tab or in all tabs) gives a result list to uncheck and replace in place (core: `replace_rule_matches`, one undo step per tab; each result is replaced as it was found in the line text, a result overlapping one already replaced is skipped, and lines hidden by the grid filter are not searched), and Replace also works across all tabs. The Video menu lists the audio streams (with several tracks, the loaded one checked; choosing one reloads audio) and the file's subtitle streams (loaded into the tab after a save prompt, with the tab's track checked until another file replaces it). Names taken from data (files, styles, tracks, chapters, macros, tabs) keep "&" in menus and on tabs (`fs::menuText`/`fs::plainText`), and a save prompt dismissed without an answer saves nothing. Options: counting spaces and punctuation in line breaks, active line after Ctrl+click, merging "n" in karaoke auto-split, moving a syllable boundary by clicking, initial video zoom, program font, the text field status bar in the menu, a word filter for autosaves, removing several dictionary words at once, comparison by selected styles, linked resolutions in properties, a temporary file cleanup dialog (selected, all, older than a date), and the "hide original" shortcut wraps the line's original in braces;
+* Kainote: splitting a line into characters, words and line breaks gives each piece the line's full times and its own \pos or \move at the place where it was (from text sizes in the style after tags, the line's \an, tags preceding the piece kept, \org when rotated); splitting into frames turns \move into the \pos of the given frame. Assignable: the font button, pasting the whole text and the selection into the translation, hiding the original, tag buttons 1–20, Stop, the progress bar, aspect ratio and video removal, removing unused styles. The style editor has a font filter by characters (Polish letters by default, configurable in the settings);
+* Kainote: opening a video offers subtitles with the same name (into the current tab, with a save prompt), and opening subtitles without a video that reference none offers a video with the same name from the folder; files opened together are still paired by openFiles without prompts. "Open video" from the menu takes the same route. The video settings have offsets (ms) for times inserted from video, never before zero;
+* Aegisub: with video position display enabled, audio shades the range of the previous and current frame (colours in the theme). "Show original" in the edit field shows the line's text from the moment it was selected (read-only), with Restore, Clear, Clear text (keeps tags, comments and drawings) and Insert original buttons; the two new commands get shortcuts. The styling assistant has its own assignable keys (Enter accepts, F8 previews, PgUp/PgDown lines, Home video, End audio) and a "Keys" frame, and opens only once. The crosshair with Shift gives coordinates from the right and bottom edges, with three decimal places when the video is larger than the script resolution; double-clicking moves the active line there and the other selected lines by the same amount (\pos, \move, \org). In full screen, double-click still exits it, and without a line it toggles full screen;
+* Aegisub: right-clicking the syllable bar changes the karaoke tag of the whole line to \k, \kf or \ko (one undo step; the current one is checked). Undo and Redo name the step they will take ("Undo: Line edit", "Nothing to undo"), and step names are translated in History as well. Commands with nothing to act on are greyed out, as in Aegisub: closing and saving an audio clip, saving and closing keyframes and timecodes, video details, revert to saved. State is checked when a menu opens and after every change;
+* Kainote's colour sampler: right-clicking a colour button in the edit field opens a small window at the mouse position (eyedropper, screen magnifier, colour code); the colour shows in the line immediately, and Cancel reverts it; a setting swaps the clicks with the colour dialog;
+* Kainote's font catalogues: named lists of font families in the settings (a font can be in several); in the style editor the font list is narrowed to a catalogue (or to fonts in no catalogue), "+" adds the current font to or removes it from the catalogue, and a catalogue window (add / rename / delete, fonts with preview to check, filter);
+* editing several styles at once (Kainote): Edit with several styles selected — after a prompt, the others receive whatever changed in the edited one (except the name), in the file as one undo step (`style_with_changes` / `change_styles`), in a storage with the catalogue saved;
+* searching the web for the selected phrase from the edit field menu (Kainote): ling.pl, bab.la, Google, synonim.net;
+* visual tools toolbar in full screen (Kainote): a "Show toolbar" toggle in the full-screen panel, on by default when editing subtitles, remembered;
+* replacing selected search results (Kainote): checkboxes next to matches and files, Check / Uncheck all, custom replacement text; each checked match is replaced where it was found, one undo step per file (`replace_matches`), lines changed since the search are skipped; files from a folder are first copied to ReplaceBackup, then saved in their own format; after replacing, the button waits for a new search;
+* Kainote's default script properties (Title, Author, Translation, Proofreading, Timing, Editing): a settings page with a value and a checkbox for each; when saving to ASS, the checked ones that differ from the file are set in one undo step, after confirmation (Change / Keep current / Change and stop asking / Cancel save) if enabled;
+* Kainote's autoload script loading modes: at startup (the default, as in Aegisub) or in the background, or on first opening the Automation menu (in the background or immediately); background loading is a separate thread (`start_autoload` / `finish_autoload`), a menu opened meanwhile shows a loading row and rebuilds itself when loading ends; the manager, export and macro shortcuts of not-yet-loaded scripts finish loading first;
+* sessions in files (Kainote's session saving and loading): our own `.fses` format (JSON: the tab files — subtitles, or the video when there are none — and the active tab index up front), also opened from the command line and by dragging; a prompt about unsaved changes before saving, missing files skipped on load; no `.kls` import;
+* BestSource index file limit (Aegisub's CleanCache for FFMS2 indexes, 20 files / 42 MB; Kainote's cache file limit): after every video or audio open, on a separate thread; the open file's indexes get the current date, so the least recently used ones go, not the ones in use (`fs_media::clean_cache`);
+* Kainote's conversion settings (`Session::convert_with`, one undo step): for ASS, the video resolution or the new-file resolution (fixed 1280×720 in Kainote), a style from the storage in place of Default, tags at the start of lines; new end times from the character count without tags (min. 1 s, clipped to the next line; always for TMP); MicroDVD FPS without video; a settings dialog before converting;
+* further Kainote options: full screen for video alone at startup, no visual tool warnings, the line seen in full screen and the line at the previous tab's time as active (the line at that time or the nearest start), sorting on open (an undo step only when the order changes; an already sorted file gets no empty step), time shift values carried between tabs;
+* Kainote behaviours (options, Aegisub-like by default): subtitles in the current tab, Enter in the time fields without moving to the next line, spelling suggestions on double-click, centring the active line on jumps (not on clicks and arrow keys), originals selected after duplicating, pause on left click, video from the active line, a custom character for simplified tags, tab title length and the number of autosave files;
+* Aegisub behaviour: visual tools drawn only while the mouse is over the video, keyframes in audio separately in karaoke mode, clicking in the grid without taking focus from the edit field;
+* Aegisub limits: undo levels (per session, kept after opening another file; still alongside the memory budget) and the number of find and replace history entries;
+* Aegisub display options: waveform style (maximum only, or maximum with average), karaoke syllable font (the syllable bar grows with it), keyframes on the scroll bar (can be turned off), mouse wheel actions on video separately for plain, Ctrl and Shift (window size, zoom, pan, each also reversed, or nothing), and where frames are saved (next to the video, next to the subtitles, or ask for a folder);
+* automation: configurable autoload and include folders as in Aegisub (a `|`-separated list, `?user`/`?data` tokens; empty means the standard layout), automatic reloading of changed scripts (none / local / global / all; a `QFileSystemWatcher` refreshed from the Automation menu) and an "Edit" button in the manager as in Kainote (the editor from the settings or the system program);
+* edit field: tag parameter calltips as in Aegisub (`fs_core::calltip` on tokens from `syntax`; its off-by-one bug, which lost a comma right after the cursor when choosing an overload, is fixed; the tooltip bolds the parameter under the cursor) and `{}`/`()` bracket matching as in Kainote (background colour in the theme); the smoke test screenshot paints visible tooltips and popups;
+* spectrum as in Aegisub: quality (four levels, FFT size and step as in the FFTW version), frequency scale (five curves between linear and logarithmic, with 1 kHz at a set height; the speech boost button still gives its own logarithmic scale), the Icy Blue and Green colour schemes (HSL computed in the shader) and a column cache limit;
+* settings dialog with "Apply" and "Restore defaults" as in Aegisub (it restores the options of its own pages and reopens; themes, shortcuts and file associations have their own reset), and the font collector also copies to the subtitle folder;
+* backups as in Aegisub: a choosable autosave folder, a .ORIGINAL copy of the opened file (can be turned off), and saving the file itself after every change (changes within 300 ms of each other are saved once; only for a file that saves without prompts);
+* minor Aegisub options: saving the interface state in the file (active line, scroll position, video position; disabling it removes them from the file), syntax highlighting in the edit field, Shift+Enter as `\n` instead of `\N`, the resolution of new files (from the first video or fixed) and toolbar icon size;
+* audio options from Aegisub and Kainote: what is drawn (keyframes, time under the cursor, video position, selection background, second boundaries), line boundary thickness, snapping distance, drag sensitivity, and the time played around the marker;
+* translation mode with two text fields in the editor (original and translation) and an original column in the grid;
+* time shifting in the grid, the time shift panel and line filtering;
+* video zoom (wheel, rectangle, Aegisub commands: zoom in/out Ctrl+Num+/−, 50/100/200% of video pixels, "Ctrl+Space" to the slider) and player mode (video only, no editing, full screen). Zooming out below fit draws the whole frame smaller (down to 10%) in the middle of the view, and "Center zoomed video" (Aegisub's video/reset_pan) moves the zoomed portion to the middle of the frame without changing the zoom. The fast-jump step (Alt+←/→) is in the video settings, 10 frames by default;
+* video colours as in Aegisub: frames are decoded with the matrix from the script's `YCbCr Matrix` header (None means the video's own matrix; a missing or invalid value means VSFilter's TV.601). When a video is opened, the program warns about video with no tagged matrix and about HDR/WCG video, then sets or offers the script's matrix and layout resolution (`LayoutResX/Y`) according to the video settings, with the last choice remembered. A new, untouched file gets them without a prompt;
+* Aegisub commands with their own keys in the hotkey editor: moving lines (Alt+↑/↓; in the text field Alt+↓ still marks the line as unconfirmed), audio spectrum or waveform view, Ctrl+Enter in the text field (commits times from audio and closes the undo step without changing the line), copying, cutting and pasting lines, showing or hiding the toolbar, and every vector clip mode. A command can have any number of keys (as in Aegisub); a key taken over from another command disappears only from that command's list;
+* Medusa mode (Aegisub's app/toggle/global_hotkeys, Audio menu): timing keys that type nothing (numeric keypad, with Ctrl or Alt, F keys) work across the whole window, except video and audio, which have their own;
+* smoothed freehand drawing (Aegisub): a point every 60 pixels, and on releasing the button the shape becomes Bézier curves (`fs-bridge::visual::smooth_figure`, Shemanarev's algorithm from `Spline::Smooth`, closed shape);
+* translation assistant (Aegisub, Subtitles menu): plain-text blocks of lines in turn from the active one (without tags, comments, drawings and whitespace-only blocks, `fs-core::tags::translatable_ranges`), the original with the current block highlighted at the top, and the typed translation replaces the block. Enter accepts and moves on, F8 accepts and stays, PgUp/PgDown move between blocks, Insert inserts the original, Home and End play video and audio, and Shift+Enter inserts `\N`. The keys can be changed in the hotkey editor. A line selected elsewhere or changed outside the assistant starts from its first block;
+* Aegisub's colour dialog (`colorpicker.*`) for colour tags, styles, Lua dialogs and dummy video. It has a spectrum in RGB/R, G, B, HSL/L and HSV/H modes, RGB/HSL/HSV, ASS and HTML fields, alpha, 32 recent colours, and an eyedropper: drag or two clicks, 7×7 magnification, and releasing takes the pixel. In the text field the colour is previewed live in a separate undo step that Cancel undoes;
+* colour themes (`theme.*`, the "Colours" page in the settings). Every colour the program draws (grid, text field with Aegisub's styles and their bolding, audio, visual tools) is a role. There are built-in Dark and Light themes (Aegisub's default colours), user themes in `.ini` files (save as, delete, restore) and the window palette (system, light, dark). Changes show immediately, and Cancel restores the previous theme;
+* 3D rotations in the visual tools computed the way libass does (`fs-bridge::visual::projection`): `\fax`/`\fay` shear (scaled by `\fscx`/`\fscy`) from the drawing's (0,0) point, Z, X and Y rotation around `\org`, then perspective projection with the camera at a distance of 312.5 · PlayResY / frame height. Drawing handles lie on the rendered shape, and dragging inverts the projection. The scale axes, the Z rotation circle and the X/Y rotation grid are drawn in the line's plane. A test compares the projection with libass bounding boxes for nine cases;
+* visual tool options from Kainote, remembered in the settings. Scale: change all scale tags and keep proportions. Z rotation: change all `\frz` and keep proportions. X/Y rotation: change all `\frx`/`\fry`. Move: `\move` from two points and the video time. The anchor is the time of the first point, not the start of the line as in Kainote. Each line moves from where it was at that time, within its own `\move` times;
+* position and scale by rectangle (Kainote). The line is measured the way libass draws it (`fs-media::bounds`): in a script 3× larger, with the line offset by the frame size, so the off-screen part also counts, and the result is the bounding box of the whole and of the text alone (without outline and shadow). Position places the line in the rectangle in one of 21 ways (9 alignments, below, above, before and after), scale fills it with text on the chosen axes, and the outline stays unchanged. A second, custom rectangle (right button) replaces the measured one;
+* Hydra (the "all tags" tool): a user tag list with range, step, digit count, default values, insertion point and mode. Sliders over the video show the active line's values, the wheel changes a value by one step, Shift+wheel selects the tag, and the right button moves the sliders. For `\fad` and `\t`, the keys for the distance from the line's start and end (Ctrl+, and Ctrl+.) take the video time;
+* the "File associations" page in the settings (Windows): a `FSEditor.<extension>` ProgID in `HKCU\Software\Classes`, so no administrator rights are needed. The type gets it as its default and in the "Open with" list, and turning it off restores the previous program. A choice made in Explorer (UserChoice) takes precedence, because only Explorer can write it;
+* text field context menu: spelling suggestions, adding a word to the dictionary and removing it from there, the spell-check language (or turning spell-check off) and the thesaurus;
+* autosave every N seconds (Aegisub): an O(1) copy of the document on the GUI thread, and the ASS write to disk on a worker thread. On a crash or logoff, the save is synchronous. Next to the copy lies a `.from` file with the original's path, so "Save" after recovery starts in that location;
+* dragging in the grid and in audio past the edge keeps scrolling on a timer, even when the mouse is still, faster the further away it is. Lines picked up by Ctrl+dragging a marker are drawn along with it;
+* fonts attached to the video for the position and scale rectangles load in the background as soon as you choose the tool. The style manager does not flag fonts attached to the file as missing. A font removed from `[Fonts]` also disappears from the screen: the renderer starts over, because libass can only remove all fonts at once.
 
-## 8. Etapy
+## 8. Milestones
 
-| Etap | Zakres | Kryterium ukończenia |
+| Milestone | Scope | Completion criterion |
 |---|---|---|
-| 0 | Plan, struktura repo, licencja, toolchain | ten dokument, `cargo check` |
-| 1 | `fs-core` + `fs-formats` + `fsed` CLI | testy roundtrip bajt-w-bajt na prawdziwych plikach, testy jednostkowe czasu/VFR/undo/tagów/formatów |
-| 2 | `fs-audio` (peaks, FFT, cpal) + `fs-media` (BestSource, libass) | testy na wygenerowanym audio/wideo (seek co do klatki, VFR, audio co do próbki, libass), `fsed media info`, `fsed media frame` |
-| 3 | `fs-automation` (Automation 4, karaskel, MoonScript, DependencyControl) | uruchomienie prawdziwych skryptów (kara-templater, skrypty z TypesettingTools) w `fsed lua` |
-| 4 | `fs-bridge` + GUI Qt | aplikacja z pełnym układem Kainote, wideo i audio na QRhi |
-| 5 | Pakowanie (Windows installer, AppImage, .dmg), CI 3× OS | artefakty z GitHub Actions |
+| 0 | Plan, repo layout, license, toolchain | this document, `cargo check` |
+| 1 | `fs-core` + `fs-formats` + `fsed` CLI | byte-for-byte roundtrip tests on real files, unit tests for time/VFR/undo/tags/formats |
+| 2 | `fs-audio` (peaks, FFT, cpal) + `fs-media` (BestSource, libass) | tests on generated audio/video (frame-accurate seeking, VFR, sample-accurate audio, libass), `fsed media info`, `fsed media frame` |
+| 3 | `fs-automation` (Automation 4, karaskel, MoonScript, DependencyControl) | running real scripts (kara-templater, TypesettingTools scripts) in `fsed lua` |
+| 4 | `fs-bridge` + Qt GUI | the application with the full Kainote layout, video and audio on QRhi |
+| 5 | Packaging (unpack-and-run ZIPs for Windows and Linux; macOS later), CI with packaged smoke tests, tag-driven releases | release ZIPs built and smoke-tested by GitHub Actions |

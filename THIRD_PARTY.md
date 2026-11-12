@@ -1,18 +1,18 @@
-# Komponenty zewnętrzne i licencje
+# Third-party components and licences
 
-FS Editor jest na licencji BSD-3-Clause.
+FS Editor is licensed under BSD-3-Clause.
 
-* Zależności ze zgodnymi licencjami (MIT, Apache-2.0, BSD, ISC, Zlib) są linkowane statycznie.
-* Zależności na licencjach copyleft (LGPL: Qt, FFmpeg, FriBidi) są linkowane **dynamicznie**, żeby użytkownik mógł je podmienić.
-* Funkcje `gpl` i `nonfree` FFmpeg są wyłączone.
+* Dependencies with compatible licences (MIT, Apache-2.0, BSD, ISC, Zlib) are linked statically.
+* Dependencies under copyleft licences (LGPL: Qt, FFmpeg, FriBidi) are linked **dynamically**, so that users can replace them.
+* The FFmpeg `gpl` and `nonfree` features are disabled.
 
-Kod Kainote **nie jest** kopiowany. Układ interfejsu jest odtworzony na podstawie zachowania programu i zrzutów ekranu; zasady clean-room są w [docs/research/kainote-ui.md](docs/research/kainote-ui.md).
+Kainote code is **not** copied. The interface layout is recreated from the program's behaviour and screenshots; the clean-room rules are in [docs/research/kainote-ui.md](docs/research/kainote-ui.md).
 
-## Crate'y Rust (rdzeń i CLI)
+## Rust crates (core and CLI)
 
-Wersje są przypięte w `Cargo.lock`. Pełną listę wraz z zależnościami przechodnimi wypisuje `cargo metadata`. Licencje:
+Versions are pinned in `Cargo.lock`. `cargo metadata` prints the full list, including transitive dependencies. Licences:
 
-| Crate | Licencja |
+| Crate | Licence |
 |---|---|
 | regex, regex-automata, regex-syntax | MIT OR Apache-2.0 |
 | aho-corasick, memchr | Unlicense OR MIT |
@@ -21,60 +21,60 @@ Wersje są przypięte w `Cargo.lock`. Pełną listę wraz z zależnościami prze
 | clap (+ clap_builder, clap_derive, clap_lex, anstream, anstyle*) | MIT OR Apache-2.0 |
 | strsim | MIT |
 | anyhow, thiserror | MIT OR Apache-2.0 |
-| tempfile (tylko testy), fastrand, rustix, getrandom, libc, windows-sys | MIT OR Apache-2.0 (rustix, linux-raw-sys: także Apache-2.0 WITH LLVM-exception) |
+| tempfile (tests only), fastrand, rustix, getrandom, libc, windows-sys | MIT OR Apache-2.0 (rustix, linux-raw-sys: also Apache-2.0 WITH LLVM-exception) |
 | unicode-ident | (MIT OR Apache-2.0) AND Unicode-3.0 |
 | proc-macro2, quote, syn, heck | MIT OR Apache-2.0 |
 | mlua, mlua-sys, luajit-src | MIT |
-| pcre2-sys (PCRE2 budowane ze źródeł) | MIT / Unlicense (crate), BSD-3-Clause (PCRE2) |
-| icu_casemap i zależności ICU4X | Unicode-3.0 |
+| pcre2-sys (PCRE2 built from source) | MIT / Unlicense (crate), BSD-3-Clause (PCRE2) |
+| icu_casemap and ICU4X dependencies | Unicode-3.0 |
 | fontdb, ttf-parser | MIT OR Apache-2.0 |
-| spellbook (sprawdzanie pisowni, słowniki Hunspell) | MPL-2.0 (copyleft na poziomie pliku; crate używany bez zmian) |
-| cc (tylko budowanie) | MIT OR Apache-2.0 |
+| spellbook (spell checking, Hunspell dictionaries) | MPL-2.0 (file-level copyleft; the crate is used unmodified) |
+| cc (build only) | MIT OR Apache-2.0 |
 
-## Zależności kolejnych etapów
+## Dependencies of later stages
 
-Wersje pochodzą z [docs/research/dependencies.md](docs/research/dependencies.md).
+Versions come from [docs/research/dependencies.md](docs/research/dependencies.md).
 
-| Komponent | Licencja | Sposób dołączenia |
+| Component | Licence | How it is included |
 |---|---|---|
-| Qt 6.12 | LGPLv3 | dynamicznie |
-| `qsb` (qtshadertools) | GPLv3 | tylko w czasie budowania, nie jest dystrybuowany |
-| BestSource R23 | MIT | statycznie |
-| FFmpeg 9.0 | LGPL-2.1+ | dynamicznie, bez `gpl` i `nonfree` |
-| xxHash | BSD-2-Clause | statycznie |
-| Nagłówki API VapourSynth (`VapourSynth4.h`, `VSScript4.h`, R79) | LGPL-2.1+ | tylko nagłówki w `crates/fs-media/cpp/vapoursynth/`; sam VapourSynth nie jest linkowany ani dołączany, ładuje się w czasie działania z instalacji użytkownika |
-| Avisynth (AviSynth+) | GPL-2+ z wyjątkiem dla interfejsu | nic nie jest dołączone: `avisynth.dll` użytkownika ładuje się w czasie działania i jest wołany przez interfejs C, z własnymi deklaracjami |
-| libp2p (sekrit-twc) | WTFPL | statycznie |
-| libass 0.17.5 | ISC | statycznie lub dynamicznie |
-| FreeType | FTL | wariant FTL |
+| Qt 6.12 | LGPLv3 | dynamically |
+| `qsb` (qtshadertools) | GPLv3 | build time only, not distributed |
+| BestSource R23 | MIT | statically |
+| FFmpeg 9.0 | LGPL-2.1+ | dynamically, without `gpl` and `nonfree` |
+| xxHash | BSD-2-Clause | statically |
+| VapourSynth API headers (`VapourSynth4.h`, `VSScript4.h`, R79) | LGPL-2.1+ | headers only, in `crates/fs-media/cpp/vapoursynth/`; VapourSynth itself is neither linked nor bundled, it is loaded at run time from the user's installation |
+| Avisynth (AviSynth+) | GPL-2+ with an exception for the interface | nothing is bundled: the user's `avisynth.dll` is loaded at run time and called through the C interface, with our own declarations |
+| libp2p (sekrit-twc) | WTFPL | statically |
+| libass 0.17.5 | ISC | statically or dynamically |
+| FreeType | FTL | FTL variant |
 | HarfBuzz, Fontconfig | MIT | — |
-| FriBidi | LGPL-2.1+ | dynamicznie |
-| cxx, cpal, realfft, mlua | MIT / Apache-2.0 | crate'y |
-| LuaJIT | MIT | przez `mlua` (vendored) |
-| LPeg 1.1.0 | MIT | źródła C budowane przez `cc` |
-| luabins 0.3 (z podprojektu Aegisub) | MIT | źródła C budowane przez `cc`, `crates/fs-automation/vendor/luabins` (licencja w `COPYRIGHT`) |
-| MoonScript | MIT | dołączony plik `moonscript.lua` z licencją upstream |
-| Include'y i autoloady Automation 4 Aegisub (karaskel, utils, unicode, re, clipboard, lfs, kara-templater …) | BSD-3 / ISC / MIT | `crates/fs-automation/automation/`, z zachowanymi nagłówkami; pliki bez nagłówka objęte `LICENCE-Aegisub` |
-| Tabela kana↔romaji z libaegisub (`kana_table.cpp`) | ISC, © 2013 Thomas Goyne | dane w `crates/fs-core/src/kana_table.rs` (kanji timer) |
-| Corrosion | MIT | narzędzie budowania |
-| Tabler Icons 3.49.0 | MIT | pliki SVG w `app/icons/` (licencja w `app/icons/LICENSE`), wkompilowane jako zasoby Qt |
+| FriBidi | LGPL-2.1+ | dynamically |
+| cxx, cpal, realfft, mlua | MIT / Apache-2.0 | crates |
+| LuaJIT | MIT | through `mlua` (vendored) |
+| LPeg 1.1.0 | MIT | C sources built by `cc` |
+| luabins 0.3 (from the Aegisub subproject) | MIT | C sources built by `cc`, `crates/fs-automation/vendor/luabins` (licence in `COPYRIGHT`) |
+| MoonScript | MIT | bundled `moonscript.lua` file with the upstream licence |
+| Aegisub Automation 4 includes and autoloads (karaskel, utils, unicode, re, clipboard, lfs, kara-templater …) | BSD-3 / ISC / MIT | `crates/fs-automation/automation/`, with their headers kept; files without a header are covered by `LICENCE-Aegisub` |
+| Kana↔romaji table from libaegisub (`kana_table.cpp`) | ISC, © 2013 Thomas Goyne | data in `crates/fs-core/src/kana_table.rs` (kanji timer) |
+| Corrosion | MIT | build tool |
+| Tabler Icons 3.49.0 | MIT | SVG files in `app/icons/` (licence in `app/icons/LICENSE`), compiled in as Qt resources |
 
-## Słowniki pisowni
+## Spelling dictionaries
 
-Słowniki nie leżą w repozytorium, ale paczki z CI je zawierają: `tools/dictionaries.py` pobiera przypięte wersje (sprawdzane SHA-256) do `bin/dictionaries` paczki, razem z plikami README/licencji każdego z nich. Inne słowniki Hunspell (`.aff` + `.dic`) i tezaurusy MyThes (`th_*.idx` + `.dat`) wrzuca się do tego katalogu albo wskazuje folder w ustawieniach.
+The dictionaries are not in the repository, but the CI packages include them: `tools/dictionaries.py` downloads pinned versions (verified by SHA-256) into the package's `bin/dictionaries`, together with each one's README/licence files. Other Hunspell dictionaries (`.aff` + `.dic`) and MyThes thesauri (`th_*.idx` + `.dat`) can be dropped into that directory, or a folder can be set in the settings.
 
-| Słownik | Źródło | Licencja |
+| Dictionary | Source | Licence |
 |---|---|---|
-| polski `pl_PL` | [sjp.pl/sl/en](https://sjp.pl/sl/en/), plik `sjp-hunspell-pl-*.zip`; sjp.pl trzyma tylko najnowsze wydanie, więc gdy przypięte zniknie, do czasu przypięcia nowego wchodzi kopia tego słownika z [LibreOffice/dictionaries](https://github.com/LibreOffice/dictionaries/tree/master/pl_PL) | do wyboru GPL-2, LGPL-2.1, MPL-1.1, CC BY 4.0, Apache-2.0 |
-| angielski `en_US` | [en-wl/wordlist](https://github.com/en-wl/wordlist/releases), plik `hunspell-en_US-*.zip` (SCOWL) | licencja SCOWL (typu MIT) |
-| tezaurus polski `th_pl_PL_v2` | Dobry słownik / Marcin Miłkowski, z [LibreOffice/dictionaries](https://github.com/LibreOffice/dictionaries/tree/master/pl_PL) | LGPL-2.1 |
-| tezaurus angielski `th_en_US_v2` | WordNet (Princeton), z [LibreOffice/dictionaries](https://github.com/LibreOffice/dictionaries/tree/master/en) | licencja WordNet (typu BSD) |
+| Polish `pl_PL` | [sjp.pl/sl/en](https://sjp.pl/sl/en/), file `sjp-hunspell-pl-*.zip`; sjp.pl keeps only the latest release, so when the pinned one disappears, a copy of this dictionary from [LibreOffice/dictionaries](https://github.com/LibreOffice/dictionaries/tree/master/pl_PL) is used until a new one is pinned | choice of GPL-2, LGPL-2.1, MPL-1.1, CC BY 4.0, Apache-2.0 |
+| English `en_US` | [en-wl/wordlist](https://github.com/en-wl/wordlist/releases), file `hunspell-en_US-*.zip` (SCOWL) | SCOWL licence (MIT-like) |
+| Polish thesaurus `th_pl_PL_v2` | Dobry słownik / Marcin Miłkowski, from [LibreOffice/dictionaries](https://github.com/LibreOffice/dictionaries/tree/master/pl_PL) | LGPL-2.1 |
+| English thesaurus `th_en_US_v2` | WordNet (Princeton), from [LibreOffice/dictionaries](https://github.com/LibreOffice/dictionaries/tree/master/en) | WordNet licence (BSD-like) |
 
-## Pliki testowe
+## Test files
 
-| Katalog | Pochodzenie | Licencja |
+| Directory | Origin | Licence |
 |---|---|---|
-| `tests/corpus/aegisub/` | przykładowe skrypty z repozytorium Aegisub | licencja Aegisub (BSD-3 / ISC) |
-| `tests/corpus/vfr/`, `tests/corpus/keyframe/`, `tests/corpus/charset/` | dane testowe z `tests/` repozytorium Aegisub | licencja Aegisub (BSD-3 / ISC) |
-| `crates/fs-automation/tests/aegisub/` | testy Automation 4 i specyfikacje modułów z repozytorium Aegisub | licencja Aegisub (BSD-3 / ISC) |
-| `tests/corpus-local/` | prywatne pliki użytkownika | nie są dystrybuowane (`.gitignore`) |
+| `tests/corpus/aegisub/` | sample scripts from the Aegisub repository | Aegisub licence (BSD-3 / ISC) |
+| `tests/corpus/vfr/`, `tests/corpus/keyframe/`, `tests/corpus/charset/` | test data from `tests/` in the Aegisub repository | Aegisub licence (BSD-3 / ISC) |
+| `crates/fs-automation/tests/aegisub/` | Automation 4 tests and module specs from the Aegisub repository | Aegisub licence (BSD-3 / ISC) |
+| `tests/corpus-local/` | the user's private files | not distributed (`.gitignore`) |

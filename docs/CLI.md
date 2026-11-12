@@ -1,119 +1,125 @@
-# `fsed`: narzędzie wiersza poleceń
+# `fsed`: the command-line tool
 
-`fsed` pracuje bezpośrednio na rdzeniu FS Editora: tym samym modelu dokumentu i tych samych operacjach, których używa GUI.
+`fsed` works directly on the FS Editor core: the same document model and the same operations the GUI uses.
 
 ```bash
-cargo run --release -p fs-cli -- <polecenie> [opcje]
+cargo run --release -p fs-cli -- <command> [options]
 ```
 
-## Zasady wspólne
+## Common rules
 
-* **Formaty wejścia** są wykrywane po treści i rozszerzeniu: ASS, SSA, SRT, WebVTT, MPL2, MicroDVD, TMP i TTXT (MPEG-4 Timed Text).
-  * `--format` wymusza format.
-  * `--encoding` wymusza kodowanie, np. `windows-1250`.
-  * `--input-fps` podaje FPS dla MicroDVD bez nagłówka; domyślnie 23.976.
-* **Kodowanie** jest wykrywane kolejno po BOM, UTF-16, UTF-8 i na koniec przez chardetng z podpowiedzią dla języka polskiego.
-* **Wyjście** poleceń, które zmieniają plik, trafia:
-  * na stdout (domyślnie);
-  * do pliku przez `-o plik`;
-  * do pliku wejściowego przez `--in-place`. Zapis jest atomowy: plik tymczasowy, potem zmiana nazwy.
+* **Input formats** are detected from the content and the extension: ASS, SSA, SRT, WebVTT, MPL2, MicroDVD, TMP and TTXT (MPEG-4 Timed Text).
+* **Encoding** is detected in this order: BOM, UTF-16 without BOM, UTF-8, and finally chardetng with a hint for Polish.
+* **Load options** are accepted by the read-only commands `info`, `check`, `lines`, `fonts`, `styles` and by `convert`:
+  * `--format ass|ssa|srt|mpl2|microdvd|tmp|ttxt|vtt` forces the format;
+  * `--encoding` forces the encoding, e.g. `windows-1250`;
+  * `--input-fps` gives the frame rate for MicroDVD files without an FPS header; the default is 23.976 (24000/1001).
 
-  Format, kodowanie i BOM pliku wejściowego zostają zachowane, a MicroDVD wraca w tym samym FPS, w którym został wczytany.
-  * Gdy rozszerzenie pliku z `-o` wskazuje inny format niż wejściowy (np. `-o wynik.srt` dla pliku ASS), polecenie kończy się błędem i odsyła do `fsed convert`.
-  * Gdy po zmianie tekstu nie da się go zapisać w kodowaniu wejściowym, plik jest zapisywany jako UTF-8 z BOM, a na stderr trafia informacja o tym.
-* **Bezstratność**: linie, których polecenie nie zmieniło, są zapisywane z oryginalnego tekstu, razem z końcami linii, komentarzami i nieznanymi sekcjami.
-* **Czas** można podać jako:
-  * `1.5s`, `-250ms`, `300` (milisekundy);
+  The editing commands (`shift`, `sort`, `filter`, `replace`, `resample`, `change-fps`, `postprocess`, `tl …`, `lua`) and `roundtrip` always auto-detect format and encoding.
+* **Output** of commands that change the file goes:
+  * to stdout (the default);
+  * to a file with `-o FILE` / `--output FILE`;
+  * back to the input file with `--in-place` (cannot be combined with `-o`). The file is overwritten directly; only `convert` writes atomically (temporary file, then rename).
+
+  The input file's format, encoding and BOM are kept. A MicroDVD file is written back at the frame rate its header declares, or at 23.976 if it has none.
+  * If the extension of the `-o` file names a different format than the input (e.g. `-o out.srt` for an ASS file), the command fails and points to `fsed convert`. This check covers `.ass`, `.ssa`, `.srt`, `.sub` (MicroDVD), `.ttxt` and `.vtt`.
+  * If the edited text can no longer be stored in the input encoding, the file is written in an encoding that can hold it (UTF-8) and a note is printed to stderr.
+* **Lossless output**: lines the command did not change are written from their original text, together with line endings, comments and unknown sections.
+* **Times** can be given as:
+  * `1.5s`, `-250ms`, `300` (milliseconds), `2.5` (a bare number with a decimal point means seconds);
   * `0:00:02.10`, `+0:01.00`.
-* **FPS** podaje się przez `--fps 23.976` albo `--fps 24000/1001`. Wartości 23.976, 29.97, 47.952 i 59.94 są zamieniane na dokładne ułamki NTSC.
-* **VFR** obsługuje się przez `--timecodes plik.txt` (formaty v1 i v2).
+* **Frame rate** is given with `--fps 23.976` or `--fps 24000/1001`. The values 23.976 (and 23.98), 29.97, 47.952 and 59.94 are turned into the exact NTSC fractions.
+* **VFR** is handled with `--timecodes file.txt` (v1 and v2 formats). `--timecodes` takes precedence over `--fps`.
+* **Exit codes**: 0 on success, 1 when a checking command finds problems (`check`, `roundtrip`, `fonts`) or a Lua script cancels, 2 on an error (unreadable file, bad option value and so on).
 
-## Polecenia
+## Commands
 
-| Polecenie | Opis |
+| Command | Description |
 |---|---|
-| `info FILE` | Format, kodowanie, rozdzielczość, sekcje, liczba stylów i linii, długość, CPS, kolizje. |
-| `check FILE…` | Ostrzeżenia parsera, brakujące style, koniec przed startem, CPS i kolizje w tym samym stylu i warstwie. Kod wyjścia 1 przy błędach. Z `--strict` CPS i kolizje też są błędami. |
-| `roundtrip FILE…` | Sprawdza, czy wczytanie i zapis dają identyczne bajty. |
-| `lines FILE` | Tabela linii jak w gridzie. Przyjmuje te same filtry co `filter`; `--strip` usuwa tagi z wyświetlanego tekstu. |
-| `styles FILE` | Lista stylów. |
-| `fonts FILE` | Kolekcjoner czcionek jak w Aegisubie: kroje użyte w liniach (z `\fn`, `\b`, `\i`, `\r`), plik z czcionką, brakujące glify i sztuczne pogrubienie/kursywa (`FAUX`). `--dir KATALOG` przeszukuje dodatkowy folder, `--collect KATALOG` kopiuje znalezione pliki. Kod wyjścia 1, gdy czegoś brakuje. |
-| `convert IN -o OUT` | Konwersja. Format wyjścia bierze się z `--to` albo z rozszerzenia. Opcje: `--out-encoding`, `--no-bom`, `--output-fps` (MicroDVD). |
-| `shift FILE` | Przesuwa czasy o `--by CZAS` albo o `--frames N`; ta druga opcja wymaga `--fps` lub `--timecodes`. |
-| `sort FILE --by KLUCZ` | Sortowanie po `start`, `end`, `style`, `actor`, `effect`, `layer` albo `text`. |
-| `filter FILE` | Zostawia tylko pasujące linie, resztę usuwa. |
-| `replace FILE --find X --replace Y` | Znajdź i zamień. |
-| `resample FILE --to 1920x1080` | Zmienia rozdzielczość skryptu: style, `\pos`, `\move`, `\org`, `\clip`, rysunki, `\fs`, `\bord` itd. Domyślnie rozdzielczość źródłowa pochodzi z PlayRes. `--stretch` rozciąga obraz przy zmianie proporcji. |
-| `change-fps FILE --from A --to B` | Przelicza czasy między stałymi FPS. |
-| `postprocess FILE` | Postprocesor timingu w stylu Aegisub. |
-| `tl status`, `tl enable`, `tl disable` | Tryb tłumaczenia zgodny z Kainote: postęp, włączenie i wyłączenie. `disable` zostawia tłumaczenia. |
-| `tl paste FILE TXT` | Wkleja tłumaczenia z pliku tekstowego, jedna linia na napis. `--from-row` wskazuje pierwszy wiersz. |
-| `tl extract-original FILE` | Wypisuje oryginały, jeden na linię, do tłumaczenia poza programem. |
-| `frame WARTOŚĆ` | Zamienia czas na klatkę albo odwrotnie. Numer klatki poprzedza się literą `f`, np. `f1500`. Wypisuje czasy exact, start i end oraz SMPTE. |
-| `timecodes IN -o OUT` | Konwertuje timecody v1 lub v2 do v2. `--frames N` przedłuża plik o ekstrapolowane klatki. |
-| `lua SKRYPT [FILE]` | Automatyzacja zgodna z Aegisub Automation 4 (Lua i MoonScript). Bez pliku wypisuje makra i filtry eksportu skryptu. Z plikiem uruchamia `--macro NAZWA` albo `--filter NAZWA` (nazwa lub numer z listy) i zapisuje wynik. |
+| `info FILE` | Format, encoding, declared FPS, version, PlayRes, title, linked video/audio/keyframes files, sections, translation-mode progress, number of styles, dialogue lines and comments, duration, characters, max CPS, overlaps, missing styles, parser warnings. `--cps N` sets the CPS limit used for the statistics (default 15). |
+| `check FILE…` | Parser warnings, missing styles, end before start, CPS above `--cps` (default 15), and overlaps between lines with the same style and layer. Exit code 1 if errors were found. With `--strict`, CPS and overlaps count as errors too. |
+| `roundtrip FILE…` | Checks that loading and saving gives identical bytes. Only ASS and SSA are checked; other formats are skipped as lossy by design. Exit code 1 on any difference. |
+| `lines FILE` | Table of lines, as in the grid. Takes the same filters as `filter`; `--strip` removes override tags from the displayed text. |
+| `styles FILE` | List of styles. |
+| `fonts FILE` | Font collector as in Aegisub: the faces used by the lines (with `\fn`, `\b`, `\i`, `\r`), the font file, missing glyphs and synthetic bold/italic (`FAUX`). `--dir DIR` searches an extra folder besides the system fonts (repeatable), `--collect DIR` copies the found files there. Exit code 1 when anything is missing. |
+| `convert IN -o OUT` | Conversion. The output format comes from `--to` (same values as `--format`) or from the extension of `OUT`. Options: `--out-encoding` (default UTF-8), `--no-bom`, `--output-fps` (MicroDVD; defaults to the FPS declared by the input, else 23.976). |
+| `shift FILE` | Shifts times by `--by TIME` or by `--frames N`; the latter needs `--fps` or `--timecodes`. |
+| `sort FILE` | Sorts by `--by KEY`: `start` (default), `end`, `style`, `actor`, `effect`, `layer` or `text`. |
+| `filter FILE` | Keeps only the matching lines and deletes the rest. |
+| `replace FILE --find X --replace Y` | Find and replace. |
+| `resample FILE --to 1920x1080` | Changes the script resolution, scaling styles, `\pos`, `\move`, `\org`, `\clip`, drawings, `\fs`, `\bord` and so on. The source resolution defaults to PlayResX/Y and can be set with `--from WxH`. When the aspect ratio changes, borders are added by default; `--stretch` stretches the picture instead. |
+| `change-fps FILE --from A --to B` | Converts times between two constant frame rates. |
+| `postprocess FILE` | Aegisub-style timing post-processor. |
+| `tl status`, `tl enable`, `tl disable` | Kainote-compatible translation mode: progress (rows, translated, doubtful), turning it on and off. `disable` keeps the translations and removes the originals of translated lines. |
+| `tl paste FILE TXT` | Pastes translations from a text file, one line per subtitle, turning translation mode on if needed. `--start N` sets the first row to fill (1-based, default 1). |
+| `tl extract-original FILE` | Prints the original texts, one per line, for translation outside the program. |
+| `frame VALUE` | Converts a time into a frame or the other way round; needs `--fps` or `--timecodes`. A frame number is prefixed with `f`, e.g. `f1500`. Prints the exact, start and end times and SMPTE for a frame, or the exact, line-start and line-end frames for a time. |
+| `timecodes IN` | Converts v1 or v2 timecodes to v2, to stdout or to `-o OUT`. `--frames N` extends the output to N frames, extrapolating past the end of the file (default 0: only the frames the file lists). |
+| `lua SCRIPT [FILE]` | Automation compatible with Aegisub Automation 4 (Lua and MoonScript). Without a file it lists the script's macros and export filters. With a file it runs `--macro NAME` or `--filter NAME` (a name or a number from the list) and writes the result. Built by default (feature `lua`). |
+| `media …` | Video and audio commands, see [below](#media-commands). |
 
-Opcje poleceń, które wymagają rozwinięcia:
+Command options that need more detail:
 
 * **`shift`**:
-  * `--start-only` / `--end-only` przesuwają tylko jeden z czasów;
-  * `--from-line N` ogranicza zmianę do linii od numeru N;
-  * `--after CZAS` ogranicza ją do linii startujących od podanego czasu (nie łączy się z `--from-line`);
-  * `--styles A,B` ogranicza ją do podanych stylów.
-* **`filter`**:
-  * `--style`, `--actor` i `--effect` filtrują po polach;
-  * `--text REGEX` dopasowuje treść;
-  * `--comments` i `--dialogue` wybierają rodzaj linii;
-  * `--overlapping` zostawia linie nakładające się na inne;
-  * `--min-cps N` zostawia linie powyżej N znaków na sekundę;
-  * `--invert` odwraca wynik.
+  * `--start-only` / `--end-only` shift only one of the two times;
+  * `--from-line N` limits the change to lines from number N on (1-based);
+  * `--after TIME` limits it to lines starting at or after the given time (cannot be combined with `--from-line`);
+  * `--styles A,B` limits it to the given styles.
+* **`filter`** (and `lines`):
+  * `--style`, `--actor` and `--effect` filter by those fields (comma-separated lists);
+  * `--text REGEX` matches the text (case-sensitive regular expression);
+  * `--comments` and `--dialogue` pick the line type;
+  * `--overlapping` keeps lines that overlap another line;
+  * `--min-cps N` keeps lines above N characters per second;
+  * `--invert` inverts the result.
 * **`replace`**:
-  * `--regex` włącza wyrażenia regularne;
-  * `-i` ignoruje wielkość liter;
-  * `--skip-tags` nie zamienia niczego wewnątrz `{…}`;
-  * `--field text|style|actor|effect` wybiera pole.
+  * `--regex` turns on regular expressions;
+  * `-i` / `--ignore-case` ignores letter case;
+  * `--skip-tags` replaces nothing inside `{…}`;
+  * `--field text|style|actor|effect` picks the field (default `text`).
 * **`postprocess`**:
-  * `--lead-in` i `--lead-out` dodają zapas przed i po linii;
-  * `--adjacent CZAS` łączy sąsiednie linie z przerwą mniejszą niż CZAS;
-  * `--bias 0..1` ustala punkt połączenia;
-  * `--keyframes` z `--fps` lub `--timecodes` i `--snap` przyciąga czasy do keyframe'ów.
-
+  * `--lead-in` and `--lead-out` add time before and after each line;
+  * `--adjacent TIME` links neighbouring lines with a gap smaller than TIME;
+  * `--overlap TIME` links neighbouring lines that overlap by no more than TIME;
+  * `--bias 0..1` sets where linked lines meet within the gap (0 = end of the previous line, 1 = start of the next; default 0.5);
+  * `--keyframes FILE` with `--fps` or `--timecodes` snaps times to keyframes within `--snap TIME` (default 250ms) before and after each start and end.
 * **`lua`**:
-  * `--rows 1,4-7` zaznacza wiersze (domyślnie wszystkie), `--active N` ustawia aktywny wiersz;
-  * makro uruchamia się tylko, gdy jego `validate` zwróci prawdę;
-  * filtr dostaje domyślne wartości ze swojego panelu konfiguracji, a okna dialogowe makr są zatwierdzane domyślnym przyciskiem;
-  * `--fps` lub `--timecodes` dają skryptowi `aegisub.frame_from_ms` i `ms_from_frame`;
-  * `--user KATALOG` wskazuje katalog z `automation/{autoload,include}` użytkownika (domyślnie `%APPDATA%\fs-editor` albo `~/.config/fs-editor`), `--data KATALOG` katalog z dołączonym `automation/`;
-  * `--trace-level 0..5` ustala próg `aegisub.debug.out`; komunikaty skryptu trafiają na stderr.
-  * skrypty z DependencyControl zachowują się jak w Aegisubie: brakujące moduły z zaufanych feedów DepCtrl doinstalowuje sam do katalogu `--user` (także natywne biblioteki, np. SubInspector), a feedy zapisuje w katalogu tymczasowym. Do eksperymentów warto podać osobny `--user`.
+  * `--rows 1,4-7` selects rows (all by default), `--active N` sets the active row (by default the first selected one);
+  * a macro only runs when its `validate` returns true;
+  * a filter gets the default values from its configuration panel, and macro dialogs are accepted with their default button;
+  * `--fps` or `--timecodes` give the script `aegisub.frame_from_ms` and `ms_from_frame`;
+  * `--user DIR` points to the user directory with `automation/{autoload,include}` (default `%APPDATA%\fs-editor`, or `$XDG_CONFIG_HOME/fs-editor`, or `~/.config/fs-editor`), `--data DIR` to the directory with the bundled `automation/` tree (default: next to the executable, or the source tree in development builds);
+  * `--trace-level 0..5` sets the threshold for `aegisub.debug.out` (default 3); script messages go to stderr;
+  * a script cancelled with `aegisub.cancel()` changes nothing and exits with code 1;
+  * scripts using DependencyControl behave as in Aegisub: missing modules from trusted DepCtrl feeds are installed into the `--user` directory (native libraries too, e.g. SubInspector), and feeds are cached in a temporary directory. A separate `--user` is a good idea for experiments.
 
-## Przykłady
+## Examples
 
-Opóźnienie napisów o 1,2 s od 10. minuty:
-
-```bash
-fsed shift odc01.ass --by 1.2s --after 0:10:00.00 --in-place
-```
-
-Przesunięcie o 3 klatki przy wideo VFR:
+Delay the subtitles by 1.2 s from minute 10 on:
 
 ```bash
-fsed shift odc01.ass --frames 3 --timecodes tc.txt -o out.ass
+fsed shift ep01.ass --by 1.2s --after 0:10:00.00 --in-place
 ```
 
-Konwersja do SRT w CP1250:
+Shift by 3 frames for a VFR video:
 
 ```bash
-fsed convert odc01.ass -o odc01.srt --out-encoding windows-1250 --no-bom
+fsed shift ep01.ass --frames 3 --timecodes tc.txt -o out.ass
 ```
 
-Linie powyżej 20 CPS bez tagów:
+Convert to SRT in CP1250:
 
 ```bash
-fsed lines odc01.ass --dialogue --min-cps 20 --strip
+fsed convert ep01.ass -o ep01.srt --out-encoding windows-1250 --no-bom
 ```
 
-Tłumaczenie poza programem:
+Lines above 20 CPS, without tags:
+
+```bash
+fsed lines ep01.ass --dialogue --min-cps 20 --strip
+```
+
+Translating outside the program:
 
 ```bash
 fsed tl extract-original en.ass > en.txt
@@ -123,22 +129,22 @@ fsed tl extract-original en.ass > en.txt
 fsed tl paste en.ass pl.txt -o pl.ass
 ```
 
-Szablony karaoke (kara-templater) na całym pliku:
+Karaoke templates (kara-templater) on the whole file:
 
 ```bash
 fsed lua crates/fs-automation/automation/autoload/kara-templater.lua kara.ass --macro "Apply karaoke template" -o kara-fx.ass
 ```
 
-## Polecenia `media`
+## `media` commands
 
-Polecenia `media` wymagają budowy z funkcją `media`: `cargo build -p fs-cli --features media` (zależności z `tools/deps`). Dekodowanie robi BestSource, a renderowanie napisów libass. Indeks każdego pliku jest zapisywany w `%LOCALAPPDATA%\fs-editor\bsindex` albo `~/.cache/fs-editor/bsindex`, więc kolejne otwarcia są natychmiastowe.
+The `media` commands need a build with the `media` feature: `cargo build -p fs-cli --features media` (dependencies from `tools/deps`). BestSource does the decoding and libass renders the subtitles. Each file's index is stored in `%LOCALAPPDATA%\fs-editor\bsindex` or `~/.cache/fs-editor/bsindex`, so later opens are instant.
 
-Zamiast pliku wideo lub audio można podać skrypt Avisynth (`.avs`) albo VapourSynth (`.vpy`): jest wykonywany przez AviSynth+ lub VapourSynth zainstalowany na komputerze, bez indeksu. `media info` pokazuje wtedy ścieżkę wideo i audio według tego, co skrypt oddaje. Gdy biblioteki nie ma, polecenie kończy się błędem z nazwą tego, co zainstalować. Inną instalację VapourSynth wskazuje zmienna `VSSCRIPT_PATH` (ścieżka biblioteki VSScript).
+Instead of a video or audio file you can pass an Avisynth (`.avs`) or VapourSynth (`.vpy`) script: it is run by the AviSynth+ or VapourSynth installed on the computer, with no index. `media info` then shows the video and audio tracks according to what the script returns. When the library is missing, the command fails with the name of what to install. The `VSSCRIPT_PATH` variable points to a different VapourSynth installation (the path of the VSScript library).
 
-| Polecenie | Opis |
+| Command | Description |
 |---|---|
-| `media info FILE` | Lista strumieni (z językiem i tytułem) oraz parametry wideo: rozdzielczość, format, macierz kolorów, liczba klatek, FPS, czy plik jest VFR, keyframe'y. Do tego parametry audio i fonty załączone w MKV. |
-| `media frame VIDEO --frame N` | Zapisuje klatkę N do PNG (`-o`). Zamiast `--frame` można podać `--time CZAS`, wtedy zapisana zostanie klatka widoczna w tym czasie. `--subs PLIK` nakłada napisy przez libass z fontami z MKV. |
-| `media keyframes VIDEO` | Lista keyframe'ów w formacie Aegisuba. |
-| `media timecodes VIDEO` | Timecody v2 z rzeczywistych znaczników czasu klatek. |
-| `media audio-clip FILE --start A --end B -o clip.wav` | Wycinek audio jako 16-bitowy WAV (odpowiednik „Save audio clip” w Aegisubie). `--mono` miksuje kanały do mono. |
+| `media info FILE` | Stream list (with language, title and default flag) and video properties: resolution, pixel format, SAR, colour matrix, frame count, FPS, whether the file is VFR, duration, number of keyframes. Also the audio properties and the fonts attached to an MKV. |
+| `media frame VIDEO --frame N -o OUT.png` | Saves frame N as PNG. Instead of `--frame` you can give `--time TIME`, and the frame shown at that time is saved. `--subs FILE` renders subtitles on top with libass, using the fonts attached to the MKV. |
+| `media keyframes VIDEO` | Keyframe list in the Aegisub format, to stdout or to `-o FILE`. |
+| `media timecodes VIDEO` | v2 timecodes from the actual frame timestamps, to stdout or to `-o FILE`. |
+| `media audio-clip FILE --start A --end B -o clip.wav` | Audio excerpt as a 16-bit WAV (the equivalent of "Save audio clip" in Aegisub). `--mono` downmixes the channels to mono. |

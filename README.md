@@ -1,69 +1,133 @@
 <div align="center">
 
+<img src="app/appicon/fsed.svg" alt="FS Editor logo" width="112">
+
 # FS Editor
 
-**Wieloplatformowy edytor napisów ASS/SSA: logika i API z Aegisuba, układ z Kainote.**
+**A fast, cross-platform ASS/SSA subtitle editor for typesetting, timing and translation.**<br>
+Aegisub's engine and Automation 4 scripts, Kainote's layout and workflow.
 
-[![Licencja: BSD-3-Clause](https://img.shields.io/badge/licencja-BSD--3--Clause-blue)](LICENSE)
-[![Rust 1.99](https://img.shields.io/badge/Rust-1.99-orange?logo=rust)](rust-toolchain.toml)
-[![Qt 6.8+](https://img.shields.io/badge/Qt-6.8%2B-41cd52?logo=qt)](app/CMakeLists.txt)
-![Platformy](https://img.shields.io/badge/platformy-Windows%20%7C%20Linux-lightgrey)
+[![CI](https://github.com/Ognisty321/fs-editor/actions/workflows/ci.yml/badge.svg)](https://github.com/Ognisty321/fs-editor/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/Ognisty321/fs-editor?label=release)](https://github.com/Ognisty321/fs-editor/releases/latest)
+[![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-lightgrey)
 
-[Funkcje](#funkcje) • [Budowanie](#budowanie) • [Użycie](#użycie) • [Testy](#testy) • [Struktura projektu](#struktura-projektu) • [Dokumentacja](#dokumentacja)
+[Download](#download) • [Features](#features) • [Usage](#usage) • [Building from source](#building-from-source) • [Documentation](#documentation)
+
+<img src="docs/images/main-window.png" alt="FS Editor main window: video with a typeset sign and the position tool, audio waveform, edit box, subtitle grid and the shift-times panel" width="900">
 
 </div>
 
-FS Editor to edytor napisów do typesettingu, timingu i tłumaczenia. Rdzeń jest napisany w Rust i nie zna GUI: te same operacje wywołuje interfejs Qt, narzędzie wiersza poleceń `fsed` i skrypty Lua. Plik otwarty i zapisany bez zmian jest identyczny co do bajtu.
+FS Editor is a subtitle editor built for fansub and professional workflows. Its core is written in Rust and knows nothing about the GUI: the Qt interface, the `fsed` command-line tool and Lua scripts all run the same document operations. A file that is opened and saved without edits comes out byte-for-byte identical.
 
-| Warstwa | Technologia |
-|---|---|
-| Rdzeń | Rust (edycja 2024): model dokumentu, bezstratny parser ASS, undo, VFR |
-| Interfejs | Qt 6 Widgets (C++23), wideo i audio rysowane na GPU przez QRhi |
-| Most | [`cxx`](https://cxx.rs) + [Corrosion](https://github.com/corrosion-rs/corrosion) |
-| Media | [BestSource](https://github.com/vapoursynth/bestsource), [libass](https://github.com/libass/libass), cpal, realfft |
-| Automatyzacja | LuaJIT przez `mlua`, zgodność z Aegisub Automation 4 |
+- **Aegisub-compatible.** Timing math, ASS handling and the Automation 4 Lua API follow Aegisub, so existing macros, `karaskel`, `kara-templater` and DependencyControl scripts run unchanged.
+- **Kainote-style workspace.** Grid, edit box, shift-times panel, translation mode and default shortcuts follow Kainote, re-engineered from its behaviour rather than its code.
+- **Built for big files.** Tens of thousands of lines, heavy `\p` drawings and long-running scripts without freezing the window; video and audio are drawn on the GPU.
 
 > [!NOTE]
-> Projekt jest we wczesnej wersji (0.1.2). Gotowe paczki ZIP dla Windows i Linuksa, zbudowane w CI, są na stronie [wydań](https://github.com/Ognisty321/fs-editor/releases): wystarczy rozpakować i uruchomić `bin/fsed`. Nowszą wersję program sprawdza na żądanie (Pomoc → Sprawdź aktualizacje) albo, po włączeniu w ustawieniach, raz dziennie przy starcie. Kod przewiduje macOS, ale nie był jeszcze budowany ani testowany na Macu.
+> FS Editor is in early development (0.1.x). Windows and Linux builds are produced and smoke-tested by CI on every release. macOS is anticipated in the code but has not been built or tested yet.
 
-## Funkcje
+## Download
 
-- **Bezstratny ASS.** BOM, końce linii, komentarze, nieznane sekcje, `[Fonts]`, `[Graphics]` i dane projektu Aegisuba zostają nietknięte. Linia, której nikt nie zmienił, jest zapisywana z oryginalnego tekstu.
-- **Formaty:** ASS, SSA, SRT, WebVTT, MPL2, MicroDVD i TMP, z wykrywaniem kodowania (UTF-8, UTF-16, Windows-1250 i inne).
-- **Wideo co do klatki:** BestSource, VFR (timecody v1 i v2), keyframe'y, rozdziały, podgląd libass, zoom, tryb odtwarzacza i wideo zastępcze.
-- **Skrypty Avisynth i VapourSynth:** pliki `.avs` i `.vpy` otwierają się jako wideo i audio, gdy na komputerze jest AviSynth+ albo VapourSynth. Biblioteki są ładowane dopiero przy pierwszym skrypcie, więc program działa też bez nich.
-- **Audio:** waveform i spektrogram na GPU, tryb karaoke, odtwarzanie i zapis wycinka do WAV.
-- **Narzędzia wizualne:** `\pos`, `\move`, `\org`, `\clip`/`\iclip`, rysunki `\p`, skalowanie i obroty bezpośrednio na wideo.
-- **Timing:** przesuwanie czasów myszą w gridzie i panel zmiany czasów jak w Kainote, postprocesor (lead-in/out, łączenie sąsiednich linii, przyciąganie do keyframe'ów), kanji timer, zmiana FPS i resample rozdzielczości.
-- **Tryb tłumaczenia** zgodny z Kainote: dwa pola tekstu, kolumna oryginału w gridzie i dopasowywanie tłumaczenia do oryginału.
-- **Automatyzacja:** skrypty Aegisub Automation 4 w Lua i MoonScript, w tym karaskel, kara-templater i DependencyControl.
-- **Narzędzia do pracy:** menedżer stylów, kolekcjoner czcionek (także z załączników MKV), załączniki, sprawdzanie pisowni (Hunspell), szukaj i zamień, zaznaczanie linii, porównanie napisów z dwóch kart, historia zmian i autozapis.
-- **Karty:** każdy plik ma własny dokument, wideo, audio i historię undo.
-- **Interfejs po polsku i angielsku,** język idzie za systemem albo za ustawieniem.
+Grab the ZIP for your system from the [latest release](https://github.com/Ognisty321/fs-editor/releases/latest):
 
-## Budowanie
-
-### Wymagania
-
-| Narzędzie | Potrzebne do |
+| Package | System |
 |---|---|
-| Rust 1.99 (`rustup` pobierze go sam z [rust-toolchain.toml](rust-toolchain.toml)) | wszystkiego |
-| Kompilator C/C++: MSVC, GCC albo Clang | LuaJIT, mediów i GUI |
-| [vcpkg](https://vcpkg.io) (`VCPKG_ROOT` albo vcpkg z Visual Studio) | wideo i audio |
-| Qt 6.8+ z modułem Qt Shader Tools, CMake 3.28+ | GUI |
+| `FS-Editor-<version>-windows-x64.zip` | Windows 10/11, 64-bit |
+| `FS-Editor-<version>-linux-x64.zip` | Linux x86-64 (built on Ubuntu 24.04) |
 
-Na Linuksie potrzebne są też pakiety systemowe dla vcpkg i ALSA (Ubuntu):
+Unpack it anywhere and run `bin\fsed.exe` (Windows) or `bin/fsed` (Linux). There is no installer and nothing else to install: Qt, FFmpeg, libass and Polish and English spell-check dictionaries are included. Verify the download against `SHA256SUMS.txt` from the same release.
+
+> [!TIP]
+> To be told about new versions, use **Help → Check for updates**, or enable the daily check in the settings. The program never contacts the network on its own unless you turn that on.
+
+## Features
+
+- **Lossless ASS.** BOM, line endings, comments, unknown sections, `[Fonts]`, `[Graphics]` and Aegisub project data survive untouched; an unedited line is written back from its original text.
+- **Formats.** ASS, SSA, SRT, WebVTT, MPL2, MicroDVD and TMP, with encoding detection (UTF-8, UTF-16, Windows-1250 and others).
+- **Frame-accurate video.** BestSource decoding, VFR (v1 and v2 timecodes), keyframes, chapters, libass preview, zoom, player mode and dummy video. Colour conversion runs in shaders.
+- **AviSynth and VapourSynth.** `.avs` and `.vpy` scripts open as video and audio when AviSynth+ or VapourSynth is installed; the libraries load only on first use.
+- **Audio.** GPU waveform and spectrogram, karaoke mode, playback and export of a selection to WAV.
+- **Visual typesetting.** `\pos`, `\move`, `\org`, `\clip`/`\iclip`, `\p` drawings, scaling and rotation directly on the video.
+- **Timing.** Drag times in the grid, Kainote's shift-times panel, the timing post-processor (lead-in/out, adjacent line linking, keyframe snapping), kanji timer, FPS change and resolution resampling.
+- **Translation mode.** Two text fields, an original-text column in the grid and alignment of the translation to the original, as in Kainote.
+- **Automation.** Aegisub Automation 4 scripts in Lua and MoonScript, running on LuaJIT.
+- **Everyday tools.** Style manager, font collector (including MKV attachments), attachments, Hunspell spell checking with thesaurus, find and replace, line selection, comparing two tabs, history and autosave.
+- **Tabs.** Each file has its own document, video, audio and undo history.
+- **English and Polish UI,** following the system language or the setting.
+
+## Usage
+
+### Editor
+
+```bash
+fsed subs.ass video.mkv
+```
+
+Files passed on the command line open in a tab. Subtitles, video, audio and keyframes can also be dropped anywhere on the window. A video with text subtitle tracks (ASS, SSA, SRT) opened in an empty tab offers to load one of them.
+
+<details>
+<summary><b>AviSynth and VapourSynth scripts</b></summary>
+
+`.avs` and `.vpy` files open like any video: from the menu, by drag and drop, on the command line and in `fsed media`. The same script can also be opened as audio.
+
+- AviSynth needs the 64-bit [AviSynth+](https://github.com/AviSynth/AviSynthPlus) (`avisynth.dll` in the system folder or next to the program; `libavisynth` on Linux).
+- VapourSynth needs [VapourSynth](https://www.vapoursynth.com) R55 or newer with Python. The VSScript library is found automatically (`VSSCRIPT_PATH`, the registry, Python on `PATH`) or can be set in the video settings. A script can provide keyframes in `__aegi_keyframes` and frame times in `__aegi_timecodes`.
+- The AviSynth options match Aegisub's: memory limit, pre-2.6 versions, down-mixer and forced audio sample rate.
+
+> [!WARNING]
+> A script is a program and runs with the editor's permissions. Only open scripts you trust.
+
+</details>
+
+<details>
+<summary><b>Spell checking and thesaurus</b></summary>
+
+Spell checking uses Hunspell dictionaries (`xx_YY.aff` + `xx_YY.dic`) and synonyms come from MyThes thesauri (`th_xx_YY*.idx` + `.dat`). Release packages ship Polish and English dictionaries in `bin/dictionaries/`. Drop other languages into that folder, or point the settings at another folder and language. Up-to-date sources: Polish from [sjp.pl](https://sjp.pl/sl/en/), English from [en-wl/wordlist](https://github.com/en-wl/wordlist/releases).
+
+</details>
+
+### Command line
+
+`fsed` also runs core operations without the GUI:
+
+```bash
+# delay everything after 10 minutes by 1.2 s
+fsed shift ep01.ass --by 1.2s --after 0:10:00.00 --in-place
+
+# convert to SRT in Windows-1250
+fsed convert ep01.ass -o ep01.srt --out-encoding windows-1250 --no-bom
+
+# lines faster than 20 characters per second, tags stripped
+fsed lines ep01.ass --dialogue --min-cps 20 --strip
+
+# run kara-templater over a whole file
+fsed lua crates/fs-automation/automation/autoload/kara-templater.lua kara.ass --macro "Apply karaoke template" -o kara-fx.ass
+```
+
+See [docs/CLI.md](docs/CLI.md) for every command (`info`, `check`, `fonts`, `resample`, `postprocess`, `tl`, `media` and more).
+
+## Building from source
+
+| Tool | Needed for |
+|---|---|
+| Rust 1.99 (installed by `rustup` from [rust-toolchain.toml](rust-toolchain.toml)) | everything |
+| A C/C++ compiler: MSVC, GCC or Clang | LuaJIT, media and GUI |
+| [vcpkg](https://vcpkg.io) (`VCPKG_ROOT`, or the copy bundled with Visual Studio) | video and audio |
+| Qt 6.8+ with Qt Shader Tools, CMake 3.28+ | GUI |
+
+On Linux, vcpkg and ALSA also need system packages (Ubuntu):
 
 ```bash
 sudo apt-get install -y libasound2-dev ninja-build nasm libgl1-mesa-dev libxkbcommon-dev autoconf-archive bison flex gperf zip
 ```
 
 > [!IMPORTANT]
-> Na Windows zmienna `NoDefaultCurrentDirectoryInExePath` przerywa budowanie LuaJIT, bo `msvcbuild.bat` uruchamia `minilua` z bieżącego katalogu. Jeśli jest ustawiona, usuń ją na czas budowania, np. `env -u NoDefaultCurrentDirectoryInExePath cargo build`.
+> On Windows, the `NoDefaultCurrentDirectoryInExePath` environment variable breaks the LuaJIT build, because `msvcbuild.bat` runs `minilua` from the current directory. Unset it for the build, e.g. `env -u NoDefaultCurrentDirectoryInExePath cargo build`.
 
-### 1. Rdzeń i CLI
+### 1. Core and CLI
 
-Do samego rdzenia i `fsed` wystarczy Rust i kompilator C:
+The core and `fsed` need only Rust and a C compiler:
 
 ```bash
 git clone https://github.com/Ognisty321/fs-editor.git
@@ -73,26 +137,28 @@ git clone https://github.com/Ognisty321/fs-editor.git
 cd fs-editor && cargo build --release -p fs-cli
 ```
 
-Binarka trafia do `target/release/fsed`.
+The binary is written to `target/release/fsed`.
 
-### 2. Biblioteki mediów
+### 2. Media libraries
 
-Wideo i audio (FFmpeg, libass, BestSource) instaluje skrypt z [vcpkg.json](vcpkg.json). Zapisuje ich położenie w `.cargo/config.toml`, więc cargo znajdzie je samo; CMake dostaje je przez `FS_DEPS_DIR`.
+FFmpeg, libass and BestSource are installed from [vcpkg.json](vcpkg.json) by a script that records their location in `.cargo/config.toml` (for cargo) and prints the directory to pass to CMake as `FS_DEPS_DIR`.
+
+Windows:
 
 ```bash
 pwsh tools/deps.ps1
 ```
 
+Linux and macOS (requires `VCPKG_ROOT`):
+
 ```bash
 TRIPLET=x64-linux-dynamic tools/deps.sh
 ```
 
-Pierwsze polecenie jest dla Windows, drugie dla Linuksa i macOS (wymaga `VCPKG_ROOT`).
-
 > [!NOTE]
-> Biblioteki lądują poza repozytorium (`%LOCALAPPDATA%\fs-editor\deps` albo `~/.cache/fs-editor/deps`), bo port FFmpeg w vcpkg nie znosi spacji w ścieżce.
+> The libraries go outside the repository (`%LOCALAPPDATA%\fs-editor\deps` or `~/.cache/fs-editor/deps`) because vcpkg's FFmpeg port cannot handle spaces in paths.
 
-Z bibliotekami można zbudować CLI z poleceniami `fsed media`:
+With the media libraries in place, the CLI can be built with the `fsed media` commands:
 
 ```bash
 cargo build --release -p fs-cli --features media
@@ -100,9 +166,9 @@ cargo build --release -p fs-cli --features media
 
 ### 3. GUI
 
-GUI buduje CMake, a rdzeń w Rust dobudowuje przez Corrosion. Ścieżki do Qt i bibliotek z kroku 2 podaje się przy konfiguracji.
+CMake builds the GUI and pulls in the Rust core through Corrosion. Pass the Qt location and the libraries from step 2 at configure time.
 
-**Windows** (Visual Studio 2026):
+Windows (Visual Studio 2026):
 
 ```bash
 cmake -S app --preset windows -DCMAKE_PREFIX_PATH=C:/Qt/6.12.0/msvc2022_64 -DFS_DEPS_DIR="$LOCALAPPDATA/fs-editor/deps/installed/x64-windows"
@@ -112,7 +178,7 @@ cmake -S app --preset windows -DCMAKE_PREFIX_PATH=C:/Qt/6.12.0/msvc2022_64 -DFS_
 cmake --build app/build-windows --config Release
 ```
 
-**Linux** (sprawdzone na Ubuntu 26.04 z GCC i Qt 6.12 z aqtinstall) i macOS:
+Linux (tested on Ubuntu 26.04 with GCC and Qt 6.12 from aqtinstall) and macOS:
 
 ```bash
 cmake -S app --preset unix -DCMAKE_PREFIX_PATH=$HOME/Qt/6.12.0/gcc_64 -DFS_DEPS_DIR=$HOME/.cache/fs-editor/deps/installed/x64-linux-dynamic
@@ -123,119 +189,43 @@ cmake --build app/build-unix
 ```
 
 > [!TIP]
-> Preset `windows-dev` buduje rdzeń profilem cargo `gui-dev` (bez LTO, przyrostowo), co bardzo skraca kolejne kompilacje podczas pracy nad GUI.
+> The `windows-dev` preset builds the core with the `gui-dev` cargo profile (no LTO, incremental), which makes rebuilds during GUI work much faster.
 
-### 4. Paczka ZIP
+### 4. ZIP package
 
-CPack składa paczkę z programem, Qt, bibliotekami mediów i dołączonymi skryptami automatyzacji:
+CPack assembles the program, Qt, the media libraries and the bundled automation scripts into a ZIP:
 
 ```bash
 cd app/build-windows && cpack -C Release
 ```
 
-Na Linuksie paczka ma RUNPATH `$ORIGIN/../lib`. Z systemu potrzebne są tylko biblioteki X11/xcb, których wymaga Qt (`libxcb-cursor0`, `libxkbcommon-x11-0` i pokrewne), obecne na zwykłym pulpicie.
+On Linux the package uses the RUNPATH `$ORIGIN/../lib`; the only system libraries it needs are the X11/xcb ones Qt requires (`libxcb-cursor0`, `libxkbcommon-x11-0` and friends), present on any desktop install.
 
-## Użycie
-
-### Edytor
-
-```bash
-fsed napisy.ass wideo.mkv
-```
-
-Pliki podane w wierszu poleceń otwierają się w karcie. Napisy, wideo, audio i keyframe'y można też przeciągnąć w dowolne miejsce okna. Wideo z tekstowymi ścieżkami napisów (ASS, SSA, SRT) otwarte w pustej karcie pyta, czy wczytać którąś z nich.
-
-**Skrypty `.avs` i `.vpy`** otwierają się jak wideo: z menu, przez przeciągnięcie, z wiersza poleceń i w `fsed media`. Ten sam skrypt można otworzyć jako audio.
-
-- Avisynth wymaga zainstalowanego [AviSynth+](https://github.com/AviSynth/AviSynthPlus) w wersji 64-bitowej (`avisynth.dll` w folderze systemowym albo obok programu; na Linuksie i macOS `libavisynth`).
-- VapourSynth wymaga [VapourSynth](https://www.vapoursynth.com) R55 lub nowszego z Pythonem. Bibliotekę VSScript program znajduje sam (`VSSCRIPT_PATH`, rejestr, Python ze ścieżki), a w razie potrzeby wskazuje się ją w ustawieniach wideo. Skrypt może podać klatki kluczowe w `__aegi_keyframes` i czasy klatek w `__aegi_timecodes`.
-- Gdy biblioteki nie ma, otwarcie skryptu kończy się komunikatem, co zainstalować.
-- Ustawienia Avisynth są te same co w Aegisubie: limit pamięci, starsze wersje, down-mixer i wymuszona częstotliwość próbkowania audio.
-
-Skrypt to program: wykonuje się z uprawnieniami edytora, więc otwieraj tylko skrypty, którym ufasz.
-
-**Sprawdzanie pisowni** używa słowników Hunspell (`xx_YY.aff` + `xx_YY.dic`), a podpowiedzi synonimów tezaurusów MyThes (`th_xx_YY*.idx` + `.dat`). Paczki z CI mają już polski i angielski słownik z tezaurusami w `bin/dictionaries/` (`tools/dictionaries.py`); inne wrzuć do tego katalogu albo wskaż folder i język w ustawieniach. Aktualne słowniki: polski z [sjp.pl](https://sjp.pl/sl/en/), angielski z [en-wl/wordlist](https://github.com/en-wl/wordlist/releases).
-
-### Wiersz poleceń
-
-`fsed` z crate'u `fs-cli` wykonuje operacje rdzenia bez GUI. Kilka przykładów:
-
-```bash
-# opóźnienie napisów o 1,2 s od 10. minuty
-fsed shift odc01.ass --by 1.2s --after 0:10:00.00 --in-place
-
-# konwersja do SRT w CP1250
-fsed convert odc01.ass -o odc01.srt --out-encoding windows-1250 --no-bom
-
-# linie powyżej 20 znaków na sekundę, bez tagów
-fsed lines odc01.ass --dialogue --min-cps 20 --strip
-
-# kara-templater na całym pliku
-fsed lua crates/fs-automation/automation/autoload/kara-templater.lua kara.ass --macro "Apply karaoke template" -o kara-fx.ass
-```
-
-Pełna lista poleceń (`info`, `check`, `fonts`, `resample`, `postprocess`, `tl`, `media` i inne) jest w [docs/CLI.md](docs/CLI.md).
-
-## Testy
+## Testing
 
 ```bash
 cargo test
 ```
 
-Domyślne `cargo test` obejmuje crate'y, które nie potrzebują bibliotek mediów. Po kroku 2 z [budowania](#2-biblioteki-mediów) dochodzą testy mediów i mostu:
+The default run covers every crate that does not need the media libraries. After [step 2](#2-media-libraries), the media and bridge tests can run too:
 
 ```bash
 cargo test -p fs-media -p fs-bridge
 ```
 
-Testy korpusowe sprawdzają każdy plik pod kątem zapisu bajt w bajt, nienaruszania sąsiednich pól przy edycji, bezstratnego parsowania tagów oraz konwersji przez SRT, MPL2, MicroDVD, TMP i SSA. Pliki biorą z:
-
-- [`tests/corpus/`](tests/corpus/README.md): pliki testowe Aegisuba, timecody VFR, keyframe'y i próbki kodowań;
-- `tests/corpus-local/`: twoje własne pliki `.ass` (katalog jest w `.gitignore`);
-- katalogu ze zmiennej `FS_CORPUS_DIR`.
+Corpus tests check every file for byte-exact round-trips, untouched neighbouring fields on edit, lossless tag parsing and conversion through SRT, MPL2, MicroDVD, TMP and SSA. Files come from [`tests/corpus/`](tests/corpus/README.md) (Aegisub's test scripts, VFR timecodes, keyframes and encoding samples), from your own `.ass` files in the git-ignored `tests/corpus-local/`, and from the directory in `FS_CORPUS_DIR`.
 
 <details>
-<summary>Testy opcjonalne i media testowe</summary>
+<summary><b>Optional tests and test media</b></summary>
 
-| Zmienna | Co włącza |
+| Variable | Enables |
 |---|---|
-| `FS_DEPCTRL_DIR=/ścieżka/do/DependencyControl` | test zgodności z DependencyControl (`cargo test -p fs-automation dependency_control`) |
-| `FS_DICT=/ścieżka/pl_PL`, `FS_DICT_EN=/ścieżka/en_US` | testy pisowni na prawdziwych słownikach (`cargo test -p fs-bridge spell`), ścieżki bez rozszerzenia |
+| `FS_DEPCTRL_DIR=/path/to/DependencyControl` | DependencyControl compatibility test (`cargo test -p fs-automation dependency_control`) |
+| `FS_DICT=/path/pl_PL`, `FS_DICT_EN=/path/en_US` | spell-check tests on real dictionaries (`cargo test -p fs-bridge spell`), paths without extension |
 
-Media w `tests/media` generuje `tools/gen-test-media.sh` (potrzebne ffmpeg z libx264 i mkvmerge). Każda klatka jest jednolicie szara, a jej jasność koduje numer klatki, więc testy sprawdzają dokładność seeków po jednym pikselu.
+The media in `tests/media` are generated by `tools/gen-test-media.sh` (needs ffmpeg with libx264 and mkvmerge). Every frame is a flat grey whose brightness encodes the frame number, so tests check seek accuracy from a single pixel.
 
-</details>
-
-<details>
-<summary>Smoke test GUI</summary>
-
-GUI czyta zmienne środowiskowe, które pozwalają sprawdzić aplikację bez klikania. Smoke test używa osobnych ustawień („FS Editor smoke test”), więc nie rusza twojej konfiguracji.
-
-| Zmienna | Działanie |
-|---|---|
-| `FSED_SMOKE=plik.png` | zapisuje zrzut okna (albo otwartego dialogu) i zamyka program |
-| `FSED_SMOKE_MS` | czas do zrzutu w ms (domyślnie 1000) |
-| `FSED_SMOKE_ROW=N` | wybiera linię N, co przesuwa wideo jak kliknięcie |
-| `FSED_SMOKE_ACTION=id` | uruchamia polecenie menu, np. `styleManager`, `fontCollector`, `macro:Strip tags/Strip tags` |
-| `FSED_SMOKE_TOOL=N` | włącza narzędzie wizualne nr N (kolejność jak na pasku pod wideo) |
-| `FSED_SMOKE_CLICK=tekst` | klika przycisk o tym napisie w otwartym dialogu |
-| `FSED_SMOKE_EDITDBL=N` | dwuklik na znaku N tekstu linii w polu edycji |
-| `FSED_SMOKE_DROP=plik` | upuszcza plik na pole edycji linii |
-| `FSED_SMOKE_SET="klucz=wartość;..."` | ustawia opcje przed startem, np. `spell/lang=pl_PL`; `video/planes=false` pokazuje klatki konwertowane na CPU zamiast w shaderze |
-| `FSED_UPDATE_URL=adres` | miejsce, które pyta „Sprawdź aktualizacje” zamiast GitHuba, np. `file:///.../latest.json`; bez niej smoke test nie pyta sieci |
-| `FSED_SMOKE_BENCH=plik.txt` | mierzy okno na otwartym pliku (pokazanie zmiany, odrysowanie siatki, zmiana linii, wpisany znak, cofnij/ponów, przewinięcie strony, zaznacz wszystko) i zapisuje mediany oraz najgorsze czasy; ustaw `FSED_SMOKE_MS` na kilka sekund |
-
-```bash
-FSED_SMOKE=out.png FSED_SMOKE_MS=8000 FSED_SMOKE_ROW=1 fsed napisy.ass wideo.mkv
-```
-
-`tools/smoke.sh` przechodzi tak przez całe okno: plik z korpusu, wideo zastępcze z audio, każde okno otwierane z menu i propozycję aktualizacji. Kończy się błędem, gdy program padnie, zawiśnie albo nie odda zrzutu. CI uruchamia go na rozpakowanej paczce.
-
-```bash
-tools/smoke.sh app/build-windows/Release/fsed.exe
-```
-
-Szybkość dekodowania wideo (klatki na sekundę do RGBA, tak jak bierze je okno) mierzy test `decode_speed`:
+Video decoding speed (frames per second to RGBA, as the window takes them) is measured by the `decode_speed` test:
 
 ```bash
 FS_BENCH_VIDEO=film.mkv cargo test -p fs-media --release decode_speed -- --ignored --nocapture
@@ -243,32 +233,72 @@ FS_BENCH_VIDEO=film.mkv cargo test -p fs-media --release decode_speed -- --ignor
 
 </details>
 
-## Struktura projektu
+<details>
+<summary><b>GUI smoke tests</b></summary>
+
+The GUI reads environment variables that let it be checked without clicking. Smoke runs use their own settings ("FS Editor smoke test"), so your configuration is left alone.
+
+| Variable | Effect |
+|---|---|
+| `FSED_SMOKE=file.png` | saves a screenshot of the window (or of the open dialog) and exits |
+| `FSED_SMOKE_MS` | time before the screenshot in ms (default 1000) |
+| `FSED_SMOKE_ROW=N` | selects line N, which seeks the video like a click |
+| `FSED_SMOKE_ACTION=id` | runs a menu command, e.g. `styleManager`, `fontCollector`, `macro:Strip tags/Strip tags` |
+| `FSED_SMOKE_TOOL=N` | enables visual tool N (in toolbar order under the video) |
+| `FSED_SMOKE_CLICK=text` | clicks the button with this label in the open dialog |
+| `FSED_SMOKE_EDITDBL=N` | double-clicks character N of the line text in the edit box |
+| `FSED_SMOKE_DROP=file` | drops a file on the edit box |
+| `FSED_SMOKE_SET="key=value;..."` | sets options before start, e.g. `main/language=en` or `spell/lang=pl_PL`; `video/planes=false` converts frames on the CPU instead of in the shader |
+| `FSED_UPDATE_URL=url` | where "Check for updates" looks instead of GitHub, e.g. `file:///.../latest.json`; without it, smoke runs never touch the network |
+| `FSED_SMOKE_BENCH=file.txt` | times the window on the open file (showing a change, grid repaint, line change, typed character, undo/redo, page scroll, select all) and writes medians and worst cases; set `FSED_SMOKE_MS` to a few seconds |
+
+```bash
+FSED_SMOKE=out.png FSED_SMOKE_MS=8000 FSED_SMOKE_ROW=1 fsed subs.ass video.mkv
+```
+
+`tools/smoke.sh` walks through the whole window this way: a corpus file, a dummy video with audio, every dialog opened from a menu and the update offer. It fails when the program crashes, hangs or produces no screenshot. CI runs it on the unpacked release package.
+
+```bash
+tools/smoke.sh app/build-windows/Release/fsed.exe
+```
+
+</details>
+
+## Project structure
 
 ```
 crates/
-├─ fs-core/        model dokumentu, parser i zapis ASS, tagi, czas, VFR, undo, operacje
-├─ fs-formats/     SRT, MPL2, MicroDVD, TMP i wykrywanie kodowania
-├─ fs-audio/       szczyty waveformu, spektrogram, odtwarzanie
-├─ fs-media/       BestSource i libass (C++ przez FFI)
-├─ fs-automation/  LuaJIT z API Automation 4 i dołączonymi skryptami Aegisuba
-├─ fs-bridge/      most cxx między rdzeniem a Qt
-└─ fs-cli/         binarka fsed
-app/               GUI w Qt 6 Widgets (C++23, CMake)
-docs/              architektura, opis CLI, notatki badawcze
-tests/             korpus testowy i media testowe
-tools/             instalacja zależności, generator mediów testowych, generator ikony programu, port vcpkg BestSource
+├─ fs-core/        document model, ASS parser and writer, tags, time, VFR, undo, operations
+├─ fs-formats/     SRT, WebVTT, MPL2, MicroDVD, TMP and encoding detection
+├─ fs-audio/       waveform peaks, spectrogram, playback
+├─ fs-media/       BestSource, libass, AviSynth and VapourSynth (C++ via FFI)
+├─ fs-automation/  LuaJIT with the Automation 4 API and bundled Aegisub scripts
+├─ fs-bridge/      cxx bridge between the core and Qt
+└─ fs-cli/         the fsed binary
+app/               Qt 6 Widgets GUI (C++23, CMake)
+docs/              architecture, CLI reference, release notes, research notes
+tests/             test corpus and test media
+tools/             dependency setup, test media and icon generators, smoke test, BestSource vcpkg port
 ```
 
-## Dokumentacja
+| Layer | Technology |
+|---|---|
+| Core | Rust (2024 edition): document model, lossless ASS parser, undo, VFR |
+| Interface | Qt 6 Widgets (C++23), video and audio drawn on the GPU through QRhi |
+| Bridge | [`cxx`](https://cxx.rs) + [Corrosion](https://github.com/corrosion-rs/corrosion) |
+| Media | [BestSource](https://github.com/vapoursynth/bestsource), [libass](https://github.com/libass/libass), cpal, realfft |
+| Automation | LuaJIT via `mlua`, Aegisub Automation 4 compatible |
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): zasady, model dokumentu, formaty, media, automatyzacja i etapy prac.
-- [docs/CLI.md](docs/CLI.md): wszystkie polecenia `fsed` z opcjami i przykładami.
-- [docs/research/](docs/research): notatki o układzie Kainote, Automation 4 i wersjach zależności.
-- [THIRD_PARTY.md](THIRD_PARTY.md): licencje zależności i dołączonych plików.
+## Documentation
 
-## Podziękowania
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): design principles, document model, formats, media, automation and milestones.
+- [docs/CLI.md](docs/CLI.md): every `fsed` command with options and examples.
+- [docs/releases/](docs/releases): release notes and the release procedure.
+- [docs/research/](docs/research): notes on Kainote's layout, Automation 4 and dependency versions.
+- [THIRD_PARTY.md](THIRD_PARTY.md): licences of dependencies and bundled files.
 
-- [Aegisub](https://github.com/TypesettingTools/Aegisub): wzór logiki edytora oraz skrypty i biblioteki Automation 4 dołączone na ich licencjach.
-- [Kainote](https://github.com/bjakja/Kainote): wzór układu interfejsu, odtworzony z zachowania programu, bez kopiowania kodu.
-- [Tabler Icons](https://tabler.io/icons): ikony interfejsu.
+## Acknowledgements
+
+- [Aegisub](https://github.com/TypesettingTools/Aegisub): the model for the editor's logic, and the Automation 4 scripts and libraries bundled under their licences.
+- [Kainote](https://github.com/bjakja/Kainote): the model for the interface layout, recreated from the program's behaviour without copying its code.
+- [Tabler Icons](https://tabler.io/icons): interface icons.

@@ -1,12 +1,12 @@
-# Korpus testowy
+# Test corpus
 
-| Katalog | Zawartość |
+| Directory | Contents |
 |---|---|
-| `aegisub/` | skrypty `.ass` z repozytorium Aegisub (format, karaoke, templater, rysunki) |
-| `vfr/` | pliki timecode v1 i v2, poprawne i błędne; wyniki referencyjne z testów Aegisub |
-| `keyframe/` | pliki keyframe'ów w formatach Aegisub, XviD i x264, plus pusty i błędny |
-| `charset/` | próbki kodowań: ASCII, UTF-8, UTF-8 z BOM, ucięty UTF-8, windows-1250, plik binarny |
+| `aegisub/` | `.ass` scripts from the Aegisub repository (format, karaoke, templater, drawings) |
+| `vfr/` | v1 and v2 timecode files, valid and broken; reference results from the Aegisub tests |
+| `keyframe/` | keyframe files in the Aegisub, XviD and x264 formats, plus an empty and a broken one |
+| `charset/` | encoding samples: ASCII, UTF-8, UTF-8 with BOM, truncated UTF-8, windows-1250, a binary file |
 
-Pliki są oznaczone `-text` w `.gitattributes`. Dzięki temu git nie zmienia w nich końców linii, a testy porównują bajty.
+The files are marked `-text` in `.gitattributes`, so git leaves their line endings alone and the tests can compare bytes.
 
-Własne pliki `.ass` wrzuć do `tests/corpus-local/` (katalog jest ignorowany przez git) albo wskaż ich katalog zmienną `FS_CORPUS_DIR`. Każdy taki plik przechodzi wtedy przez wszystkie testy korpusowe.
+Put your own `.ass` files in `tests/corpus-local/` (git ignores that directory) or point to their directory with the `FS_CORPUS_DIR` variable. Every such file then goes through all the corpus tests.

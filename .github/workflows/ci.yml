@@ -3,12 +3,18 @@ name: CI
 on:
   push:
     branches: [main]
+    # a version tag builds and smoke-tests the packages as usual, then drafts its release
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+# read-only token everywhere; only the release job may write
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -204,3 +210,60 @@ jobs:
         with:
           name: fs-editor-${{ matrix.os }}
           path: app/build-${{ matrix.preset }}/*.zip
+
+  # A version tag's checks, run beside the build so a missing notes file or a version mismatch shows
+  # up in minutes, not after the GUI build.
+  release-check:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash tools/release-check.sh "$GITHUB_REF_NAME"
+
+  # Drafts the GitHub release of a version tag from the smoke-tested packages: FS Editor <version>,
+  # both ZIPs and SHA256SUMS.txt, notes from docs/releases/v<version>.md. Publishing stays manual.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [gui, release-check]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: fs-editor-*
+          path: dist
+          merge-multiple: true
+      - name: Packages and checksums
+        working-directory: dist
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          expected="FS-Editor-$v-linux-x64.zip FS-Editor-$v-windows-x64.zip"
+          actual=$(ls | sort | xargs)
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::expected packages '$expected', the build gave '$actual'"
+            exit 1
+          fi
+          sha256sum --binary FS-Editor-$v-windows-x64.zip FS-Editor-$v-linux-x64.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      # a re-run refreshes its own draft; a published release is never touched
+      - name: Draft release
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          notes="docs/releases/$GITHUB_REF_NAME.md"
+          files=(dist/FS-Editor-$v-windows-x64.zip dist/FS-Editor-$v-linux-x64.zip dist/SHA256SUMS.txt)
+          if draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft -q .isDraft 2>/dev/null); then
+            if [ "$draft" != true ]; then
+              echo "::error::release $GITHUB_REF_NAME is already published; not changing it"
+              exit 1
+            fi
+            gh release edit "$GITHUB_REF_NAME" --title "FS Editor $v" --notes-file "$notes"
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" --draft --verify-tag --title "FS Editor $v" --notes-file "$notes"
+          fi
+          echo "draft: $(gh release view "$GITHUB_REF_NAME" --json url -q .url)" >> "$GITHUB_STEP_SUMMARY"
