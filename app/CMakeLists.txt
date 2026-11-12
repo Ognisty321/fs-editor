@@ -75,7 +75,7 @@ qt_add_executable(fsed WIN32 MACOSX_BUNDLE
 )
 qt_add_shaders(fsed "shaders"
     PREFIX "/"
-    FILES shaders/quad.vert shaders/texture.frag shaders/audio.frag
+    FILES shaders/quad.vert shaders/texture.frag shaders/chroma.frag shaders/yuv.frag shaders/audio.frag
 )
 # Polish UI, embedded as :/i18n/fsed_pl.qm; `cmake --build <dir> --target update_translations` refreshes the .ts
 qt_add_translations(fsed TS_FILES translations/fsed_pl.ts RESOURCE_PREFIX /i18n NO_GENERATE_PLURALS_TS_FILE

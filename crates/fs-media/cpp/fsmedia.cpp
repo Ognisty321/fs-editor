@@ -12,6 +12,7 @@
 #include <map>
 #include <set>
 #include <string_view>
+#include <utility>
 
 #include <audiosource.h>
 #include <tracklist.h>
@@ -1039,23 +1040,127 @@ void VideoSource::frame_rgba(int64_t n, std::span<uint8_t> out) {
     convert(f->GetAVFrame(), out, n);
 }
 
+FramePlanes VideoSource::frame_planes(int64_t n, std::span<uint8_t> y, std::span<uint8_t> u, std::span<uint8_t> v) {
+    n = std::clamp<int64_t>(n, 0, info_.num_frames - 1);
+    std::lock_guard g(m_);
+    if (packets_) {
+        const AVFrame *f = packets_->get(n);
+        if (!f)
+            throw MediaError("cannot decode frame " + std::to_string(n));
+        return planes(f, y, u, v);
+    }
+    std::unique_ptr<BestVideoFrame> f(bs_->GetFrame(n));
+    if (!f)
+        throw MediaError("cannot decode frame " + std::to_string(n));
+    return planes(f->GetAVFrame(), y, u, v);
+}
+
+void VideoSource::colour(const AVFrame *frame, int &colorspace, int &range) const {
+    colorspace = frame->colorspace;
+    range = frame->color_range;
+    if (colorspace == AVCOL_SPC_UNSPECIFIED)
+        colorspace = (frame->width > 1024 || frame->height >= 600) ? AVCOL_SPC_BT709 : AVCOL_SPC_BT470BG;
+    if (range == AVCOL_RANGE_UNSPECIFIED)
+        range = AVCOL_RANGE_MPEG;
+    switch (matrix_) {
+    case Matrix::Auto: break;
+    case Matrix::Bt601: colorspace = AVCOL_SPC_BT470BG; break;
+    case Matrix::Bt709: colorspace = AVCOL_SPC_BT709; break;
+    case Matrix::Fcc: colorspace = AVCOL_SPC_FCC; break;
+    case Matrix::Smpte240m: colorspace = AVCOL_SPC_SMPTE240M; break;
+    case Matrix::Bt2020: colorspace = AVCOL_SPC_BT2020_NCL; break;
+    }
+    if (range_override_)
+        range = full_range_ ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+}
+
+// What convert() below has swscale do, left to a shader: the planes as they are, and the numbers
+// swscale would convert them with.
+FramePlanes VideoSource::planes(const AVFrame *frame, std::span<uint8_t> y, std::span<uint8_t> u,
+                                std::span<uint8_t> v) const {
+    FramePlanes p;
+    const auto format = static_cast<AVPixelFormat>(frame->format);
+    const AVPixFmtDescriptor *d = av_pix_fmt_desc_get(format);
+    if (!d || d->flags != AV_PIX_FMT_FLAG_PLANAR || d->nb_components != 3 || d->log2_chroma_w > 1 ||
+        d->log2_chroma_h > 1 || (frame->flags & AV_FRAME_FLAG_INTERLACED) || frame->width != info_.width ||
+        frame->height != info_.height)
+        return p;
+    const int depth = d->comp[0].depth, bytes = depth > 8 ? 2 : 1;
+    if (depth < 8 || depth > 16)
+        return p;
+    for (int i = 0; i < 3; ++i)
+        if (d->comp[i].plane != i || d->comp[i].step != bytes || d->comp[i].offset || d->comp[i].shift ||
+            d->comp[i].depth != depth)
+            return p;
+    // An HDR10 frame says what display it was mastered on, and swscale then maps its colours from
+    // that display's black level and gamut to the plain ones of the frame convert() gives it (a
+    // 3D LUT, 40 ms a 4K frame). Such a frame keeps the picture it has had, on the CPU.
+    if (av_frame_get_side_data(frame, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA))
+        return p;
+    int cs, range;
+    colour(frame, cs, range);
+    switch (cs) { // the ones swscale converts (sws_test_colorspace)
+    case AVCOL_SPC_RGB:
+    case AVCOL_SPC_BT709:
+    case AVCOL_SPC_FCC:
+    case AVCOL_SPC_BT470BG:
+    case AVCOL_SPC_SMPTE170M:
+    case AVCOL_SPC_SMPTE240M:
+    case AVCOL_SPC_BT2020_NCL: break;
+    default: return p;
+    }
+    // swscale takes the deprecated full range formats as full range whatever the frame says
+    const bool full = range == AVCOL_RANGE_JPEG || format == AV_PIX_FMT_YUVJ420P || format == AV_PIX_FMT_YUVJ422P ||
+                      format == AV_PIX_FMT_YUVJ444P || format == AV_PIX_FMT_YUVJ440P;
+
+    p.planar = true;
+    p.width = frame->width;
+    p.height = frame->height;
+    p.chroma_width = AV_CEIL_RSHIFT(frame->width, d->log2_chroma_w);
+    p.chroma_height = AV_CEIL_RSHIFT(frame->height, d->log2_chroma_h);
+    p.bytes = bytes;
+
+    // swscale's own numbers (ff_yuv2rgb_c_init_tables), in 8-bit levels: its table has the chroma
+    // factors for limited range, times 65536; a deeper sample counts as its value over 2^(depth - 8)
+    const int *t = sws_getCoefficients(cs);
+    const double cy = full ? 1.0 : 255.0 / 219.0, oy = full ? 0.0 : 16.0;
+    const double c = (full ? 224.0 / 255.0 : 1.0) / 65536.0;
+    const double crv = t[0] * c, cbu = t[1] * c, cgu = -t[2] * c, cgv = -t[3] * c;
+    // a sample as 0..1 of its stored bits, to 8-bit levels, and the result from levels to 0..1
+    const double k = double((1 << (8 * bytes)) - 1) / double(1 << (depth - 8)) / 255.0;
+    const double rows[3][4] = {{cy * k, 0, crv * k, -(cy * oy + crv * 128) / 255},
+                               {cy * k, cgu * k, cgv * k, -(cy * oy + (cgu + cgv) * 128) / 255},
+                               {cy * k, cbu * k, 0, -(cy * oy + cbu * 128) / 255}};
+    for (int i = 0; i < 12; ++i)
+        p.to_rgb[size_t(i)] = float(rows[i / 4][i % 4]);
+
+    // ff_sws_chroma_pos: an unset location is the centre, and a plane as large as the luma has none
+    int cx = 0, cy_pos = 0;
+    if (av_chroma_location_enum_to_pos(&cx, &cy_pos, frame->chroma_location) < 0)
+        cx = cy_pos = 128;
+    p.chroma_x = d->log2_chroma_w ? float(cx) / 256.f : 0.f;
+    p.chroma_y = d->log2_chroma_h ? float(cy_pos) / 256.f : 0.f;
+    // hScale8To15_c, hScale16To15_c: a sample of `depth` bits times 2^(15 - depth), 32767 at most
+    p.chroma_top = float(32767.0 / std::ldexp(1.0, 15 - depth) / double((1 << (8 * bytes)) - 1));
+
+    const size_t row = size_t(p.width) * size_t(bytes), crow = size_t(p.chroma_width) * size_t(bytes);
+    if (y.size() < row * size_t(p.height) || u.size() < crow * size_t(p.chroma_height) ||
+        v.size() < crow * size_t(p.chroma_height))
+        return p;
+    av_image_copy_plane(y.data(), int(row), frame->data[0], frame->linesize[0], int(row), p.height);
+    av_image_copy_plane(u.data(), int(crow), frame->data[1], frame->linesize[1], int(crow), p.chroma_height);
+    av_image_copy_plane(v.data(), int(crow), frame->data[2], frame->linesize[2], int(crow), p.chroma_height);
+    p.copied = true;
+    return p;
+}
+
 void VideoSource::convert(const AVFrame *frame, std::span<uint8_t> out, int64_t n) {
     const int w = info_.width, h = info_.height;
     AVFrame *src = av_frame_clone(frame);
-    if (src->colorspace == AVCOL_SPC_UNSPECIFIED)
-        src->colorspace = (src->width > 1024 || src->height >= 600) ? AVCOL_SPC_BT709 : AVCOL_SPC_BT470BG;
-    if (src->color_range == AVCOL_RANGE_UNSPECIFIED)
-        src->color_range = AVCOL_RANGE_MPEG;
-    switch (matrix_) {
-    case Matrix::Auto: break;
-    case Matrix::Bt601: src->colorspace = AVCOL_SPC_BT470BG; break;
-    case Matrix::Bt709: src->colorspace = AVCOL_SPC_BT709; break;
-    case Matrix::Fcc: src->colorspace = AVCOL_SPC_FCC; break;
-    case Matrix::Smpte240m: src->colorspace = AVCOL_SPC_SMPTE240M; break;
-    case Matrix::Bt2020: src->colorspace = AVCOL_SPC_BT2020_NCL; break;
-    }
-    if (range_override_)
-        src->color_range = full_range_ ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+    int cs, range;
+    colour(frame, cs, range);
+    src->colorspace = static_cast<AVColorSpace>(cs);
+    src->color_range = static_cast<AVColorRange>(range);
 
     AVFrame *dst = av_frame_alloc();
     dst->format = AV_PIX_FMT_RGBA;
@@ -1288,6 +1393,7 @@ void SubtitleRenderer::set_fonts(const std::string &default_family, const std::f
     if (!fonts_dir.empty())
         ass_set_fonts_dir(lib_, reinterpret_cast<const char *>(fonts_dir.u8string().c_str()));
     ass_set_fonts(renderer_, nullptr, default_family_.c_str(), ASS_FONTPROVIDER_AUTODETECT, nullptr, 1);
+    boxed_valid_ = false;
 }
 
 void SubtitleRenderer::add_font(const std::string &name, std::span<const uint8_t> data) {
@@ -1297,9 +1403,11 @@ void SubtitleRenderer::add_font(const std::string &name, std::span<const uint8_t
 void SubtitleRenderer::refresh_fonts() {
     // fonts added after ass_set_fonts are only seen after re-running it
     ass_set_fonts(renderer_, nullptr, default_family_.c_str(), ASS_FONTPROVIDER_AUTODETECT, nullptr, 1);
+    boxed_valid_ = false;
 }
 
 void SubtitleRenderer::set_script(std::string_view ass) {
+    boxed_valid_ = false;
     if (track_)
         ass_free_track(track_);
     std::string copy(ass);  // libass wants a mutable buffer
@@ -1308,31 +1416,26 @@ void SubtitleRenderer::set_script(std::string_view ass) {
         throw MediaError("libass could not parse the script");
 }
 
+namespace {
+
+// libass's pictures onto the `width` x `height` pixels at (`left`, `top`) of the frame: straight
+// onto opaque RGBA8, or as a premultiplied overlay. True when a pixel changed.
 template <bool Premul>
-bool SubtitleRenderer::draw(int64_t ms, int width, int height, int video_w, int video_h, std::span<uint8_t> rgba) {
-    if (rgba.size() < static_cast<size_t>(width) * height * 4)
-        throw MediaError("subtitle buffer too small");
-    if constexpr (Premul)
-        std::ranges::fill(rgba, uint8_t{0});
-    if (!track_ || width <= 0 || height <= 0)
-        return false;
-    ass_set_frame_size(renderer_, width, height);
-    ass_set_storage_size(renderer_, video_w > 0 ? video_w : width, video_h > 0 ? video_h : height);
-    int changed = 0;
+bool paint(const ASS_Image *img, int left, int top, int width, int height, uint8_t *rgba) {
     bool drawn = false;
-    for (ASS_Image *img = ass_render_frame(renderer_, track_, ms, &changed); img; img = img->next) {
+    for (; img; img = img->next) {
         if (img->w <= 0 || img->h <= 0)
             continue;
         const uint32_t r = img->color >> 24, g = (img->color >> 16) & 0xff, b = (img->color >> 8) & 0xff;
         const uint32_t opacity = 255 - (img->color & 0xff);
         for (int y = 0; y < img->h; ++y) {
-            const int dy = img->dst_y + y;
+            const int dy = img->dst_y + y - top;
             if (dy < 0 || dy >= height)
                 continue;
             const uint8_t *src = img->bitmap + static_cast<ptrdiff_t>(y) * img->stride;
-            uint8_t *row = rgba.data() + static_cast<size_t>(dy) * width * 4;
+            uint8_t *row = rgba + static_cast<size_t>(dy) * width * 4;
             for (int x = 0; x < img->w; ++x) {
-                const int dx = img->dst_x + x;
+                const int dx = img->dst_x + x - left;
                 if (dx < 0 || dx >= width)
                     continue;
                 const uint32_t a = src[x] * opacity / 255;  // 0..255
@@ -1357,6 +1460,66 @@ bool SubtitleRenderer::draw(int64_t ms, int width, int height, int video_w, int 
     return drawn;
 }
 
+} // namespace
+
+template <bool Premul>
+bool SubtitleRenderer::draw(int64_t ms, int width, int height, int video_w, int video_h, std::span<uint8_t> rgba) {
+    if (rgba.size() < static_cast<size_t>(width) * height * 4)
+        throw MediaError("subtitle buffer too small");
+    if constexpr (Premul)
+        std::ranges::fill(rgba, uint8_t{0});
+    if (!track_ || width <= 0 || height <= 0)
+        return false;
+    boxed_valid_ = false;
+    ass_set_frame_size(renderer_, width, height);
+    ass_set_storage_size(renderer_, video_w > 0 ? video_w : width, video_h > 0 ? video_h : height);
+    int changed = 0;
+    return paint<Premul>(ass_render_frame(renderer_, track_, ms, &changed), 0, 0, width, height, rgba.data());
+}
+
+int SubtitleRenderer::overlay_box(int64_t ms, int width, int height, int video_w, int video_h,
+                                  std::span<uint8_t> rgba_premul, std::span<int32_t> box) {
+    if (width <= 0 || height <= 0 || box.size() < 4 || rgba_premul.size() < static_cast<size_t>(width) * height * 4)
+        throw MediaError("subtitle buffer too small");
+    const std::array<int, 4> sizes{width, height, video_w, video_h};
+    const bool was = std::exchange(boxed_valid_, track_ != nullptr) && sizes == boxed_;
+    boxed_ = sizes;
+    if (!track_)
+        return 0;
+    ass_set_frame_size(renderer_, width, height);
+    ass_set_storage_size(renderer_, video_w > 0 ? video_w : width, video_h > 0 ? video_h : height);
+    int changed = 0;
+    const ASS_Image *images = ass_render_frame(renderer_, track_, ms, &changed);
+    if (was && !changed)
+        return 2;
+    int l = INT_MAX, t = INT_MAX, r = INT_MIN, b = INT_MIN;
+    for (const ASS_Image *img = images; img; img = img->next) {
+        if (img->w <= 0 || img->h <= 0 || (img->color & 0xff) == 0xff)
+            continue;
+        l = std::min(l, img->dst_x);
+        t = std::min(t, img->dst_y);
+        r = std::max(r, img->dst_x + img->w);
+        b = std::max(b, img->dst_y + img->h);
+    }
+    if (l >= r || t >= b)
+        return 0;
+    // a transparent pixel around: a view that scales the box then fades its edge as the frame's did
+    l = std::max(l - 1, 0);
+    t = std::max(t - 1, 0);
+    r = std::min(r + 1, width);
+    b = std::min(b + 1, height);
+    if (l >= r || t >= b)
+        return 0;
+    std::ranges::fill(rgba_premul.first(static_cast<size_t>(r - l) * (b - t) * 4), uint8_t{0});
+    if (!paint<true>(images, l, t, r - l, b - t, rgba_premul.data()))
+        return 0;
+    box[0] = l;
+    box[1] = t;
+    box[2] = r;
+    box[3] = b;
+    return 1;
+}
+
 bool SubtitleRenderer::blend(int64_t ms, int width, int height, int video_w, int video_h, std::span<uint8_t> rgba) {
     return draw<false>(ms, width, height, video_w, video_h, rgba);
 }
@@ -1369,6 +1532,7 @@ bool SubtitleRenderer::overlay(int64_t ms, int width, int height, int video_w, i
 bool SubtitleRenderer::bounds(int64_t ms, int width, int height, std::span<int32_t> box) {
     if (!track_ || width <= 0 || height <= 0 || box.size() < 8)
         return false;
+    boxed_valid_ = false;
     ass_set_frame_size(renderer_, width, height);
     ass_set_storage_size(renderer_, width, height);
     int changed = 0;

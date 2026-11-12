@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use cxx::UniquePtr;
 use ffi::{ProgressSink, bridge};
 
-pub use bridge::{AudioProps, TrackInfo, VideoProps};
+pub use bridge::{AudioProps, PlaneLayout, TrackInfo, VideoProps};
 
 #[derive(Debug, thiserror::Error)]
 pub enum MediaError {
@@ -353,6 +353,75 @@ impl Video {
         self.frame_into(n, &mut v)?;
         Ok(v)
     }
+
+    /// Decode frame `n` and copy its planes as the decoder gives them into `y`, `u` and `v`, row
+    /// after row: what a shader makes the RGB of [`frame_into`](Self::frame_into) from, without
+    /// the conversion on the CPU. The answer says how (its matrix has the range and what
+    /// [`set_matrix`](Self::set_matrix) overrides), whether the frame has such planes at all, and
+    /// whether they were copied: a buffer shorter than its plane leaves all three untouched.
+    pub fn planes_into(
+        &mut self,
+        n: i64,
+        y: &mut [u8],
+        u: &mut [u8],
+        v: &mut [u8],
+    ) -> Result<PlaneLayout> {
+        Ok(bridge::video_frame_planes(
+            self.inner.pin_mut(),
+            n,
+            y,
+            u,
+            v,
+        )?)
+    }
+
+    /// [`planes_into`](Self::planes_into) with buffers of its own; `None` for a frame without
+    /// planes.
+    pub fn planes(&mut self, n: i64) -> Result<Option<Planes>> {
+        let layout = self.planes_into(n, &mut [], &mut [], &mut [])?;
+        if !layout.planar {
+            return Ok(None);
+        }
+        let (luma, chroma) = layout.sizes();
+        let mut p = Planes {
+            layout,
+            y: vec![0; luma],
+            u: vec![0; chroma],
+            v: vec![0; chroma],
+        };
+        p.layout = self.planes_into(n, &mut p.y, &mut p.u, &mut p.v)?;
+        Ok((p.layout.planar && p.layout.copied).then_some(p))
+    }
+}
+
+impl PlaneLayout {
+    /// The bytes of the luma plane and of each chroma plane.
+    pub fn sizes(&self) -> (usize, usize) {
+        let n = |w: i32, h: i32| w.max(0) as usize * h.max(0) as usize * self.bytes.max(1) as usize;
+        (
+            n(self.width, self.height),
+            n(self.chroma_width, self.chroma_height),
+        )
+    }
+}
+
+/// A frame's planes ([`Video::planes`]).
+pub struct Planes {
+    pub layout: PlaneLayout,
+    pub y: Vec<u8>,
+    pub u: Vec<u8>,
+    pub v: Vec<u8>,
+}
+
+/// What [`SubtitleRenderer::overlay_box`] found at a time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Overlay {
+    /// Nothing shows.
+    Empty,
+    /// Drawn: `[left, top, right, bottom]` of the part of the frame the buffer now starts with.
+    Drawn([i32; 4]),
+    /// What the call before found, and nothing was written.
+    Same,
 }
 
 /// An audio track; implements [`fs_audio::AudioSource`] so it can be
@@ -523,6 +592,36 @@ impl SubtitleRenderer {
             &mut b,
         )?;
         Ok(shown.then_some(b))
+    }
+
+    /// The subtitles at `ms` alone, as [`overlay`](Self::overlay) draws them, but only the part
+    /// of the frame they cover, at the start of `rgba` (which must hold a whole frame): what a
+    /// view draws over a picture it converts itself. [`Overlay::Same`] when libass saw no change
+    /// since the call before this one and no other call of this renderer came between.
+    pub fn overlay_box(
+        &mut self,
+        ms: i64,
+        width: usize,
+        height: usize,
+        video: (usize, usize),
+        rgba: &mut [u8],
+    ) -> Result<Overlay> {
+        let mut b = [0i32; 4];
+        let found = bridge::subs_overlay_box(
+            self.inner.pin_mut(),
+            ms,
+            width as i32,
+            height as i32,
+            video.0 as i32,
+            video.1 as i32,
+            rgba,
+            &mut b,
+        )?;
+        Ok(match found {
+            1 => Overlay::Drawn(b),
+            2 => Overlay::Same,
+            _ => Overlay::Empty,
+        })
     }
 
     /// Render into a transparent premultiplied RGBA8 overlay.

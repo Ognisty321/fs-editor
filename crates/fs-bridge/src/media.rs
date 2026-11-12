@@ -47,7 +47,7 @@ use fs_core::Document;
 use fs_core::ass::Section;
 use fs_core::vfr::{Framerate, TimeType};
 
-use crate::ffi::VideoInfo;
+use crate::ffi::{FramePlanes, VideoInfo};
 
 fn cache(dir: &str) -> PathBuf {
     if dir.is_empty() {
@@ -183,6 +183,30 @@ impl Video {
     pub fn frame(&mut self, n: i64, out: &mut [u8]) -> Result<(), String> {
         let n = n.clamp(0, (self.inner.num_frames() - 1).max(0));
         self.inner.frame_into(n, out).map_err(|e| e.to_string())
+    }
+
+    pub fn frame_planes(
+        &mut self,
+        n: i64,
+        y: &mut [u8],
+        u: &mut [u8],
+        v: &mut [u8],
+    ) -> Result<FramePlanes, String> {
+        let n = n.clamp(0, (self.inner.num_frames() - 1).max(0));
+        let l = (self.inner.planes_into(n, y, u, v)).map_err(|e| e.to_string())?;
+        Ok(FramePlanes {
+            planar: l.planar,
+            copied: l.copied,
+            width: l.width,
+            height: l.height,
+            chroma_width: l.chroma_width,
+            chroma_height: l.chroma_height,
+            bytes: l.bytes,
+            to_rgb: l.to_rgb,
+            chroma_x: l.chroma_x,
+            chroma_y: l.chroma_y,
+            chroma_top: l.chroma_top,
+        })
     }
 
     pub fn timecodes(&self) -> Vec<i64> {
@@ -322,6 +346,34 @@ impl Renderer {
         self.ass
             .overlay(ms, width, height, (video_w, video_h), rgba)
             .map_err(|e| e.to_string())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn overlay_box(
+        &mut self,
+        ms: i64,
+        width: usize,
+        height: usize,
+        video_w: usize,
+        video_h: usize,
+        rgba: &mut [u8],
+        bounds: &mut [i32],
+    ) -> Result<i32, String> {
+        use fs_media::Overlay;
+        if bounds.len() < 4 {
+            return Err("four numbers for the bounds".into());
+        }
+        let found = (self.ass)
+            .overlay_box(ms, width, height, (video_w, video_h), rgba)
+            .map_err(|e| e.to_string())?;
+        Ok(match found {
+            Overlay::Empty => 0,
+            Overlay::Drawn(b) => {
+                bounds[..4].copy_from_slice(&b);
+                1
+            }
+            Overlay::Same => 2,
+        })
     }
 }
 

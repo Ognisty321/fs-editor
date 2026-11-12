@@ -27,6 +27,21 @@ ffmpeg -v error -y -i "$out/cfr.mkv" -map 0:v -c copy "$tmp/v.h264"
 # native Windows tools need Windows paths under MSYS/Git Bash
 native() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else echo "$1"; fi; }
 mkvmerge -q -o "$(native "$out/vfr.mkv")" --timestamps "0:$(native "$out/vfr-timecodes.txt")" "$(native "$tmp/v.h264")"
+# A colour picture with hard edges (testsrc2) in each kind of planes the window draws itself, for the
+# comparison of its shader's arithmetic with swscale: 8 and 10 bits, 4:2:0, 4:2:2 and 4:4:4, a JPEG's
+# full range with the chroma between the luma samples, and an HDR10 frame with its mastering display.
+colour() { # name, pixel format, encoder and its options
+    name=$1 fmt=$2
+    shift 2
+    ffmpeg -v error -y -f lavfi -i "testsrc2=s=320x180:r=24" -frames:v 2 -pix_fmt "$fmt" "$@" "$out/colour-$name.mkv"
+}
+colour 420p8 yuv420p -c:v libx264 -preset veryfast -crf 12
+colour 420p10 yuv420p10le -c:v libx265 -preset veryfast -crf 12 -x265-params log-level=error
+colour 422p10 yuv422p10le -c:v libx264 -preset veryfast -crf 12
+colour 444p8 yuv444p -c:v libx264 -preset veryfast -crf 12
+colour j420p8 yuvj420p -c:v mjpeg -q:v 2
+colour hdr10 yuv420p10le -c:v libx265 -preset veryfast -crf 12 -x265-params     "log-level=error:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,50):max-cll=1000,400"
+
 # Embedded subtitles: an ASS and an SRT stream (no video), for extract_subtitles.
 cat > "$tmp/s.ass" <<'EOF'
 [Script Info]

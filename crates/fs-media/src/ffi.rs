@@ -58,6 +58,30 @@ pub(crate) mod bridge {
         hdr: bool,
     }
 
+    /// A frame's planes as the decoder gives them, and what takes them to RGB (`FramePlanes` in
+    /// `fsmedia.h`).
+    #[derive(Debug, Clone, Copy, Default, PartialEq)]
+    struct PlaneLayout {
+        /// False for a frame that has no planes here; `Video::frame_into` is the way then.
+        planar: bool,
+        /// False when a buffer was too small and nothing was copied.
+        copied: bool,
+        width: i32,
+        height: i32,
+        chroma_width: i32,
+        chroma_height: i32,
+        /// Of a sample: 1, or 2 (native-endian).
+        bytes: i32,
+        /// R, G and B in 0..1 (to be clamped), each the sum of its four factors times Y, U, V and
+        /// 1, with a sample as 0..1 of the bits it is stored in.
+        to_rgb: [f32; 12],
+        /// Where the first chroma sample lies, in luma samples from the first luma sample.
+        chroma_x: f32,
+        chroma_y: f32,
+        /// The most a chroma value interpolated along a row can be, as a sample is 0..1.
+        chroma_top: f32,
+    }
+
     #[derive(Debug, Clone, Copy)]
     struct AudioProps {
         sample_rate: i32,
@@ -107,6 +131,13 @@ pub(crate) mod bridge {
         fn video_exact(v: &VideoSource) -> bool;
         fn video_set_matrix(v: Pin<&mut VideoSource>, matrix: u8, range: u8);
         fn video_frame_rgba(v: Pin<&mut VideoSource>, n: i64, out: &mut [u8]) -> Result<()>;
+        fn video_frame_planes(
+            v: Pin<&mut VideoSource>,
+            n: i64,
+            y: &mut [u8],
+            u: &mut [u8],
+            v_plane: &mut [u8],
+        ) -> Result<PlaneLayout>;
 
         fn open_audio(
             path: &str,
@@ -152,6 +183,17 @@ pub(crate) mod bridge {
             vh: i32,
             rgba: &mut [u8],
         ) -> Result<bool>;
+        #[allow(clippy::too_many_arguments)]
+        fn subs_overlay_box(
+            r: Pin<&mut SubtitleRenderer>,
+            ms: i64,
+            w: i32,
+            h: i32,
+            vw: i32,
+            vh: i32,
+            rgba: &mut [u8],
+            bounds: &mut [i32],
+        ) -> Result<i32>;
     }
 }
 

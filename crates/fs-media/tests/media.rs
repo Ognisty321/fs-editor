@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use fs_audio::{PcmBuffer, Spectrogram, SpectrumConfig};
 use fs_core::vfr::{Framerate, TimeType};
-use fs_media::{Audio, SubtitleRenderer, Video, list_tracks};
+use fs_media::{Audio, Matrix, Overlay, Planes, Range, SubtitleRenderer, Video, list_tracks};
 
 fn media(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -248,6 +248,273 @@ fn libass_renders_onto_frames() {
     assert_eq!(px(&ov, 200, 20), vec![0, 0, 0, 0]);
     assert!(!r.overlay(6000, w, h, (w, h), &mut ov).unwrap());
     assert!(ov.iter().all(|&b| b == 0));
+}
+
+/// What `app/shaders/chroma.frag` and `yuv.frag` make of a frame's planes, a pixel for each luma
+/// sample, the chroma taken at its place with swscale's bicubic (B = 0, C = 0.6) where the plane
+/// is smaller than the luma (along the rows first, cut at what swscale's 15 bits hold, then down
+/// them), and the layout's matrix. The two shaders' arithmetic, step for step.
+fn shade(p: &Planes) -> Vec<u8> {
+    let l = &p.layout;
+    let (w, h) = (l.width as usize, l.height as usize);
+    let (cw, ch) = (l.chroma_width as usize, l.chroma_height as usize);
+    // a sample as 0..1 of the bits it is stored in, as a texture gives it
+    let sample = |plane: &[u8], i: usize| -> f32 {
+        if l.bytes == 2 {
+            u16::from_ne_bytes([plane[i * 2], plane[i * 2 + 1]]) as f32 / 65535.0
+        } else {
+            plane[i] as f32 / 255.0
+        }
+    };
+    // the four samples around a place and their weights: the cubic for a smaller plane, the
+    // sample itself (or the line between two) for one as large as the luma
+    let taps = |at: f32, cubic: bool, size: usize| -> [(usize, f32); 4] {
+        let first = at.floor();
+        let t = at - first;
+        let c = 0.6f32;
+        let weights = if cubic {
+            [
+                ((-c * t + 2.0 * c) * t - c) * t,
+                ((2.0 - c) * t - (3.0 - c)) * t * t + 1.0,
+                ((-(2.0 - c) * t + (3.0 - 2.0 * c)) * t + c) * t,
+                (c * t - c) * t * t,
+            ]
+        } else {
+            [0.0, 1.0 - t, t, 0.0]
+        };
+        std::array::from_fn(|k| {
+            let i = (first as i64 + k as i64 - 1).clamp(0, size as i64 - 1);
+            (i as usize, weights[k])
+        })
+    };
+    let (sx, sy) = (cw as f32 / w.max(1) as f32, ch as f32 / h.max(1) as f32);
+    let (sx, sy) = (
+        if sx < 0.75 { 0.5 } else { 1.0 },
+        if sy < 0.75 { 0.5 } else { 1.0 },
+    );
+    let m = &l.to_rgb;
+    let mut out = vec![255u8; w * h * 4];
+    for y in 0..h {
+        let ty = taps((y as f32 - l.chroma_y) * sy, sy < 1.0, ch);
+        for x in 0..w {
+            let tx = taps((x as f32 - l.chroma_x) * sx, sx < 1.0, cw);
+            let (mut u, mut v) = (0.0f32, 0.0f32);
+            for (j, wy) in ty {
+                let (mut row_u, mut row_v) = (0.0f32, 0.0f32);
+                for (i, wx) in tx {
+                    row_u += wx * sample(&p.u, j * cw + i);
+                    row_v += wx * sample(&p.v, j * cw + i);
+                }
+                u += wy * row_u.min(l.chroma_top);
+                v += wy * row_v.min(l.chroma_top);
+            }
+            let luma = sample(&p.y, y * w + x);
+            for c in 0..3 {
+                let r = m[c * 4] * luma + m[c * 4 + 1] * u + m[c * 4 + 2] * v + m[c * 4 + 3];
+                out[(y * w + x) * 4 + c] = (r.clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
+        }
+    }
+    out
+}
+
+/// The planes and their matrix give the picture swscale makes: on the grey frames, and on a colour
+/// picture with hard edges in each kind of planes, with the matrix and the range as a script's
+/// header overrides them. A level apart at most here (two are allowed: swscale counts in fixed
+/// point, and not the same way on every processor), but for one row and one column: swscale
+/// rounds the place its five samples start at toward zero, which for the third row or column of a
+/// picture whose chroma lies between the luma samples leaves out the sample before the first one,
+/// and the others stand in for it. The shader repeats the first sample there, as at every edge.
+#[test]
+fn planes_shade_to_the_frame_swscale_makes() {
+    let cases = [
+        ("cfr.mkv", 1, (0.0, 0.5), 37),
+        ("colour-420p8.mkv", 1, (0.0, 0.5), 1),
+        ("colour-420p10.mkv", 2, (0.0, 0.5), 1),
+        ("colour-422p10.mkv", 2, (0.0, 0.0), 1),
+        ("colour-444p8.mkv", 1, (0.0, 0.0), 1),
+        // a JPEG's chroma lies between the luma samples both ways, and its format is full range
+        // whatever is asked for
+        ("colour-j420p8.mkv", 1, (0.5, 0.5), 1),
+    ];
+    for (name, bytes, chroma, n) in cases {
+        let mut v = Video::open(&media(name), -1, None, |_, _| true).unwrap();
+        let w = v.width();
+        for (matrix, range) in [
+            (Matrix::Auto, Range::AsDecoded),
+            (Matrix::Bt601, Range::Tv),
+            (Matrix::Bt601, Range::Pc),
+            (Matrix::Bt709, Range::Tv),
+            (Matrix::Bt709, Range::Pc),
+        ] {
+            v.set_matrix(matrix, range);
+            let rgba = v.frame(n).unwrap();
+            let p = v.planes(n).unwrap().expect("planes of a planar format");
+            let l = &p.layout;
+            assert_eq!(l.bytes, bytes, "{name}");
+            assert_eq!((l.chroma_x, l.chroma_y), chroma, "{name}");
+            let ours = shade(&p);
+            // [everywhere else, where swscale leaves a sample out]
+            let (mut worst, mut apart) = ([0u8; 2], 0usize);
+            for (i, (a, b)) in ours.iter().zip(&rgba).enumerate() {
+                let (x, y) = (i / 4 % w, i / 4 / w);
+                let left_out = (y == 2 && l.chroma_y == 0.5) || (x == 2 && l.chroma_x == 0.5);
+                let d = a.abs_diff(*b);
+                worst[left_out as usize] = worst[left_out as usize].max(d);
+                apart += (d > 0 && !left_out) as usize;
+            }
+            let share = apart as f64 / rgba.len() as f64;
+            eprintln!(
+                "{name} {matrix:?} {range:?}: {} apart at most, {:.2}% of the samples; {} where swscale leaves a sample out",
+                worst[0],
+                share * 100.0,
+                worst[1]
+            );
+            assert!(
+                worst[0] <= 2,
+                "{name} {matrix:?} {range:?}: {} levels apart",
+                worst[0]
+            );
+            assert!(
+                worst[1] <= 8,
+                "{name} {matrix:?} {range:?}: {} levels apart",
+                worst[1]
+            );
+            assert!(share < 0.01, "{name} {matrix:?} {range:?}: {share}");
+        }
+        // and the matrix is the one asked for: full range leaves the luma as it is
+        v.set_matrix(Matrix::Bt709, Range::Pc);
+        let p = v.planes(n).unwrap().unwrap();
+        let scale = if bytes == 2 { 65535.0 / 1020.0 } else { 1.0 };
+        assert!((p.layout.to_rgb[0] - scale).abs() < 1e-4, "{name}");
+        assert!((p.layout.to_rgb[2] - 1.5748 * scale).abs() < 1e-3, "{name}");
+    }
+}
+
+/// An HDR10 frame that names its mastering display has no planes: swscale maps its colours (black
+/// level, gamut) on the way to RGB, which the matrix alone does not, and the window shows what a
+/// saved frame has.
+#[test]
+fn a_frame_swscale_maps_the_colours_of_has_no_planes() {
+    let mut v = Video::open(&media("colour-hdr10.mkv"), -1, None, |_, _| true).unwrap();
+    assert!(v.props().hdr);
+    assert_eq!(v.props().pixel_format, "yuv420p10le");
+    assert!(v.planes(1).unwrap().is_none());
+    assert!(!v.planes_into(1, &mut [], &mut [], &mut []).unwrap().planar);
+    v.frame(1).unwrap();
+}
+
+/// A buffer too small for its plane leaves all three as they were, and says what they need.
+#[test]
+fn planes_are_copied_whole_or_not_at_all() {
+    let mut v = Video::open(&media("colour-420p10.mkv"), -1, None, |_, _| true).unwrap();
+    let l = v.planes_into(0, &mut [], &mut [], &mut []).unwrap();
+    assert!(l.planar && !l.copied);
+    assert_eq!((l.width, l.height), (320, 180));
+    assert_eq!((l.chroma_width, l.chroma_height), (160, 90));
+    assert_eq!(l.sizes(), (320 * 180 * 2, 160 * 90 * 2));
+    let (mut y, mut u, mut short) = (vec![7u8; l.sizes().0], vec![7u8; l.sizes().1], [7u8; 16]);
+    assert!(!v.planes_into(0, &mut y, &mut u, &mut short).unwrap().copied);
+    assert!(y.iter().chain(&u).chain(&short).all(|&b| b == 7));
+    let mut vv = vec![7u8; l.sizes().1];
+    assert!(v.planes_into(0, &mut y, &mut u, &mut vv).unwrap().copied);
+    // ten bits in sixteen: nothing above 1023
+    let top = |p: &[u8]| {
+        let (samples, _) = p.as_chunks::<2>();
+        samples.iter().map(|&s| u16::from_ne_bytes(s)).max()
+    };
+    assert!(top(&y).unwrap() > 512 && top(&y).unwrap() < 1024);
+    assert!(top(&vv).unwrap() < 1024);
+}
+
+/// The subtitles alone, in the part of the frame they cover: the same pixels as the whole overlay
+/// has there, and no work when nothing changed since the call before.
+#[test]
+fn overlay_box_is_the_overlay_cut_to_the_subtitles() {
+    let (w, h) = (320usize, 240usize);
+    let mut r = SubtitleRenderer::new().unwrap();
+    r.set_script(
+        "[Script Info]\nScriptType: v4.00+\nPlayResX: 320\nPlayResY: 240\n\n[V4+ Styles]\n\
+         Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n\
+         Style: Default,Arial,40,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n\n\
+         [Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n\
+         Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0,0,0,,{\\an7\\pos(40,30)\\bord0\\1c&H0000FF&\\p1}m 0 0 l 100 0 100 100 0 100\n\
+         Dialogue: 0,0:00:02.00,0:00:05.00,Default,,0,0,0,,{\\fad(2000,0)}Test\n",
+    )
+    .unwrap();
+    let mut whole = vec![0u8; w * h * 4];
+    let mut part = vec![9u8; w * h * 4];
+    let same_as_whole = |b: [i32; 4], part: &[u8], whole: &[u8]| {
+        let (bw, bh) = ((b[2] - b[0]) as usize, (b[3] - b[1]) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                let px = &whole[(y * w + x) * 4..][..4];
+                let (bx, by) = (x as i32 - b[0], y as i32 - b[1]);
+                if bx >= 0 && by >= 0 && (bx as usize) < bw && (by as usize) < bh {
+                    assert_eq!(
+                        px,
+                        &part[(by as usize * bw + bx as usize) * 4..][..4],
+                        "{x},{y}"
+                    );
+                } else {
+                    assert_eq!(px, [0, 0, 0, 0], "{x},{y} outside {b:?}");
+                }
+            }
+        }
+        bw * bh * 4
+    };
+    // the square alone: its box is libass's picture of the square and a transparent pixel around
+    let Overlay::Drawn(b) = r.overlay_box(1000, w, h, (w, h), &mut part).unwrap() else {
+        panic!("the square shows at 1 s");
+    };
+    assert!(b[0] < 40 && b[1] < 30 && b[2] > 140 && b[3] > 130, "{b:?}");
+    assert!(b[0] > 20 && b[1] > 10 && b[2] < 160 && b[3] < 150, "{b:?}");
+    r.overlay(1000, w, h, (w, h), &mut whole).unwrap();
+    let used = same_as_whole(b, &part, &whole);
+    assert!(part[used..].iter().all(|&v| v == 9), "past the box");
+    // another renderer's call came between (the whole overlay just now): drawn again
+    assert_eq!(
+        r.overlay_box(1000, w, h, (w, h), &mut part).unwrap(),
+        Overlay::Drawn(b)
+    );
+    // the same picture a little later: nothing to do, and nothing written
+    part.fill(9);
+    assert_eq!(
+        r.overlay_box(1500, w, h, (w, h), &mut part).unwrap(),
+        Overlay::Same
+    );
+    assert!(part.iter().all(|&v| v == 9));
+    // the text fades in: another picture on every frame, and a larger box
+    let Overlay::Drawn(b3) = r.overlay_box(3000, w, h, (w, h), &mut part).unwrap() else {
+        panic!("the text shows at 3 s");
+    };
+    assert!(b3[3] > 200 && b3[0] <= b[0] && b3[1] == b[1], "{b3:?}");
+    r.overlay(3000, w, h, (w, h), &mut whole).unwrap();
+    same_as_whole(b3, &part, &whole);
+    assert!(matches!(
+        r.overlay_box(3040, w, h, (w, h), &mut part).unwrap(),
+        Overlay::Drawn(_)
+    ));
+    // another size is another picture; past the lines nothing shows, and stays nothing
+    assert!(matches!(
+        r.overlay_box(3040, w / 2, h / 2, (w, h), &mut part)
+            .unwrap(),
+        Overlay::Drawn(_)
+    ));
+    assert_eq!(
+        r.overlay_box(6000, w, h, (w, h), &mut part).unwrap(),
+        Overlay::Empty
+    );
+    assert_eq!(
+        r.overlay_box(6040, w, h, (w, h), &mut part).unwrap(),
+        Overlay::Same
+    );
+    // a new script is drawn anew, even one that shows the same
+    r.set_script("[Script Info]\nScriptType: v4.00+\n").unwrap();
+    assert_eq!(
+        r.overlay_box(6040, w, h, (w, h), &mut part).unwrap(),
+        Overlay::Empty
+    );
 }
 
 #[test]
@@ -512,9 +779,10 @@ fn bench_open() {
     eprintln!("index files: {} KiB", size / 1024);
 }
 
-/// The ceiling of playback: frames a second of decoding in order to RGBA, the way the window
-/// takes them. `FS_BENCH_VIDEO=<file> cargo test -p fs-media --release decode_speed -- --ignored
-/// --nocapture`; `FS_BENCH_FRAMES` is how many frames are timed (240).
+/// The ceiling of playback: frames a second of decoding in order, to RGBA as a saved frame takes
+/// them (swscale converts each on the CPU) and to planes as the window takes them (a copy, the
+/// conversion left to its shader). `FS_BENCH_VIDEO=<file> cargo test -p fs-media --release
+/// decode_speed -- --ignored --nocapture`; `FS_BENCH_FRAMES` is how many frames are timed (240).
 #[test]
 #[ignore = "a measurement, needs FS_BENCH_VIDEO"]
 fn decode_speed() {
@@ -525,25 +793,51 @@ fn decode_speed() {
         .ok()
         .and_then(|n| n.parse().ok())
         .unwrap_or(240);
-    let opened = std::time::Instant::now();
-    let mut v = Video::open(Path::new(&path), -1, None, |_, _| true).unwrap();
-    let open_ms = opened.elapsed().as_millis();
-    let mut px = vec![0u8; v.width() * v.height() * 4];
-    v.frame_into(0, &mut px).unwrap();
-    let n = frames.min(v.num_frames() - 1);
-    let t = std::time::Instant::now();
-    let mut worst = 0.0f64;
-    for i in 1..=n {
-        let f = std::time::Instant::now();
-        v.frame_into(i, &mut px).unwrap();
-        worst = worst.max(f.elapsed().as_secs_f64() * 1000.0);
-    }
-    let s = t.elapsed().as_secs_f64();
-    println!(
-        "{}x{}, open {open_ms} ms, {n} frames in {s:.2} s: {:.1} fps, {:.1} ms a frame, worst {worst:.1} ms",
-        v.width(),
-        v.height(),
-        n as f64 / s,
-        s * 1000.0 / n as f64
+    // each way with a decoder of its own, so neither finds the other's frames decoded already
+    type Frame = Box<dyn FnMut(&mut Video, i64)>;
+    let timed = |what: &str, mut frame: Frame| {
+        let opened = std::time::Instant::now();
+        let mut v = Video::open(Path::new(&path), -1, None, |_, _| true).unwrap();
+        let open_ms = opened.elapsed().as_millis();
+        frame(&mut v, 0);
+        let n = frames.min(v.num_frames() - 1);
+        let t = std::time::Instant::now();
+        let mut worst = 0.0f64;
+        for i in 1..=n {
+            let f = std::time::Instant::now();
+            frame(&mut v, i);
+            worst = worst.max(f.elapsed().as_secs_f64() * 1000.0);
+        }
+        let s = t.elapsed().as_secs_f64();
+        println!(
+            "{what}: {}x{} {}, open {open_ms} ms, {n} frames in {s:.2} s: {:.1} fps, {:.2} ms a frame, worst {worst:.1} ms",
+            v.width(),
+            v.height(),
+            v.props().pixel_format,
+            n as f64 / s,
+            s * 1000.0 / n as f64
+        );
+    };
+    let mut px = Vec::new();
+    timed(
+        "rgba",
+        Box::new(move |v, i| {
+            px.resize(v.width() * v.height() * 4, 0u8);
+            v.frame_into(i, &mut px).unwrap();
+        }),
+    );
+    let (mut y, mut u, mut c) = (Vec::new(), Vec::new(), Vec::new());
+    timed(
+        "planes",
+        Box::new(move |v, i| {
+            let mut l = v.planes_into(i, &mut y, &mut u, &mut c).unwrap();
+            if l.planar && !l.copied {
+                y.resize(l.sizes().0, 0u8);
+                u.resize(l.sizes().1, 0u8);
+                c.resize(l.sizes().1, 0u8);
+                l = v.planes_into(i, &mut y, &mut u, &mut c).unwrap();
+            }
+            assert!(l.planar && l.copied, "no planes for this video: {l:?}");
+        }),
     );
 }

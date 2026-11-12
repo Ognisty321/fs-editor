@@ -14,6 +14,7 @@ struct FontFile;
 struct Chapter;
 struct SubPacket;
 struct VideoProps;
+struct PlaneLayout;
 struct AudioProps;
 struct ProgressSink;
 
@@ -31,6 +32,8 @@ bool video_linear(const VideoSource &v);
 bool video_exact(const VideoSource &v);
 void video_set_matrix(VideoSource &v, uint8_t matrix, uint8_t range);
 void video_frame_rgba(VideoSource &v, int64_t n, rust::Slice<uint8_t> out);
+PlaneLayout video_frame_planes(VideoSource &v, int64_t n, rust::Slice<uint8_t> y, rust::Slice<uint8_t> u,
+                               rust::Slice<uint8_t> v_plane);
 
 std::unique_ptr<AudioSource> open_audio(rust::Str path, int32_t track, rust::Str cache_dir, ProgressSink &progress);
 AudioProps audio_props(const AudioSource &a);
@@ -51,5 +54,7 @@ bool subs_bounds(SubtitleRenderer &r, int64_t ms, int32_t w, int32_t h, rust::Sl
 bool subs_blend(SubtitleRenderer &r, int64_t ms, int32_t w, int32_t h, int32_t vw, int32_t vh, rust::Slice<uint8_t> rgba);
 bool subs_overlay(SubtitleRenderer &r, int64_t ms, int32_t w, int32_t h, int32_t vw, int32_t vh,
                   rust::Slice<uint8_t> rgba);
+int32_t subs_overlay_box(SubtitleRenderer &r, int64_t ms, int32_t w, int32_t h, int32_t vw, int32_t vh,
+                         rust::Slice<uint8_t> rgba, rust::Slice<int32_t> bounds);
 
 }  // namespace fsmedia::ffi
