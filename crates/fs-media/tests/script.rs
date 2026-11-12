@@ -4,7 +4,9 @@
 
 use std::path::{Path, PathBuf};
 
-use fs_media::{Audio, ScriptKind, Video, list_tracks, load_script_library};
+use fs_media::{
+    Audio, ScriptKind, ScriptOptions, Video, list_tracks, load_script_library, set_script_options,
+};
 
 fn script(dir: &Path, name: &str, text: &str) -> PathBuf {
     let p = dir.join(name);
@@ -244,78 +246,228 @@ fn vapoursynth_script_timecodes() {
     assert!((v.props().duration_s - 0.18).abs() < 1e-9);
 }
 
+/// The same picture from Avisynth, and a tone in each channel: 440 Hz at half the level on the
+/// left, 880 Hz at a quarter on the right, so swapped or mixed channels show.
 const AVS: &str = r#"
 function Quarter(int c) {
     return BlankClip(length=24, width=160, height=120, pixel_type="RGB32", fps=24000,
-    \                fps_denominator=1001, color=c, audio_rate=48000, channels=2,
-    \                sample_type="float")
+    \                fps_denominator=1001, color=c)
 }
 top = StackHorizontal(Quarter($FF0000), Quarter($00FF00))
 bottom = StackHorizontal(Quarter($0000FF), Quarter($FFFFFF))
 clip = StackVertical(top, bottom) + StackVertical(bottom, top)
 CONVERT
-return clip
+left = Tone(length=2.0, frequency=440, samplerate=RATE, channels=1, type="Sine", level=0.5)
+right = Tone(length=2.0, frequency=880, samplerate=RATE, channels=1, type="Sine", level=0.25)
+return AudioDub(clip, MergeChannels(left, right))
 "#;
+
+fn avs(convert: &str, rate: u32) -> String {
+    AVS.replace("CONVERT", convert)
+        .replace("RATE", &rate.to_string())
+}
+
+/// What the script's tone is at sample `i` of a track at 48 kHz.
+fn tone(i: usize, hz: f64, level: f64) -> f32 {
+    (level * (std::f64::consts::TAU * hz * i as f64 / 48000.0).sin()) as f32
+}
 
 #[test]
 fn avisynth_script() {
     let dir = tempfile::tempdir().unwrap();
-    let plain = script(dir.path(), "rgb.avs", &AVS.replace("CONVERT", ""));
+    let plain = script(dir.path(), "rgb.avs", &avs("", 48000));
     if !have(ScriptKind::Avisynth, &plain, "Avisynth") {
         return;
     }
-    // bottom-up packed RGB, planar YUV with Avisynth's default matrix for it (Rec601, which a
-    // clip this small is taken for), and the same at 10 bits
-    for (convert, format, tolerance) in [
-        ("", "bgr0", 0),
-        ("clip = clip.ConvertToRGB24()", "bgr24", 0),
-        ("clip = clip.ConvertToYV12()", "yuv420p", 4),
+    // frame properties (the matrix a conversion leaves in them) and the deeper formats are
+    // AviSynth+ 3.7's; an older Avisynth is asked for what it has
+    let plus = script(
+        dir.path(),
+        "plus.avs",
+        "BlankClip(length=1).propSet(\"_Matrix\", 1)\n",
+    );
+    let plus = Video::open(&plus, -1, None, |_, _| true).is_ok();
+    if !plus {
+        eprintln!("this Avisynth has no frame properties: only what Avisynth 2.6 has is tested");
+    }
+    // bottom-up packed RGB at 8 and 16 bits, planar RGB, YUV of every layout with the matrix
+    // and range it was made with, and what swscale does not read: 64-bit RGB, which Avisynth
+    // turns into RGB32, and float YUV, which it turns into 16 bits
+    let formats = [
+        ("", "bgr0", "None", true),
+        ("clip = clip.ConvertToRGB24()", "bgr24", "None", true),
+        ("clip = clip.ConvertToYV12()", "yuv420p", "TV.601", true),
+        ("clip = clip.ConvertToYUY2()", "yuyv422", "TV.601", true),
+        ("clip = clip.ConvertToRGB48()", "bgr48le", "None", false),
+        ("clip = clip.ConvertToRGB64()", "bgr0", "None", false),
+        ("clip = clip.ConvertToPlanarRGB()", "gbrp", "None", false),
+        (
+            "clip = clip.ConvertToPlanarRGBA().ConvertBits(32)",
+            "gbrpf32le",
+            "None",
+            false,
+        ),
+        (
+            "clip = clip.ConvertToYV12(matrix=\"Rec709\")",
+            "yuv420p",
+            "TV.709",
+            false,
+        ),
+        (
+            "clip = clip.ConvertToYV12(matrix=\"PC.709\")",
+            "yuv420p",
+            "PC.709",
+            false,
+        ),
+        ("clip = clip.ConvertToYV411()", "yuv411p", "TV.601", false),
         (
             "clip = clip.ConvertToYUV422().ConvertBits(10)",
             "yuv422p10le",
-            4,
+            "TV.601",
+            false,
         ),
-        ("clip = clip.ConvertToPlanarRGB()", "gbrp", 0),
-    ] {
-        let path = script(dir.path(), "clip.avs", &AVS.replace("CONVERT", convert));
+        (
+            "clip = clip.ConvertToYUV444(matrix=\"Rec709\").ConvertBits(32)",
+            "yuv444p16le",
+            "TV.709",
+            false,
+        ),
+        ("clip = clip.ConvertToYUVA420()", "yuv420p", "TV.601", false),
+    ];
+    // a folder no code page has all the letters of
+    let named = dir.path().join("zażółć クリップ");
+    std::fs::create_dir(&named).unwrap();
+    for (convert, format, matrix, old) in formats {
+        if !plus && !old {
+            continue;
+        }
+        let at = if plus { &named } else { dir.path() };
+        let path = script(at, "clip.avs", &avs(convert, 48000));
         let mut v = Video::open(&path, -1, None, |_, _| true).unwrap();
         let p = v.props().clone();
         assert_eq!(
             (p.width, p.height, p.num_frames),
             (320, 240, 48),
-            "{format}"
+            "{convert}"
         );
         assert_eq!((p.fps_num, p.fps_den), (24000, 1001));
-        assert_eq!(p.pixel_format, format);
+        assert_eq!(p.pixel_format, format, "{convert}");
+        if plus {
+            assert_eq!(p.matrix, matrix, "{convert}");
+        }
         assert_eq!(&v.timestamps_ms()[..3], &[0, 41, 83]);
-        assert!(v.keyframes().is_empty() && v.is_exact());
+        assert!(v.keyframes().is_empty() && v.is_exact() && !v.is_vfr());
         let (red, green, blue, white) = ([255, 0, 0], [0, 255, 0], [0, 0, 255], [255; 3]);
         let first = v.frame(0).unwrap();
-        near(pixel(&v, &first, 80, 60), red, tolerance, format);
-        near(pixel(&v, &first, 240, 60), green, tolerance, format);
-        near(pixel(&v, &first, 80, 180), blue, tolerance, format);
-        near(pixel(&v, &first, 240, 180), white, tolerance, format);
+        near(pixel(&v, &first, 80, 60), red, 2, convert);
+        near(pixel(&v, &first, 240, 60), green, 2, convert);
+        near(pixel(&v, &first, 80, 180), blue, 2, convert);
+        near(pixel(&v, &first, 240, 180), white, 2, convert);
         let later = v.frame(30).unwrap();
-        near(pixel(&v, &later, 80, 60), blue, tolerance, format);
-        near(pixel(&v, &later, 240, 180), green, tolerance, format);
+        near(pixel(&v, &later, 80, 60), blue, 2, convert);
+        near(pixel(&v, &later, 240, 180), green, 2, convert);
+        assert_eq!(v.frame(0).unwrap(), first);
+    }
+    if plus {
+        let anamorphic =
+            "clip = clip.ConvertToYV12().propSet(\"_SARNum\", 4).propSet(\"_SARDen\", 3)";
+        let path = script(dir.path(), "sar.avs", &avs(anamorphic, 48000));
+        let v = Video::open(&path, -1, None, |_, _| true).unwrap();
+        assert_eq!((v.props().sar_num, v.props().sar_den), (4, 3));
     }
 
     let tracks = list_tracks(&plain).unwrap();
-    let kinds: Vec<_> = tracks.iter().map(|t| t.kind.as_str()).collect();
-    assert_eq!(kinds, ["video", "audio"]);
-    // Aegisub's audio: 16 bits whatever the script has, at the script's rate from 32 kHz up
+    let kinds: Vec<_> = tracks.iter().map(|t| (t.index, t.kind.as_str())).collect();
+    assert_eq!(kinds, [(0, "video"), (1, "audio")]);
+    assert!(tracks.iter().all(|t| t.codec == "avisynth"));
+
+    // Aegisub's audio: 16 bits whatever the script has (Tone's is float), the channels and
+    // the rate as they are from 32 kHz up
     let a = Audio::open(&plain, -1, None, |_, _| true).unwrap();
     let p = *a.props();
     assert_eq!(
-        (p.sample_rate, p.channels, p.bits, p.is_float),
-        (48000, 2, 16, false)
+        (p.sample_rate, p.channels, p.bits, p.is_float, p.num_samples),
+        (48000, 2, 16, false, 96000)
     );
-    assert_eq!(p.num_samples, 2 * 48048);
-    let mut all = vec![1.0f32; 2 * 5000];
+    let mut all = vec![1.0f32; 2 * 96100];
     a.read(-50, &mut all).unwrap();
-    assert!(all.iter().all(|&s| s == 0.0));
+    assert!(all[..100].iter().all(|&s| s == 0.0));
+    assert!(all[2 * 96050..].iter().all(|&s| s == 0.0));
+    for i in (0..96000).step_by(7) {
+        let (l, r) = (all[100 + 2 * i], all[101 + 2 * i]);
+        assert!((l - tone(i, 440.0, 0.5)).abs() < 1e-3, "left {i}: {l}");
+        assert!((r - tone(i, 880.0, 0.25)).abs() < 1e-3, "right {i}: {r}");
+    }
+    let mut mono = vec![7i16; 500];
+    a.read_mono(1000, &mut mono).unwrap();
+    for (i, &m) in mono.iter().enumerate() {
+        let want = (tone(1000 + i, 440.0, 0.5) + tone(1000 + i, 880.0, 0.25)) / 2.0 * 32768.0;
+        assert!((m as f32 - want).abs() < 40.0, "mono {i}: {m}, {want}");
+    }
+    let pcm = fs_audio::PcmBuffer::load(&a, |_, _| true).unwrap();
+    assert_eq!((pcm.rate(), pcm.len()), (48000, 96000));
 
+    // under 32 kHz it is resampled to 44100 Hz
+    let low = script(dir.path(), "low.avs", &avs("", 22050));
+    let a = Audio::open(&low, -1, None, |_, _| true).unwrap();
+    assert_eq!(
+        (a.props().sample_rate, a.props().num_samples),
+        (44100, 88200)
+    );
+    let mut all = vec![0.0f32; 2 * 88200];
+    a.read(0, &mut all).unwrap();
+    let peak = |c: usize| {
+        let of = all.iter().skip(c).step_by(2);
+        of.fold(0.0f32, |m, &s| m.max(s.abs()))
+    };
+    assert!((0.4..0.55).contains(&peak(0)) && (0.2..0.28).contains(&peak(1)));
+
+    // the settings: a rate for every script, and one channel made of the two or taken from them
+    let with = |rate: i32, mixer: &str| {
+        set_script_options(&ScriptOptions {
+            avs_sample_rate: rate,
+            avs_downmixer: mixer.into(),
+            avs_memory_max_mb: 128,
+            ..Default::default()
+        });
+        let a = Audio::open(&plain, -1, None, |_, _| true);
+        set_script_options(&ScriptOptions::default());
+        let a = a.unwrap();
+        let mut all = vec![0.0f32; a.props().num_samples as usize];
+        assert_eq!(a.props().channels, 1, "{mixer}");
+        a.read(0, &mut all).unwrap();
+        (a.props().sample_rate, all)
+    };
+    let (rate, all) = with(32000, "ConvertToMono");
+    assert_eq!((rate, all.len()), (32000, 64000));
+    let (rate, all) = with(0, "GetLeftChannel");
+    assert_eq!((rate, all.len()), (48000, 96000));
+    assert!((0..96000).all(|i| (all[i] - tone(i, 440.0, 0.5)).abs() < 1e-3));
+    let (_, all) = with(0, "GetRightChannel");
+    assert!((0..96000).all(|i| (all[i] - tone(i, 880.0, 0.25)).abs() < 1e-3));
+
+    // a script with one of the two has one track, and the other does not open
+    let video_only = script(dir.path(), "video.avs", "BlankClip(length=5).KillAudio()\n");
+    assert_eq!(list_tracks(&video_only).unwrap().len(), 1);
+    let e = Audio::open(&video_only, -1, None, |_, _| true)
+        .err()
+        .unwrap();
+    assert!(e.to_string().contains("no audio"), "{e}");
+    let audio_only = script(dir.path(), "audio.avs", "Tone(length=1.0)\n");
+    let tracks = list_tracks(&audio_only).unwrap();
+    assert!(tracks.len() == 1 && tracks[0].kind == "audio");
+    let e = Video::open(&audio_only, -1, None, |_, _| true)
+        .err()
+        .unwrap();
+    assert!(e.to_string().contains("no video"), "{e}");
+    assert!(Audio::open(&audio_only, -1, None, |_, _| true).is_ok());
+
+    // the script's own error, as Avisynth tells it, and a script that ends in no clip
     let broken = script(dir.path(), "broken.avs", "NotThere()\n");
     let e = Video::open(&broken, -1, None, |_, _| true).err().unwrap();
     assert!(e.to_string().contains("NotThere"), "{e}");
+    let number = script(dir.path(), "number.avs", "return 5\n");
+    let e = Video::open(&number, -1, None, |_, _| true).err().unwrap();
+    assert!(e.to_string().contains("does not return a clip"), "{e}");
+    assert!(Video::open(&dir.path().join("none.avs"), -1, None, |_, _| true).is_err());
 }

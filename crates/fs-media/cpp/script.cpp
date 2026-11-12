@@ -802,7 +802,10 @@ private:
         }
         if (v.type != 'c') {
             a_->release_value(v);
-            throw MediaError(std::string("Avisynth: ") + name + " did not return a clip");
+            // Import's value is the script's own
+            throw MediaError(std::strcmp(name, "Import") == 0
+                                 ? std::string("Avisynth: the script does not return a clip")
+                                 : std::string("Avisynth: ") + name + " did not return a clip");
         }
         return v;
     }
