@@ -83,7 +83,9 @@
 
 namespace {
 const QStringList kSubsExt = {"ass", "ssa", "srt", "sub", "mpl", "tmp", "txt", "ttxt", "vtt"};
-const QStringList kVideoExt = {"mkv", "mp4", "avi", "webm", "mov", "m2ts", "ts", "wmv", "flv", "m4v", "mpg", "mpeg", "ogv"};
+// avs, vpy: Avisynth and VapourSynth scripts, run by the library the user has (also as audio)
+const QStringList kVideoExt = {"mkv", "mp4", "avi", "webm", "mov", "m2ts", "ts", "wmv", "flv", "m4v", "mpg", "mpeg", "ogv",
+                               "avs", "vpy"};
 const QStringList kAudioExt = {"wav", "mp3", "flac", "aac", "ac3", "eac3", "dts", "ogg", "opus", "m4a", "mka", "wma"};
 const QString kSubsFilter =
     QObject::tr("Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt *.vtt);;All files (*)");

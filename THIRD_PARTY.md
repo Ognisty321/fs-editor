@@ -42,6 +42,8 @@ Wersje pochodzą z [docs/research/dependencies.md](docs/research/dependencies.md
 | BestSource R23 | MIT | statycznie |
 | FFmpeg 9.0 | LGPL-2.1+ | dynamicznie, bez `gpl` i `nonfree` |
 | xxHash | BSD-2-Clause | statycznie |
+| Nagłówki API VapourSynth (`VapourSynth4.h`, `VSScript4.h`, R79) | LGPL-2.1+ | tylko nagłówki w `crates/fs-media/cpp/vapoursynth/`; sam VapourSynth nie jest linkowany ani dołączany, ładuje się w czasie działania z instalacji użytkownika |
+| Avisynth (AviSynth+) | GPL-2+ z wyjątkiem dla interfejsu | nic nie jest dołączone: `avisynth.dll` użytkownika ładuje się w czasie działania i jest wołany przez interfejs C, z własnymi deklaracjami |
 | libp2p (sekrit-twc) | WTFPL | statycznie |
 | libass 0.17.5 | ISC | statycznie lub dynamicznie |
 | FreeType | FTL | wariant FTL |

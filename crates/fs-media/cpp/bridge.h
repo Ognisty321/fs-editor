@@ -23,6 +23,12 @@ rust::Vec<Chapter> chapters(rust::Str path);
 rust::String subtitle_packets(rust::Str path, int32_t index, int32_t how, ProgressSink &progress,
                               rust::Vec<SubPacket> &out);
 
+void set_script_options(rust::Str vsscript, int32_t avs_memory_max_mb, bool avs_allow_ancient, int32_t avs_sample_rate,
+                        rust::Str avs_downmixer);
+void load_vapoursynth(rust::Str library);
+void load_avisynth();
+bool script_evaluated(rust::Str path);
+
 std::unique_ptr<VideoSource> open_video(rust::Str path, int32_t track, rust::Str cache_dir, ProgressSink &progress);
 VideoProps video_props(const VideoSource &v);
 rust::Vec<int64_t> video_timestamps(const VideoSource &v);

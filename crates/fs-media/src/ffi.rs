@@ -94,6 +94,17 @@ pub(crate) mod bridge {
             out: &mut Vec<SubPacket>,
         ) -> Result<String>;
 
+        fn set_script_options(
+            vsscript: &str,
+            avs_memory_max_mb: i32,
+            avs_allow_ancient: bool,
+            avs_sample_rate: i32,
+            avs_downmixer: &str,
+        );
+        fn load_vapoursynth(library: &str) -> Result<()>;
+        fn load_avisynth() -> Result<()>;
+        fn script_evaluated(path: &str) -> bool;
+
         fn open_video(
             path: &str,
             track: i32,

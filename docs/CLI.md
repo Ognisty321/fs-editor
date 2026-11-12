@@ -133,6 +133,8 @@ fsed lua crates/fs-automation/automation/autoload/kara-templater.lua kara.ass --
 
 Polecenia `media` wymagają budowy z funkcją `media`: `cargo build -p fs-cli --features media` (zależności z `tools/deps`). Dekodowanie robi BestSource, a renderowanie napisów libass. Indeks każdego pliku jest zapisywany w `%LOCALAPPDATA%\fs-editor\bsindex` albo `~/.cache/fs-editor/bsindex`, więc kolejne otwarcia są natychmiastowe.
 
+Zamiast pliku wideo lub audio można podać skrypt Avisynth (`.avs`) albo VapourSynth (`.vpy`): jest wykonywany przez AviSynth+ lub VapourSynth zainstalowany na komputerze, bez indeksu. `media info` pokazuje wtedy ścieżkę wideo i audio według tego, co skrypt oddaje. Gdy biblioteki nie ma, polecenie kończy się błędem z nazwą tego, co zainstalować. Inną instalację VapourSynth wskazuje zmienna `VSSCRIPT_PATH` (ścieżka biblioteki VSScript).
+
 | Polecenie | Opis |
 |---|---|
 | `media info FILE` | Lista strumieni (z językiem i tytułem) oraz parametry wideo: rozdzielczość, format, macierz kolorów, liczba klatek, FPS, czy plik jest VFR, keyframe'y. Do tego parametry audio i fonty załączone w MKV. |
