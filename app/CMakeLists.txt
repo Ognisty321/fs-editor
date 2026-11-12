@@ -89,6 +89,17 @@ if(EXISTS "${FS_QT_TRANSLATIONS}/qtbase_pl.qm")
 endif()
 file(GLOB FS_ICONS CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} icons/*.svg)
 qt_add_resources(fsed "icons" PREFIX "/" FILES ${FS_ICONS})
+# The program's own icon, drawn in appicon/fsed.svg (fsed-small.svg for fewer than 32 pixels): the windows
+# take the SVGs from the resources, the Windows exe and the macOS bundle carry the .ico and .icns
+# tools/appicon.py makes of them.
+qt_add_resources(fsed "appicon" PREFIX "/" FILES appicon/fsed.svg appicon/fsed-small.svg)
+if(WIN32)
+    target_sources(fsed PRIVATE appicon/fsed.rc)
+elseif(APPLE)
+    target_sources(fsed PRIVATE appicon/fsed.icns)
+    set_source_files_properties(appicon/fsed.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    set_target_properties(fsed PROPERTIES MACOSX_BUNDLE_ICON_FILE fsed.icns)
+endif()
 target_include_directories(fsed PRIVATE ${FS_BRIDGE_INCLUDE_DIR})
 target_link_directories(fsed PRIVATE ${FS_DEPS_DIR}/lib)
 # Native libraries the Rust staticlib needs (cargo:rustc-link-lib of fs-media, cpal's audio backend).

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" viewBox="0 0 256 256" width="256" height="256">
+  <title>FS Editor (small sizes)</title>
+  <!-- Drawn for 16-31 px: 16 units = 1 px at 16 px. Same idea as the large
+       icon (amber sung F, white S, sweep caret, audio line), details dropped. -->
+  <defs>
+    <linearGradient id="tile" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="256">
+      <stop offset="0" stop-color="#343a42"/>
+      <stop offset="1" stop-color="#1b1e22"/>
+    </linearGradient>
+    <linearGradient id="amber" gradientUnits="userSpaceOnUse" x1="0" y1="32" x2="0" y2="192">
+      <stop offset="0" stop-color="#ffcd4a"/>
+      <stop offset="1" stop-color="#eba51f"/>
+    </linearGradient>
+  </defs>
+
+  <!-- tile: dark rim keeps the edge on light backgrounds -->
+  <rect x="0" y="0" width="256" height="256" rx="48" fill="#0e1013"/>
+  <rect x="8" y="8" width="240" height="240" rx="40" fill="url(#tile)"/>
+
+  <!-- F: 2 px stem, 2 px arms, 10 px tall -->
+  <path d="M24 32H104V64H56V96H96V128H56V192H24Z" fill="url(#amber)"/>
+
+  <!-- S: 2 px stroke along its centreline -->
+  <path d="M216 72C212 56 202 48 190 48C176 48 168 57 168 74
+           C168 92 180 99 192 105C206 112 216 120 216 142
+           C216 162 205 176 190 176C176 176 167 168 164 154"
+        fill="none" stroke="#f4f6f9" stroke-width="32"/>
+
+  <!-- sweep caret between the letters -->
+  <rect x="120" y="16" width="16" height="208" fill="#ffffff" opacity="0.8"/>
+
+  <!-- audio line: sung part amber, the rest blue -->
+  <rect x="24" y="208" width="96" height="16" fill="url(#amber)"/>
+  <rect x="136" y="208" width="96" height="16" fill="#4aa3ff"/>
+</svg>

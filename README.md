@@ -257,7 +257,7 @@ crates/
 app/               GUI w Qt 6 Widgets (C++23, CMake)
 docs/              architektura, opis CLI, notatki badawcze
 tests/             korpus testowy i media testowe
-tools/             instalacja zależności, generator mediów testowych, port vcpkg BestSource
+tools/             instalacja zależności, generator mediów testowych, generator ikony programu, port vcpkg BestSource
 ```
 
 ## Dokumentacja

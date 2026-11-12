@@ -3,6 +3,7 @@
 #include "editbox.h"
 #include "associations.h"
 #include "grid.h"
+#include "icons.h"
 #include "mainwindow.h"
 #include "tabpanel.h"
 #include "theme.h"
@@ -196,6 +197,7 @@ int main(int argc, char **argv) {
     QApplication::setApplicationName("FS Editor");
     QApplication::setApplicationDisplayName("FS Editor");
     QApplication::setApplicationVersion(FS_VERSION);
+    QApplication::setWindowIcon(appIcon()); // every window and dialog, the About box's picture, the taskbar
     const bool smoke = qEnvironmentVariableIsSet("FSED_SMOKE");
     if (smoke) {
         // separate, fresh settings so smoke runs never touch the user's own

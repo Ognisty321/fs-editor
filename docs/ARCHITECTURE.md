@@ -86,6 +86,7 @@ fs-editor/
 │  │  ├─ theme.*              # motywy kolorów: role kolorów, Ciemny/Jasny, motywy użytkownika (.ini), paleta okien
 │  │  ├─ hydra.*              # lista tagów narzędzia „wszystkie tagi” (Hydra Kainote) i jej edytor
 │  │  ├─ associations.*       # skojarzenia typów plików napisów (rejestr użytkownika w Windows)
+│  │  ├─ icons.*              # ikony SVG z zasobów rysowane w żądanym rozmiarze: barwione ikony paska (icon), ikona programu (appIcon)
 │  │  ├─ audiobox.*           # AudioView (QRhiWidget): waveform/spektrogram, karaoke, przyciski
 │  │  ├─ rhiquad.*            # jeden teksturowany prostokąt QRhi używany przez wideo i audio
 │  │  ├─ findreplace.*        # FindDialog: szukaj/zamień, „znajdź wszystko”, szukanie i zamiana w plikach, okno wyników
@@ -106,6 +107,9 @@ fs-editor/
 │  │  ├─ tagbuttondialog.*    # TagButtonDialog: ustawienie przycisku tagu editboxa
 │  │  ├─ dialogutil.*         # wspólne dla okien i reszty programu: folder autozapisu, katalogi stylów, kolor ASS, ustawienia mediów, cache indeksów
 │  │  └─ automationhost.*     # dialogi aegisub.dialog, wybór plików, postęp
+│  ├─ icons/                  # ikony paska narzędzi i menu (Tabler Icons, SVG barwione w icons.cpp), zasoby Qt
+│  ├─ appicon/                # ikona programu, własna: fsed.svg i fsed-small.svg (poniżej 32 px) jako zasoby Qt dla okien;
+│  │                          #   tools/appicon.py robi z nich fsed.ico (zasób exe przez fsed.rc) i fsed.icns (pakiet macOS)
 │  └─ shaders/                # .vert/.frag → .qsb (qt_add_shaders)
 ├─ tests/
 │  └─ corpus/                 # prawdziwe pliki .ass/.srt/… (z licencją pozwalającą na redystrybucję)

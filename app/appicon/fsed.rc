@@ -1,0 +1,3 @@
+// The icon of fsed.exe: what Explorer, the taskbar and the file types set to the program show.
+// IDI_ICON1 is the name Qt looks for, so a window has it before the program sets its own.
+IDI_ICON1 ICON "fsed.ico"
