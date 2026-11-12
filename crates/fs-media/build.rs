@@ -10,6 +10,10 @@ fn main() {
         "src/ffi.rs",
         "cpp/fsmedia.h",
         "cpp/fsmedia.cpp",
+        "cpp/script.h",
+        "cpp/script.cpp",
+        "cpp/vapoursynth/VapourSynth4.h",
+        "cpp/vapoursynth/VSScript4.h",
         "cpp/bridge.h",
         "cpp/bridge.cpp",
     ] {
@@ -32,6 +36,7 @@ fn main() {
 
     let mut b = cxx_build::bridge("src/ffi.rs");
     b.file("cpp/fsmedia.cpp")
+        .file("cpp/script.cpp")
         .file("cpp/bridge.cpp")
         .include(&include)
         .include(include.join("bestsource"))
@@ -63,6 +68,14 @@ fn main() {
         "ass",
     ] {
         println!("cargo:rustc-link-lib={lib}");
+    }
+
+    // script.cpp finds Avisynth and VapourSynth at run time: the registry on Windows, dlopen elsewhere
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os == "windows" {
+        println!("cargo:rustc-link-lib=advapi32");
+    } else if target_os == "linux" {
+        println!("cargo:rustc-link-lib=dl");
     }
 
     // Shared libraries next to the binaries so tests and the CLI run in place.

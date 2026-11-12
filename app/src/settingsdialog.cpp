@@ -541,11 +541,41 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
           {tr("At program start, in the background"), tr("At program start"),
            tr("When the menu first opens, in the background"), tr("When the menu first opens")},
           automation);
+    // Avisynth (.avs) and VapourSynth (.vpy) scripts as video and audio: where VapourSynth is, and Aegisub's
+    // Avisynth options (memory limit and pre-2.56a Avisynth of its advanced video page, down-mixer and forced
+    // sample rate of its advanced audio page). All of them count for scripts opened afterwards.
+    auto *vsscript = new QLineEdit(QDir::toNativeSeparators(st.value("scripts/vsscript").toString()), this);
+    vsscript->setPlaceholderText(tr("found automatically"));
+    vsscript->setToolTip(tr("The VSScript library (vsscript.dll, libvapoursynth-script) of the VapourSynth that opens .vpy "
+                            "scripts. Empty: the one VSSCRIPT_PATH or the registry names, or the one Python has. It is "
+                            "loaded with the first script opened and kept until the program closes."));
+    video->addRow(tr("VapourSynth library (VSScript)"), vsscript);
+    const auto scriptSpin = [&](const char *key, int max, int step, const QString &label, const QString &suffix,
+                                const QString &zero, QFormLayout *form) {
+        auto *s = new QSpinBox(this);
+        s->setRange(0, max);
+        s->setSingleStep(step);
+        s->setSuffix(suffix);
+        s->setSpecialValueText(zero);
+        s->setValue(st.value(key, 0).toInt());
+        s->setToolTip(tr("For scripts opened after it is changed"));
+        form->addRow(label, s);
+        spins.emplace_back(key, s);
+    };
+    scriptSpin("scripts/avsMemoryMb", 65536, 64, tr("Avisynth memory limit"), " MB", tr("Avisynth's own"), video);
+    auto *avsAncient = new QCheckBox(tr("Allow Avisynth older than 2.6"), this);
+    avsAncient->setChecked(st.value("scripts/avsAllowAncient", false).toBool());
+    avsAncient->setToolTip(tr("Such a version converts the frames to RGB itself, with the matrix of the subtitles"));
+    video->addRow(avsAncient);
+    boxes.emplace_back("scripts/avsAllowAncient", avsAncient);
+    combo("scripts/avsDownmixer", 0, tr("Avisynth down-mixer"), {"ConvertToMono", "GetLeftChannel", "GetRightChannel"},
+          audio);
+    scriptSpin("scripts/avsSampleRate", 384000, 1000, tr("Avisynth audio sample rate"), " Hz", tr("the script's"), audio);
     // Aegisub's OK, Cancel, Apply and Restore Defaults
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply |
                                         QDialogButtonBox::RestoreDefaults,
                                     this);
-    const auto save = [this, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs, fonts,
+    const auto save = [this, vsscript, boxes, spins, combos, inactive, leadIn, leadOut, autosave, dictDir, dictLang, language, catalogs, fonts,
                        trace, tracks, tagMark, fontFilter, saveConversion, saveScriptDefaults, fontsDir, device, autosaveFolder, autoloadPath, includePath, scriptEditor, types] {
         QSettings st;
         QSettings classes(assoc::kClasses, QSettings::NativeFormat);
@@ -577,6 +607,7 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
         saveConversion();
         saveScriptDefaults();
         st.setValue("fonts/externalDir", QDir::fromNativeSeparators(fontsDir->text().trimmed()));
+        st.setValue("scripts/vsscript", QDir::fromNativeSeparators(vsscript->text().trimmed()));
         st.setValue("audio/device", device->currentData());
         st.setValue("main/autosaveDir", QDir::fromNativeSeparators(autosaveFolder->text().trimmed()));
         st.setValue("audio/leadOut", leadOut->value());
@@ -601,7 +632,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
                          "video/openWithSubs",    "grid/font",        "edit/font",        "automation/autoloadPath",
                          "main/programFont",      "audio/karaokeFont",
                          "automation/includePath", "automation/editor", "grid/tagMark", "style/fontFilterText", "convert/style",
-                         "convert/tags", "convert/newEnds", "convert/msPerChar", "convert/fps", "convert/showSettings"};
+                         "convert/tags", "convert/newEnds", "convert/msPerChar", "convert/fps", "convert/showSettings",
+                         "scripts/vsscript"};
     owned << scriptDefaultKeys();
     for (const auto &[k, w] : boxes) owned << k;
     for (const auto &[k, w] : spins) owned << k;

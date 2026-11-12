@@ -44,6 +44,14 @@ void cleanIndexCache(const QString &used) {
 void applyMediaSettings() {
     fsb::set_audio_device(fs::Utf8(QSettings().value("audio/device").toString()));
     fsb::set_audio_delay(QSettings().value("audio/delay", 0).toLongLong());
+    // how .avs and .vpy scripts are opened from now on
+    static const char *const kDownmixers[] = {"ConvertToMono", "GetLeftChannel", "GetRightChannel"};
+    const QSettings scripts;
+    fsb::set_script_options(fs::Utf8(scripts.value("scripts/vsscript").toString()),
+                            scripts.value("scripts/avsMemoryMb", 0).toInt(),
+                            scripts.value("scripts/avsAllowAncient", false).toBool(),
+                            scripts.value("scripts/avsSampleRate", 0).toInt(),
+                            kDownmixers[std::clamp(scripts.value("scripts/avsDownmixer", 0).toInt(), 0, 2)]);
     const QString dir = QSettings().value("fonts/externalDir").toString();
     fsb::set_fonts_dir(fs::Utf8(dir));
     static QSet<QString> added; // Qt cannot take an application font back; one left is harmless

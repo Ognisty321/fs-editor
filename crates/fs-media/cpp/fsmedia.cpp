@@ -18,6 +18,8 @@
 #include <tracklist.h>
 #include <videosource.h>
 
+#include "script.h"
+
 extern "C" {
 #include <ass/ass.h>
 #include <libavcodec/avcodec.h>
@@ -117,6 +119,8 @@ void ass_log(int level, const char *fmt, va_list args, void *) {
 }  // namespace
 
 std::vector<Track> list_tracks(const std::filesystem::path &file) {
+    if (script::kind_of(file) != script::Kind::None)
+        return script::tracks(file);
     return guarded(file, [&] {
         BestTrackList tl(file, nullptr);
         std::vector<Track> out;
@@ -886,6 +890,27 @@ struct VideoSource::Packets {
 
 VideoSource::VideoSource(const std::filesystem::path &file, int track, const std::filesystem::path &cache_dir,
                          const Progress &progress) {
+    if (script::kind_of(file) != script::Kind::None) {
+        // a script's clip: nothing to index, every frame is the one asked for
+        script_ = script::open(file, script::Want::Video);
+        const AVFrame *f = script_->frame(0);
+        info_ = script_->video;
+        info_.sar_num = f->sample_aspect_ratio.num > 0 ? f->sample_aspect_ratio.num : 1;
+        info_.sar_den = f->sample_aspect_ratio.num > 0 && f->sample_aspect_ratio.den > 0 ? f->sample_aspect_ratio.den : 1;
+        if (const char *n = av_get_pix_fmt_name(static_cast<AVPixelFormat>(f->format)))
+            info_.pixel_format = n;
+        read_colour(info_, f);
+        if (script_->source_colorspace >= 0) {
+            // frames the script library made RGB: the editor is told the clip's own colour space
+            info_.colorspace = script_->source_colorspace;
+            info_.color_range = script_->source_range;
+            info_.matrix = matrix_name(static_cast<AVColorSpace>(info_.colorspace),
+                                       static_cast<AVColorRange>(info_.color_range));
+        }
+        timestamps_ = std::move(script_->timestamps);
+        keyframes_ = std::move(script_->keyframes);
+        return;
+    }
     guarded(file, [&] {
         auto cache = cache_file(file, cache_dir);
         if (auto p = cache.empty() ? nullptr : Packets::open(file, track)) {
@@ -1013,13 +1038,15 @@ bool VideoSource::linear_decoding() const {
 
 bool VideoSource::exact() const {
     std::lock_guard g(m_);
-    return bs_ != nullptr;
+    return bs_ != nullptr || script_ != nullptr;
 }
 
 void VideoSource::set_matrix(Matrix m, bool full_range, bool use_override_range) {
     matrix_ = m;
     full_range_ = full_range;
     range_override_ = use_override_range;
+    if (script_)
+        script_->set_matrix(m, full_range, use_override_range);
 }
 
 void VideoSource::frame_rgba(int64_t n, std::span<uint8_t> out) {
@@ -1028,6 +1055,8 @@ void VideoSource::frame_rgba(int64_t n, std::span<uint8_t> out) {
         throw MediaError("frame buffer too small");
     n = std::clamp<int64_t>(n, 0, info_.num_frames - 1);
     std::lock_guard g(m_);
+    if (script_)
+        return convert(script_->frame(n), out, n);
     if (packets_) {
         const AVFrame *f = packets_->get(n);
         if (!f)
@@ -1043,6 +1072,9 @@ void VideoSource::frame_rgba(int64_t n, std::span<uint8_t> out) {
 FramePlanes VideoSource::frame_planes(int64_t n, std::span<uint8_t> y, std::span<uint8_t> u, std::span<uint8_t> v) {
     n = std::clamp<int64_t>(n, 0, info_.num_frames - 1);
     std::lock_guard g(m_);
+    // a script's frame is in its clip's format, as a decoder's is in the file's
+    if (script_)
+        return planes(script_->frame(n), y, u, v);
     if (packets_) {
         const AVFrame *f = packets_->get(n);
         if (!f)
@@ -1191,6 +1223,13 @@ void VideoSource::convert(const AVFrame *frame, std::span<uint8_t> out, int64_t 
 
 AudioSource::AudioSource(const std::filesystem::path &file, int track, const std::filesystem::path &cache_dir,
                          const Progress &progress) {
+    if (script::kind_of(file) != script::Kind::None) {
+        script_ = script::open(file, script::Want::Audio);
+        info_ = script_->audio;
+        if (info_.channels <= 0 || info_.sample_rate <= 0)
+            throw MediaError("unsupported audio format");
+        return;
+    }
     guarded(file, [&] {
         auto cache = cache_file(file, cache_dir);
         // -1: align to the first video track; -2 would leave the delay alone
@@ -1229,7 +1268,7 @@ AudioSource::AudioSource(const std::filesystem::path &file, int track, const std
 
 AudioSource::~AudioSource() = default;
 
-bool AudioSource::seeks() const { return !bs_->GetLinearDecodingState(); }
+bool AudioSource::seeks() const { return !bs_ || !bs_->GetLinearDecodingState(); }
 
 namespace {
 
@@ -1282,6 +1321,28 @@ void AudioSource::fill_mono(int64_t start, std::span<int16_t> out) {
     count = std::min(count, info_.num_samples - delay_ - s);
     if (count <= 0)
         return;
+    if (script_) {
+        // the script's samples as fill_f32 gives them, a piece at a time
+        const int ch = info_.channels;
+        while (count > 0) {
+            if (cancel_->load())
+                throw MediaError("canceled");
+            const int64_t take = std::min<int64_t>(count, 16384);
+            script_buf_.resize(static_cast<size_t>(take) * ch);
+            script_->samples(s, take, script_buf_.data());
+            const float *p = script_buf_.data();
+            for (int64_t i = 0; i < take; ++i) {
+                float sum = 0;
+                for (int c = 0; c < ch; ++c)
+                    sum += *p++;
+                o[i] = mono16(sum, ch);
+            }
+            o += take;
+            s += take;
+            count -= take;
+        }
+        return;
+    }
     const auto range = bs_->GetFrameRangeBySamples(s, count);
     if (range.First < 0)
         return;
@@ -1327,6 +1388,11 @@ void AudioSource::fill_f32(int64_t start, std::span<float> out) {
     int64_t e = std::min(start + count, info_.num_samples);
     if (e <= s)
         return;
+    if (script_) {
+        if (cancel_->load())
+            throw MediaError("canceled");
+        return script_->samples(s, e - s, out.data() + (s - start) * ch);
+    }
     buf_.resize(static_cast<size_t>(e - s) * ch * bytes_per_sample_);
     bs_->GetPackedAudio(buf_.data(), s, e - s);
     float *o = out.data() + (s - start) * ch;

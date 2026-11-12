@@ -4798,6 +4798,50 @@ Niezapisane napisy trafiły do folderu autozapisu. Zapisz pracę i uruchom FS Ed
         <translation>Przy pierwszym otwarciu menu</translation>
     </message>
     <message>
+        <source>found automatically</source>
+        <translation>znajdowana automatycznie</translation>
+    </message>
+    <message>
+        <source>The VSScript library (vsscript.dll, libvapoursynth-script) of the VapourSynth that opens .vpy scripts. Empty: the one VSSCRIPT_PATH or the registry names, or the one Python has. It is loaded with the first script opened and kept until the program closes.</source>
+        <translation>Biblioteka VSScript (vsscript.dll, libvapoursynth-script) tego VapourSynth, który otwiera skrypty .vpy. Puste pole: ta, którą wskazuje VSSCRIPT_PATH albo rejestr, a potem ta, którą ma Python. Ładuje się przy pierwszym otwartym skrypcie i zostaje do zamknięcia programu.</translation>
+    </message>
+    <message>
+        <source>VapourSynth library (VSScript)</source>
+        <translation>Biblioteka VapourSynth (VSScript)</translation>
+    </message>
+    <message>
+        <source>For scripts opened after it is changed</source>
+        <translation>Dla skryptów otwartych po zmianie</translation>
+    </message>
+    <message>
+        <source>Avisynth memory limit</source>
+        <translation>Limit pamięci Avisynth</translation>
+    </message>
+    <message>
+        <source>Avisynth&apos;s own</source>
+        <translation>ustala Avisynth</translation>
+    </message>
+    <message>
+        <source>Allow Avisynth older than 2.6</source>
+        <translation>Zezwalaj na Avisynth starszy niż 2.6</translation>
+    </message>
+    <message>
+        <source>Such a version converts the frames to RGB itself, with the matrix of the subtitles</source>
+        <translation>Taka wersja sama zamienia klatki na RGB, z macierzą z napisów</translation>
+    </message>
+    <message>
+        <source>Avisynth down-mixer</source>
+        <translation>Down-mixer Avisynth</translation>
+    </message>
+    <message>
+        <source>Avisynth audio sample rate</source>
+        <translation>Częstotliwość próbkowania audio Avisynth</translation>
+    </message>
+    <message>
+        <source>the script&apos;s</source>
+        <translation>ze skryptu</translation>
+    </message>
+    <message>
         <source>Restore defaults?</source>
         <translation>Przywrócić domyślne?</translation>
     </message>

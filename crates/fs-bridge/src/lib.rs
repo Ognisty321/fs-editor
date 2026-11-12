@@ -1112,6 +1112,17 @@ pub mod ffi {
         fn set_audio_device(name: &str);
         /// Kainote's audio delay in ms, for audio opened after this.
         fn set_audio_delay(ms: i64);
+        /// How .avs and .vpy scripts are opened from now on: the VSScript library of the
+        /// VapourSynth to use ("" found), and Aegisub's Avisynth options (memory limit in MB,
+        /// 0 its own; versions before 2.6; forced audio sample rate, 0 none; the down-mixer,
+        /// "" none).
+        fn set_script_options(
+            vsscript: &str,
+            avs_memory_max_mb: i32,
+            avs_allow_ancient: bool,
+            avs_sample_rate: i32,
+            avs_downmixer: &str,
+        );
         /// Aegisub's CleanCache of the index files in `dir` on a thread of its own: the ones used
         /// longest ago go until at most `max_files` (0: any number) of `max_mb` in all are left;
         /// those of `used`, the media file just opened, count as used now.
@@ -1453,6 +1464,22 @@ fn set_audio_delay(ms: i64) {
     media::set_audio_delay(ms);
 }
 
+fn set_script_options(
+    vsscript: &str,
+    avs_memory_max_mb: i32,
+    avs_allow_ancient: bool,
+    avs_sample_rate: i32,
+    avs_downmixer: &str,
+) {
+    fs_media::set_script_options(&fs_media::ScriptOptions {
+        vsscript: vsscript.into(),
+        avs_memory_max_mb,
+        avs_allow_ancient,
+        avs_sample_rate,
+        avs_downmixer: avs_downmixer.to_string(),
+    });
+}
+
 fn clean_index_cache(dir: &str, used: &str, max_mb: u64, max_files: usize) {
     let dir = std::path::PathBuf::from(dir);
     // BestSource names an index "<file name>_<hash>_..."
@@ -1470,6 +1497,17 @@ fn audio_devices() -> Vec<String> {
 }
 
 fn audio_tracks(path: &str) -> Vec<ffi::SubTrack> {
+    // called on the window's thread: a script not run yet is not run here. One track that stands
+    // for "open it and see", which then says whether the script has audio.
+    let p = std::path::Path::new(path);
+    if fs_media::script_kind(p).is_some() && !fs_media::script_evaluated(p) {
+        return vec![ffi::SubTrack {
+            index: -1,
+            codec: "script".to_string(),
+            language: String::new(),
+            title: String::new(),
+        }];
+    }
     fs_media::list_tracks(std::path::Path::new(path))
         .unwrap_or_default()
         .into_iter()

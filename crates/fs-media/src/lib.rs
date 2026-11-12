@@ -4,13 +4,18 @@
 //! The C++ side (`cpp/fsmedia.h`) is also used directly by the Qt GUI; this
 //! crate wraps it for Rust (the CLI, tests, and the audio pipeline, which
 //! feeds BestSource audio into `fs-audio`).
+//!
+//! An Avisynth (`.avs`) or VapourSynth (`.vpy`) script opens as video and audio like a file
+//! does ([`Video::open`], [`Audio::open`]). Their libraries are not linked: each is loaded when
+//! the first script of its kind is opened, and a missing one is an error that names it.
 
 mod ffi;
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use std::path::Path;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use cxx::UniquePtr;
 use ffi::{ProgressSink, bridge};
@@ -120,8 +125,139 @@ mod tests {
     }
 }
 
-/// All streams in a media file.
+/// The script language of a file, by its extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptKind {
+    /// `.avs`, run by Avisynth (AviSynth+).
+    Avisynth,
+    /// `.vpy`, run by VapourSynth through VSScript.
+    VapourSynth,
+}
+
+pub fn script_kind(path: &Path) -> Option<ScriptKind> {
+    let ext = path.extension()?.to_str()?;
+    if ext.eq_ignore_ascii_case("avs") {
+        Some(ScriptKind::Avisynth)
+    } else if ext.eq_ignore_ascii_case("vpy") {
+        Some(ScriptKind::VapourSynth)
+    } else {
+        None
+    }
+}
+
+/// How scripts are opened; read at each open.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScriptOptions {
+    /// The VSScript library of the VapourSynth to use. Empty: the one `VSSCRIPT_PATH` names,
+    /// the one in the registry (Windows), the library path, then the one Python tells of.
+    pub vsscript: PathBuf,
+    /// Aegisub's "Avisynth memory limit" in MB; 0 leaves Avisynth's own.
+    pub avs_memory_max_mb: i32,
+    /// Aegisub's "Allow pre-2.56a Avisynth": here one older than 2.6, which converts the
+    /// frames to RGB itself.
+    pub avs_allow_ancient: bool,
+    /// Aegisub's "Force sample rate" of Avisynth audio; 0 keeps the script's, but 44100 for
+    /// one under 32000 as Aegisub does.
+    pub avs_sample_rate: i32,
+    /// Aegisub's "Avisynth down-mixer", a function applied to the audio first (`ConvertToMono`,
+    /// `GetLeftChannel`, `GetRightChannel`). Empty: the channels as the script gives them.
+    pub avs_downmixer: String,
+}
+
+static VSSCRIPT_NAMED: AtomicBool = AtomicBool::new(false);
+
+pub fn set_script_options(o: &ScriptOptions) {
+    let vsscript = o.vsscript.to_str().unwrap_or("");
+    VSSCRIPT_NAMED.store(!vsscript.is_empty(), Ordering::Relaxed);
+    bridge::set_script_options(
+        vsscript,
+        o.avs_memory_max_mb,
+        o.avs_allow_ancient,
+        o.avs_sample_rate,
+        &o.avs_downmixer,
+    );
+}
+
+/// Loads the library that runs scripts of `kind`, unless it is loaded already. The error says
+/// what is missing and what to install.
+pub fn load_script_library(kind: ScriptKind) -> Result<()> {
+    match kind {
+        ScriptKind::Avisynth => Ok(bridge::load_avisynth()?),
+        ScriptKind::VapourSynth => {
+            let not_found = match bridge::load_vapoursynth("") {
+                Ok(()) => return Ok(()),
+                Err(e) => e,
+            };
+            // installed with pip and not registered (`vapoursynth register-install`), or
+            // registered for a Python that is gone: the Python on the path knows where it is
+            if !VSSCRIPT_NAMED.load(Ordering::Relaxed)
+                && let Some(lib) = python_vsscript()
+            {
+                return Ok(bridge::load_vapoursynth(lib)?);
+            }
+            Err(not_found.into())
+        }
+    }
+}
+
+/// The VSScript library of the VapourSynth a Python on the path has (R73 and newer tell it).
+fn python_vsscript() -> Option<&'static str> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    static FOUND: OnceLock<Option<String>> = OnceLock::new();
+    let ask = |exe: &str, first: &[&str]| -> Option<String> {
+        let mut cmd = Command::new(exe);
+        cmd.args(first)
+            .args(["-m", "vapoursynth", "get-vsscript"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: no console flashes over the editor
+        }
+        let mut child = cmd.spawn().ok()?;
+        let give_up = Instant::now() + Duration::from_secs(20);
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => break,
+                Ok(None) if Instant::now() < give_up => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+            }
+        }
+        let mut out = String::new();
+        child.stdout.take()?.read_to_string(&mut out).ok()?;
+        let lib = out.trim();
+        (!lib.is_empty() && Path::new(lib).is_file()).then(|| lib.to_string())
+    };
+    FOUND
+        .get_or_init(|| {
+            ask("python", &[])
+                .or_else(|| ask("python3", &[]))
+                .or_else(|| ask("py", &["-3"]))
+        })
+        .as_deref()
+}
+
+/// True when the script was opened as it is now, by any of [`Video::open`], [`Audio::open`] and
+/// [`list_tracks`]: its tracks are known then, and [`list_tracks`] does not run it again.
+pub fn script_evaluated(path: &Path) -> bool {
+    path.to_str().is_some_and(bridge::script_evaluated)
+}
+
+/// All streams in a media file. A script has a video and an audio track for what it outputs.
 pub fn list_tracks(path: &Path) -> Result<Vec<TrackInfo>> {
+    if let Some(kind) = script_kind(path) {
+        load_script_library(kind)?;
+    }
     Ok(bridge::list_tracks(path_str(path)?)?)
 }
 
@@ -211,6 +347,9 @@ pub fn extract_subtitles_with(
 
 /// Fonts attached to a Matroska file, as (file name, data).
 pub fn attached_fonts(path: &Path) -> Result<Vec<(String, Vec<u8>)>> {
+    if script_kind(path).is_some() {
+        return Ok(Vec::new());
+    }
     Ok(bridge::attached_fonts(path_str(path)?)?
         .into_iter()
         .map(|f| (f.name, f.data))
@@ -219,6 +358,9 @@ pub fn attached_fonts(path: &Path) -> Result<Vec<(String, Vec<u8>)>> {
 
 /// Chapters of a Matroska/MP4 file, as (start in ms, title), by start.
 pub fn chapters(path: &Path) -> Result<Vec<(i64, String)>> {
+    if script_kind(path).is_some() {
+        return Ok(Vec::new());
+    }
     Ok(bridge::chapters(path_str(path)?)?
         .into_iter()
         .map(|c| (c.start_ms, c.title))
@@ -258,12 +400,19 @@ impl Video {
     /// cache directory the index is stored and reused on the next open, and a
     /// Matroska/MP4 file not indexed yet opens from its packets at once while
     /// BestSource indexes it in the background ([`Video::is_exact`]).
+    ///
+    /// An `.avs` or `.vpy` file is evaluated and its clip served: nothing is indexed, the
+    /// frame rate is the clip's and the keyframes are the ones the script names (VapourSynth:
+    /// `__aegi_keyframes`, with `__aegi_timecodes` for the frames' times).
     pub fn open(
         path: &Path,
         track: i32,
         cache_dir: Option<&Path>,
         progress: impl FnMut(i64, i64) -> bool,
     ) -> Result<Self> {
+        if let Some(kind) = script_kind(path) {
+            load_script_library(kind)?;
+        }
         let mut sink = ProgressSink(Box::new(progress));
         let cache = cache_dir.map(path_str).transpose()?.unwrap_or("");
         let inner = bridge::open_video(path_str(path)?, track, cache, &mut sink)?;
@@ -433,12 +582,16 @@ pub struct Audio {
 }
 
 impl Audio {
+    /// The audio track `track` of a file, or the audio an `.avs` or `.vpy` script outputs.
     pub fn open(
         path: &Path,
         track: i32,
         cache_dir: Option<&Path>,
         progress: impl FnMut(i64, i64) -> bool,
     ) -> Result<Self> {
+        if let Some(kind) = script_kind(path) {
+            load_script_library(kind)?;
+        }
         let mut sink = ProgressSink(Box::new(progress));
         let cache = cache_dir.map(path_str).transpose()?.unwrap_or("");
         let inner = bridge::open_audio(path_str(path)?, track, cache, &mut sink)?;

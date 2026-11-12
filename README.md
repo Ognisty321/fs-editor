@@ -31,6 +31,7 @@ FS Editor to edytor napisów do typesettingu, timingu i tłumaczenia. Rdzeń jes
 - **Bezstratny ASS.** BOM, końce linii, komentarze, nieznane sekcje, `[Fonts]`, `[Graphics]` i dane projektu Aegisuba zostają nietknięte. Linia, której nikt nie zmienił, jest zapisywana z oryginalnego tekstu.
 - **Formaty:** ASS, SSA, SRT, WebVTT, MPL2, MicroDVD i TMP, z wykrywaniem kodowania (UTF-8, UTF-16, Windows-1250 i inne).
 - **Wideo co do klatki:** BestSource, VFR (timecody v1 i v2), keyframe'y, rozdziały, podgląd libass, zoom, tryb odtwarzacza i wideo zastępcze.
+- **Skrypty Avisynth i VapourSynth:** pliki `.avs` i `.vpy` otwierają się jako wideo i audio, gdy na komputerze jest AviSynth+ albo VapourSynth. Biblioteki są ładowane dopiero przy pierwszym skrypcie, więc program działa też bez nich.
 - **Audio:** waveform i spektrogram na GPU, tryb karaoke, odtwarzanie i zapis wycinka do WAV.
 - **Narzędzia wizualne:** `\pos`, `\move`, `\org`, `\clip`/`\iclip`, rysunki `\p`, skalowanie i obroty bezpośrednio na wideo.
 - **Timing:** przesuwanie czasów myszą w gridzie i panel zmiany czasów jak w Kainote, postprocesor (lead-in/out, łączenie sąsiednich linii, przyciąganie do keyframe'ów), kanji timer, zmiana FPS i resample rozdzielczości.
@@ -143,6 +144,15 @@ fsed napisy.ass wideo.mkv
 ```
 
 Pliki podane w wierszu poleceń otwierają się w karcie. Napisy, wideo, audio i keyframe'y można też przeciągnąć w dowolne miejsce okna. Wideo z tekstowymi ścieżkami napisów (ASS, SSA, SRT) otwarte w pustej karcie pyta, czy wczytać którąś z nich.
+
+**Skrypty `.avs` i `.vpy`** otwierają się jak wideo: z menu, przez przeciągnięcie, z wiersza poleceń i w `fsed media`. Ten sam skrypt można otworzyć jako audio.
+
+- Avisynth wymaga zainstalowanego [AviSynth+](https://github.com/AviSynth/AviSynthPlus) w wersji 64-bitowej (`avisynth.dll` w folderze systemowym albo obok programu; na Linuksie i macOS `libavisynth`).
+- VapourSynth wymaga [VapourSynth](https://www.vapoursynth.com) R55 lub nowszego z Pythonem. Bibliotekę VSScript program znajduje sam (`VSSCRIPT_PATH`, rejestr, Python ze ścieżki), a w razie potrzeby wskazuje się ją w ustawieniach wideo. Skrypt może podać klatki kluczowe w `__aegi_keyframes` i czasy klatek w `__aegi_timecodes`.
+- Gdy biblioteki nie ma, otwarcie skryptu kończy się komunikatem, co zainstalować.
+- Ustawienia Avisynth są te same co w Aegisubie: limit pamięci, starsze wersje, down-mixer i wymuszona częstotliwość próbkowania audio.
+
+Skrypt to program: wykonuje się z uprawnieniami edytora, więc otwieraj tylko skrypty, którym ufasz.
 
 **Sprawdzanie pisowni** używa słowników Hunspell (`xx_YY.aff` + `xx_YY.dic`), a podpowiedzi synonimów tezaurusów MyThes (`th_xx_YY*.idx` + `.dat`). Paczki z CI mają już polski i angielski słownik z tezaurusami w `bin/dictionaries/` (`tools/dictionaries.py`); inne wrzuć do tego katalogu albo wskaż folder i język w ustawieniach. Aktualne słowniki: polski z [sjp.pl](https://sjp.pl/sl/en/), angielski z [en-wl/wordlist](https://github.com/en-wl/wordlist/releases).
 

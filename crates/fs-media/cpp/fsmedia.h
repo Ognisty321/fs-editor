@@ -27,6 +27,10 @@ struct ass_track;
 
 namespace fsmedia {
 
+namespace script {
+class Clip; // an evaluated Avisynth or VapourSynth script (script.h)
+}
+
 /// Called while indexing; return false to cancel.
 using Progress = std::function<bool(int64_t done, int64_t total)>;
 
@@ -68,6 +72,34 @@ enum class SubtitleRead { Auto, Packets, Index };
 /// read the packets.
 std::string subtitle_packets(const std::filesystem::path &file, int index, std::vector<SubPacket> &out,
                              const Progress &progress = {}, SubtitleRead how = SubtitleRead::Auto);
+
+/// How Avisynth (.avs) and VapourSynth (.vpy) scripts are opened. Both libraries are loaded at
+/// run time, when the first script of their kind is opened; the options are read at each open.
+struct ScriptOptions {
+    /// The VSScript library of the VapourSynth to use. Empty: the one VSSCRIPT_PATH names, then
+    /// the one in the registry (Windows), then the library path.
+    std::filesystem::path vsscript;
+    /// Aegisub's Provider/Avisynth/Memory Max, in MB; 0 leaves Avisynth's own limit.
+    int avs_memory_max_mb = 0;
+    /// Aegisub's Provider/Avisynth/Allow Ancient: an Avisynth older than 2.6, which converts
+    /// the frames to RGB itself.
+    bool avs_allow_ancient = false;
+    /// Aegisub's Provider/Audio/AVS/Sample Rate: ResampleAudio to this; 0 keeps the script's
+    /// rate, but 44100 for one under 32000 as Aegisub does.
+    int avs_sample_rate = 0;
+    /// Aegisub's Audio/Downmixer, a function applied to the audio first (ConvertToMono,
+    /// GetLeftChannel, GetRightChannel). Empty: the channels as the script gives them.
+    std::string avs_downmixer;
+};
+void set_script_options(const ScriptOptions &options);
+/// Loads VapourSynth: `library` when given, otherwise as ScriptOptions::vsscript says. Throws
+/// MediaError saying what is missing; nothing to do once it is loaded.
+void load_vapoursynth(const std::filesystem::path &library = {});
+/// Loads Avisynth (avisynth.dll from the program's or the system folder, libavisynth elsewhere).
+void load_avisynth();
+/// True when the script was evaluated as it is now, so that list_tracks knows its tracks
+/// without running it again.
+bool script_evaluated(const std::filesystem::path &file);
 
 /// Colour matrix used to convert YUV to RGB.
 enum class Matrix { Auto, Bt601, Bt709, Fcc, Smpte240m, Bt2020 };
@@ -118,6 +150,8 @@ class VideoSource {
 public:
     /// Open (and index, or read the cached index of) a video track.
     /// `track` < 0 selects the n-th video track (-1 = first).
+    /// An .avs or .vpy file is evaluated as a script instead and its clip served: nothing is
+    /// indexed, every frame is exact, and the keyframes are the ones the script names.
     /// With a cache directory, a Matroska or MP4 file BestSource has not indexed yet opens from its
     /// packets as Aegisub's FFMS2 does (a second for an episode, where BestSource decodes and hashes
     /// every frame for half a minute); BestSource indexes it in the background and takes over when
@@ -157,6 +191,7 @@ private:
 
     std::unique_ptr<BestVideoSource> bs_;
     std::unique_ptr<Packets> packets_; // until bs_ takes over
+    std::unique_ptr<script::Clip> script_; // an .avs or .vpy file: in place of both
     mutable std::mutex m_;             // bs_ and packets_, swapped by the background indexer
     std::atomic_bool stop_{false};
     std::thread indexer_;
@@ -182,6 +217,7 @@ class AudioSource {
 public:
     /// `track` < 0 selects the n-th audio track. The delay is adjusted
     /// relative to the first video track, like Aegisub.
+    /// An .avs or .vpy file is evaluated as a script and its audio served (`track` is ignored).
     AudioSource(const std::filesystem::path &file, int track, const std::filesystem::path &cache_dir,
                 const Progress &progress = {});
     ~AudioSource();
@@ -206,6 +242,8 @@ public:
 
 private:
     std::unique_ptr<BestAudioSource> bs_;
+    std::unique_ptr<script::Clip> script_; // an .avs or .vpy file: in place of bs_
+    std::vector<float> script_buf_;
     std::shared_ptr<std::atomic_bool> cancel_ = std::make_shared<std::atomic_bool>(false);
     AudioInfo info_;
     int bytes_per_sample_ = 0;

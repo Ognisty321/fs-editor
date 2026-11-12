@@ -54,6 +54,23 @@ rust::String subtitle_packets(rust::Str path, int32_t index, int32_t how, Progre
     return str(header);
 }
 
+void set_script_options(rust::Str vsscript, int32_t avs_memory_max_mb, bool avs_allow_ancient, int32_t avs_sample_rate,
+                        rust::Str avs_downmixer) {
+    fsmedia::set_script_options(ScriptOptions{
+        .vsscript = to_path(vsscript),
+        .avs_memory_max_mb = avs_memory_max_mb,
+        .avs_allow_ancient = avs_allow_ancient,
+        .avs_sample_rate = avs_sample_rate,
+        .avs_downmixer = std::string(avs_downmixer),
+    });
+}
+
+void load_vapoursynth(rust::Str library) { fsmedia::load_vapoursynth(to_path(library)); }
+
+void load_avisynth() { fsmedia::load_avisynth(); }
+
+bool script_evaluated(rust::Str path) { return fsmedia::script_evaluated(to_path(path)); }
+
 std::unique_ptr<VideoSource> open_video(rust::Str path, int32_t track, rust::Str cache_dir, ProgressSink &progress) {
     return std::make_unique<VideoSource>(to_path(path), track, to_path(cache_dir), progress_of(progress));
 }

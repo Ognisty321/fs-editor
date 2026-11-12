@@ -15,7 +15,9 @@ struct MainWindow::Menus {
           *filter = nullptr, *subs = nullptr;
 };
 
-inline const QStringList kVideoExt = {"mkv", "mp4", "avi", "webm", "mov", "m2ts", "ts", "wmv", "flv", "m4v", "mpg", "mpeg", "ogv"};
+// avs, vpy: Avisynth and VapourSynth scripts, run by the library the user has (also as audio)
+inline const QStringList kVideoExt = {"mkv", "mp4", "avi", "webm", "mov", "m2ts", "ts", "wmv", "flv", "m4v", "mpg", "mpeg", "ogv",
+                                      "avs", "vpy"};
 inline const QStringList kAudioExt = {"wav", "mp3", "flac", "aac", "ac3", "eac3", "dts", "ogg", "opus", "m4a", "mka", "wma"};
 inline const QString kSubsFilter =
     QObject::tr("Subtitles (*.ass *.ssa *.srt *.sub *.mpl *.txt *.tmp *.ttxt *.vtt);;All files (*)");

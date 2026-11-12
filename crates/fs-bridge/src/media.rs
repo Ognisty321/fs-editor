@@ -410,8 +410,13 @@ impl Audio {
         let (file, dir) = (PathBuf::from(path), cache(cache_dir));
         let first = fs_media::Audio::open(&file, track, Some(&dir), progress)
             .map_err(|e| format!("{path}: {e}"))?;
-        // one more decoder of the track, for a part of it (BestSource seeks to the sample)
+        // one more decoder of the track, for a part of it (BestSource seeks to the sample); a
+        // script is evaluated once, each further decoder would run all of it again
+        let script = fs_media::script_kind(&file).is_some();
         let another = move || {
+            if script {
+                return None;
+            }
             let a = fs_media::Audio::open(&file, track, Some(&dir), |_, _| true).ok()?;
             Some(Box::new(a) as Box<dyn AudioSource>)
         };
